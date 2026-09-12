@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.proc - Command Builder
 // ============================================================================
@@ -6,7 +6,7 @@ using std { .. }
 // Access via: using std::proc { .. }
 // ============================================================================
 
-using std::os { Path, IntoPath }
+using std::os { Path, IntoPath };
 
 // ============================================================================
 // FFI Declarations
@@ -21,7 +21,7 @@ foreign let __koral_spawn(
     stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
     stdin_fd Int32, stdout_fd Int32, stderr_fd Int32,
     out *unsafe KoralProcess
-) Int32
+) Int32;
 
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
@@ -38,7 +38,7 @@ file_private let stdio_to_int(s IoRedirect) Int32 = when s in {
     .File(_) then 3(Int32),
     .StdoutPipe(_) then 3(Int32),
     .StderrPipe(_) then 3(Int32),
-}
+};
 
 /// Extract the file descriptor from an IoRedirect (mode=3 variants).
 /// Returns -1 for non-fd variants (Inherit, Piped, Null).
@@ -49,44 +49,44 @@ file_private let stdio_to_fd(s IoRedirect) Int32 = when s in {
     .Inherit then 0(Int32) - 1,
     .Piped then 0(Int32) - 1,
     .Null then 0(Int32) - 1,
-}
+};
 
 /// Convert a list of strings to an array of UInt8 pointers for FFI.
 file_private let argv_to_ptrs(argv List[String]) *unsafe *unsafe UInt8 = {
-    let count = argv.count()
-    let ptrs = alloc_memory[*unsafe UInt8](count)
+    let count = argv.count();
+    let ptrs = alloc_memory[*unsafe UInt8](count);
     for i in 0..<count then {
-        init_memory(ptrs + i, argv[i].borrow_ptr())
-    }
-    return ptrs
-}
+        init_memory(ptrs + i, argv[i].borrow_ptr());
+    };
+    return ptrs;
+};
 
 /// Build environment variable strings from env actions.
 /// Set => "KEY=VALUE", Remove => "KEY" (no =), Clear => "" (empty string).
 file_private let build_env_strings(actions List[EnvAction]) List[String] = {
-    let mutable result List[String] = []
+    let mutable result List[String] = [];
     for action in actions then {
         when action in {
             .Set(name, value) then result.push("\(name)=\(value)"),
             .Remove(name) then result.push(name),
             .Clear then result.push(""),
-        }
-    }
-    return result
-}
+        };
+    };
+    return result;
+};
 
 /// Convert env strings list to pointer array for FFI.
 file_private let env_strs_to_ptrs(strs List[String]) *unsafe *unsafe UInt8 = {
-    let count = strs.count()
+    let count = strs.count();
     if count == 0 then {
-        return null_ptr[*unsafe UInt8]()
-    }
-    let ptrs = alloc_memory[*unsafe UInt8](count)
+        return null_ptr[*unsafe UInt8]();
+    };
+    let ptrs = alloc_memory[*unsafe UInt8](count);
     for i in 0..<count then {
-        init_memory(ptrs + i, strs[i].borrow_ptr())
-    }
-    return ptrs
-}
+        init_memory(ptrs + i, strs[i].borrow_ptr());
+    };
+    return ptrs;
+};
 
 // ============================================================================
 // EnvAction (internal)
@@ -100,7 +100,7 @@ type EnvAction {
     Remove(name String),
     /// Clear all inherited environment variables.
     Clear(),
-}
+};
 
 // ============================================================================
 // CommandStorage (internal)
@@ -115,7 +115,7 @@ file_private type CommandStorage(
     mutable stdin_cfg IoRedirect,
     mutable stdout_cfg IoRedirect,
     mutable stderr_cfg IoRedirect,
-)
+);
 
 // ============================================================================
 // Command — Builder type
@@ -124,7 +124,7 @@ file_private type CommandStorage(
 /// Command builder for configuring and launching child processes.
 /// Provides a fluent API for setting program, arguments, environment variables,
 /// working directory, and I/O redirection before spawning.
-public type Command(file_private mutable storage *mutable CommandStorage)
+public type Command(file_private mutable storage *mutable CommandStorage);
 
 given Command {
 
@@ -137,91 +137,91 @@ given Command {
         IoRedirect.Inherit(),
         IoRedirect.Inherit(),
         IoRedirect.Inherit()
-    )))
+    )));
 
     /// Add a single argument (chainable).
     public arg(self, value String) Command = {
-        self.storage.arguments.push(value)
-        return self
-    }
+        self.storage.arguments.push(value);
+        return self;
+    };
 
     /// Add multiple arguments at once (chainable).
     public args(self, values List[String]) Command = {
         for v in values then {
-            self.storage.arguments.push(v)
-        }
-        return self
-    }
+            self.storage.arguments.push(v);
+        };
+        return self;
+    };
 
     /// Set an environment variable (chainable).
     public set_env(self, name String, value String) Command = {
-        self.storage.env_actions.push(EnvAction.Set(name, value))
-        return self
-    }
+        self.storage.env_actions.push(EnvAction.Set(name, value));
+        return self;
+    };
 
     /// Clear all inherited environment variables (chainable).
     public clear_env(self) Command = {
-        self.storage.env_actions.push(EnvAction.Clear())
-        return self
-    }
+        self.storage.env_actions.push(EnvAction.Clear());
+        return self;
+    };
 
     /// Remove a specific environment variable (chainable).
     public remove_env(self, name String) Command = {
-        self.storage.env_actions.push(EnvAction.Remove(name))
-        return self
-    }
+        self.storage.env_actions.push(EnvAction.Remove(name));
+        return self;
+    };
 
     /// Set the child process working directory (chainable).
     public set_current_dir[T IntoPath](self, path T) Command = {
-        self.storage.work_dir = Option[Path].Some(path.into_path())
-        return self
-    }
+        self.storage.work_dir = Option[Path].Some(path.into_path());
+        return self;
+    };
 
     /// Configure stdin redirection (chainable).
     public set_stdin(self, cfg IoRedirect) Command = {
-        self.storage.stdin_cfg = cfg
-        return self
-    }
+        self.storage.stdin_cfg = cfg;
+        return self;
+    };
 
     /// Configure stdout redirection (chainable).
     public set_stdout(self, cfg IoRedirect) Command = {
-        self.storage.stdout_cfg = cfg
-        return self
-    }
+        self.storage.stdout_cfg = cfg;
+        return self;
+    };
 
     /// Configure stderr redirection (chainable).
     public set_stderr(self, cfg IoRedirect) Command = {
-        self.storage.stderr_cfg = cfg
-        return self
-    }
+        self.storage.stderr_cfg = cfg;
+        return self;
+    };
 
     /// Asynchronously spawn a child process, returning a Process handle.
     public spawn(self) Result[Process] = {
         // Build argv array (program + arguments)
-        let mutable argv = [self.storage.program]
+        let mutable argv = [self.storage.program];
         for a in self.storage.arguments then {
-            argv.push(a)
-        }
+            argv.push(a);
+        };
 
         // Encode stdio config: 0=inherit, 1=piped, 2=null
-        let stdin_mode = stdio_to_int(self.storage.stdin_cfg)
-        let stdout_mode = stdio_to_int(self.storage.stdout_cfg)
-        let stderr_mode = stdio_to_int(self.storage.stderr_cfg)
+        let stdin_mode = stdio_to_int(self.storage.stdin_cfg);
+        let stdout_mode = stdio_to_int(self.storage.stdout_cfg);
+        let stderr_mode = stdio_to_int(self.storage.stderr_cfg);
 
         // Build environment variable string list ("KEY=VALUE" format)
-        let env_strs = build_env_strings(self.storage.env_actions)
-        let stdin_fd = stdio_to_fd(self.storage.stdin_cfg)
-        let stdout_fd = stdio_to_fd(self.storage.stdout_cfg)
-        let stderr_fd = stdio_to_fd(self.storage.stderr_cfg)
+        let env_strs = build_env_strings(self.storage.env_actions);
+        let stdin_fd = stdio_to_fd(self.storage.stdin_cfg);
+        let stdout_fd = stdio_to_fd(self.storage.stdout_cfg);
+        let stderr_fd = stdio_to_fd(self.storage.stderr_cfg);
 
         // Working directory (empty string means inherit)
         let cwd = when self.storage.work_dir in {
             .Some(d) then d.to_string(),
             .None then String.new(),
-        }
+        };
 
         // Call FFI to create child process
-        let mutable proc = KoralProcess(0, -1, -1, -1)
+        let mutable proc = KoralProcess(0, -1, -1, -1);
         let result = __koral_spawn(
             self.storage.program.borrow_ptr(),
             argv_to_ptrs(argv),
@@ -236,11 +236,11 @@ given Command {
             stdout_fd,
             stderr_fd,
             &unsafe proc
-        )
+        );
 
         if result <> 0 then {
-            return .Error(box(last_error_message()))
-        }
+            return .Error(box(last_error_message()));
+        };
 
         return .Ok(Process(box(ProcessStorage(
             proc.pid,
@@ -248,20 +248,20 @@ given Command {
             proc.stdout_fd,
             proc.stderr_fd,
             false
-        ))))
-    }
+        ))));
+    };
 
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
-    public run(self) Result[ExitStatus] = self.spawn() and then it.wait()
+    public run(self) Result[ExitStatus] = self.spawn() and then it.wait();
 
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.
     public run_output(self) Result[CommandOutput] = {
         // Force stdout/stderr to Piped to capture output
-        self.storage.stdout_cfg = IoRedirect.Piped()
-        self.storage.stderr_cfg = IoRedirect.Piped()
+        self.storage.stdout_cfg = IoRedirect.Piped();
+        self.storage.stderr_cfg = IoRedirect.Piped();
 
-        return self.spawn() and then it.wait_output()
-    }
-}
+        return self.spawn() and then it.wait_output();
+    };
+};

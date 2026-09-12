@@ -1,7 +1,7 @@
 // Module Resolver - resolves using declarations and builds the module tree.
 // Mirrors compiler/Sources/KoralCompiler/Module/ModuleResolver.swift
 
-using std::os { .. }
+using std::os { .. };
 
 // ── ModuleError ───────────────────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ public type ModuleError {
     DuplicateUsing(name String),
     ParseError(file String, message String),
     InvalidEntryFileName(filename String, reason String),
-}
+};
 
 given ModuleError {
     public message(*self) String = {
@@ -23,23 +23,23 @@ given ModuleError {
             .DuplicateUsing(name) then "Duplicate using declaration for '\(name)'",
             .ParseError(file, message) then "\(file): \(message)",
             .InvalidEntryFileName(filename, reason) then "Invalid entry file name '\(filename)': \(reason)",
-        }
-    }
-}
+        };
+    };
+};
 
 file_private type PendingUsing {
     Module(path_segments List[String], items List[UsingModuleItem]),
     File(file_name String),
-}
+};
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
 module_private type ModuleResolverStorage(
     mutable resolving_files List[String],
     mutable manifest_module_aliases List[ResolvedModuleAliasRule],
-)
+);
 
-public type ModuleResolver(module_private mutable storage *mutable ModuleResolverStorage)
+public type ModuleResolver(module_private mutable storage *mutable ModuleResolverStorage);
 
 public type ResolvedModuleGraph(
     root_module_path String,
@@ -49,223 +49,223 @@ public type ResolvedModuleGraph(
     node_source_paths List[String],
     module_paths List[List[String]],
     source_files List[String],
-)
+);
 
 given ModuleResolver {
     public new() ModuleResolver = {
-        let s = box(ModuleResolverStorage(List[String].new(), List[ResolvedModuleAliasRule].new()))
-        return ModuleResolver(s)
-    }
+        let s = box(ModuleResolverStorage(List[String].new(), List[ResolvedModuleAliasRule].new()));
+        return ModuleResolver(s);
+    };
 
     public set_manifest_module_aliases(*mutable self, aliases List[ResolvedModuleAliasRule]) Void = {
-        self.storage.manifest_module_aliases = aliases
-    }
+        self.storage.manifest_module_aliases = aliases;
+    };
 
     file_private resolve_manifest_aliased_module_path(*self, path_segments List[String]) List[String] = {
         if self.storage.manifest_module_aliases.is_empty() then {
-            return path_segments
-        }
+            return path_segments;
+        };
 
-        let mutable best_match_count Int = -1
-        let mutable best_target = path_segments
+        let mutable best_match_count Int = -1;
+        let mutable best_target = path_segments;
         for rule in self.storage.manifest_module_aliases then {
-            let alias_count = rule.alias_path_segments.count()
+            let alias_count = rule.alias_path_segments.count();
             if path_segments.count() < alias_count then {
-                continue
-            }
+                continue;
+            };
 
-            let mutable matched = true
-            let mutable i UInt = 0
+            let mutable matched = true;
+            let mutable i UInt = 0;
             while i < alias_count then {
                 if path_segments[i] <> rule.alias_path_segments[i] then {
-                    matched = false
-                    break
-                }
-                i += 1
-            }
+                    matched = false;
+                    break;
+                };
+                i += 1;
+            };
             if not matched then {
-                continue
-            }
+                continue;
+            };
 
-            let alias_len = alias_count(Int)
+            let alias_len = alias_count(Int);
             if alias_len <= best_match_count then {
-                continue
-            }
+                continue;
+            };
 
-            let mutable resolved = List[String].new()
+            let mutable resolved = List[String].new();
             for segment in rule.target_path_segments then {
-                resolved.push(segment)
-            }
-            let mutable j = alias_count
+                resolved.push(segment);
+            };
+            let mutable j = alias_count;
             while j < path_segments.count() then {
-                resolved.push(path_segments[j])
-                j += 1
-            }
-            best_match_count = alias_len
-            best_target = resolved
-        }
+                resolved.push(path_segments[j]);
+                j += 1;
+            };
+            best_match_count = alias_len;
+            best_target = resolved;
+        };
 
-        return best_target
-    }
+        return best_target;
+    };
 
     // Main entry: resolve a module from its entry file.
     public resolve_module_with_path(self, entry_file String, root_module_path Option[List[String]]) Result[CompilationUnit] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
-            .Error(e) then { return Result[CompilationUnit].Error(box("Cannot resolve path: \(entry_file)")) },
-        }
+            .Error(e) then { return Result[CompilationUnit].Error(box("Cannot resolve path: \(entry_file)"));},
+        };
 
-        module_debug("[module] resolve_module: \(abs_path)")
+        module_debug("[module] resolve_module: \(abs_path)");
 
-        let filename = abs_path.into_path().with_ext_name("").base_name()
+        let filename = abs_path.into_path().with_ext_name("").base_name();
 
         if validate_module_name(filename) is .Some(reason) then {
-            return Result[CompilationUnit].Error(box("Invalid entry file name '\(filename)': \(reason)"))
-        }
+            return Result[CompilationUnit].Error(box("Invalid entry file name '\(filename)': \(reason)"));
+        };
 
         let mutable root_path = when root_module_path in {
             .Some(path) then path,
             .None() then {
-                let mutable default_path = List[String].new()
-                default_path.push(module_file_name_to_identifier(filename))
-                yield default_path
+                let mutable default_path = List[String].new();
+                default_path.push(module_file_name_to_identifier(filename));
+                yield default_path;
             },
-        }
-        let root = ModuleInfo.new(root_path, abs_path, false)
-        let unit = CompilationUnit.new(root)
+        };
+        let root = ModuleInfo.new(root_path, abs_path, false);
+        let unit = CompilationUnit.new(root);
 
-        let _ = self.resolve_file(abs_path, root, unit) or return
-        module_debug("[module] root-local nodes after resolve: \(root.global_nodes().count())")
-        module_debug("[module] unit-root nodes after resolve: \(unit.root_module().global_nodes().count())")
-        module_debug("[module] unit collect_all_nodes_with_path count: \(unit.collect_all_nodes_with_path().count())")
+        let _ = self.resolve_file(abs_path, root, unit) or return;
+        module_debug("[module] root-local nodes after resolve: \(root.global_nodes().count())");
+        module_debug("[module] unit-root nodes after resolve: \(unit.root_module().global_nodes().count())");
+        module_debug("[module] unit collect_all_nodes_with_path count: \(unit.collect_all_nodes_with_path().count())");
 
-        return Result[CompilationUnit].Ok(unit)
-    }
+        return Result[CompilationUnit].Ok(unit);
+    };
 
     public resolve_module(self, entry_file String) Result[CompilationUnit] = {
-        return self.resolve_module_with_path(entry_file, Option[List[String]].None())
-    }
+        return self.resolve_module_with_path(entry_file, Option[List[String]].None());
+    };
 
     public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
-        let mutable user_unit_opt = Option[CompilationUnit].None()
-        let mutable resolve_error = Option[* Error].None()
+        let mutable user_unit_opt = Option[CompilationUnit].None();
+        let mutable resolve_error = Option[* Error].None();
         when self.resolve_module(entry_file) in {
             .Ok(u) then {
-                user_unit_opt = Option[CompilationUnit].Some(u)
+                user_unit_opt = Option[CompilationUnit].Some(u);
             },
             .Error(e) then {
-                resolve_error = Option[* Error].Some(e)
+                resolve_error = Option[* Error].Some(e);
             },
-        }
+        };
         if resolve_error is .Some(e) then {
-            return Result[ResolvedModuleGraph].Error(e)
-        }
+            return Result[ResolvedModuleGraph].Error(e);
+        };
         let user_unit = user_unit_opt or else {
-            return Result[ResolvedModuleGraph].Error(box("module resolution failed"))
-        }
-        let user_unit_ref = box(user_unit)
-        let user_has_std = user_unit_ref.has_module("Std") or user_unit_ref.has_module("std")
-        let std_unit = self.load_std_unit_for_typecheck(no_std, user_has_std)
-        return Result[ResolvedModuleGraph].Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
-    }
+            return Result[ResolvedModuleGraph].Error(box("module resolution failed"));
+        };
+        let user_unit_ref = box(user_unit);
+        let user_has_std = user_unit_ref.has_module("Std") or user_unit_ref.has_module("std");
+        let std_unit = self.load_std_unit_for_typecheck(no_std, user_has_std);
+        return Result[ResolvedModuleGraph].Ok(self.build_resolved_module_graph(std_unit, user_unit_ref));
+    };
 
     file_private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[* CompilationUnit] = {
         if no_std or user_has_std then {
-            return Option[* CompilationUnit].None()
-        }
+            return Option[* CompilationUnit].None();
+        };
         let std_path = find_std_entry_path() or else {
-            return Option[* CompilationUnit].None()
-        }
+            return Option[* CompilationUnit].None();
+        };
         return when self.resolve_module(std_path) in {
             .Ok(unit) then Option[* CompilationUnit].Some(box(unit)),
             .Error(_) then Option[* CompilationUnit].None(),
-        }
-    }
+        };
+    };
 
     file_private collect_effective_std_nodes_with_path(
         self,
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
     ) List[Pair[LoadedNode, List[String]]] = {
-        let mutable result = List[Pair[LoadedNode, List[String]]].new()
+        let mutable result = List[Pair[LoadedNode, List[String]]].new();
         when std_unit in {
             .Some(su) then {
-                result = su.collect_all_nodes_with_path()
+                result = su.collect_all_nodes_with_path();
             },
             .None() then {
                 if user_unit.has_module("std") then {
-                    result = user_unit.collect_nodes_with_path_for_module("std")
+                    result = user_unit.collect_nodes_with_path_for_module("std");
                 } else if user_unit.has_module("Std") then {
-                    result = user_unit.collect_nodes_with_path_for_module("Std")
-                }
+                    result = user_unit.collect_nodes_with_path_for_module("Std");
+                };
             },
-        }
-        let _ = self
-        return result
-    }
+        };
+        let _ = self;
+        return result;
+    };
 
     file_private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
-        let mutable seen = Set[String].new()
-        let mutable module_paths = List[List[String]].new()
+        let mutable seen = Set[String].new();
+        let mutable module_paths = List[List[String]].new();
         for pair in loaded_nodes_with_path.iterator() then {
-            let path = pair.second
-            let key = join_path(path, ".")
+            let path = pair.second;
+            let key = join_path(path, ".");
             if not seen.contains(key) then {
-                seen.insert(key)
-                module_paths.push(path)
-            }
-        }
-        let _ = self
-        return module_paths
-    }
+                seen.insert(key);
+                module_paths.push(path);
+            };
+        };
+        let _ = self;
+        return module_paths;
+    };
 
     file_private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
-        let mutable seen = Set[String].new()
-        let mutable source_files = List[String].new()
+        let mutable seen = Set[String].new();
+        let mutable source_files = List[String].new();
         for node in loaded_nodes.iterator() then {
             if not seen.contains(node.source_file) then {
-                seen.insert(node.source_file)
-                source_files.push(node.source_file)
-            }
-        }
-        let _ = self
-        return source_files
-    }
+                seen.insert(node.source_file);
+                source_files.push(node.source_file);
+            };
+        };
+        let _ = self;
+        return source_files;
+    };
 
     file_private build_resolved_module_graph(
         self,
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
     ) ResolvedModuleGraph = {
-        let mutable all_pairs = List[Pair[LoadedNode, List[String]]].new()
+        let mutable all_pairs = List[Pair[LoadedNode, List[String]]].new();
         for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {
             all_pairs.push(Pair[LoadedNode, List[String]](
                 LoadedNode(pair.first.decl, pair.first.source_file, "std:std"),
                 pair.second
-            ))
-        }
+            ));
+        };
         for pair in user_unit.collect_all_nodes_with_path() then {
             all_pairs.push(Pair[LoadedNode, List[String]](
                 LoadedNode(pair.first.decl, pair.first.source_file, "root:user"),
                 pair.second
-            ))
-        }
+            ));
+        };
 
-        let mutable loaded_nodes = List[LoadedNode].new()
-        let mutable node_source_paths = List[String].new()
+        let mutable loaded_nodes = List[LoadedNode].new();
+        let mutable node_source_paths = List[String].new();
         for pair in all_pairs.iterator() then {
-            loaded_nodes.push(pair.first)
-            node_source_paths.push(pair.first.source_file)
-        }
+            loaded_nodes.push(pair.first);
+            node_source_paths.push(pair.first.source_file);
+        };
 
-        let mutable merged_graph = ImportGraph.new()
+        let mutable merged_graph = ImportGraph.new();
         when std_unit in {
             .Some(su) then {
-                merged_graph.merge(su.import_graph())
+                merged_graph.merge(su.import_graph());
             },
             .None() then {},
-        }
-        merged_graph.merge(user_unit.import_graph())
+        };
+        merged_graph.merge(user_unit.import_graph());
 
         return ResolvedModuleGraph(
             user_unit.root_module().path_string(),
@@ -275,30 +275,30 @@ given ModuleResolver {
             node_source_paths,
             self.collect_unique_module_paths(all_pairs),
             self.collect_unique_sources(loaded_nodes),
-        )
-    }
+        );
+    };
 
     // Parse and process a single file into a module.
     file_private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) Result[Void] = {
         let normalized_file = when absolute_path(file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
-        }
+        };
 
         // Circular dependency: same compilation unit, just return
         for f in self.storage.resolving_files then {
             if f == normalized_file then {
-                module_debug("[module] circular-skip: \(normalized_file)")
-                return Result[Void].Ok({})
-            }
-        }
+                module_debug("[module] circular-skip: \(normalized_file)");
+                return Result[Void].Ok({});
+            };
+        };
 
-        self.storage.resolving_files.push(normalized_file)
-        module_debug("[module] resolve_file: \(normalized_file)")
+        self.storage.resolving_files.push(normalized_file);
+        module_debug("[module] resolve_file: \(normalized_file)");
         let pending = self.collect_pending_usings(normalized_file, module) or else {
-            self.storage.resolving_files.pop()
-            return Result[Void].Error(it)
-        }
+            self.storage.resolving_files.pop();
+            return Result[Void].Error(it);
+        };
 
         for using_decl in pending then {
             when using_decl in {
@@ -306,67 +306,67 @@ given ModuleResolver {
                     when self.record_module_using(path_segments, items, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
-                            self.storage.resolving_files.pop()
-                            return Result[Void].Error(e)
+                            self.storage.resolving_files.pop();
+                            return Result[Void].Error(e);
                         },
-                    }
+                    };
                 },
                 .File(file_name) then {
                     when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
-                            self.storage.resolving_files.pop()
-                            return Result[Void].Error(e)
+                            self.storage.resolving_files.pop();
+                            return Result[Void].Error(e);
                         },
-                    }
+                    };
                 },
-            }
-        }
+            };
+        };
 
-        self.storage.resolving_files.pop()
-        return Result[Void].Ok({})
-    }
+        self.storage.resolving_files.pop();
+        return Result[Void].Ok({});
+    };
 
     file_private collect_pending_usings(self, normalized_file String, module ModuleInfo) Result[List[PendingUsing]] = {
-        module_debug("[module] read: begin")
+        module_debug("[module] read: begin");
 
         let source = read_text_file(normalized_file.into_path()) or else {
-            return Result[List[PendingUsing]].Error(box("Failed to read file: \(normalized_file)"))
-        }
-        module_debug("[module] read: done")
-        module_debug("[module] lex: begin")
+            return Result[List[PendingUsing]].Error(box("Failed to read file: \(normalized_file)"));
+        };
+        module_debug("[module] read: done");
+        module_debug("[module] lex: begin");
 
         let tokens = lex_in_file(source, normalized_file) or else {
-            return Result[List[PendingUsing]].Error(it)
-        }
-        module_debug("[module] lex: done")
-        module_debug("[module] parse: begin")
+            return Result[List[PendingUsing]].Error(it);
+        };
+        module_debug("[module] lex: done");
+        module_debug("[module] parse: begin");
 
         let program = parse_in_file(tokens, normalized_file) or else {
-            return Result[List[PendingUsing]].Error(it)
-        }
-        module_debug("[module] parse: done")
-        module_debug("[module] decl-loop: begin")
+            return Result[List[PendingUsing]].Error(it);
+        };
+        module_debug("[module] parse: done");
+        module_debug("[module] decl-loop: begin");
 
-        let mutable pending = List[PendingUsing].new()
+        let mutable pending = List[PendingUsing].new();
         for decl in program.declarations then {
             when decl in {
                 .ModuleUsingDecl(path_segments, items, _) then {
-                    pending.push(.Module(path_segments, items))
+                    pending.push(.Module(path_segments, items));
                 },
                 .FileUsingDecl(file_name, _) then {
-                    pending.push(.File(file_name))
+                    pending.push(.File(file_name));
                 },
                 _ then {
-                    module.add_node(decl, normalized_file)
+                    module.add_node(decl, normalized_file);
                 },
-            }
-        }
+            };
+        };
 
-        module_debug("[module] decl-loop: done")
-        module_debug("[module] current module node count: \(module.global_nodes().count())")
-        return Result[List[PendingUsing]].Ok(pending)
-    }
+        module_debug("[module] decl-loop: done");
+        module_debug("[module] current module node count: \(module.global_nodes().count())");
+        return Result[List[PendingUsing]].Ok(pending);
+    };
 
     file_private record_module_using(
         self,
@@ -376,12 +376,12 @@ given ModuleResolver {
         unit CompilationUnit,
         current_file String,
     ) Result[Void] = {
-        let import_source_file = Option[String].Some(current_file)
-        let target_path = self.resolve_manifest_aliased_module_path(path_segments)
+        let import_source_file = Option[String].Some(current_file);
+        let target_path = self.resolve_manifest_aliased_module_path(path_segments);
         for item in items then {
             when item.kind in {
                 .AllPublic() then {
-                    unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+                    unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file);
                 },
                 .Symbol() then {
                     when item.name in {
@@ -393,151 +393,151 @@ given ModuleResolver {
                                 ImportKind.MemberImport(),
                                 import_source_file,
                                 Option[String].Some(symbol_name),
-                            )
+                            );
                         },
                         .None() then {},
-                    }
+                    };
                 },
-            }
-        }
+            };
+        };
         when self.resolve_local_module_import(target_path, module, unit) in {
             .Ok(_) then {},
-            .Error(e) then { return Result[Void].Error(e) },
-        }
-        let _ = self
-        return Result[Void].Ok({})
-    }
+            .Error(e) then { return Result[Void].Error(e);},
+        };
+        let _ = self;
+        return Result[Void].Ok({});
+    };
 
     file_private resolve_local_module_import(self, target_path List[String], module ModuleInfo, unit CompilationUnit) Result[Void] = {
-        let current_path = module.path()
+        let current_path = module.path();
         if target_path.count() <= current_path.count() then {
-            return Result[Void].Ok({})
-        }
-        let mutable idx UInt = 0
+            return Result[Void].Ok({});
+        };
+        let mutable idx UInt = 0;
         while idx < current_path.count() then {
             if target_path[idx] <> current_path[idx] then {
-                return Result[Void].Ok({})
-            }
-            idx += 1
-        }
+                return Result[Void].Ok({});
+            };
+            idx += 1;
+        };
 
-        let module_key = join_path(target_path, ".")
+        let module_key = join_path(target_path, ".");
         if unit.has_module(module_key) then {
-            return Result[Void].Ok({})
-        }
+            return Result[Void].Ok({});
+        };
 
-        let mutable relative_segments = List[String].new()
-        let mutable rel_idx = current_path.count()
+        let mutable relative_segments = List[String].new();
+        let mutable rel_idx = current_path.count();
         while rel_idx < target_path.count() then {
-            relative_segments.push(target_path[rel_idx])
-            rel_idx += 1
-        }
+            relative_segments.push(target_path[rel_idx]);
+            rel_idx += 1;
+        };
         if relative_segments.is_empty() then {
-            return Result[Void].Ok({})
-        }
+            return Result[Void].Ok({});
+        };
 
-        let mutable dir_path = module.directory().into_path()
-        let mutable seg_idx UInt = 0
+        let mutable dir_path = module.directory().into_path();
+        let mutable seg_idx UInt = 0;
         while seg_idx + 1(UInt) < relative_segments.count() then {
-            dir_path = dir_path.join(module_identifier_to_file_name(relative_segments[seg_idx]))
-            seg_idx += 1(UInt)
-        }
-        let leaf_name = module_identifier_to_file_name(relative_segments[relative_segments.count() - 1(UInt)])
-        let entry_file = dir_path.join(leaf_name).join(leaf_name + ".koral").normalize().to_string()
+            dir_path = dir_path.join(module_identifier_to_file_name(relative_segments[seg_idx]));
+            seg_idx += 1(UInt);
+        };
+        let leaf_name = module_identifier_to_file_name(relative_segments[relative_segments.count() - 1(UInt)]);
+        let entry_file = dir_path.join(leaf_name).join(leaf_name + ".koral").normalize().to_string();
 
         if not path_exist(entry_file.into_path()) then {
-            return Result[Void].Error(box("Module '\(join_path(target_path, "::"))' not found at '\(entry_file)'"))
-        }
+            return Result[Void].Error(box("Module '\(join_path(target_path, "::"))' not found at '\(entry_file)'"));
+        };
 
-        let child_module = ModuleInfo.new(target_path, entry_file, false)
-        unit.add_module(child_module)
-        return self.resolve_file(entry_file, child_module, unit)
-    }
+        let child_module = ModuleInfo.new(target_path, entry_file, false);
+        unit.add_module(child_module);
+        return self.resolve_file(entry_file, child_module, unit);
+    };
 
     // Resolve file merge: using "file_name"
     // Resolves a normalized relative source path against the current file's directory and merges it.
     file_private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
-        let current_dir = current_file.into_path().dir_name().to_string()
-        let merge_path = if file_name.ends_with(".koral") then file_name else file_name + ".koral"
-        let file_path = current_dir.into_path().join(merge_path).normalize().to_string()
+        let current_dir = current_file.into_path().dir_name().to_string();
+        let merge_path = if file_name.ends_with(".koral") then file_name else file_name + ".koral";
+        let file_path = current_dir.into_path().join(merge_path).normalize().to_string();
 
         if not path_exist(file_path.into_path()) then {
-            return Result[Void].Error(box("File '\(file_name).koral' not found in '\(current_dir)'"))
-        }
+            return Result[Void].Error(box("File '\(file_name).koral' not found in '\(current_dir)'"));
+        };
 
         if module.has_merged_submodule(file_path) then {
-            return Result[Void].Error(box("Duplicate using: \"\(file_name)\""))
-        }
+            return Result[Void].Error(box("Duplicate using: \"\(file_name)\""));
+        };
 
-        module.add_merged_submodule(file_path)
-        return self.resolve_file(file_path, module, unit)
-    }
-}
+        module.add_merged_submodule(file_path);
+        return self.resolve_file(file_path, module, unit);
+    };
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Convert PascalCase module identifier to snake_case file name
 // e.g. "Primitives" -> "primitives", "BufReader" -> "buf_reader", "Std" -> "std"
 public let module_identifier_to_file_name(identifier String) String = {
-    if identifier.is_empty() then { return identifier }
-    let mutable result = String.new()
-    let runes = identifier.to_runes()
-    let mutable first = true
+    if identifier.is_empty() then { return identifier;};
+    let mutable result = String.new();
+    let runes = identifier.to_runes();
+    let mutable first = true;
     for ch in runes then {
         if ch.is_ascii_uppercase() then {
             if not first then {
-                result.push_byte('_')
-            }
-            result.push_rune(ch.to_ascii_lowercase())
+                result.push_byte('_');
+            };
+            result.push_rune(ch.to_ascii_lowercase());
         } else {
-            result.push_rune(ch)
-        }
-        first = false
-    }
-    return result
-}
+            result.push_rune(ch);
+        };
+        first = false;
+    };
+    return result;
+};
 
 // Convert snake_case file name to PascalCase module identifier
 // e.g. "primitives" -> "Primitives", "buf_reader" -> "BufReader"
 public let module_file_name_to_identifier(filename String) String = {
-    let mutable result = String.new()
-    let mutable capitalize_next = true
-    let runes = filename.to_runes()
+    let mutable result = String.new();
+    let mutable capitalize_next = true;
+    let runes = filename.to_runes();
     for ch in runes then {
         if ch == '_' then {
-            capitalize_next = true
+            capitalize_next = true;
         } else if capitalize_next and ch.is_ascii_lowercase() then {
-            result.push_rune(ch.to_ascii_uppercase())
-            capitalize_next = false
+            result.push_rune(ch.to_ascii_uppercase());
+            capitalize_next = false;
         } else {
-            result.push_rune(ch)
-            capitalize_next = false
-        }
-    }
-    return result
-}
+            result.push_rune(ch);
+            capitalize_next = false;
+        };
+    };
+    return result;
+};
 
 // Validate a PascalCase module identifier (used in source code)
 // Returns Some(reason) if invalid, None if valid
 file_private let validate_module_identifier(name String) Option[String] = {
     if name.is_empty() then {
-        return .Some("Module name cannot be empty")
-    }
-    let runes = name.to_runes()
-    let first = runes[0]
+        return .Some("Module name cannot be empty");
+    };
+    let runes = name.to_runes();
+    let first = runes[0];
     if not first.is_ascii_uppercase() then {
-        return .Some("Module name must start with an uppercase letter (A-Z)")
-    }
+        return .Some("Module name must start with an uppercase letter (A-Z)");
+    };
     for ch in runes then {
         if not ch.is_ascii_uppercase() and not ch.is_ascii_lowercase() and not ch.is_ascii_digit() then {
-            return .Some("Module name can only contain letters and digits")
-        }
-    }
-    return .None()
-}
+            return .Some("Module name can only contain letters and digits");
+        };
+    };
+    return .None();
+};
 
 file_private let module_debug(message String) Void = {
     if env("KORAL_DEBUG_MODULE") is .Some(v) and (v == "1" or v == "true" or v == "TRUE") then {
-        eprintln(message)
-    }
-}
+        eprintln(message);
+    };
+};

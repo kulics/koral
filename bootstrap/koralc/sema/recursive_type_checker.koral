@@ -12,17 +12,17 @@
 // ── DFS 访问状态 ──────────────────────────────────────────────────────────────
 
 public type VisitColor {
-    White(),   // 未访问
-    Gray(),    // 正在访问（在当前 DFS 路径上）
-    Black(),   // 已完成访问
-}
+    White(),// 未访问
+    Gray(),// 正在访问（在当前 DFS 路径上）
+    Black(),// 已完成访问
+};
 
 // ── 类型依赖信息 ──────────────────────────────────────────────────────────────
 
 public type TypeDependency(
     target_def_id DefId,
     field_name String,
-)
+);
 
 // ── 循环节点 ──────────────────────────────────────────────────────────────────
 
@@ -30,34 +30,34 @@ public type CycleNode(
     def_id DefId,
     type_name String,
     field_name String,
-)
+);
 
 // ── 递归循环信息 ──────────────────────────────────────────────────────────────
 
 public type RecursionCycle(
     path List[CycleNode],
     start_index UInt,
-)
+);
 
 given RecursionCycle {
     public path_string(self, context CompilerContext) String = {
-        let _ = context
-        let mutable parts = List[String].new()
-        let mutable i = self.start_index
+        let _ = context;
+        let mutable parts = List[String].new();
+        let mutable i = self.start_index;
         while i < self.path.count() then {
-            parts.push(self.path[i].type_name)
-            i += 1
-        }
-        let mutable result = String.new()
-        let mutable first = true
+            parts.push(self.path[i].type_name);
+            i += 1;
+        };
+        let mutable result = String.new();
+        let mutable first = true;
         for p in parts then {
-            if not first then { result.push_string(" -> ") }
-            result.push_string(p)
-            first = false
-        }
-        return result
-    }
-}
+            if not first then { result.push_string(" -> ");};
+            result.push_string(p);
+            first = false;
+        };
+        return result;
+    };
+};
 
 // ── RecursiveTypeChecker ──────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ public type RecursiveTypeChecker(
     mutable context CompilerContext,
     mutable dependency_graph Dict[UInt, List[TypeDependency]],
     mutable all_type_def_ids List[DefId],
-)
+);
 
 given RecursiveTypeChecker {
     public new(context CompilerContext) RecursiveTypeChecker = {
@@ -73,55 +73,55 @@ given RecursiveTypeChecker {
             context,
             Dict[UInt, List[TypeDependency]].new(),
             List[DefId].new()
-        )
-    }
+        );
+    };
 
     // 执行递归类型检查，返回检测到的循环列表。
     public check(*mutable self) List[RecursionCycle] = {
-        self.build_dependency_graph()
-        return self.detect_cycles()
-    }
+        self.build_dependency_graph();
+        return self.detect_cycles();
+    };
 
     // ── 值类型边检测 ──────────────────────────────────────────────────────
 
     // 从类型中提取值类型依赖的 DefId 列表。
     // ref/ptr/weakref 打破循环（固定大小指针），不继续追踪。
     file_private extract_value_type_def_ids(self, t Type) List[DefId] = {
-        let mutable result = List[DefId].new()
+        let mutable result = List[DefId].new();
         when t in {
-            .ReferenceType(_) then {},      // ref 打破循环
-            .PointerType(_) then {},        // ptr 打破循环
-            .WeakReferenceType(_) then {},  // weakref 打破循环
-            .MutableWeakReferenceType(_) then {},  // weakref mutable 打破循环
-            .StructureType(def_id) then { result.push(def_id) },
-            .EnumType(def_id) then { result.push(def_id) },
+            .ReferenceType(_) then {},// ref 打破循环
+            .PointerType(_) then {},// ptr 打破循环
+            .WeakReferenceType(_) then {},// weakref 打破循环
+            .MutableWeakReferenceType(_) then {},// weakref mutable 打破循环
+            .StructureType(def_id) then { result.push(def_id);},
+            .EnumType(def_id) then { result.push(def_id);},
             .GenericStruct(_, args) then {
                 for arg in args then {
-                    let sub = self.extract_value_type_def_ids(*arg)
-                    for d in sub then { result.push(d) }
-                }
+                    let sub = self.extract_value_type_def_ids(*arg);
+                    for d in sub then { result.push(d);};
+                };
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
-                    let sub = self.extract_value_type_def_ids(*arg)
-                    for d in sub then { result.push(d) }
-                }
+                    let sub = self.extract_value_type_def_ids(*arg);
+                    for d in sub then { result.push(d);};
+                };
             },
             _ then {},
-        }
-        return result
-    }
+        };
+        return result;
+    };
 
     // ── 依赖图构建 ───────────────────────────────────────────────────────
 
     file_private build_dependency_graph(*mutable self) Void = {
-        self.dependency_graph = Dict[UInt, List[TypeDependency]].new()
-        self.all_type_def_ids = List[DefId].new()
+        self.dependency_graph = Dict[UInt, List[TypeDependency]].new();
+        self.all_type_def_ids = List[DefId].new();
 
         // 遍历所有已分配的 DefId
-        let mutable id UInt = 1
+        let mutable id UInt = 1;
         while id < self.context.next_def_id() then {
-            let def_id = DefId(id)
+            let def_id = DefId(id);
             when self.context.get_kind(def_id) in {
                 .Some(kind) then {
                     when kind in {
@@ -131,91 +131,91 @@ given RecursiveTypeChecker {
                                     if not self.context.is_generic_instantiation(def_id) then {
                                         when self.context.get_struct_fields(def_id) in {
                                             .Some(fields) then {
-                                                self.all_type_def_ids.push(def_id)
-                                                let deps = self.extract_struct_deps(fields)
+                                                self.all_type_def_ids.push(def_id);
+                                                let deps = self.extract_struct_deps(fields);
                                                 if not deps.is_empty() then {
-                                                    self.dependency_graph.insert(id, deps)
-                                                }
+                                                    self.dependency_graph.insert(id, deps);
+                                                };
                                             },
                                             .None() then {},
-                                        }
-                                    }
+                                        };
+                                    };
                                 },
                                 .Enum() then {
                                     if not self.context.is_generic_instantiation(def_id) then {
                                         when self.context.get_enum_cases(def_id) in {
                                             .Some(cases) then {
-                                                self.all_type_def_ids.push(def_id)
-                                                let deps = self.extract_union_deps(cases)
+                                                self.all_type_def_ids.push(def_id);
+                                                let deps = self.extract_union_deps(cases);
                                                 if not deps.is_empty() then {
-                                                    self.dependency_graph.insert(id, deps)
-                                                }
+                                                    self.dependency_graph.insert(id, deps);
+                                                };
                                             },
                                             .None() then {},
-                                        }
-                                    }
+                                        };
+                                    };
                                 },
                                 _ then {},
-                            }
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 .None() then {},
-            }
-            id += 1
-        }
-    }
+            };
+            id += 1;
+        };
+    };
 
     file_private extract_struct_deps(self, fields List[StructField]) List[TypeDependency] = {
-        let mutable deps = List[TypeDependency].new()
+        let mutable deps = List[TypeDependency].new();
         for f in fields then {
-            let def_ids = self.extract_value_type_def_ids(f.field_type)
+            let def_ids = self.extract_value_type_def_ids(f.field_type);
             for d in def_ids then {
-                deps.push(TypeDependency(d, f.name))
-            }
-        }
-        return deps
-    }
+                deps.push(TypeDependency(d, f.name));
+            };
+        };
+        return deps;
+    };
 
     file_private extract_union_deps(self, cases List[EnumCaseInfo]) List[TypeDependency] = {
-        let mutable deps = List[TypeDependency].new()
+        let mutable deps = List[TypeDependency].new();
         for c in cases then {
             for p in c.params then {
-                let def_ids = self.extract_value_type_def_ids(p.param_type)
+                let def_ids = self.extract_value_type_def_ids(p.param_type);
                 for d in def_ids then {
-                    deps.push(TypeDependency(d, c.name + "." + p.name))
-                }
-            }
-        }
-        return deps
-    }
+                    deps.push(TypeDependency(d, c.name + "." + p.name));
+                };
+            };
+        };
+        return deps;
+    };
 
     // ── 循环检测（三色标记 DFS）─────────────────────────────────────────
 
     file_private detect_cycles(*mutable self) List[RecursionCycle] = {
-        let mutable visit_state = box(Dict[UInt, UInt].new())  // 0=White, 1=Gray, 2=Black
-        let mutable cycles = box(List[RecursionCycle].new())
+        let mutable visit_state = box(Dict[UInt, UInt].new());// 0=White, 1=Gray, 2=Black
+        let mutable cycles = box(List[RecursionCycle].new());
 
         // 初始化所有类型为 White
         for def_id in self.all_type_def_ids then {
-            visit_state.insert(def_id.id, 0)
-        }
+            visit_state.insert(def_id.id, 0);
+        };
 
         // 对每个未访问的类型执行 DFS
         for def_id in self.all_type_def_ids then {
             let state = when visit_state.get(def_id.id) in {
                 .Some(s) then s,
                 .None() then 0,
-            }
+            };
             if state == 0 then {
-                let mutable path = box(List[CycleNode].new())
-                self.dfs(def_id, visit_state, path, cycles)
-            }
-        }
+                let mutable path = box(List[CycleNode].new());
+                self.dfs(def_id, visit_state, path, cycles);
+            };
+        };
 
-        return *cycles
-    }
+        return *cycles;
+    };
 
     file_private dfs(
         *mutable self,
@@ -225,13 +225,13 @@ given RecursiveTypeChecker {
         cycles *mutable List[RecursionCycle],
     ) Void = {
         // 标记为 Gray（正在访问）
-        visit_state.insert(def_id.id, 1)
+        visit_state.insert(def_id.id, 1);
 
         let type_name = when self.context.get_name(def_id) in {
             .Some(n) then n,
             .None() then "<unknown>",
-        }
-        path.push(CycleNode(def_id, type_name, ""))
+        };
+        path.push(CycleNode(def_id, type_name, ""));
 
         // 遍历所有依赖
         when self.dependency_graph.get(def_id.id) in {
@@ -240,50 +240,50 @@ given RecursiveTypeChecker {
                     let target_state = when visit_state.get(dep.target_def_id.id) in {
                         .Some(s) then s,
                         .None() then 0,
-                    }
+                    };
 
                     if target_state == 0 then {
                         // White: 未访问，继续 DFS
-                        self.dfs(dep.target_def_id, visit_state, path, cycles)
+                        self.dfs(dep.target_def_id, visit_state, path, cycles);
                     } else if target_state == 1 then {
                         // Gray: 发现循环！
-                        let mutable start_index UInt = 0
-                        let mutable found = false
-                        let mutable si UInt = 0
+                        let mutable start_index UInt = 0;
+                        let mutable found = false;
+                        let mutable si UInt = 0;
                         while si < path.count() then {
                             if path[si].def_id.id == dep.target_def_id.id then {
-                                start_index = si
-                                found = true
-                                break
-                            }
-                            si += 1
-                        }
+                                start_index = si;
+                                found = true;
+                                break;
+                            };
+                            si += 1;
+                        };
                         if found then {
                             let target_name = when self.context.get_name(dep.target_def_id) in {
                                 .Some(n) then n,
                                 .None() then "<unknown>",
-                            }
-                            let mutable cycle_path = List[CycleNode].new()
-                            let mutable ci UInt = 0
+                            };
+                            let mutable cycle_path = List[CycleNode].new();
+                            let mutable ci UInt = 0;
                             while ci < path.count() then {
-                                cycle_path.push(path[ci])
-                                ci += 1
-                            }
-                            cycle_path.push(CycleNode(dep.target_def_id, target_name, dep.field_name))
-                            cycles.push(RecursionCycle(cycle_path, start_index))
-                        }
-                    }
+                                cycle_path.push(path[ci]);
+                                ci += 1;
+                            };
+                            cycle_path.push(CycleNode(dep.target_def_id, target_name, dep.field_name));
+                            cycles.push(RecursionCycle(cycle_path, start_index));
+                        };
+                    };
                     // Black (2): 已完成访问，跳过
-                }
+                };
             },
             .None() then {},
-        }
+        };
 
         // 标记为 Black（已完成）
-        visit_state.insert(def_id.id, 2)
+        visit_state.insert(def_id.id, 2);
         // 移除路径末尾
         if path.count() > 0 then {
-            path.pop()
-        }
-    }
-}
+            path.pop();
+        };
+    };
+};

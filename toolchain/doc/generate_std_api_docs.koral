@@ -1,928 +1,925 @@
-using std::os { .. }
+using std::os { .. };
 
-type Decl(lines List[String])
+type Decl(lines List[String]);
 
-type TraitBlock(header Decl, methods List[Decl])
+type TraitBlock(header Decl, methods List[Decl]);
 
 type ParsedApi(
     mutable free_functions List[Decl],
     mutable traits List[TraitBlock],
     mutable types List[Decl],
     mutable givens List[TraitBlock],
-)
+);
 
-type CollectSignatureResult(end UInt, signature List[String], has_block Bool)
+type CollectSignatureResult(end UInt, signature List[String], has_block Bool);
 
-type ExtractBlockResult(end UInt, block List[String])
+type ExtractBlockResult(end UInt, block List[String]);
 
-type ExtractTypeResult(end UInt, declaration Decl)
+type ExtractTypeResult(end UInt, declaration Decl);
 
-type ExtractTraitResult(block TraitBlock, valid Bool)
+type ExtractTraitResult(block TraitBlock, valid Bool);
 
 let empty_parsed_api() ParsedApi =
-    ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
+    ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new());
 
-let is_space(b UInt8) Bool = b == ' ' or b == '\t' or b == '\r' or b == '\n'
+let is_space(b UInt8) Bool = b == ' ' or b == '\t' or b == '\r' or b == '\n';
 
 let rstrip(text String) String = {
-    let mutable end = text.count()
+    let mutable end = text.count();
     while end > 0 and is_space(text[end - 1]) then {
-        end -= 1
-    }
-    return if end == text.count() then text else text.substring(0..<end)
-}
+        end -= 1;
+    };
+    return if end == text.count() then text else text.substring(0..<end);
+};
 
 let trim(text String) String = {
-    let mutable start UInt = 0
-    let mutable end = text.count()
+    let mutable start UInt = 0;
+    let mutable end = text.count();
 
     while start < end and is_space(text[start]) then {
-        start += 1
-    }
+        start += 1;
+    };
     while end > start and is_space(text[end - 1]) then {
-        end -= 1
-    }
+        end -= 1;
+    };
 
-    return if start == 0 and end == text.count() then text
-        else if start >= end then ""
-        else text.substring(start..<end)
-}
+    return if start == 0 and end == text.count() then text else if start >= end then "" else text.substring(start..<end);
+};
 
 let strip_inline_comment(text String) String =
     when text.find("//") in {
         .Some(idx) then rstrip(text.substring(0..<idx)),
         .None then rstrip(text),
-    }
+    };
 
 let count_braces(text String) Int = {
-    let mutable delta Int = 0
-    let mutable in_string = false
-    let mutable in_rune = false
-    let mutable escaped = false
+    let mutable delta Int = 0;
+    let mutable in_string = false;
+    let mutable in_rune = false;
+    let mutable escaped = false;
 
     for i in 0..<text.count() then {
-        let ch = text[i]
+        let ch = text[i];
 
         if in_string then {
             if escaped then {
-                escaped = false
+                escaped = false;
             } else if ch == '\\' then {
-                escaped = true
+                escaped = true;
             } else if ch == '"' then {
-                in_string = false
-            }
-            continue
-        }
+                in_string = false;
+            };
+            continue;
+        };
 
         if in_rune then {
             if escaped then {
-                escaped = false
+                escaped = false;
             } else if ch == '\\' then {
-                escaped = true
+                escaped = true;
             } else if ch == '\'' then {
-                in_rune = false
-            }
-            continue
-        }
+                in_rune = false;
+            };
+            continue;
+        };
 
         if ch == '/' and i + 1 < text.count() and text[i + 1] == '/' then {
-            break
-        }
+            break;
+        };
 
         if ch == '"' then {
-            in_string = true
-            continue
-        }
+            in_string = true;
+            continue;
+        };
 
         if ch == '\'' then {
-            in_rune = true
-            continue
-        }
+            in_rune = true;
+            continue;
+        };
 
         if ch == '{' then {
-            delta += 1
+            delta += 1;
         } else if ch == '}' then {
-            delta -= 1
-        }
-    }
+            delta -= 1;
+        };
+    };
 
-    return delta
-}
+    return delta;
+};
 
 let has_unclosed_delimiters(lines List[String]) Bool = {
-    let mutable paren Int = 0
-    let mutable bracket Int = 0
+    let mutable paren Int = 0;
+    let mutable bracket Int = 0;
 
     for line in lines then {
         for i in 0..<line.count() then {
-            let ch = line[i]
+            let ch = line[i];
             if ch == '(' then {
-                paren += 1
+                paren += 1;
             } else if ch == ')' then {
-                paren -= 1
+                paren -= 1;
             } else if ch == '[' then {
-                bracket += 1
+                bracket += 1;
             } else if ch == ']' then {
-                bracket -= 1
-            }
-        }
-    }
+                bracket -= 1;
+            };
+        };
+    };
 
-    return paren > 0 or bracket > 0
-}
+    return paren > 0 or bracket > 0;
+};
 
 let signature_seems_complete(line String) Bool = {
-    let raw_line = rstrip(line)
+    let raw_line = rstrip(line);
     if raw_line.is_empty() then {
-        return false
-    }
+        return false;
+    };
 
-    if raw_line.ends_with(",") or raw_line.ends_with("(") or raw_line.ends_with("[") or raw_line.ends_with("<")
-        or raw_line.ends_with("and") or raw_line.ends_with("or") or raw_line.ends_with("->") or raw_line.ends_with(":") then {
-        return false
-    }
+    if raw_line.ends_with(",") or raw_line.ends_with("(") or raw_line.ends_with("[") or raw_line.ends_with("<") or raw_line.ends_with("and") or raw_line.ends_with("or") or raw_line.ends_with("->") or raw_line.ends_with(":") then {
+        return false;
+    };
 
-    let mutable paren Int = 0
-    let mutable bracket Int = 0
-    let mutable angle Int = 0
+    let mutable paren Int = 0;
+    let mutable bracket Int = 0;
+    let mutable angle Int = 0;
 
     for i in 0..<raw_line.count() then {
-        let ch = raw_line[i]
+        let ch = raw_line[i];
         if ch == '(' then {
-            paren += 1
+            paren += 1;
         } else if ch == ')' then {
-            paren -= 1
+            paren -= 1;
         } else if ch == '[' then {
-            bracket += 1
+            bracket += 1;
         } else if ch == ']' then {
-            bracket -= 1
+            bracket -= 1;
         } else if ch == '<' then {
-            angle += 1
+            angle += 1;
         } else if ch == '>' then {
-            angle -= 1
-        }
-    }
+            angle -= 1;
+        };
+    };
 
-    return paren <= 0 and bracket <= 0 and angle <= 0
-}
+    return paren <= 0 and bracket <= 0 and angle <= 0;
+};
 
 let trim_signature_lines(lines List[String], keep_open_brace Bool) List[String] = {
-    let mutable out = List[String].new()
+    let mutable out = List[String].new();
     for line in lines then {
         if not trim(line).is_empty() then {
-            out.push(line)
-        }
-    }
+            out.push(line);
+        };
+    };
 
     if out.is_empty() then {
-        return out
-    }
+        return out;
+    };
 
-    let last_index = out.count() - 1
-    let mutable last = out[last_index]
+    let last_index = out.count() - 1;
+    let mutable last = out[last_index];
 
     when last.find("=") in {
         .Some(eq_idx) then {
-            last = rstrip(last.substring(0..<eq_idx))
+            last = rstrip(last.substring(0..<eq_idx));
         },
         .None then {},
-    }
+    };
 
     if keep_open_brace then {
         when last.find("{") in {
             .Some(brace_idx) then {
-                let prefix = rstrip(last.substring(0..<brace_idx))
-                last = if prefix.is_empty() then "{" else prefix + " {"
+                let prefix = rstrip(last.substring(0..<brace_idx));
+                last = if prefix.is_empty() then "{" else prefix + " {";
             },
             .None then {
                 if not rstrip(last).ends_with("{") then {
-                    last = rstrip(last) + " {"
-                }
+                    last = rstrip(last) + " {";
+                };
             },
-        }
+        };
     } else {
         when last.find("{") in {
             .Some(brace_idx) then {
-                last = rstrip(last.substring(0..<brace_idx))
+                last = rstrip(last.substring(0..<brace_idx));
             },
             .None then {},
-        }
-    }
+        };
+    };
 
-    out[last_index] = last
-    return out
-}
+    out[last_index] = last;
+    return out;
+};
 
 let collect_signature(lines List[String], start UInt, keep_open_brace Bool) CollectSignatureResult = {
-    let mutable parts = List[String].new()
-    let mutable i = start
-    let mutable has_block = false
+    let mutable parts = List[String].new();
+    let mutable i = start;
+    let mutable has_block = false;
 
     while i < lines.count() then {
-        let cleaned = strip_inline_comment(lines[i])
+        let cleaned = strip_inline_comment(lines[i]);
         if not trim(cleaned).is_empty() then {
-            parts.push(cleaned)
-        }
+            parts.push(cleaned);
+        };
 
         if cleaned.contains("{") then {
-            has_block = true
-            break
-        }
+            has_block = true;
+            break;
+        };
         if cleaned.contains("=") then {
-            break
-        }
+            break;
+        };
         if not has_unclosed_delimiters(parts) and signature_seems_complete(cleaned) then {
-            break
-        }
-        i += 1
-    }
+            break;
+        };
+        i += 1;
+    };
 
-    return CollectSignatureResult(i, trim_signature_lines(parts, keep_open_brace), has_block)
-}
+    return CollectSignatureResult(i, trim_signature_lines(parts, keep_open_brace), has_block);
+};
 
 let extract_block(lines List[String], start UInt) ExtractBlockResult = {
-    let mutable block = List[String].new()
-    block.push(lines[start])
-    let mutable level = count_braces(lines[start])
-    let mutable i = start + 1
+    let mutable block = List[String].new();
+    block.push(lines[start]);
+    let mutable level = count_braces(lines[start]);
+    let mutable i = start + 1;
 
     while i < lines.count() and level > 0 then {
-        let raw_str = lines[i]
-        block.push(raw_str)
-        level += count_braces(raw_str)
-        i += 1
-    }
+        let raw_str = lines[i];
+        block.push(raw_str);
+        level += count_braces(raw_str);
+        i += 1;
+    };
 
-    return ExtractBlockResult(i - 1, block)
-}
+    return ExtractBlockResult(i - 1, block);
+};
 
 let starts_with_any_public_let(line String) Bool =
-    line.starts_with("public let") or line.starts_with("public foreign let")
+    line.starts_with("public let") or line.starts_with("public foreign let");
 
 let looks_like_method_signature(line String) Bool = {
     if line.is_empty() then {
-        return false
-    }
-    let first = line[0]
-    let starts_ok = (first >= 65 and first <= 90) or (first >= 97 and first <= 122) or first == '_' or first == '['
-    return starts_ok and line.contains("(")
-}
+        return false;
+    };
+    let first = line[0];
+    let starts_ok = (first >= 65 and first <= 90) or (first >= 97 and first <= 122) or first == '_' or first == '[';
+    return starts_ok and line.contains("(");
+};
 
 let list_lines_equal(a List[String], b List[String]) Bool = {
     if a.count() <> b.count() then {
-        return false
-    }
+        return false;
+    };
     for i in 0..<a.count() then {
         if a[i] <> b[i] then {
-            return false
-        }
-    }
-    return true
-}
+            return false;
+        };
+    };
+    return true;
+};
 
 let methods_contains(methods List[Decl], signature List[String]) Bool = {
     for method in methods then {
         if list_lines_equal(method.lines, signature) then {
-            return true
-        }
-    }
-    return false
-}
+            return true;
+        };
+    };
+    return false;
+};
 
 let extract_trait_or_given_methods(block List[String], require_public Bool) ExtractTraitResult = {
-    let mutable header_lines = List[String].new()
-    let mutable i UInt = 0
+    let mutable header_lines = List[String].new();
+    let mutable i UInt = 0;
 
     while i < block.count() then {
-        let cleaned = strip_inline_comment(block[i])
+        let cleaned = strip_inline_comment(block[i]);
         if not trim(cleaned).is_empty() then {
-            header_lines.push(cleaned)
-        }
+            header_lines.push(cleaned);
+        };
         if cleaned.contains("{") then {
-            break
-        }
-        i += 1
-    }
+            break;
+        };
+        i += 1;
+    };
 
-    let header = trim_signature_lines(header_lines, true)
+    let header = trim_signature_lines(header_lines, true);
     if header.is_empty() then {
-        return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
-    }
+        return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
+    };
 
-    let header_first = trim(header[0])
+    let header_first = trim(header[0]);
     if require_public then {
         if not header_first.starts_with("given") and not header_first.starts_with("intrinsic given") then {
-            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
-        }
+            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
+        };
     } else {
         if not header_first.starts_with("public trait") then {
-            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
-        }
-    }
+            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
+        };
+    };
 
-    let mutable methods = List[Decl].new()
-    let mutable depth Int = 0
-    i = 0
+    let mutable methods = List[Decl].new();
+    let mutable depth Int = 0;
+    i = 0;
 
     while i < block.count() then {
-        let raw_str = block[i]
-        let cleaned = trim(strip_inline_comment(raw_str))
-        let prev_depth = depth
-        depth += count_braces(raw_str)
+        let raw_str = block[i];
+        let cleaned = trim(strip_inline_comment(raw_str));
+        let prev_depth = depth;
+        depth += count_braces(raw_str);
 
         if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
-            let mutable include = false
+            let mutable include = false;
             if require_public then {
-                include = cleaned.starts_with("public ")
+                include = cleaned.starts_with("public ");
             } else {
-                include = cleaned.starts_with("public ") or looks_like_method_signature(cleaned)
-            }
+                include = cleaned.starts_with("public ") or looks_like_method_signature(cleaned);
+            };
 
             if include then {
-                let collected = collect_signature(block, i, false)
-                let mutable signature = collected.signature
+                let collected = collect_signature(block, i, false);
+                let mutable signature = collected.signature;
                 while signature.count() > 0 and trim(signature[signature.count() - 1]) == "}" then {
-                    let _ = signature.pop()
-                }
+                    let _ = signature.pop();
+                };
 
                 if signature.count() > 0 and not methods_contains(methods, signature) then {
-                    methods.push(Decl(signature))
-                }
-                i = collected.end + 1
-                continue
-            }
-        }
+                    methods.push(Decl(signature));
+                };
+                i = collected.end + 1;
+                continue;
+            };
+        };
 
-        i += 1
-    }
+        i += 1;
+    };
 
-    return ExtractTraitResult(TraitBlock(Decl(header), methods), true)
-}
+    return ExtractTraitResult(TraitBlock(Decl(header), methods), true);
+};
 
 let extract_type_api(lines List[String], start UInt) ExtractTypeResult = {
-    let collected = collect_signature(lines, start, false)
+    let collected = collect_signature(lines, start, false);
     if not collected.has_block then {
-        return ExtractTypeResult(collected.end, Decl(collected.signature))
-    }
+        return ExtractTypeResult(collected.end, Decl(collected.signature));
+    };
 
-    let extracted = extract_block(lines, start)
-    let block = extracted.block
-    let mutable out = List[String].new()
-    let mutable depth Int = 0
-    let mutable idx UInt = 0
+    let extracted = extract_block(lines, start);
+    let block = extracted.block;
+    let mutable out = List[String].new();
+    let mutable depth Int = 0;
+    let mutable idx UInt = 0;
 
     while idx < block.count() then {
-        let raw_str = block[idx]
-        let cleaned_line = strip_inline_comment(raw_str)
-        let cleaned = trim(cleaned_line)
-        let prev_depth = depth
-        depth += count_braces(raw_str)
+        let raw_str = block[idx];
+        let cleaned_line = strip_inline_comment(raw_str);
+        let cleaned = trim(cleaned_line);
+        let prev_depth = depth;
+        depth += count_braces(raw_str);
 
         if idx == 0 then {
-            let mutable first = cleaned_line
+            let mutable first = cleaned_line;
             when first.find("{") in {
                 .Some(brace_idx) then {
-                    let prefix = rstrip(first.substring(0..<brace_idx))
-                    first = if prefix.is_empty() then "{" else prefix + " {"
+                    let prefix = rstrip(first.substring(0..<brace_idx));
+                    first = if prefix.is_empty() then "{" else prefix + " {";
                 },
                 .None then {},
-            }
-            out.push(first)
-            idx += 1
-            continue
-        }
+            };
+            out.push(first);
+            idx += 1;
+            continue;
+        };
 
         if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
-            out.push(cleaned_line)
-        }
+            out.push(cleaned_line);
+        };
 
-        idx += 1
-    }
+        idx += 1;
+    };
 
-    out.push("}")
-    return ExtractTypeResult(extracted.end, Decl(out))
-}
+    out.push("}");
+    return ExtractTypeResult(extracted.end, Decl(out));
+};
 
 let split_top_level_commas(text String) List[String] = {
-    let mutable parts = List[String].new()
-    let mutable current = String.new()
-    let mutable paren Int = 0
-    let mutable bracket Int = 0
-    let mutable brace Int = 0
+    let mutable parts = List[String].new();
+    let mutable current = String.new();
+    let mutable paren Int = 0;
+    let mutable bracket Int = 0;
+    let mutable brace Int = 0;
 
     for i in 0..<text.count() then {
-        let ch = text[i]
+        let ch = text[i];
         if ch == '(' then {
-            paren += 1
-            current.push_byte(ch)
-            continue
-        }
+            paren += 1;
+            current.push_byte(ch);
+            continue;
+        };
         if ch == ')' then {
-            paren -= 1
-            current.push_byte(ch)
-            continue
-        }
+            paren -= 1;
+            current.push_byte(ch);
+            continue;
+        };
         if ch == '[' then {
-            bracket += 1
-            current.push_byte(ch)
-            continue
-        }
+            bracket += 1;
+            current.push_byte(ch);
+            continue;
+        };
         if ch == ']' then {
-            bracket -= 1
-            current.push_byte(ch)
-            continue
-        }
+            bracket -= 1;
+            current.push_byte(ch);
+            continue;
+        };
         if ch == '{' then {
-            brace += 1
-            current.push_byte(ch)
-            continue
-        }
+            brace += 1;
+            current.push_byte(ch);
+            continue;
+        };
         if ch == '}' then {
-            brace -= 1
-            current.push_byte(ch)
-            continue
-        }
+            brace -= 1;
+            current.push_byte(ch);
+            continue;
+        };
 
         if ch == ',' and paren == 0 and bracket == 0 and brace == 0 then {
-            let part = trim(current)
+            let part = trim(current);
             if not part.is_empty() then {
-                parts.push(part)
-            }
-            current = String.new()
-            continue
-        }
+                parts.push(part);
+            };
+            current = String.new();
+            continue;
+        };
 
-        current.push_byte(ch)
-    }
+        current.push_byte(ch);
+    };
 
-    let tail = trim(current)
+    let tail = trim(current);
     if not tail.is_empty() then {
-        parts.push(tail)
-    }
-    return parts
-}
+        parts.push(tail);
+    };
+    return parts;
+};
 
 let is_identifier_char(ch UInt8) Bool =
-    (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == '_'
+    (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == '_';
 
 let contains_word(text String, word String) Bool = {
     if word.is_empty() or text.count() < word.count() then {
-        return false
-    }
+        return false;
+    };
 
-    let limit = text.count() - word.count()
-    let mutable i UInt = 0
+    let limit = text.count() - word.count();
+    let mutable i UInt = 0;
     while i <= limit then {
-        let mutable matched = true
-        let mutable j UInt = 0
+        let mutable matched = true;
+        let mutable j UInt = 0;
         while j < word.count() then {
             if text[i + j] <> word[j] then {
-                matched = false
-                break
-            }
-            j += 1
-        }
+                matched = false;
+                break;
+            };
+            j += 1;
+        };
 
         if matched then {
-            let left_ok = i == 0 or not is_identifier_char(text[i - 1])
-            let right_index = i + word.count()
-            let right_ok = right_index >= text.count() or not is_identifier_char(text[right_index])
+            let left_ok = i == 0 or not is_identifier_char(text[i - 1]);
+            let right_index = i + word.count();
+            let right_ok = right_index >= text.count() or not is_identifier_char(text[right_index]);
             if left_ok and right_ok then {
-                return true
-            }
-        }
+                return true;
+            };
+        };
 
-        i += 1
-    }
+        i += 1;
+    };
 
-    return false
-}
+    return false;
+};
 
 let sanitize_type_declaration(decl Decl) Decl = {
     if decl.lines.count() == 0 then {
-        return decl
-    }
+        return decl;
+    };
 
-    let joined = decl.lines.join_to_string("\n")
-    let line = trim(joined)
+    let joined = decl.lines.join_to_string("\n");
+    let line = trim(joined);
     if not line.starts_with("public type") or not line.ends_with(")") then {
-        return decl
-    }
+        return decl;
+    };
     if line.contains("{") or line.contains("}") then {
-        return decl
-    }
+        return decl;
+    };
 
-    let mutable open_idx UInt = 0
+    let mutable open_idx UInt = 0;
     when line.find("(") in {
         .Some(idx) then {
-            open_idx = idx
+            open_idx = idx;
         },
         .None then {
-            return decl
+            return decl;
         },
-    }
+    };
 
-    let mutable close_idx UInt = 0
+    let mutable close_idx UInt = 0;
     when line.find_last(")") in {
         .Some(idx) then {
-            close_idx = idx
+            close_idx = idx;
         },
         .None then {
-            return decl
+            return decl;
         },
-    }
+    };
 
     if close_idx <= open_idx then {
-        return decl
-    }
+        return decl;
+    };
 
-    let prefix = rstrip(line.substring(0..<open_idx))
-    let fields_raw = trim(line.substring((open_idx + 1)..<close_idx))
-    let fields = split_top_level_commas(fields_raw)
-    let mutable filtered = List[String].new()
+    let prefix = rstrip(line.substring(0..<open_idx));
+    let fields_raw = trim(line.substring((open_idx + 1)..<close_idx));
+    let fields = split_top_level_commas(fields_raw);
+    let mutable filtered = List[String].new();
 
     for field in fields then {
         if not contains_word(field, "file_private") and not contains_word(field, "module_private") then {
-            filtered.push(field)
-        }
-    }
+            filtered.push(field);
+        };
+    };
 
     if filtered.count() == 0 then {
-        let mutable single = List[String].new()
-        single.push(prefix)
-        return Decl(single)
-    }
+        let mutable single = List[String].new();
+        single.push(prefix);
+        return Decl(single);
+    };
 
-    let multiline = decl.lines.count() > 1 or filtered.count() > 1
+    let multiline = decl.lines.count() > 1 or filtered.count() > 1;
     if not multiline and filtered.count() == 1 then {
-        let mutable single = List[String].new()
-        single.push(prefix + "(" + filtered[0] + ")")
-        return Decl(single)
-    }
+        let mutable single = List[String].new();
+        single.push(prefix + "(" + filtered[0] + ")");
+        return Decl(single);
+    };
 
-    let mutable out = List[String].new()
-    out.push(prefix + "(")
+    let mutable out = List[String].new();
+    out.push(prefix + "(");
     for field in filtered then {
-        out.push("    " + field + ",")
-    }
-    out.push(")")
-    return Decl(out)
-}
+        out.push("    " + field + ",");
+    };
+    out.push(")");
+    return Decl(out);
+};
 
 let split_lines(text String) List[String] = {
-    let mutable lines = List[String].new()
+    let mutable lines = List[String].new();
     for line in text.split("\n") then {
         if line.ends_with("\r") and line.count() > 0 then {
-            lines.push(line.substring(0..<(line.count() - 1)))
+            lines.push(line.substring(0..<(line.count() - 1)));
         } else {
-            lines.push(line)
-        }
-    }
-    return lines
-}
+            lines.push(line);
+        };
+    };
+    return lines;
+};
 
 let parse_public_api(file_path Path) ParsedApi = {
     let text = read_text_file(file_path) or else {
-        eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())")
-        return empty_parsed_api()
-    }
+        eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())");
+        return empty_parsed_api();
+    };
 
-    let lines = split_lines(text)
-    let mutable free_functions = List[Decl].new()
-    let mutable traits = List[TraitBlock].new()
-    let mutable types = List[Decl].new()
-    let mutable givens = List[TraitBlock].new()
+    let lines = split_lines(text);
+    let mutable free_functions = List[Decl].new();
+    let mutable traits = List[TraitBlock].new();
+    let mutable types = List[Decl].new();
+    let mutable givens = List[TraitBlock].new();
 
-    let mutable i UInt = 0
-    let mutable level Int = 0
+    let mutable i UInt = 0;
+    let mutable level Int = 0;
 
     while i < lines.count() then {
-        let raw_str = lines[i]
-        let cleaned = trim(strip_inline_comment(raw_str))
+        let raw_str = lines[i];
+        let cleaned = trim(strip_inline_comment(raw_str));
 
         if level == 0 then {
             if starts_with_any_public_let(cleaned) then {
-                let collected = collect_signature(lines, i, false)
+                let collected = collect_signature(lines, i, false);
                 if collected.signature.count() > 0 then {
-                    free_functions.push(Decl(collected.signature))
-                }
+                    free_functions.push(Decl(collected.signature));
+                };
 
                 if collected.has_block then {
-                    let block = extract_block(lines, i)
-                    i = block.end + 1
+                    let block = extract_block(lines, i);
+                    i = block.end + 1;
                 } else {
-                    i = collected.end + 1
-                }
-                continue
-            }
+                    i = collected.end + 1;
+                };
+                continue;
+            };
 
             if cleaned.starts_with("public trait") then {
-                let block = extract_block(lines, i)
-                let extracted = extract_trait_or_given_methods(block.block, false)
+                let block = extract_block(lines, i);
+                let extracted = extract_trait_or_given_methods(block.block, false);
                 if extracted.valid then {
-                    traits.push(extracted.block)
-                }
-                i = block.end + 1
-                continue
-            }
+                    traits.push(extracted.block);
+                };
+                i = block.end + 1;
+                continue;
+            };
 
             if cleaned.starts_with("public type") then {
-                let type_api = extract_type_api(lines, i)
-                types.push(type_api.declaration)
-                i = type_api.end + 1
-                continue
-            }
+                let type_api = extract_type_api(lines, i);
+                types.push(type_api.declaration);
+                i = type_api.end + 1;
+                continue;
+            };
 
             if cleaned.starts_with("given") or cleaned.starts_with("intrinsic given") then {
-                let block = extract_block(lines, i)
-                let extracted = extract_trait_or_given_methods(block.block, true)
+                let block = extract_block(lines, i);
+                let extracted = extract_trait_or_given_methods(block.block, true);
                 if extracted.valid and extracted.block.methods.count() > 0 then {
-                    givens.push(extracted.block)
-                }
-                i = block.end + 1
-                continue
-            }
-        }
+                    givens.push(extracted.block);
+                };
+                i = block.end + 1;
+                continue;
+            };
+        };
 
-        level += count_braces(raw_str)
-        i += 1
-    }
+        level += count_braces(raw_str);
+        i += 1;
+    };
 
-    return ParsedApi(free_functions, traits, types, givens)
-}
+    return ParsedApi(free_functions, traits, types, givens);
+};
 
 let to_pascal_case(s String) String = {
-    if s.is_empty() then { return s }
-    let first = s.substring(0..<1).to_ascii_uppercase()
-    let rest = s.substring(1..)
-    return first + rest
-}
+    if s.is_empty() then { return s;};
+    let first = s.substring(0..<1).to_ascii_uppercase();
+    let rest = s.substring(1..);
+    return first + rest;
+};
 
 let segments_to_pascal_key(segments List[String]) String = {
-    let mutable out = String.new()
+    let mutable out = String.new();
     for i in 0..<segments.count() then {
-        if i > 0 then { out.push_byte('.') }
-        out.push_string(to_pascal_case(segments[i]))
-    }
-    return out
-}
+        if i > 0 then { out.push_byte('.');};
+        out.push_string(to_pascal_case(segments[i]));
+    };
+    return out;
+};
 
 let module_key_for_source(source Path, std_root Path) String = {
     let rel = source.relative_to(std_root) or else {
-        return "Std"
-    }
-    let rel_path = rel.to_string().replace_all("\\", "/")
-    let parent = rel_path.into_path().dir_name().to_string().replace_all("\\", "/")
+        return "Std";
+    };
+    let rel_path = rel.to_string().replace_all("\\", "/");
+    let parent = rel_path.into_path().dir_name().to_string().replace_all("\\", "/");
     if parent == "." or parent.is_empty() then {
-        return "Std"
-    }
-    let parts = parent.split("/").into_list()
-    let mutable pascal_parts = List[String].new()
-    pascal_parts.push("Std")
+        return "Std";
+    };
+    let parts = parent.split("/").into_list();
+    let mutable pascal_parts = List[String].new();
+    pascal_parts.push("Std");
     for part in parts then {
-        pascal_parts.push(to_pascal_case(part))
-    }
-    return pascal_parts.join_to_string(".")
-}
+        pascal_parts.push(to_pascal_case(part));
+    };
+    return pascal_parts.join_to_string(".");
+};
 
-let module_name_from_key(key String) String = key
+let module_name_from_key(key String) String = key;
 
 let append_declarations(lines *mutable List[String], declarations List[Decl]) Void = {
     for idx in 0..<declarations.count() then {
-        let decl = declarations[idx]
+        let decl = declarations[idx];
         for line in decl.lines then {
-            lines.push(line)
-        }
+            lines.push(line);
+        };
         if idx + 1 < declarations.count() then {
-            lines.push("")
-        }
-    }
-}
+            lines.push("");
+        };
+    };
+};
 
 let append_traits_or_givens(lines *mutable List[String], blocks List[TraitBlock]) Void = {
     for idx in 0..<blocks.count() then {
-        let block = blocks[idx]
+        let block = blocks[idx];
         for line in block.header.lines then {
-            lines.push(line)
-        }
+            lines.push(line);
+        };
         for method in block.methods then {
             for line in method.lines then {
-                lines.push(line)
-            }
-        }
-        lines.push("}")
+                lines.push(line);
+            };
+        };
+        lines.push("}");
         if idx + 1 < blocks.count() then {
-            lines.push("")
-        }
-    }
-}
+            lines.push("");
+        };
+    };
+};
 
 let file_stem(path Path) String = {
-    let base = path.base_name()
-    let ext = path.ext_name()
+    let base = path.base_name();
+    let ext = path.ext_name();
     if ext.is_empty() or base.count() <= ext.count() then {
-        return base
-    }
-    return base.substring(0..<(base.count() - ext.count()))
-}
+        return base;
+    };
+    return base.substring(0..<(base.count() - ext.count()));
+};
 
 let last_segment(key String) String =
     when key.find_last(".") in {
         .Some(idx) then key.substring((idx + 1)..),
         .None then key,
-    }
+    };
 
 let merge_parsed(target *mutable ParsedApi, parsed ParsedApi) Void = {
     for item in parsed.free_functions then {
-        target.free_functions.push(item)
-    }
+        target.free_functions.push(item);
+    };
     for item in parsed.traits then {
-        target.traits.push(item)
-    }
+        target.traits.push(item);
+    };
     for item in parsed.types then {
-        target.types.push(item)
-    }
+        target.types.push(item);
+    };
     for item in parsed.givens then {
-        target.givens.push(item)
-    }
-}
+        target.givens.push(item);
+    };
+};
 
 let write_module_doc(module_key String, source_files List[String], docs_root Path) Result[Void] = {
-    let module_name = module_name_from_key(module_key)
-    let module_stem = last_segment(module_key)
-    let mutable stem_first = List[String].new()
-    let mutable rest = List[String].new()
+    let module_name = module_name_from_key(module_key);
+    let module_stem = last_segment(module_key);
+    let mutable stem_first = List[String].new();
+    let mutable rest = List[String].new();
     for source_str in source_files then {
         if to_pascal_case(file_stem(source_str.into_path())) == module_stem then {
-            stem_first.push(source_str)
+            stem_first.push(source_str);
         } else {
-            rest.push(source_str)
-        }
-    }
-    stem_first.sort()
-    rest.sort()
+            rest.push(source_str);
+        };
+    };
+    stem_first.sort();
+    rest.sort();
 
-    let mutable ordered_sources = stem_first
-    ordered_sources.push_list(rest)
+    let mutable ordered_sources = stem_first;
+    ordered_sources.push_list(rest);
 
-    let mutable parsed_all = empty_parsed_api()
+    let mutable parsed_all = empty_parsed_api();
 
     for source_str in ordered_sources then {
-        let parsed = parse_public_api(source_str.into_path())
-        merge_parsed(&mutable parsed_all, parsed)
-    }
+        let parsed = parse_public_api(source_str.into_path());
+        merge_parsed(&mutable parsed_all, parsed);
+    };
 
-    let mutable sanitized_types = List[Decl].new()
+    let mutable sanitized_types = List[Decl].new();
     for decl in parsed_all.types then {
-        sanitized_types.push(sanitize_type_declaration(decl))
-    }
+        sanitized_types.push(sanitize_type_declaration(decl));
+    };
 
-    let mutable lines = List[String].new()
-    lines.push("# " + module_name + " API")
-    lines.push("")
-    lines.push("## Overview")
-    lines.push("This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.")
-    lines.push("")
+    let mutable lines = List[String].new();
+    lines.push("# " + module_name + " API");
+    lines.push("");
+    lines.push("## Overview");
+    lines.push("This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.");
+    lines.push("");
 
-    lines.push("## Free Functions")
+    lines.push("## Free Functions");
     if parsed_all.free_functions.count() > 0 then {
-        lines.push("```koral")
-        append_declarations(&mutable lines, parsed_all.free_functions)
-        lines.push("```")
+        lines.push("```koral");
+        append_declarations(&mutable lines, parsed_all.free_functions);
+        lines.push("```");
     } else {
-        lines.push("(none)")
-    }
+        lines.push("(none)");
+    };
 
-    lines.push("")
-    lines.push("## Traits")
+    lines.push("");
+    lines.push("## Traits");
     if parsed_all.traits.count() > 0 then {
-        lines.push("```koral")
-        append_traits_or_givens(&mutable lines, parsed_all.traits)
-        lines.push("```")
+        lines.push("```koral");
+        append_traits_or_givens(&mutable lines, parsed_all.traits);
+        lines.push("```");
     } else {
-        lines.push("(none)")
-    }
+        lines.push("(none)");
+    };
 
-    lines.push("")
-    lines.push("## Types")
+    lines.push("");
+    lines.push("## Types");
     if sanitized_types.count() > 0 then {
-        lines.push("```koral")
-        append_declarations(&mutable lines, sanitized_types)
-        lines.push("```")
+        lines.push("```koral");
+        append_declarations(&mutable lines, sanitized_types);
+        lines.push("```");
     } else {
-        lines.push("(none)")
-    }
+        lines.push("(none)");
+    };
 
-    lines.push("")
-    lines.push("## Given Implementations")
+    lines.push("");
+    lines.push("## Given Implementations");
     if parsed_all.givens.count() > 0 then {
-        lines.push("```koral")
-        append_traits_or_givens(&mutable lines, parsed_all.givens)
-        lines.push("```")
+        lines.push("```koral");
+        append_traits_or_givens(&mutable lines, parsed_all.givens);
+        lines.push("```");
     } else {
-        lines.push("(none)")
-    }
+        lines.push("(none)");
+    };
 
-    lines.push("")
+    lines.push("");
 
-    let output = docs_root.join(last_segment(module_key).to_ascii_lowercase() + ".md")
-    return write_text_file(output, lines.join_to_string("\n"))
-}
+    let output = docs_root.join(last_segment(module_key).to_ascii_lowercase() + ".md");
+    return write_text_file(output, lines.join_to_string("\n"));
+};
 
 let clear_generated_docs_recursive(path Path) Void = {
     let mutable entries = read_dir(path) or else {
-        return
-    }
+        return;
+    };
 
     while entries.next() is .Some(entry) then {
-        let full_path = entry.path()
+        let full_path = entry.path();
         if entry.is_dir() then {
-            clear_generated_docs_recursive(full_path)
-            let _ = remove_dir(full_path)
+            clear_generated_docs_recursive(full_path);
+            let _ = remove_dir(full_path);
         } else {
             if entry.name().ends_with(".md") then {
-                let _ = remove_file(full_path)
-            }
-        }
-    }
-}
+                let _ = remove_file(full_path);
+            };
+        };
+    };
+};
 
 let clear_generated_docs(docs_root Path) Void = {
     if not path_exist(docs_root) then {
-        let _ = create_dir_all(docs_root)
-        return
-    }
-    clear_generated_docs_recursive(docs_root)
-}
+        let _ = create_dir_all(docs_root);
+        return;
+    };
+    clear_generated_docs_recursive(docs_root);
+};
 
 let collect_koral_sources(root Path) Result[List[String]] = {
-    let mutable out = List[String].new()
-    let mutable walker = walk_dir(root) or return
+    let mutable out = List[String].new();
+    let mutable walker = walk_dir(root) or return;
 
     while walker.next() is .Some(entry) then {
         if entry.is_file() and entry.name().ends_with(".koral") then {
-            out.push(entry.path().to_string())
-        }
-    }
+            out.push(entry.path().to_string());
+        };
+    };
 
-    return Result[List[String]].Ok(out)
-}
+    return Result[List[String]].Ok(out);
+};
 
 let find_repo_root() Result[Path] = {
-    let mutable cursor = current_dir() or return
+    let mutable cursor = current_dir() or return;
 
-    let mutable steps UInt = 0
+    let mutable steps UInt = 0;
     while steps < 12 then {
-        let marker = cursor.join("std/std.koral")
+        let marker = cursor.join("std/std.koral");
         if path_exist(marker) then {
-            return Result[Path].Ok(cursor)
-        }
+            return Result[Path].Ok(cursor);
+        };
 
-        let parent = cursor.dir_name()
+        let parent = cursor.dir_name();
         if parent.to_string() == cursor.to_string() then {
-            break
-        }
-        cursor = parent
-        steps += 1
-    }
+            break;
+        };
+        cursor = parent;
+        steps += 1;
+    };
 
-    return Result[Path].Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."))
-}
+    return Result[Path].Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."));
+};
 
 let main() Void = {
     let repo_root = find_repo_root() or else {
-        eprintln("Error: \(it.message())")
-        exit(1)
-    }
+        eprintln("Error: \(it.message())");
+        exit(1);
+    };
 
-    let std_root = repo_root.join("std")
-    let docs_root = repo_root.join("docs").join("std")
+    let std_root = repo_root.join("std");
+    let docs_root = repo_root.join("docs").join("std");
 
-    clear_generated_docs(docs_root)
+    clear_generated_docs(docs_root);
 
     let mutable source_files = collect_koral_sources(std_root) or else {
-        eprintln("Error collecting std sources: \(it.message())")
-        exit(1)
-    }
+        eprintln("Error collecting std sources: \(it.message())");
+        exit(1);
+    };
 
-    source_files.sort()
+    source_files.sort();
 
-    let grouped = source_files.group_by((source_str) -> module_key_for_source(source_str.into_path(), std_root))
+    let grouped = source_files.group_by((source_str) -> module_key_for_source(source_str.into_path(), std_root));
 
-    let mutable module_keys = List[String].new()
-    let mutable grouped_entries = grouped.iterator()
+    let mutable module_keys = List[String].new();
+    let mutable grouped_entries = grouped.iterator();
     while grouped_entries.next() is .Some(entry) then {
-        module_keys.push(entry.first)
-    }
-    module_keys.sort()
+        module_keys.push(entry.first);
+    };
+    module_keys.sort();
 
     for module_key in module_keys then {
-        let files = grouped.get(module_key).unwrap()
+        let files = grouped.get(module_key).unwrap();
         let _ = write_module_doc(module_key, files, docs_root) or else {
-            eprintln("Error writing doc for \(module_key): \(it.message())")
-            exit(1)
-        }
-    }
+            eprintln("Error writing doc for \(module_key): \(it.message())");
+            exit(1);
+        };
+    };
 
-    println("Generated \(module_keys.count()) module docs in \(docs_root.to_string())")
-}
+    println("Generated \(module_keys.count()) module docs in \(docs_root.to_string())");
+};

@@ -2,7 +2,7 @@ public type LexError(
     message String,
     line UInt,
     column UInt,
-)
+);
 
 public type Lexer(
     source_runes List[Rune],
@@ -13,102 +13,102 @@ public type Lexer(
     continued_line_column UInt,
     mutable tokens List[Token],
     mutable has_newline_before Bool,
-)
+);
 
 given Lexer {
     file_private format_position(self, line UInt, column UInt) String = {
-        let mutable text = line.to_string()
-        text.push_byte(':')
-        text.push_string(column.to_string())
-        return text
-    }
+        let mutable text = line.to_string();
+        text.push_byte(':');
+        text.push_string(column.to_string());
+        return text;
+    };
 
     file_private rune_text(self, ch Rune) String = {
-        let mutable text = String.new()
-        text.push_rune(ch)
-        return text
-    }
+        let mutable text = String.new();
+        text.push_rune(ch);
+        return text;
+    };
 
     file_private invalid_digit_message(self, ch Rune, prefix String) String = {
-        let _ = self
-        let mutable text = "Invalid digit '"
-        text.push_string(self.rune_text(ch))
-        text.push_string("' in ")
-        text.push_string(prefix)
-        text.push_string(" literal")
-        return text
-    }
+        let _ = self;
+        let mutable text = "Invalid digit '";
+        text.push_string(self.rune_text(ch));
+        text.push_string("' in ");
+        text.push_string(prefix);
+        text.push_string(" literal");
+        return text;
+    };
 
-    file_private is_utf8_bom(ch Rune) Bool = ch.to_uint32() == 65279
+    file_private is_utf8_bom(ch Rune) Bool = ch.to_uint32() == 65279;
 
     public new(source String) Lexer = {
-        let runes = source.to_runes()
-        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt)
-        return Lexer(runes, "", start_index, 1, 1, 1, List[Token].new(), false)
-    }
+        let runes = source.to_runes();
+        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt);
+        return Lexer(runes, "", start_index, 1, 1, 1, List[Token].new(), false);
+    };
 
     public new_in_file(source String, file_path String) Lexer = {
-        let runes = source.to_runes()
-        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt)
-        return Lexer(runes, file_path, start_index, 1, 1, 1, List[Token].new(), false)
-    }
+        let runes = source.to_runes();
+        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt);
+        return Lexer(runes, file_path, start_index, 1, 1, 1, List[Token].new(), false);
+    };
 
     public new_in_file_at(source String, file_path String, start_line UInt, start_column UInt, continued_line_column UInt) Lexer = {
-        let runes = source.to_runes()
-        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt)
-        let continued = if continued_line_column > 0(UInt) then continued_line_column else 1(UInt)
-        return Lexer(runes, file_path, start_index, start_line, start_column, continued, List[Token].new(), false)
-    }
+        let runes = source.to_runes();
+        let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then 1(UInt) else 0(UInt);
+        let continued = if continued_line_column > 0(UInt) then continued_line_column else 1(UInt);
+        return Lexer(runes, file_path, start_index, start_line, start_column, continued, List[Token].new(), false);
+    };
 
-    file_private is_at_end(self) Bool = self.index >= self.source_runes.count()
+    file_private is_at_end(self) Bool = self.index >= self.source_runes.count();
 
     file_private peek(self) Option[Rune] = {
         if self.index < self.source_runes.count() then {
-            return .Some(self.source_runes[self.index])
-        }
-        return .None()
-    }
+            return .Some(self.source_runes[self.index]);
+        };
+        return .None();
+    };
 
     file_private peek_next(self) Option[Rune] = {
         if self.index + 1 < self.source_runes.count() then {
-            return .Some(self.source_runes[self.index + 1])
-        }
-        return .None()
-    }
+            return .Some(self.source_runes[self.index + 1]);
+        };
+        return .None();
+    };
 
     file_private advance(*mutable self) Option[Rune] = {
         if self.is_at_end() then {
-            return .None()
-        }
+            return .None();
+        };
 
-        let ch = self.source_runes[self.index]
-        self.index += 1
+        let ch = self.source_runes[self.index];
+        self.index += 1;
 
         if ch == '\r' then {
             when self.peek() in {
                 .Some(next) then {
                     if next == '\n' then {
-                        self.index += 1
-                    }
+                        self.index += 1;
+                    };
                 },
                 .None() then {},
-            }
-        }
+            };
+        };
 
         if ch.is_newline() then {
-            self.line += 1
-            self.column = self.continued_line_column
+            self.line += 1;
+            self.column = self.continued_line_column;
         } else {
-            self.column += 1
-        }
+            self.column += 1;
+        };
 
-        return .Some(ch)
-    }
+        return .Some(ch);
+    };
 
     file_private add(*mutable self, kind TokenKind, line UInt, column UInt) Void = {
-        self.tokens.push(Token(kind, line, column, self.has_newline_before))
-        self.has_newline_before = false
-    }
+        self.tokens.push(Token(kind, line, column, self.has_newline_before));
+        self.has_newline_before = false;
+    };
 
     file_private fail(self, line UInt, column UInt, message String) Result[List[Token]] = {
         return .Error(box(make_diagnostic_at(
@@ -116,8 +116,8 @@ given Lexer {
             self.file_path,
             message,
             SourceSpan(SourceLocation(line, column), SourceLocation(line, column))
-        )))
-    }
+        )));
+    };
 
     file_private fail_at(self, line UInt, column UInt, message String) * Error = {
         return box(make_diagnostic_at(
@@ -125,192 +125,192 @@ given Lexer {
             self.file_path,
             message,
             SourceSpan(SourceLocation(line, column), SourceLocation(line, column))
-        ))
-    }
+        ));
+    };
 
     file_private match_next(*mutable self, expected Rune) Bool = {
         let next = self.peek() or else {
-            return false
-        }
+            return false;
+        };
         if next == expected then {
-            self.advance()
-            return true
-        }
-        return false
-    }
+            self.advance();
+            return true;
+        };
+        return false;
+    };
 
-    file_private is_space(ch Rune) Bool = ch.is_ascii_whitespace()
+    file_private is_space(ch Rune) Bool = ch.is_ascii_whitespace();
 
-    file_private is_digit(ch Rune) Bool = ch.is_ascii_digit()
+    file_private is_digit(ch Rune) Bool = ch.is_ascii_digit();
 
-    file_private is_identifier_start(ch Rune) Bool = ch.is_identifier_start()
+    file_private is_identifier_start(ch Rune) Bool = ch.is_identifier_start();
 
-    file_private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue()
+    file_private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue();
 
     file_private read_identifier(*mutable self, start_line UInt, start_col UInt, first Rune) Void = {
-        let mutable text = String.new()
-        text.push_rune(first)
+        let mutable text = String.new();
+        text.push_rune(first);
 
         while self.peek() is .Some(ch) and Lexer.is_identifier_continue(ch) then {
-            text.push_rune(self.advance().unwrap())
-        }
+            text.push_rune(self.advance().unwrap());
+        };
 
         when keyword_kind(text) in {
             .Some(kind) then {
-                self.add(kind, start_line, start_col)
+                self.add(kind, start_line, start_col);
             },
             .None() then {
-                self.add(TokenKind.Identifier(text), start_line, start_col)
+                self.add(TokenKind.Identifier(text), start_line, start_col);
             },
-        }
-    }
+        };
+    };
 
     file_private read_duration_suffix_if_present(*mutable self) Option[String] = {
         let first = self.peek() or else {
-            return .None()
-        }
+            return .None();
+        };
         if not first.is_ascii_alphabetic() then {
-            return .None()
-        }
+            return .None();
+        };
 
-        let mutable letters = String.new()
-        letters.push_rune(self.advance().unwrap())
+        let mutable letters = String.new();
+        letters.push_rune(self.advance().unwrap());
 
         while self.peek() is .Some(ch) and ch.is_ascii_alphabetic() then {
-            letters.push_rune(self.advance().unwrap())
-        }
+            letters.push_rune(self.advance().unwrap());
+        };
 
-        let is_supported = letters == "s" or letters == "ms" or letters == "us" or letters == "ns"
+        let is_supported = letters == "s" or letters == "ms" or letters == "us" or letters == "ns";
         if is_supported then {
             when self.peek() in {
                 .Some(next) then {
                     if Lexer.is_identifier_continue(next) then {
-                        let mutable i = letters.to_runes().count()
+                        let mutable i = letters.to_runes().count();
                         while i > 0 then {
-                            i -= 1
-                            self.index -= 1
-                            self.column -= 1
-                        }
-                        return .None()
-                    }
+                            i -= 1;
+                            self.index -= 1;
+                            self.column -= 1;
+                        };
+                        return .None();
+                    };
                 },
                 .None() then {},
-            }
-            return .Some(letters)
-        }
+            };
+            return .Some(letters);
+        };
 
-        let mutable i = letters.to_runes().count()
+        let mutable i = letters.to_runes().count();
         while i > 0 then {
-            i -= 1
-            self.index -= 1
-            self.column -= 1
-        }
-        return .None()
-    }
+            i -= 1;
+            self.index -= 1;
+            self.column -= 1;
+        };
+        return .None();
+    };
 
     file_private read_number(*mutable self, start_line UInt, start_col UInt, first Rune) Result[Void] = {
-        let mutable text = String.new()
-        text.push_rune(first)
+        let mutable text = String.new();
+        text.push_rune(first);
 
         // 检查是否为非十进制前缀（只支持小写 0b / 0o / 0x）
         if first == '0' then {
             when self.peek() in {
                 .Some(prefix) then {
                     if prefix == 'b' then {
-                        text.push_rune(self.advance().unwrap())
-                        let mutable digit_count UInt = 0
+                        text.push_rune(self.advance().unwrap());
+                        let mutable digit_count UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if ch == '0' or ch == '1' then {
-                                text.push_rune(self.advance().unwrap())
-                                digit_count += 1
+                                text.push_rune(self.advance().unwrap());
+                                digit_count += 1;
                             } else if ch == '_' then {
-                                if self.peek_next() is .None() then { break }
-                                let next = self.peek_next().unwrap()
+                                if self.peek_next() is .None() then { break;};
+                                let next = self.peek_next().unwrap();
                                 if digit_count > 0 and (next == '0' or next == '1') then {
-                                    text.push_rune(self.advance().unwrap())
-                                } else { break }
+                                    text.push_rune(self.advance().unwrap());
+                                } else { break;};
                             } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(ch) then {
-                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0b")))
-                            } else { break }
-                        }
+                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0b")));
+                            } else { break;};
+                        };
                         if digit_count == 0 then {
-                            return .Error(self.fail_at(start_line, start_col, "0b literal must have at least one digit"))
-                        }
-                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return .Ok({})
-                    }
+                            return .Error(self.fail_at(start_line, start_col, "0b literal must have at least one digit"));
+                        };
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col);
+                        return .Ok({});
+                    };
                     if prefix == 'o' then {
-                        text.push_rune(self.advance().unwrap())
-                        let mutable digit_count UInt = 0
+                        text.push_rune(self.advance().unwrap());
+                        let mutable digit_count UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if ch >= '0' and ch <= '7' then {
-                                text.push_rune(self.advance().unwrap())
-                                digit_count += 1
+                                text.push_rune(self.advance().unwrap());
+                                digit_count += 1;
                             } else if ch == '_' then {
-                                if self.peek_next() is .None() then { break }
-                                let next = self.peek_next().unwrap()
+                                if self.peek_next() is .None() then { break;};
+                                let next = self.peek_next().unwrap();
                                 if digit_count > 0 and next >= '0' and next <= '7' then {
-                                    text.push_rune(self.advance().unwrap())
-                                } else { break }
+                                    text.push_rune(self.advance().unwrap());
+                                } else { break;};
                             } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(ch) then {
-                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0o")))
-                            } else { break }
-                        }
+                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0o")));
+                            } else { break;};
+                        };
                         if digit_count == 0 then {
-                            return .Error(self.fail_at(start_line, start_col, "0o literal must have at least one digit"))
-                        }
-                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return .Ok({})
-                    }
+                            return .Error(self.fail_at(start_line, start_col, "0o literal must have at least one digit"));
+                        };
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col);
+                        return .Ok({});
+                    };
                     if prefix == 'x' then {
-                        text.push_rune(self.advance().unwrap())
-                        let mutable digit_count UInt = 0
+                        text.push_rune(self.advance().unwrap());
+                        let mutable digit_count UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_hex_digit(ch) then {
-                                text.push_rune(self.advance().unwrap())
-                                digit_count += 1
+                                text.push_rune(self.advance().unwrap());
+                                digit_count += 1;
                             } else if ch == '_' then {
-                                if self.peek_next() is .None() then { break }
-                                let next = self.peek_next().unwrap()
+                                if self.peek_next() is .None() then { break;};
+                                let next = self.peek_next().unwrap();
                                 if digit_count > 0 and Lexer.is_hex_digit(next) then {
-                                    text.push_rune(self.advance().unwrap())
-                                } else { break }
+                                    text.push_rune(self.advance().unwrap());
+                                } else { break;};
                             } else if Lexer.is_identifier_continue(ch) then {
-                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0x")))
-                            } else { break }
-                        }
+                                return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0x")));
+                            } else { break;};
+                        };
                         if digit_count == 0 then {
-                            return .Error(self.fail_at(start_line, start_col, "0x literal must have at least one digit"))
-                        }
-                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
-                        return .Ok({})
-                    }
+                            return .Error(self.fail_at(start_line, start_col, "0x literal must have at least one digit"));
+                        };
+                        self.add(TokenKind.IntegerLiteral(text), start_line, start_col);
+                        return .Ok({});
+                    };
                 },
                 .None() then {},
-            }
-        }
+            };
+        };
 
         // 十进制整数部分
         while self.peek() is .Some(ch) then {
             if Lexer.is_digit(ch) then {
-                text.push_rune(self.advance().unwrap())
+                text.push_rune(self.advance().unwrap());
             } else if ch == '_' then {
                 if self.peek_next() is .None() then {
-                    break
-                }
-                let next = self.peek_next().unwrap()
+                    break;
+                };
+                let next = self.peek_next().unwrap();
                 if Lexer.is_digit(next) then {
-                    text.push_rune(self.advance().unwrap())
+                    text.push_rune(self.advance().unwrap());
                 } else {
-                    break
-                }
+                    break;
+                };
             } else {
-                break
-            }
-        }
+                break;
+            };
+        };
 
         // 检查是否有小数点（浮点数）
-        let mutable is_float = false
+        let mutable is_float = false;
         when self.peek() in {
             .Some(dot) then {
                 if dot == '.' then {
@@ -318,774 +318,774 @@ given Lexer {
                     when self.peek_next() in {
                         .Some(after_dot) then {
                             if Lexer.is_digit(after_dot) then {
-                                is_float = true
-                                text.push_rune(self.advance().unwrap()) // consume '.'
+                                is_float = true;
+                                text.push_rune(self.advance().unwrap());// consume '.'
                                 while self.peek() is .Some(ch) then {
                                     if Lexer.is_digit(ch) then {
-                                        text.push_rune(self.advance().unwrap())
+                                        text.push_rune(self.advance().unwrap());
                                     } else if ch == '_' then {
-                                        if self.peek_next() is .None() then { break }
-                                let next = self.peek_next().unwrap()
+                                        if self.peek_next() is .None() then { break;};
+                                let next = self.peek_next().unwrap();
                                         if Lexer.is_digit(next) then {
-                                            text.push_rune(self.advance().unwrap())
-                                        } else { break }
-                                    } else { break }
-                                }
-                            }
+                                            text.push_rune(self.advance().unwrap());
+                                        } else { break;};
+                                    } else { break;};
+                                };
+                            };
                         },
                         .None() then {},
-                    }
-                }
+                    };
+                };
             },
             .None() then {},
-        }
+        };
 
         // 检查科学计数法，只支持小写 e
         when self.peek() in {
             .Some(e_ch) then {
                 if e_ch == 'e' then {
-                    is_float = true
-                    text.push_rune(self.advance().unwrap()) // consume 'e'
+                    is_float = true;
+                    text.push_rune(self.advance().unwrap());// consume 'e'
                     // 可选的 + / -
                     when self.peek() in {
                         .Some(sign) then {
                             if sign == '+' or sign == '-' then {
-                                text.push_rune(self.advance().unwrap())
-                            }
+                                text.push_rune(self.advance().unwrap());
+                            };
                         },
                         .None() then {},
-                    }
+                    };
                     // 指数数字
                     while self.peek() is .Some(ch) then {
                         if Lexer.is_digit(ch) then {
-                            text.push_rune(self.advance().unwrap())
-                        } else { break }
-                    }
-                }
+                            text.push_rune(self.advance().unwrap());
+                        } else { break;};
+                    };
+                };
             },
             .None() then {},
-        }
+        };
 
         if is_float then {
-            self.add(TokenKind.FloatLiteral(text), start_line, start_col)
+            self.add(TokenKind.FloatLiteral(text), start_line, start_col);
         } else {
             when self.read_duration_suffix_if_present() in {
                 .Some(unit) then {
-                    self.add(TokenKind.DurationLiteral(text, unit), start_line, start_col)
+                    self.add(TokenKind.DurationLiteral(text, unit), start_line, start_col);
                 },
                 .None() then {
-                    self.add(TokenKind.IntegerLiteral(text), start_line, start_col)
+                    self.add(TokenKind.IntegerLiteral(text), start_line, start_col);
                 },
-            }
-        }
-        return .Ok({})
-    }
+            };
+        };
+        return .Ok({});
+    };
 
     file_private is_hex_digit(ch Rune) Bool = {
-        return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F')
-    }
+        return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
+    };
 
     // 将单个 hex 字符转为数值 (0-15)
     file_private hex_digit_value(ch Rune) UInt32 = {
         if ch >= '0' and ch <= '9' then {
-            return (ch.to_uint32() - '0'.to_uint32())
-        }
+            return (ch.to_uint32() - '0'.to_uint32());
+        };
         if ch >= 'a' and ch <= 'f' then {
-            return (ch.to_uint32() - 'a'.to_uint32() + 10)
-        }
+            return (ch.to_uint32() - 'a'.to_uint32() + 10);
+        };
         // 'A'-'F'
-        return (ch.to_uint32() - 'A'.to_uint32() + 10)
-    }
+        return (ch.to_uint32() - 'A'.to_uint32() + 10);
+    };
 
     // 将 hex 字符串转为 UInt32
     file_private parse_hex_to_uint32(self, hex String) Result[UInt32] = {
-        let runes = hex.to_runes()
+        let runes = hex.to_runes();
         if runes.is_empty() then {
-            return .Error(self.fail_at(self.line, self.column, "empty hex string"))
-        }
-        let mutable value UInt32 = 0
+            return .Error(self.fail_at(self.line, self.column, "empty hex string"));
+        };
+        let mutable value UInt32 = 0;
         for ch in runes then {
             if not Lexer.is_hex_digit(ch) then {
-                return .Error(self.fail_at(self.line, self.column, "invalid hex digit"))
-            }
-            value = value.wrapping_mul(16).wrapping_add(Lexer.hex_digit_value(ch))
-        }
-        return .Ok(value)
-    }
+                return .Error(self.fail_at(self.line, self.column, "invalid hex digit"));
+            };
+            value = value.wrapping_mul(16).wrapping_add(Lexer.hex_digit_value(ch));
+        };
+        return .Ok(value);
+    };
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
     file_private read_escape(*mutable self, start_line UInt, start_col UInt) Result[String] = {
         let next = self.peek() or else {
-            return .Error(self.fail_at(start_line, start_col, "Unterminated escape sequence"))
-        }
-        self.advance()
+            return .Error(self.fail_at(start_line, start_col, "Unterminated escape sequence"));
+        };
+        self.advance();
 
         // 简单单字符转义
         if next == 'n' then {
-            let mutable s = String.new()
-            s.push_rune('\n')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\n');
+            return .Ok(s);
+        };
         if next == 't' then {
-            let mutable s = String.new()
-            s.push_rune('\t')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\t');
+            return .Ok(s);
+        };
         if next == 'r' then {
-            let mutable s = String.new()
-            s.push_rune('\r')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\r');
+            return .Ok(s);
+        };
         if next == '0' then {
-            let mutable s = String.new()
-            s.push_rune('\0')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\0');
+            return .Ok(s);
+        };
         if next == '"' then {
-            let mutable s = String.new()
-            s.push_rune('"')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('"');
+            return .Ok(s);
+        };
         if next == '\'' then {
-            let mutable s = String.new()
-            s.push_rune('\'')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\'');
+            return .Ok(s);
+        };
         if next == '\\' then {
-            let mutable s = String.new()
-            s.push_rune('\\')
-            return .Ok(s)
-        }
+            let mutable s = String.new();
+            s.push_rune('\\');
+            return .Ok(s);
+        };
         if next == 'v' then {
             // vertical tab U+000B
             let r = Rune.from_uint32(11) or else {
-                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar for \\v"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(s)
-        }
+                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar for \\v"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(s);
+        };
         if next == 'f' then {
             // form feed U+000C
             let r = Rune.from_uint32(12) or else {
-                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar for \\f"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(s)
-        }
+                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar for \\f"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(s);
+        };
 
         // \xHH — 2 hex digits, single byte
         if next == 'x' then {
-            let mutable hex = String.new()
-            let mutable i UInt = 0
+            let mutable hex = String.new();
+            let mutable i UInt = 0;
             while i < 2 then {
                 let h = self.peek() or else {
-                    return .Error(self.fail_at(start_line, start_col, "\\x escape requires exactly 2 hex digits"))
-                }
+                    return .Error(self.fail_at(start_line, start_col, "\\x escape requires exactly 2 hex digits"));
+                };
                 if not Lexer.is_hex_digit(h) then {
-                    return .Error(self.fail_at(start_line, start_col, "invalid hex digit in \\x escape"))
-                }
-                hex.push_rune(self.advance().unwrap())
-                i += 1
-            }
-            let code = self.parse_hex_to_uint32(hex) or return
+                    return .Error(self.fail_at(start_line, start_col, "invalid hex digit in \\x escape"));
+                };
+                hex.push_rune(self.advance().unwrap());
+                i += 1;
+            };
+            let code = self.parse_hex_to_uint32(hex) or return;
             let r = Rune.from_uint32(code) or else {
-                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar in \\x escape"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(s)
-        }
+                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar in \\x escape"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(s);
+        };
 
         // \u{HHHH} — unicode scalar, 1-6 hex digits
         if next == 'u' then {
             let brace = self.peek() or else {
-                return .Error(self.fail_at(start_line, start_col, "\\u escape requires braces: \\u{HHHH}"))
-            }
+                return .Error(self.fail_at(start_line, start_col, "\\u escape requires braces: \\u{HHHH}"));
+            };
             if brace <> '{' then {
-                return .Error(self.fail_at(start_line, start_col, "\\u escape requires braces: \\u{HHHH}"))
-            }
-            self.advance()
-            let mutable hex = String.new()
+                return .Error(self.fail_at(start_line, start_col, "\\u escape requires braces: \\u{HHHH}"));
+            };
+            self.advance();
+            let mutable hex = String.new();
             while self.peek() is .Some(h) then {
                 if h == '}' then {
-                    self.advance()
-                    break
-                }
+                    self.advance();
+                    break;
+                };
                 if not Lexer.is_hex_digit(h) then {
-                    return .Error(self.fail_at(start_line, start_col, "invalid hex digit in \\u escape"))
-                }
-                hex.push_rune(self.advance().unwrap())
+                    return .Error(self.fail_at(start_line, start_col, "invalid hex digit in \\u escape"));
+                };
+                hex.push_rune(self.advance().unwrap());
                 if hex.count() > 6 then {
-                    return .Error(self.fail_at(start_line, start_col, "\\u escape has too many digits (max 6)"))
-                }
-            }
+                    return .Error(self.fail_at(start_line, start_col, "\\u escape has too many digits (max 6)"));
+                };
+            };
             if hex.is_empty() then {
-                return .Error(self.fail_at(start_line, start_col, "\\u{} escape requires at least one hex digit"))
-            }
-            let code = self.parse_hex_to_uint32(hex) or return
+                return .Error(self.fail_at(start_line, start_col, "\\u{} escape requires at least one hex digit"));
+            };
+            let code = self.parse_hex_to_uint32(hex) or return;
             let r = Rune.from_uint32(code) or else {
-                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar in \\u escape"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(s)
-        }
+                return .Error(self.fail_at(start_line, start_col, "invalid unicode scalar in \\u escape"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(s);
+        };
 
-        return .Error(self.fail_at(start_line, start_col, "Unknown escape sequence"))
-    }
+        return .Error(self.fail_at(start_line, start_col, "Unknown escape sequence"));
+    };
 
     file_private read_string(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
-        let mutable raw_content = String.new()
-        let mutable pending_backslashes UInt = 0
+        let mutable raw_content = String.new();
+        let mutable pending_backslashes UInt = 0;
 
         while self.peek() is .Some(ch) then {
             if ch == '"' and pending_backslashes % 2 == 0 then {
-                self.advance()
-                let parts = self.process_string_content_parts(raw_content, start_line, start_col, start_line, start_col + 1(UInt)) or return
+                self.advance();
+                let parts = self.process_string_content_parts(raw_content, start_line, start_col, start_line, start_col + 1(UInt)) or return;
                 if parts.count() == 1(UInt) then {
                     when parts[0(UInt)] in {
                         .Literal(text) then self.add(TokenKind.StringLiteral(text), start_line, start_col),
                         .ExpressionTokens(_) then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
-                    }
+                    };
                 } else {
-                    self.add(TokenKind.InterpolatedString(parts), start_line, start_col)
-                }
-                return .Ok({})
-            }
+                    self.add(TokenKind.InterpolatedString(parts), start_line, start_col);
+                };
+                return .Ok({});
+            };
 
-            let consumed = self.advance().unwrap()
-            raw_content.push_rune(consumed)
+            let consumed = self.advance().unwrap();
+            raw_content.push_rune(consumed);
             if consumed == '\\' then {
-                pending_backslashes += 1(UInt)
+                pending_backslashes += 1(UInt);
             } else {
-                pending_backslashes = 0(UInt)
-            }
-        }
+                pending_backslashes = 0(UInt);
+            };
+        };
 
         if raw_content.contains("\\(") then {
-            return .Error(self.fail_at(start_line, start_col, "unterminated string interpolation"))
-        }
-        return .Error(self.fail_at(start_line, start_col, "Unterminated string literal"))
-    }
+            return .Error(self.fail_at(start_line, start_col, "unterminated string interpolation"));
+        };
+        return .Error(self.fail_at(start_line, start_col, "Unterminated string literal"));
+    };
 
     file_private read_rune(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
-        let mutable text = String.new()
+        let mutable text = String.new();
 
         while self.peek() is .Some(ch) then {
             if ch == '\'' then {
-                self.advance()
-                self.add(TokenKind.RuneLiteral(text), start_line, start_col)
-                return .Ok({})
-            }
+                self.advance();
+                self.add(TokenKind.RuneLiteral(text), start_line, start_col);
+                return .Ok({});
+            };
 
             if ch == '\\' then {
-                self.advance()
-                let escaped = self.read_escape(start_line, start_col) or return
-                text.push_string(escaped)
+                self.advance();
+                let escaped = self.read_escape(start_line, start_col) or return;
+                text.push_string(escaped);
             } else {
-                text.push_rune(self.advance().unwrap())
-            }
-        }
+                text.push_rune(self.advance().unwrap());
+            };
+        };
 
-        return .Error(self.fail_at(start_line, start_col, "Unterminated rune literal"))
-    }
+        return .Error(self.fail_at(start_line, start_col, "Unterminated rune literal"));
+    };
 
     file_private consume_backslash_run(*mutable self) UInt = {
-        let mutable count UInt = 0
+        let mutable count UInt = 0;
         while self.peek() is .Some(ch) then {
             if ch <> '\\' then {
-                break
-            }
-            self.advance()
-            count += 1
-        }
-        return count
-    }
+                break;
+            };
+            self.advance();
+            count += 1;
+        };
+        return count;
+    };
 
     file_private append_backslashes(self, text *mutable String, count UInt) Void = {
-        let mutable i UInt = 0
+        let mutable i UInt = 0;
         while i < count then {
-            text.push_rune('\\')
-            i += 1
-        }
-    }
+            text.push_rune('\\');
+            i += 1;
+        };
+    };
 
     file_private box_token_list(self, tokens List[Token]) List[* Token] = {
-        let _ = self
-        let mutable boxed = List[* Token].new()
+        let _ = self;
+        let mutable boxed = List[* Token].new();
         for token in tokens then {
-            boxed.push(box(token))
-        }
-        return boxed
-    }
+            boxed.push(box(token));
+        };
+        return boxed;
+    };
 
     file_private lex_interpolation_tokens(*mutable self, expr_source String, start_line UInt, start_column UInt, continued_line_column UInt) Result[List[* Token]] = {
-        let mutable nested = Lexer.new_in_file_at(expr_source, self.file_path, start_line, start_column, continued_line_column)
-        let tokens = nested.run() or return
-        return .Ok(self.box_token_list(tokens))
-    }
+        let mutable nested = Lexer.new_in_file_at(expr_source, self.file_path, start_line, start_column, continued_line_column);
+        let tokens = nested.run() or return;
+        return .Ok(self.box_token_list(tokens));
+    };
 
     file_private leading_indent(self, line String) String = {
-        let runes = line.to_runes()
-        let mutable indent = String.new()
-        let mutable i UInt = 0
+        let runes = line.to_runes();
+        let mutable indent = String.new();
+        let mutable i UInt = 0;
         while i < runes.count() then {
-            let ch = runes[i]
+            let ch = runes[i];
             if ch == ' ' or ch == '\t' then {
-                indent.push_rune(ch)
-                i += 1
-                continue
-            }
-            break
-        }
-        return indent
-    }
+                indent.push_rune(ch);
+                i += 1;
+                continue;
+            };
+            break;
+        };
+        return indent;
+    };
 
     file_private strip_indent_prefix(self, line String, indent_count UInt) String = {
-        if line.is_empty() then { return line }
-        let runes = line.to_runes()
-        if indent_count >= runes.count() then { return "" }
-        return line.substring(indent_count..)
-    }
+        if line.is_empty() then { return line;};
+        let runes = line.to_runes();
+        if indent_count >= runes.count() then { return "";};
+        return line.substring(indent_count..);
+    };
 
     file_private read_escape_from_runes(self, runes List[Rune], index UInt) Result[Pair[String, UInt]] = {
-        let mutable cur_index = index
+        let mutable cur_index = index;
         if cur_index >= runes.count() then {
-            return .Error(self.fail_at(self.line, self.column, "Unterminated escape sequence"))
-        }
+            return .Error(self.fail_at(self.line, self.column, "Unterminated escape sequence"));
+        };
 
-        let next = runes[cur_index]
-        cur_index += 1
+        let next = runes[cur_index];
+        cur_index += 1;
 
         if next == 'n' then {
-            let mutable s = String.new()
-            s.push_rune('\n')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\n');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 't' then {
-            let mutable s = String.new()
-            s.push_rune('\t')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\t');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 'r' then {
-            let mutable s = String.new()
-            s.push_rune('\r')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\r');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == '0' then {
-            let mutable s = String.new()
-            s.push_rune('\0')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\0');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == '"' then {
-            let mutable s = String.new()
-            s.push_rune('"')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('"');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == '\'' then {
-            let mutable s = String.new()
-            s.push_rune('\'')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\'');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == '\\' then {
-            let mutable s = String.new()
-            s.push_rune('\\')
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+            let mutable s = String.new();
+            s.push_rune('\\');
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 'v' then {
             let r = Rune.from_uint32(11) or else {
-                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar for \\v"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar for \\v"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 'f' then {
             let r = Rune.from_uint32(12) or else {
-                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar for \\f"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar for \\f"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 'x' then {
-            let mutable hex = String.new()
-            let mutable i UInt = 0
+            let mutable hex = String.new();
+            let mutable i UInt = 0;
             while i < 2 then {
                 if cur_index >= runes.count() then {
-                    return .Error(self.fail_at(self.line, self.column, "\\x escape requires exactly 2 hex digits"))
-                }
-                let h = runes[cur_index]
+                    return .Error(self.fail_at(self.line, self.column, "\\x escape requires exactly 2 hex digits"));
+                };
+                let h = runes[cur_index];
                 if not Lexer.is_hex_digit(h) then {
-                    return .Error(self.fail_at(self.line, self.column, "invalid hex digit in \\x escape"))
-                }
-                hex.push_rune(h)
-                cur_index += 1
-                i += 1
-            }
-            let code = self.parse_hex_to_uint32(hex) or return
+                    return .Error(self.fail_at(self.line, self.column, "invalid hex digit in \\x escape"));
+                };
+                hex.push_rune(h);
+                cur_index += 1;
+                i += 1;
+            };
+            let code = self.parse_hex_to_uint32(hex) or return;
             let r = Rune.from_uint32(code) or else {
-                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar in \\x escape"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar in \\x escape"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
         if next == 'u' then {
             if cur_index >= runes.count() or runes[cur_index] <> '{' then {
-                return .Error(self.fail_at(self.line, self.column, "\\u escape requires braces: \\u{HHHH}"))
-            }
-            cur_index += 1
-            let mutable hex = String.new()
+                return .Error(self.fail_at(self.line, self.column, "\\u escape requires braces: \\u{HHHH}"));
+            };
+            cur_index += 1;
+            let mutable hex = String.new();
             while cur_index < runes.count() then {
-                let h = runes[cur_index]
+                let h = runes[cur_index];
                 if h == '}' then {
-                    cur_index += 1
-                    break
-                }
+                    cur_index += 1;
+                    break;
+                };
                 if not Lexer.is_hex_digit(h) then {
-                    return .Error(self.fail_at(self.line, self.column, "invalid hex digit in \\u escape"))
-                }
-                hex.push_rune(h)
-                cur_index += 1
+                    return .Error(self.fail_at(self.line, self.column, "invalid hex digit in \\u escape"));
+                };
+                hex.push_rune(h);
+                cur_index += 1;
                 if hex.count() > 6 then {
-                    return .Error(self.fail_at(self.line, self.column, "\\u escape has too many digits (max 6)"))
-                }
-            }
+                    return .Error(self.fail_at(self.line, self.column, "\\u escape has too many digits (max 6)"));
+                };
+            };
             if hex.is_empty() then {
-                return .Error(self.fail_at(self.line, self.column, "\\u{} escape requires at least one hex digit"))
-            }
-            let code = self.parse_hex_to_uint32(hex) or return
+                return .Error(self.fail_at(self.line, self.column, "\\u{} escape requires at least one hex digit"));
+            };
+            let code = self.parse_hex_to_uint32(hex) or return;
             let r = Rune.from_uint32(code) or else {
-                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar in \\u escape"))
-            }
-            let mutable s = String.new()
-            s.push_rune(r)
-            return .Ok(Pair[String, UInt](s, cur_index))
-        }
+                return .Error(self.fail_at(self.line, self.column, "invalid unicode scalar in \\u escape"));
+            };
+            let mutable s = String.new();
+            s.push_rune(r);
+            return .Ok(Pair[String, UInt](s, cur_index));
+        };
 
-        return .Error(self.fail_at(self.line, self.column, "Unknown escape sequence"))
-    }
+        return .Error(self.fail_at(self.line, self.column, "Unknown escape sequence"));
+    };
 
     file_private process_string_content_parts(*mutable self, content String, error_line UInt, error_col UInt, content_start_line UInt, line_start_column UInt) Result[List[InterpolatedStringTokenPart]] = {
-        let runes = content.to_runes()
-        let total = runes.count()
-        let mutable i UInt = 0
-        let mutable parts = List[InterpolatedStringTokenPart].new()
-        let mutable text = String.new()
-        let mutable current_line = content_start_line
-        let mutable current_column = line_start_column
+        let runes = content.to_runes();
+        let total = runes.count();
+        let mutable i UInt = 0;
+        let mutable parts = List[InterpolatedStringTokenPart].new();
+        let mutable text = String.new();
+        let mutable current_line = content_start_line;
+        let mutable current_column = line_start_column;
 
         while i < total then {
-            let ch = runes[i]
+            let ch = runes[i];
 
             if ch == '\\' then {
-                let mutable slash_count UInt = 0
+                let mutable slash_count UInt = 0;
                 while i + slash_count < total and runes[i + slash_count] == '\\' then {
-                    slash_count += 1
-                }
+                    slash_count += 1;
+                };
 
                 if i + slash_count < total and runes[i + slash_count] == '(' then {
-                    self.append_backslashes(&mutable text, slash_count / 2)
-                    i += slash_count
+                    self.append_backslashes(&mutable text, slash_count / 2);
+                    i += slash_count;
 
                     if slash_count % 2 == 0 then {
-                        text.push_rune('(')
-                        i += 1
-                        current_column += slash_count + 1(UInt)
-                        continue
-                    }
+                        text.push_rune('(');
+                        i += 1;
+                        current_column += slash_count + 1(UInt);
+                        continue;
+                    };
 
                     if not text.is_empty() then {
-                        let mutable literal_part = String.new()
-                        literal_part.push_string(text)
-                        parts.push(InterpolatedStringTokenPart.Literal(literal_part))
-                        text = String.new()
-                    }
+                        let mutable literal_part = String.new();
+                        literal_part.push_string(text);
+                        parts.push(InterpolatedStringTokenPart.Literal(literal_part));
+                        text = String.new();
+                    };
 
-                    let expr_start_line = current_line
-                    let expr_start_column = current_column + slash_count + 1(UInt)
-                    i += 1
-                    current_column += slash_count + 1(UInt)
-                    let mutable expr_source = String.new()
-                    let mutable depth UInt = 1
-                    let mutable quote_start = Rune.from_uint32(0) or else '\0'
+                    let expr_start_line = current_line;
+                    let expr_start_column = current_column + slash_count + 1(UInt);
+                    i += 1;
+                    current_column += slash_count + 1(UInt);
+                    let mutable expr_source = String.new();
+                    let mutable depth UInt = 1;
+                    let mutable quote_start = Rune.from_uint32(0) or else '\0';
                     while i < total then {
-                        let cur = runes[i]
-                        i += 1
+                        let cur = runes[i];
+                        i += 1;
                         if cur == '\\' then {
-                            return .Error(self.fail_at(error_line, error_col, "escape sequences are not allowed in string interpolation"))
-                        }
+                            return .Error(self.fail_at(error_line, error_col, "escape sequences are not allowed in string interpolation"));
+                        };
                         if cur == '"' or cur == '\'' then {
-                            let quote = cur
-                            expr_source.push_rune(cur)
-                            current_column += 1(UInt)
-                            let mutable terminated = false
+                            let quote = cur;
+                            expr_source.push_rune(cur);
+                            current_column += 1(UInt);
+                            let mutable terminated = false;
                             while i < total then {
-                                let inner = runes[i]
-                                i += 1
+                                let inner = runes[i];
+                                i += 1;
                                 if inner == '\\' then {
-                                    return .Error(self.fail_at(error_line, error_col, "escape sequences are not allowed in string interpolation"))
-                                }
-                                expr_source.push_rune(inner)
+                                    return .Error(self.fail_at(error_line, error_col, "escape sequences are not allowed in string interpolation"));
+                                };
+                                expr_source.push_rune(inner);
                                 if inner.is_newline() then {
-                                    current_line += 1(UInt)
-                                    current_column = line_start_column
+                                    current_line += 1(UInt);
+                                    current_column = line_start_column;
                                 } else {
-                                    current_column += 1(UInt)
-                                }
+                                    current_column += 1(UInt);
+                                };
                                 if inner == quote then {
-                                    terminated = true
-                                    break
-                                }
-                            }
+                                    terminated = true;
+                                    break;
+                                };
+                            };
                             if not terminated then {
-                                return .Error(self.fail_at(error_line, error_col, "unterminated string interpolation"))
-                            }
-                            continue
-                        }
+                                return .Error(self.fail_at(error_line, error_col, "unterminated string interpolation"));
+                            };
+                            continue;
+                        };
                         if cur == '(' then {
-                            depth += 1
-                            expr_source.push_rune(cur)
-                            current_column += 1(UInt)
-                            continue
-                        }
+                            depth += 1;
+                            expr_source.push_rune(cur);
+                            current_column += 1(UInt);
+                            continue;
+                        };
                         if cur == ')' then {
-                            depth -= 1
-                            current_column += 1(UInt)
+                            depth -= 1;
+                            current_column += 1(UInt);
                             if depth == 0 then {
-                                break
-                            }
-                            expr_source.push_rune(cur)
-                            continue
-                        }
-                        expr_source.push_rune(cur)
+                                break;
+                            };
+                            expr_source.push_rune(cur);
+                            continue;
+                        };
+                        expr_source.push_rune(cur);
                         if cur.is_newline() then {
-                            current_line += 1(UInt)
-                            current_column = line_start_column
+                            current_line += 1(UInt);
+                            current_column = line_start_column;
                         } else {
-                            current_column += 1(UInt)
-                        }
-                    }
+                            current_column += 1(UInt);
+                        };
+                    };
 
                     if depth <> 0 then {
-                        return .Error(self.fail_at(error_line, error_col, "unterminated string interpolation"))
-                    }
+                        return .Error(self.fail_at(error_line, error_col, "unterminated string interpolation"));
+                    };
                     if expr_source.trim_ascii().is_empty() then {
-                        return .Error(self.fail_at(error_line, error_col, "empty interpolation expression"))
-                    }
-                    let expr_tokens = self.lex_interpolation_tokens(expr_source, expr_start_line, expr_start_column, line_start_column) or return
-                    parts.push(InterpolatedStringTokenPart.ExpressionTokens(expr_tokens))
-                    continue
-                }
+                        return .Error(self.fail_at(error_line, error_col, "empty interpolation expression"));
+                    };
+                    let expr_tokens = self.lex_interpolation_tokens(expr_source, expr_start_line, expr_start_column, line_start_column) or return;
+                    parts.push(InterpolatedStringTokenPart.ExpressionTokens(expr_tokens));
+                    continue;
+                };
 
-                self.append_backslashes(&mutable text, slash_count / 2)
-                i += slash_count
-                current_column += slash_count
+                self.append_backslashes(&mutable text, slash_count / 2);
+                i += slash_count;
+                current_column += slash_count;
                 if slash_count % 2 == 1 then {
-                    let escape_start = i
-                    let escaped = self.read_escape_from_runes(runes, i) or return
-                    text.push_string(escaped.first)
-                    i = escaped.second
-                    current_column += escaped.second - escape_start
-                }
-                continue
-            }
+                    let escape_start = i;
+                    let escaped = self.read_escape_from_runes(runes, i) or return;
+                    text.push_string(escaped.first);
+                    i = escaped.second;
+                    current_column += escaped.second - escape_start;
+                };
+                continue;
+            };
 
-            text.push_rune(ch)
-            i += 1
+            text.push_rune(ch);
+            i += 1;
             if ch.is_newline() then {
-                current_line += 1(UInt)
-                current_column = line_start_column
+                current_line += 1(UInt);
+                current_column = line_start_column;
             } else {
-                current_column += 1(UInt)
-            }
-        }
+                current_column += 1(UInt);
+            };
+        };
 
         if not text.is_empty() then {
-            let mutable literal_part = String.new()
-            literal_part.push_string(text)
-            parts.push(InterpolatedStringTokenPart.Literal(literal_part))
-        }
+            let mutable literal_part = String.new();
+            literal_part.push_string(text);
+            parts.push(InterpolatedStringTokenPart.Literal(literal_part));
+        };
 
-        return .Ok(parts)
-    }
+        return .Ok(parts);
+    };
 
     file_private read_multiline_string(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
         // Caller has consumed the first quote; consume the remaining two of opening delimiter.
-        self.advance()
-        self.advance()
+        self.advance();
+        self.advance();
 
         let first_char = self.advance() or else {
-            return .Error(self.fail_at(start_line, start_col, "Unterminated multiline string literal"))
-        }
+            return .Error(self.fail_at(start_line, start_col, "Unterminated multiline string literal"));
+        };
         if not first_char.is_newline() then {
-            return .Error(self.fail_at(start_line, start_col, "multi-line string literal content must begin on a new line"))
-        }
+            return .Error(self.fail_at(start_line, start_col, "multi-line string literal content must begin on a new line"));
+        };
         if first_char == '\r' then {
             when self.peek() in {
                 .Some(next) then {
                     if next == '\n' then {
-                        self.advance()
-                    }
+                        self.advance();
+                    };
                 },
                 .None() then {},
-            }
-        }
+            };
+        };
 
-        let mutable raw_lines = List[String].new()
-        let mutable closing_indent = String.new()
+        let mutable raw_lines = List[String].new();
+        let mutable closing_indent = String.new();
 
         while true then {
-            let mutable current_line = String.new()
+            let mutable current_line = String.new();
 
             while self.peek() is .Some(ch) then {
                 if ch == ' ' or ch == '\t' then {
-                    current_line.push_rune(self.advance().unwrap())
-                    continue
-                }
-                break
-            }
+                    current_line.push_rune(self.advance().unwrap());
+                    continue;
+                };
+                break;
+            };
 
-            let saved_index = self.index
-            let saved_line = self.line
-            let saved_column = self.column
+            let saved_index = self.index;
+            let saved_line = self.line;
+            let saved_column = self.column;
 
             if self.peek() is .Some(first) and first == '"' then {
-                self.advance()
+                self.advance();
                 if self.peek() is .Some(second) and second == '"' then {
-                    self.advance()
+                    self.advance();
                     if self.peek() is .Some(third) and third == '"' then {
-                        self.advance()
-                        closing_indent = current_line
-                        break
-                    }
-                }
-            }
+                        self.advance();
+                        closing_indent = current_line;
+                        break;
+                    };
+                };
+            };
 
-            self.index = saved_index
-            self.line = saved_line
-            self.column = saved_column
+            self.index = saved_index;
+            self.line = saved_line;
+            self.column = saved_column;
 
             while self.peek() is .Some(_) then {
-                let cur = self.advance().unwrap()
+                let cur = self.advance().unwrap();
                 if cur.is_newline() then {
                     if cur == '\r' then {
                         when self.peek() in {
                             .Some(next) then {
                                 if next == '\n' then {
-                                    self.advance()
-                                }
+                                    self.advance();
+                                };
                             },
                             .None() then {},
-                        }
-                    }
+                        };
+                    };
                     if current_line.contains("\"\"\"") then {
-                        return .Error(self.fail_at(start_line, start_col, "multi-line string literal closing delimiter must begin on a new line"))
-                    }
-                    raw_lines.push(current_line)
-                    break
-                }
-                current_line.push_rune(cur)
-            }
+                        return .Error(self.fail_at(start_line, start_col, "multi-line string literal closing delimiter must begin on a new line"));
+                    };
+                    raw_lines.push(current_line);
+                    break;
+                };
+                current_line.push_rune(cur);
+            };
 
             if self.peek() is .None() then {
                 if current_line.contains("\"\"\"") then {
-                    return .Error(self.fail_at(start_line, start_col, "multi-line string literal closing delimiter must begin on a new line"))
-                }
-                return .Error(self.fail_at(start_line, start_col, "Unterminated multiline string literal"))
-            }
-        }
+                    return .Error(self.fail_at(start_line, start_col, "multi-line string literal closing delimiter must begin on a new line"));
+                };
+                return .Error(self.fail_at(start_line, start_col, "Unterminated multiline string literal"));
+            };
+        };
 
-        let closing_indent_count = closing_indent.count()
-        let mutable stripped_lines = List[String].new()
+        let closing_indent_count = closing_indent.count();
+        let mutable stripped_lines = List[String].new();
         for line in raw_lines then {
             if not line.is_empty() and not line.starts_with(closing_indent) then {
-                return .Error(self.fail_at(start_line, start_col, "insufficient indentation in multiline string literal: each line must be indented at least as much as the closing \"\"\""))
-            }
+                return .Error(self.fail_at(start_line, start_col, "insufficient indentation in multiline string literal: each line must be indented at least as much as the closing \"\"\""));
+            };
             if line.is_empty() then {
-                stripped_lines.push("")
+                stripped_lines.push("");
             } else {
-                stripped_lines.push(self.strip_indent_prefix(line, closing_indent_count))
-            }
-        }
+                stripped_lines.push(self.strip_indent_prefix(line, closing_indent_count));
+            };
+        };
 
-        let joined = stripped_lines.join_to_string("\n")
-        let parts = self.process_string_content_parts(joined, start_line, start_col, start_line + 1(UInt), closing_indent_count + 1(UInt)) or return
+        let joined = stripped_lines.join_to_string("\n");
+        let parts = self.process_string_content_parts(joined, start_line, start_col, start_line + 1(UInt), closing_indent_count + 1(UInt)) or return;
         if parts.count() == 1(UInt) then {
             when parts[0(UInt)] in {
                 .Literal(text) then self.add(TokenKind.StringLiteral(text), start_line, start_col),
                 .ExpressionTokens(_) then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
-            }
+            };
         } else {
-            self.add(TokenKind.InterpolatedString(parts), start_line, start_col)
-        }
-        return .Ok({})
-    }
+            self.add(TokenKind.InterpolatedString(parts), start_line, start_col);
+        };
+        return .Ok({});
+    };
 
     file_private skip_line_comment(*mutable self) Void = {
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
-                break
-            }
-            self.advance()
-        }
-    }
+                break;
+            };
+            self.advance();
+        };
+    };
 
     file_private skip_block_comment(*mutable self) Result[Bool] = {
-        let mutable saw_newline = false
+        let mutable saw_newline = false;
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
-                saw_newline = true
-            }
+                saw_newline = true;
+            };
             if ch == '*' then {
                 let next = self.peek_next() or else {
-                    self.advance()
-                    continue
-                }
+                    self.advance();
+                    continue;
+                };
                 if next == '/' then {
-                    self.advance()
-                    self.advance()
-                    return .Ok(saw_newline)
-                }
-            }
-            self.advance()
-        }
-        return .Error(self.fail_at(self.line, self.column, "Unterminated block comment"))
-    }
+                    self.advance();
+                    self.advance();
+                    return .Ok(saw_newline);
+                };
+            };
+            self.advance();
+        };
+        return .Error(self.fail_at(self.line, self.column, "Unterminated block comment"));
+    };
 
     public run(*mutable self) Result[List[Token]] = {
         while not self.is_at_end() then {
-            let start_line = self.line
-            let start_col = self.column
-            let ch = self.advance().unwrap()
+            let start_line = self.line;
+            let start_col = self.column;
+            let ch = self.advance().unwrap();
 
             // 换行：记录 has_newline_before，不产生 token
             if ch.is_newline() then {
-                self.has_newline_before = true
-                continue
-            }
+                self.has_newline_before = true;
+                continue;
+            };
 
             if Lexer.is_space(ch) then {
-                continue
-            }
+                continue;
+            };
 
             if Lexer.is_identifier_start(ch) then {
-                self.read_identifier(start_line, start_col, ch)
-                continue
-            }
+                self.read_identifier(start_line, start_col, ch);
+                continue;
+            };
 
             if Lexer.is_digit(ch) then {
                 when self.read_number(start_line, start_col, ch) in {
                     .Ok(_) then {},
                     .Error(e) then {
-                        return self.fail(start_line, start_col, e.message())
+                        return self.fail(start_line, start_col, e.message());
                     },
-                }
-                continue
-            }
+                };
+                continue;
+            };
 
             if ch == '"' then {
                 when self.peek() in {
@@ -1097,288 +1097,288 @@ given Lexer {
                                         when self.read_multiline_string(start_line, start_col) in {
                                             .Ok(_) then {},
                                             .Error(e) then {
-                                                return self.fail(start_line, start_col, e.message())
+                                                return self.fail(start_line, start_col, e.message());
                                             },
-                                        }
-                                        continue
-                                    }
+                                        };
+                                        continue;
+                                    };
                                 },
                                 .None() then {},
-                            }
-                        }
+                            };
+                        };
                     },
                     .None() then {},
-                }
+                };
 
                 when self.read_string(start_line, start_col) in {
                     .Ok(_) then {},
                     .Error(e) then {
-                        return self.fail(start_line, start_col, e.message())
+                        return self.fail(start_line, start_col, e.message());
                     },
-                }
-                continue
-            }
+                };
+                continue;
+            };
 
             if ch == '\'' then {
-                let saved_index = self.index
+                let saved_index = self.index;
                 let next = self.peek() or else {
-                    return self.fail(start_line, start_col, "unterminated lifetime or rune literal")
-                }
+                    return self.fail(start_line, start_col, "unterminated lifetime or rune literal");
+                };
                 if Lexer.is_identifier_start(next) then {
                     // Could be lifetime ('a, '_ ) or rune literal ('a')
                     // Build identifier and scan forward
-                    let mutable name = String.new()
-                    name.push_rune('\'')
-                    name.push_rune(self.advance().unwrap())
+                    let mutable name = String.new();
+                    name.push_rune('\'');
+                    name.push_rune(self.advance().unwrap());
                     while self.peek() is .Some(c) and Lexer.is_identifier_continue(c) then {
-                        name.push_rune(self.advance().unwrap())
-                    }
+                        name.push_rune(self.advance().unwrap());
+                    };
                     // Check if followed by closing '
                     if self.peek() is .Some('\'') then {
                         // Rune literal: 'a' — restore position and call read_rune
-                        self.index = saved_index
+                        self.index = saved_index;
                         when self.read_rune(start_line, start_col) in {
                             .Ok(_) then {},
                             .Error(e) then {
-                                return self.fail(start_line, start_col, e.message())
+                                return self.fail(start_line, start_col, e.message());
                             },
-                        }
+                        };
                     } else {
                         // Lifetime identifier: 'a
-                        self.add(TokenKind.Identifier(name), start_line, start_col)
-                    }
+                        self.add(TokenKind.Identifier(name), start_line, start_col);
+                    };
                 } else {
                     // Not identifier start — rune literal
                     when self.read_rune(start_line, start_col) in {
                         .Ok(_) then {},
                         .Error(e) then {
-                            return self.fail(start_line, start_col, e.message())
+                            return self.fail(start_line, start_col, e.message());
                         },
-                    }
-                }
-                continue
-            }
+                    };
+                };
+                continue;
+            };
 
             if ch == '/' then {
                 let next = self.peek() or else {
-                    self.add(TokenKind.Slash(), start_line, start_col)
-                    continue
-                }
+                    self.add(TokenKind.Slash(), start_line, start_col);
+                    continue;
+                };
 
                 if next == '/' then {
-                    self.advance()
-                    self.skip_line_comment()
-                    continue
-                }
+                    self.advance();
+                    self.skip_line_comment();
+                    continue;
+                };
 
                 if next == '*' then {
-                    self.advance()
+                    self.advance();
                     when self.skip_block_comment() in {
                         .Ok(comment_had_newline) then {
                             if comment_had_newline then {
-                                self.has_newline_before = true
-                            }
-                            continue
+                                self.has_newline_before = true;
+                            };
+                            continue;
                         },
                         .Error(e) then {
-                            return self.fail(start_line, start_col, e.message())
+                            return self.fail(start_line, start_col, e.message());
                         },
-                    }
-                }
-            }
+                    };
+                };
+            };
 
             if ch == '=' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.EqualEqual(), start_line, start_col)
+                    self.add(TokenKind.EqualEqual(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Assign(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Assign(), start_line, start_col);
+                };
+                continue;
+            };
 
             if ch == '<' then {
                 if self.match_next('>') then {
-                    self.add(TokenKind.NotEqual(), start_line, start_col)
+                    self.add(TokenKind.NotEqual(), start_line, start_col);
                 } else if self.match_next('.') then {
                     if self.match_next('.') then {
                         if self.match_next('<') then {
-                            self.add(TokenKind.LessRangeLess(), start_line, start_col)
+                            self.add(TokenKind.LessRangeLess(), start_line, start_col);
                         } else {
-                            self.add(TokenKind.LessRange(), start_line, start_col)
-                        }
+                            self.add(TokenKind.LessRange(), start_line, start_col);
+                        };
                     } else {
-                        return self.fail(start_line, start_col, "expected '..' after '<.'")
-                    }
+                        return self.fail(start_line, start_col, "expected '..' after '<.'");
+                    };
                 } else if self.match_next('=') then {
-                    self.add(TokenKind.LessEqual(), start_line, start_col)
+                    self.add(TokenKind.LessEqual(), start_line, start_col);
                 } else if self.match_next('<') then {
                     if self.match_next('=') then {
-                        self.add(TokenKind.LeftShiftAssign(), start_line, start_col)
+                        self.add(TokenKind.LeftShiftAssign(), start_line, start_col);
                     } else {
-                        self.add(TokenKind.LeftShift(), start_line, start_col)
-                    }
+                        self.add(TokenKind.LeftShift(), start_line, start_col);
+                    };
                 } else {
-                    self.add(TokenKind.Less(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Less(), start_line, start_col);
+                };
+                continue;
+            };
 
             if ch == '>' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.GreaterEqual(), start_line, start_col)
+                    self.add(TokenKind.GreaterEqual(), start_line, start_col);
                 } else if self.match_next('>') then {
                     if self.match_next('=') then {
-                        self.add(TokenKind.RightShiftAssign(), start_line, start_col)
+                        self.add(TokenKind.RightShiftAssign(), start_line, start_col);
                     } else {
-                        self.add(TokenKind.RightShift(), start_line, start_col)
-                    }
+                        self.add(TokenKind.RightShift(), start_line, start_col);
+                    };
                 } else {
-                    self.add(TokenKind.Greater(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Greater(), start_line, start_col);
+                };
+                continue;
+            };
 
             if ch == '-' then {
                 if self.match_next('>') then {
-                    self.add(TokenKind.Arrow(), start_line, start_col)
+                    self.add(TokenKind.Arrow(), start_line, start_col);
                 } else if self.match_next('=') then {
-                    self.add(TokenKind.MinusAssign(), start_line, start_col)
+                    self.add(TokenKind.MinusAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Minus(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Minus(), start_line, start_col);
+                };
+                continue;
+            };
 
             if ch == '+' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.PlusAssign(), start_line, start_col)
+                    self.add(TokenKind.PlusAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Plus(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Plus(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '*' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.StarAssign(), start_line, start_col)
+                    self.add(TokenKind.StarAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Star(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Star(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '/' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.SlashAssign(), start_line, start_col)
+                    self.add(TokenKind.SlashAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Slash(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Slash(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '%' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.PercentAssign(), start_line, start_col)
+                    self.add(TokenKind.PercentAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Percent(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Percent(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == ',' then {
-                self.add(TokenKind.Comma(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.Comma(), start_line, start_col);
+                continue;
+            };
             if ch == '.' then {
                 if self.match_next('.') then {
                     if self.match_next('.') then {
-                        self.add(TokenKind.Ellipsis(), start_line, start_col)
-                    } else 
+                        self.add(TokenKind.Ellipsis(), start_line, start_col);
+                    } else
                     if self.match_next('<') then {
-                        self.add(TokenKind.RangeLess(), start_line, start_col)
+                        self.add(TokenKind.RangeLess(), start_line, start_col);
                     } else {
-                        self.add(TokenKind.Range(), start_line, start_col)
-                    }
+                        self.add(TokenKind.Range(), start_line, start_col);
+                    };
                 } else {
-                    self.add(TokenKind.Dot(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Dot(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '&' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.AmpersandAssign(), start_line, start_col)
+                    self.add(TokenKind.AmpersandAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Ampersand(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Ampersand(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '|' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.PipeAssign(), start_line, start_col)
+                    self.add(TokenKind.PipeAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Pipe(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Pipe(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '^' then {
                 if self.match_next('=') then {
-                    self.add(TokenKind.CaretAssign(), start_line, start_col)
+                    self.add(TokenKind.CaretAssign(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Caret(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Caret(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '~' then {
-                self.add(TokenKind.Tilde(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.Tilde(), start_line, start_col);
+                continue;
+            };
             if ch == ':' then {
                 if self.match_next(':') then {
-                    self.add(TokenKind.DoubleColon(), start_line, start_col)
+                    self.add(TokenKind.DoubleColon(), start_line, start_col);
                 } else {
-                    self.add(TokenKind.Colon(), start_line, start_col)
-                }
-                continue
-            }
+                    self.add(TokenKind.Colon(), start_line, start_col);
+                };
+                continue;
+            };
             if ch == '!' then {
-                self.add(TokenKind.Bang(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.Bang(), start_line, start_col);
+                continue;
+            };
             if ch == '?' then {
-                self.add(TokenKind.QuestionMark(), start_line, start_col)
-                continue
+                self.add(TokenKind.QuestionMark(), start_line, start_col);
+                continue;
             } else if ch == ';' then {
-                self.add(TokenKind.Semicolon(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.Semicolon(), start_line, start_col);
+                continue;
+            };
             if ch == '(' then {
-                self.add(TokenKind.LParen(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.LParen(), start_line, start_col);
+                continue;
+            };
             if ch == ')' then {
-                self.add(TokenKind.RParen(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.RParen(), start_line, start_col);
+                continue;
+            };
             if ch == '{' then {
-                self.add(TokenKind.LBrace(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.LBrace(), start_line, start_col);
+                continue;
+            };
             if ch == '}' then {
-                self.add(TokenKind.RBrace(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.RBrace(), start_line, start_col);
+                continue;
+            };
             if ch == '[' then {
-                self.add(TokenKind.LBracket(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.LBracket(), start_line, start_col);
+                continue;
+            };
             if ch == ']' then {
-                self.add(TokenKind.RBracket(), start_line, start_col)
-                continue
-            }
+                self.add(TokenKind.RBracket(), start_line, start_col);
+                continue;
+            };
 
-            return self.fail(start_line, start_col, "Unexpected character")
-        }
+            return self.fail(start_line, start_col, "Unexpected character");
+        };
 
-        self.add(TokenKind.Eof(), self.line, self.column)
-        return .Ok(self.tokens)
-    }
-}
+        self.add(TokenKind.Eof(), self.line, self.column);
+        return .Ok(self.tokens);
+    };
+};
 
 file_private let keyword_kind(text String) Option[TokenKind] = {
     return when text in {
@@ -1418,20 +1418,20 @@ file_private let keyword_kind(text String) Option[TokenKind] = {
         "it" then .Some(TokenKind.KwIt()),
         "unsafe" then .Some(TokenKind.KwUnsafe()),
         _ then .None(),
-    }
-}
+    };
+};
 
 public let lex(source String) Result[List[Token]] = {
-    let mutable lexer = Lexer.new(source)
-    return lexer.run()
-}
+    let mutable lexer = Lexer.new(source);
+    return lexer.run();
+};
 
 public let lex_in_file(source String, file_path String) Result[List[Token]] = {
-    let mutable lexer = Lexer.new_in_file(source, file_path)
-    return lexer.run()
-}
+    let mutable lexer = Lexer.new_in_file(source, file_path);
+    return lexer.run();
+};
 
 public let lex_in_file_at(source String, file_path String, start_line UInt, start_column UInt, continued_line_column UInt) Result[List[Token]] = {
-    let mutable lexer = Lexer.new_in_file_at(source, file_path, start_line, start_column, continued_line_column)
-    return lexer.run()
-}
+    let mutable lexer = Lexer.new_in_file_at(source, file_path, start_line, start_column, continued_line_column);
+    return lexer.run();
+};

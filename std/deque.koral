@@ -5,291 +5,291 @@
 // and list are already available.
 // ============================================================================
 
-module_private type DequeStorage[T Any](mutable source *unsafe mutable T, mutable len UInt, mutable cap UInt, mutable head UInt)
+module_private type DequeStorage[T Any](mutable source *unsafe mutable T, mutable len UInt, mutable cap UInt, mutable head UInt);
 
 given[T Deref] DequeStorage[T] as Drop {
 
     drop(source *unsafe mutable Self) Void = {
         for i in 0..<source.len then {
-            let index = (source.head + i) % source.cap
-            deinit_memory(source.source + index)
-        }
-        dealloc_memory(source.source)
-    }
-}
+            let index = (source.head + i) % source.cap;
+            deinit_memory(source.source + index);
+        };
+        dealloc_memory(source.source);
+    };
+};
 
-public type Deque[T Any](module_private mutable storage *mutable DequeStorage[T])
+public type Deque[T Any](module_private mutable storage *mutable DequeStorage[T]);
 
-public type DequeIterator[T Any](module_private storage *mutable DequeStorage[T], module_private mutable index UInt)
+public type DequeIterator[T Any](module_private storage *mutable DequeStorage[T], module_private mutable index UInt);
 
 given[T Deref] Deque[T] {
 
     public new() Self = {
-        let cap UInt = 10
-        let source = alloc_memory[T](cap)
-        let storage = box(DequeStorage[T](source, 0, cap, 0))
-        return Deque[T](storage)
-    }
+        let cap UInt = 10;
+        let source = alloc_memory[T](cap);
+        let storage = box(DequeStorage[T](source, 0, cap, 0));
+        return Deque[T](storage);
+    };
 
     public with_capacity(capacity UInt) Self = {
-        let cap = if capacity < 1 then 1 else capacity
-        let source = alloc_memory[T](cap)
-        let storage = box(DequeStorage[T](source, 0, cap, 0))
-        return Deque[T](storage)
-    }
+        let cap = if capacity < 1 then 1 else capacity;
+        let source = alloc_memory[T](cap);
+        let storage = box(DequeStorage[T](source, 0, cap, 0));
+        return Deque[T](storage);
+    };
 
-    public count(*self) UInt = self.storage.len
+    public count(*self) UInt = self.storage.len;
 
     public reserve(*mutable self, additional UInt) Void = {
-        self.ensure_capacity(self.storage.len + additional)
-    }
+        self.ensure_capacity(self.storage.len + additional);
+    };
 
-    public is_empty(*self) Bool = self.storage.len == 0
+    public is_empty(*self) Bool = self.storage.len == 0;
 
-    file_private physical_index(*self, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap
+    file_private physical_index(*self, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap;
 
     file_private ensure_unique(*mutable self) Void = {
         if not is_unique_mutable(&unsafe self.storage) then {
-            let old = self.storage
-            let new_source = alloc_memory[T](old.cap)
+            let old = self.storage;
+            let new_source = alloc_memory[T](old.cap);
             for i in 0..<old.len then {
-                let old_index = (old.head + i) % old.cap
-                init_memory(new_source + i, old.source[old_index])
-            }
-            let new_storage = box(DequeStorage[T](new_source, old.len, old.cap, 0))
-            self.storage = new_storage
-        }
-    }
+                let old_index = (old.head + i) % old.cap;
+                init_memory(new_source + i, old.source[old_index]);
+            };
+            let new_storage = box(DequeStorage[T](new_source, old.len, old.cap, 0));
+            self.storage = new_storage;
+        };
+    };
 
     file_private ensure_capacity(*mutable self, min_capacity UInt) Void = {
         if min_capacity > self.storage.cap then {
-            let mutable new_cap = self.storage.cap * 2
+            let mutable new_cap = self.storage.cap * 2;
             if new_cap < min_capacity then {
-                new_cap = min_capacity
-            }
+                new_cap = min_capacity;
+            };
             // Check uniqueness BEFORE copying storage to avoid inflating strong_count.
-            let was_unique = is_unique_mutable(&unsafe self.storage)
-            let old = self.storage
-            let new_source = alloc_memory[T](new_cap)
+            let was_unique = is_unique_mutable(&unsafe self.storage);
+            let old = self.storage;
+            let new_source = alloc_memory[T](new_cap);
             if was_unique then {
                 for i in 0..<old.len then {
-                    let old_index = (old.head + i) % old.cap
-                    init_memory(new_source + i, take_memory(old.source + old_index))
-                }
-                dealloc_memory(old.source)
-                self.storage.source = new_source
-                self.storage.cap = new_cap
-                self.storage.head = 0
+                    let old_index = (old.head + i) % old.cap;
+                    init_memory(new_source + i, take_memory(old.source + old_index));
+                };
+                dealloc_memory(old.source);
+                self.storage.source = new_source;
+                self.storage.cap = new_cap;
+                self.storage.head = 0;
             } else {
                 for i in 0..<old.len then {
-                    let old_index = (old.head + i) % old.cap
-                    init_memory(new_source + i, old.source[old_index])
-                }
-                let new_storage = box(DequeStorage[T](new_source, old.len, new_cap, 0))
-                self.storage = new_storage
-            }
+                    let old_index = (old.head + i) % old.cap;
+                    init_memory(new_source + i, old.source[old_index]);
+                };
+                let new_storage = box(DequeStorage[T](new_source, old.len, new_cap, 0));
+                self.storage = new_storage;
+            };
         } else {
-            self.ensure_unique()
-        }
-    }
+            self.ensure_unique();
+        };
+    };
 
     public push_back(*mutable self, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1)
-        let index = self.physical_index(self.storage.len)
-        init_memory(self.storage.source + index, value)
-        self.storage.len = self.storage.len + 1
-    }
+        self.ensure_capacity(self.storage.len + 1);
+        let index = self.physical_index(self.storage.len);
+        init_memory(self.storage.source + index, value);
+        self.storage.len = self.storage.len + 1;
+    };
 
     public push_front(*mutable self, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1)
-        self.storage.head = (self.storage.head + self.storage.cap - 1) % self.storage.cap
-        init_memory(self.storage.source + self.storage.head, value)
-        self.storage.len = self.storage.len + 1
-    }
+        self.ensure_capacity(self.storage.len + 1);
+        self.storage.head = (self.storage.head + self.storage.cap - 1) % self.storage.cap;
+        init_memory(self.storage.source + self.storage.head, value);
+        self.storage.len = self.storage.len + 1;
+    };
 
     public pop_front(*mutable self) Option[T] = {
         if self.storage.len == 0 then {
-            return Option[T].None()
-        }
-        self.ensure_unique()
-        let value = take_memory(self.storage.source + self.storage.head)
-        self.storage.head = (self.storage.head + 1) % self.storage.cap
-        self.storage.len = self.storage.len - 1
+            return Option[T].None();
+        };
+        self.ensure_unique();
+        let value = take_memory(self.storage.source + self.storage.head);
+        self.storage.head = (self.storage.head + 1) % self.storage.cap;
+        self.storage.len = self.storage.len - 1;
         if self.storage.len == 0 then {
-            self.storage.head = 0
-        }
-        return Option[T].Some(value)
-    }
+            self.storage.head = 0;
+        };
+        return Option[T].Some(value);
+    };
 
     public pop_back(*mutable self) Option[T] = {
         if self.storage.len == 0 then {
-            return Option[T].None()
-        }
-        self.ensure_unique()
-        let index = self.physical_index(self.storage.len - 1)
-        let value = take_memory(self.storage.source + index)
-        self.storage.len = self.storage.len - 1
+            return Option[T].None();
+        };
+        self.ensure_unique();
+        let index = self.physical_index(self.storage.len - 1);
+        let value = take_memory(self.storage.source + index);
+        self.storage.len = self.storage.len - 1;
         if self.storage.len == 0 then {
-            self.storage.head = 0
-        }
-        return Option[T].Some(value)
-    }
+            self.storage.head = 0;
+        };
+        return Option[T].Some(value);
+    };
 
-    public first(*self) Option[T] = self.get(0)
+    public first(*self) Option[T] = self.get(0);
 
     public last(*self) Option[T] = {
         if self.storage.len == 0 then {
-            return Option[T].None()
-        }
-        return self.get(self.storage.len - 1)
-    }
+            return Option[T].None();
+        };
+        return self.get(self.storage.len - 1);
+    };
 
     public get(*self, index UInt) Option[T] = {
         if index >= self.storage.len then {
-            return Option[T].None()
-        }
-        let physical = self.physical_index(index)
-        return Option[T].Some(self.storage.source[physical])
-    }
+            return Option[T].None();
+        };
+        let physical = self.physical_index(index);
+        return Option[T].Some(self.storage.source[physical]);
+    };
 
     file_private __index_get(*self, key UInt) T = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        let physical = self.physical_index(key)
-        return self.storage.source[physical]
-    }
+            panic("Deque index out of bounds");
+        };
+        let physical = self.physical_index(key);
+        return self.storage.source[physical];
+    };
 
     file_private __index_set(*mutable self, key UInt, value T) Void = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        self.ensure_unique()
-        let physical = self.physical_index(key)
-        self.storage.source[physical] = value
-    }
+            panic("Deque index out of bounds");
+        };
+        self.ensure_unique();
+        let physical = self.physical_index(key);
+        self.storage.source[physical] = value;
+    };
 
     file_private __index_ptr(*self, key UInt) *unsafe T = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        let physical = self.physical_index(key)
-        return self.storage.source + physical
-    }
+            panic("Deque index out of bounds");
+        };
+        let physical = self.physical_index(key);
+        return self.storage.source + physical;
+    };
 
     file_private __index_mut_ptr(*mutable self, key UInt) *unsafe mutable T = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        self.ensure_unique()
-        let physical = self.physical_index(key)
-        return self.storage.source + physical
-    }
+            panic("Deque index out of bounds");
+        };
+        self.ensure_unique();
+        let physical = self.physical_index(key);
+        return self.storage.source + physical;
+    };
 
     file_private __index_ref(*self, key UInt) * T = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        let physical = self.physical_index(key)
-        return make_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
-    }
+            panic("Deque index out of bounds");
+        };
+        let physical = self.physical_index(key);
+        return make_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage);
+    };
 
     file_private __index_mut_ref(*mutable self, key UInt) *mutable T = {
         if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        self.ensure_unique()
-        let physical = self.physical_index(key)
-        return make_mut_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
-    }
+            panic("Deque index out of bounds");
+        };
+        self.ensure_unique();
+        let physical = self.physical_index(key);
+        return make_mut_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage);
+    };
 
     public clear(*mutable self) Void = {
-        self.ensure_unique()
+        self.ensure_unique();
         for i in 0..<self.storage.len then {
-            let index = self.physical_index(i)
-            deinit_memory(self.storage.source + index)
-        }
-        self.storage.len = 0
-        self.storage.head = 0
-    }
+            let index = self.physical_index(i);
+            deinit_memory(self.storage.source + index);
+        };
+        self.storage.len = 0;
+        self.storage.head = 0;
+    };
 
     // Reverses the order of elements in-place. O(n).
     public reverse(*mutable self) Void = {
         if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        let mutable left UInt = 0
-        let mutable right = self.storage.len - 1
+            return;
+        };
+        self.ensure_unique();
+        let mutable left UInt = 0;
+        let mutable right = self.storage.len - 1;
         while left < right then {
-            let lp = self.physical_index(left)
-            let rp = self.physical_index(right)
-            let tmp = self.storage.source[lp]
-            self.storage.source[lp] = self.storage.source[rp]
-            self.storage.source[rp] = tmp
-            left += 1
-            right -= 1
-        }
-    }
+            let lp = self.physical_index(left);
+            let rp = self.physical_index(right);
+            let tmp = self.storage.source[lp];
+            self.storage.source[lp] = self.storage.source[rp];
+            self.storage.source[rp] = tmp;
+            left += 1;
+            right -= 1;
+        };
+    };
 
     // Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(*mutable self, predicate Func(T) Bool) Void = {
         if self.storage.len == 0 then {
-            return
-        }
-        self.ensure_unique()
-        let mutable write UInt = 0
-        let mutable read UInt = 0
+            return;
+        };
+        self.ensure_unique();
+        let mutable write UInt = 0;
+        let mutable read UInt = 0;
         while read < self.storage.len then {
-            let rp = self.physical_index(read)
-            let v = self.storage.source[rp]
+            let rp = self.physical_index(read);
+            let v = self.storage.source[rp];
             if predicate(v) then {
-                let wp = self.physical_index(write)
+                let wp = self.physical_index(write);
                 if write <> read then {
-                    init_memory(self.storage.source + wp, take_memory(self.storage.source + rp))
-                }
-                write += 1
+                    init_memory(self.storage.source + wp, take_memory(self.storage.source + rp));
+                };
+                write += 1;
             } else {
-                deinit_memory(self.storage.source + rp)
-            }
-            read += 1
-        }
-        self.storage.len = write
-    }
-}
+                deinit_memory(self.storage.source + rp);
+            };
+            read += 1;
+        };
+        self.storage.len = write;
+    };
+};
 
 given[T Deref] Deque[T] as Default {
 
-    public default() Self = Deque[T].new()
-}
+    public default() Self = Deque[T].new();
+};
 
 given[T Eq and Deref] Deque[T] {
 
     public contains(*self, value T) Bool = {
         for i in 0..<self.storage.len then {
-            let physical = self.physical_index(i)
+            let physical = self.physical_index(i);
             if self.storage.source[physical] == value then {
-                return true
-            }
-        }
-        return false
-    }
-}
+                return true;
+            };
+        };
+        return false;
+    };
+};
 
 given[T Deref] Deque[T] as Iterable[T, DequeIterator[T]] {
 
-    public iterator(*self) DequeIterator[T] = DequeIterator[T](self.storage, 0)
-}
+    public iterator(*self) DequeIterator[T] = DequeIterator[T](self.storage, 0);
+};
 
 given[T Deref] DequeIterator[T] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if self.index >= self.storage.len then {
-            return Option[T].None()
-        }
-        let index = (self.storage.head + self.index) % self.storage.cap
-        let value = self.storage.source[index]
-        self.index += 1
-        return Option[T].Some(value)
-    }
-}
+            return Option[T].None();
+        };
+        let index = (self.storage.head + self.index) % self.storage.cap;
+        let value = self.storage.source[index];
+        self.index += 1;
+        return Option[T].Some(value);
+    };
+};

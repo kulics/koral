@@ -7,21 +7,21 @@
 // ============================================================================
 // List Storage and Type Definition
 // ============================================================================
-module_private type ListStorage[T Any](mutable source *unsafe mutable T, mutable len UInt, mutable cap UInt)
+module_private type ListStorage[T Any](mutable source *unsafe mutable T, mutable len UInt, mutable cap UInt);
 
 given[T Deref] ListStorage[T] as Drop {
 
     drop(source *unsafe mutable Self) Void = {
         for i in 0..<source.len then {
-            deinit_memory(source.source + i)
-        }
-        dealloc_memory(source.source)
-    }
-}
+            deinit_memory(source.source + i);
+        };
+        dealloc_memory(source.source);
+    };
+};
 
-public type List[T Any](module_private mutable storage *mutable ListStorage[T])
+public type List[T Any](module_private mutable storage *mutable ListStorage[T]);
 
-public type ListIterator[T Any](module_private storage *mutable ListStorage[T], module_private mutable index UInt)
+public type ListIterator[T Any](module_private storage *mutable ListStorage[T], module_private mutable index UInt);
 
 // ============================================================================
 // List Methods
@@ -29,556 +29,556 @@ public type ListIterator[T Any](module_private storage *mutable ListStorage[T], 
 given[T Deref] List[T] {
 
     public new() Self = {
-        let cap UInt = 10
-        let source = alloc_memory[T](cap)
-        let storage = box(ListStorage[T](source, 0, cap))
-        return List[T](storage)
-    }
+        let cap UInt = 10;
+        let source = alloc_memory[T](cap);
+        let storage = box(ListStorage[T](source, 0, cap));
+        return List[T](storage);
+    };
 
     public with_capacity(capacity UInt) Self = {
-        let cap = if capacity < 1 then 1 else capacity
-        let source = alloc_memory[T](cap)
-        let storage = box(ListStorage[T](source, 0, cap))
-        return List[T](storage)
-    }
+        let cap = if capacity < 1 then 1 else capacity;
+        let source = alloc_memory[T](cap);
+        let storage = box(ListStorage[T](source, 0, cap));
+        return List[T](storage);
+    };
 
-    public count(*self) UInt = self.storage.len
+    public count(*self) UInt = self.storage.len;
 
     public reserve(*mutable self, additional UInt) Void = {
-        self.ensure_capacity(self.storage.len + additional)
-    }
+        self.ensure_capacity(self.storage.len + additional);
+    };
 
     file_private ensure_unique(*mutable self) Void = {
         if not is_unique_mutable[T](&unsafe self.storage) then {
-            let old = self.storage
-            let new_cap = old.cap
-            let new_source = alloc_memory[T](new_cap)
+            let old = self.storage;
+            let new_cap = old.cap;
+            let new_source = alloc_memory[T](new_cap);
             for i in 0..<old.len then {
-                let v = old.source[i]
-                init_memory(new_source + i, v)
-            }
-            let new_storage = box(ListStorage[T](new_source, old.len, new_cap))
-            self.storage = new_storage
-        }
-    }
+                let v = old.source[i];
+                init_memory(new_source + i, v);
+            };
+            let new_storage = box(ListStorage[T](new_source, old.len, new_cap));
+            self.storage = new_storage;
+        };
+    };
 
     file_private ensure_capacity(*mutable self, min_capacity UInt) Void = {
         if min_capacity > self.storage.cap then {
-            let mutable new_cap = self.storage.cap * 2
+            let mutable new_cap = self.storage.cap * 2;
             if new_cap < min_capacity then {
-                new_cap = min_capacity
-            }
-            let new_source = alloc_memory[T](new_cap)
-            let old_len = self.storage.len
+                new_cap = min_capacity;
+            };
+            let new_source = alloc_memory[T](new_cap);
+            let old_len = self.storage.len;
             if is_unique_mutable[T](&unsafe self.storage) then {
-                let old_source = self.storage.source
-                move_memory(new_source, old_source, old_len)
-                dealloc_memory(old_source)
-                self.storage.source = new_source
-                self.storage.cap = new_cap
+                let old_source = self.storage.source;
+                move_memory(new_source, old_source, old_len);
+                dealloc_memory(old_source);
+                self.storage.source = new_source;
+                self.storage.cap = new_cap;
             } else {
                 for i in 0..<old_len then {
-                    let v = self.storage.source[i]
-                    init_memory(new_source + i, v)
-                }
-                let new_storage = box(ListStorage[T](new_source, old_len, new_cap))
-                self.storage = new_storage
-            }
+                    let v = self.storage.source[i];
+                    init_memory(new_source + i, v);
+                };
+                let new_storage = box(ListStorage[T](new_source, old_len, new_cap));
+                self.storage = new_storage;
+            };
         } else {
-            self.ensure_unique()
-        }
-    }
+            self.ensure_unique();
+        };
+    };
 
     public push(*mutable self, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1)
-        init_memory(self.storage.source + self.storage.len, value)
-        self.storage.len = self.storage.len + 1
-    }
+        self.ensure_capacity(self.storage.len + 1);
+        init_memory(self.storage.source + self.storage.len, value);
+        self.storage.len = self.storage.len + 1;
+    };
 
     public push_list(*mutable self, other List[T]) Void = {
-        self.push_sublist(other, ..)
-    }
+        self.push_sublist(other, ..);
+    };
 
     public push_sublist(*mutable self, other List[T], range Range[UInt]) Void = {
-        let span = other.slice_spec(range)
-        let start = span.start()
-        let end = span.end()
+        let span = other.slice_spec(range);
+        let start = span.start();
+        let end = span.end();
         if end <= start then {
-            return
-        }
-        self.ensure_capacity(self.storage.len + (end - start))
+            return;
+        };
+        self.ensure_capacity(self.storage.len + (end - start));
         for i in start..<end then {
-            let v = other.storage.source[i]
-            init_memory(self.storage.source + self.storage.len, v)
-            self.storage.len = self.storage.len + 1
-        }
-    }
+            let v = other.storage.source[i];
+            init_memory(self.storage.source + self.storage.len, v);
+            self.storage.len = self.storage.len + 1;
+        };
+    };
 
     // Using if is pattern matching
     public pop(*mutable self) Option[T] = {
         if self.storage.len == 0 then {
-            return Option[T].None()
-        }
-        self.ensure_unique()
-        self.storage.len = self.storage.len - 1
-        let value = take_memory(self.storage.source + self.storage.len)
-        return Option[T].Some(value)
-    }
+            return Option[T].None();
+        };
+        self.ensure_unique();
+        self.storage.len = self.storage.len - 1;
+        let value = take_memory(self.storage.source + self.storage.len);
+        return Option[T].Some(value);
+    };
 
     public insert_list_at(*mutable self, index UInt, other List[T]) Void = {
-        self.insert_sublist_at(index, other, ..)
-    }
+        self.insert_sublist_at(index, other, ..);
+    };
 
     public insert_sublist_at(*mutable self, index UInt, other List[T], range Range[UInt]) Void = {
         if index > self.storage.len then {
             panic("List insert_sublist_at index out of bounds");
-        }
-        let span = other.slice_spec(range)
-        let start = span.start()
-        let end = span.end()
-        let other_len = span.len()
+        };
+        let span = other.slice_spec(range);
+        let start = span.start();
+        let end = span.end();
+        let other_len = span.len();
         if other_len == 0 then {
-            return
-        }
-        self.ensure_capacity(self.storage.len + other_len)
+            return;
+        };
+        self.ensure_capacity(self.storage.len + other_len);
         // Shift elements to the right by other_len
-        let mutable i = self.storage.len
+        let mutable i = self.storage.len;
         while i > index then {
-            let src = self.storage.source + (i - 1)
-            let dst = self.storage.source + (i - 1 + other_len)
-            init_memory(dst, take_memory(src))
-            i = i - 1
-        }
+            let src = self.storage.source + (i - 1);
+            let dst = self.storage.source + (i - 1 + other_len);
+            init_memory(dst, take_memory(src));
+            i = i - 1;
+        };
         // Copy other's elements into the gap
         for j in start..<end then {
-            let v = other.storage.source[j]
-            init_memory(self.storage.source + (index + (j - start)), v)
-        }
-        self.storage.len = self.storage.len + other_len
-    }
+            let v = other.storage.source[j];
+            init_memory(self.storage.source + (index + (j - start)), v);
+        };
+        self.storage.len = self.storage.len + other_len;
+    };
 
     public insert_at(*mutable self, index UInt, value T) Void = {
         if index > self.storage.len then {
             panic("List insert_at index out of bounds");
-        }
-        self.ensure_capacity(self.storage.len + 1)
+        };
+        self.ensure_capacity(self.storage.len + 1);
         // Shift elements to the right
-        let mutable i = self.storage.len
+        let mutable i = self.storage.len;
         while i > index then {
-            let src = self.storage.source + (i - 1)
-            let dst = self.storage.source + i
-            init_memory(dst, take_memory(src))
-            i = i - 1
-        }
-        init_memory(self.storage.source + index, value)
-        self.storage.len = self.storage.len + 1
-    }
+            let src = self.storage.source + (i - 1);
+            let dst = self.storage.source + i;
+            init_memory(dst, take_memory(src));
+            i = i - 1;
+        };
+        init_memory(self.storage.source + index, value);
+        self.storage.len = self.storage.len + 1;
+    };
 
     public remove_at(*mutable self, index UInt) Void = {
-        let _ = self.take_at(index)
-    }
+        let _ = self.take_at(index);
+    };
 
     public take_at(*mutable self, index UInt) T = {
         if index >= self.storage.len then {
             panic("List remove_at index out of bounds");
-        }
-        self.ensure_unique()
-        let value = take_memory(self.storage.source + index)
+        };
+        self.ensure_unique();
+        let value = take_memory(self.storage.source + index);
         // Shift elements to the left
-        let mutable i = index
+        let mutable i = index;
         while i < self.storage.len - 1 then {
-            let src = self.storage.source + (i + 1)
-            let dst = self.storage.source + i
-            init_memory(dst, take_memory(src))
-            i = i + 1
-        }
-        self.storage.len = self.storage.len - 1
-        return value
-    }
+            let src = self.storage.source + (i + 1);
+            let dst = self.storage.source + i;
+            init_memory(dst, take_memory(src));
+            i = i + 1;
+        };
+        self.storage.len = self.storage.len - 1;
+        return value;
+    };
 
     public get(*self, index UInt) Option[T] = {
         if index >= self.storage.len then {
-            return Option[T].None()
-        }
-        return Option[T].Some(self.storage.source[index])
-    }
+            return Option[T].None();
+        };
+        return Option[T].Some(self.storage.source[index]);
+    };
 
     file_private __index_get(*self, key UInt) T = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        return self.storage.source[key]
-    }
+            panic("List index out of bounds");
+        };
+        return self.storage.source[key];
+    };
 
     file_private __index_set(*mutable self, key UInt, value T) Void = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        self.ensure_unique()
-        self.storage.source[key] = value
-    }
+            panic("List index out of bounds");
+        };
+        self.ensure_unique();
+        self.storage.source[key] = value;
+    };
 
     file_private __index_ptr(*self, key UInt) *unsafe T = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        return self.storage.source + key
-    }
+            panic("List index out of bounds");
+        };
+        return self.storage.source + key;
+    };
 
     file_private __index_mut_ptr(*mutable self, key UInt) *unsafe mutable T = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        self.ensure_unique()
-        return self.storage.source + key
-    }
+            panic("List index out of bounds");
+        };
+        self.ensure_unique();
+        return self.storage.source + key;
+    };
 
     file_private __index_ref(*self, key UInt) *T = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        return make_ref[T, ListStorage[T]](self.storage.source + key, self.storage)
-    }
+            panic("List index out of bounds");
+        };
+        return make_ref[T, ListStorage[T]](self.storage.source + key, self.storage);
+    };
 
     file_private __index_mut_ref(*mutable self, key UInt) *mutable T = {
         if key >= self.storage.len then {
-            panic("List index out of bounds")
-        }
-        self.ensure_unique()
-        return make_mut_ref[T, ListStorage[T]](self.storage.source + key, self.storage)
-    }
+            panic("List index out of bounds");
+        };
+        self.ensure_unique();
+        return make_mut_ref[T, ListStorage[T]](self.storage.source + key, self.storage);
+    };
 
-    public first(*self) Option[T] = self.get(0)
+    public first(*self) Option[T] = self.get(0);
 
     public last(*self) Option[T] = {
         if self.storage.len == 0 then {
-            return Option[T].None()
-        }
-        return self.get(self.storage.len - 1)
-    }
+            return Option[T].None();
+        };
+        return self.get(self.storage.len - 1);
+    };
 
-    public is_empty(*self) Bool = self.storage.len == 0
+    public is_empty(*self) Bool = self.storage.len == 0;
 
     public clear(*mutable self) Void = {
-        self.ensure_unique()
+        self.ensure_unique();
         for i in 0..<self.storage.len then {
-            deinit_memory(self.storage.source + i)
-        }
-        self.storage.len = 0
-    }
+            deinit_memory(self.storage.source + i);
+        };
+        self.storage.len = 0;
+    };
 
     public fill(*mutable self, value T) Void = {
         if self.storage.len == 0 then {
-            return
-        }
-        self.ensure_unique()
+            return;
+        };
+        self.ensure_unique();
         for i in 0..<self.storage.len then {
-            self.storage.source[i] = value
-        }
-    }
+            self.storage.source[i] = value;
+        };
+    };
 
     public map[U Deref](*self, fn Func(T) U) List[U] = {
-        let mutable result = List[U].with_capacity(self.storage.len)
+        let mutable result = List[U].with_capacity(self.storage.len);
         for i in 0..<self.storage.len then {
-            result.push(fn(self.storage.source[i]))
-        }
-        return result
-    }
+            result.push(fn(self.storage.source[i]));
+        };
+        return result;
+    };
 
     public reverse(*mutable self) Void = {
         if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        let mutable left UInt = 0
-        let mutable right = self.storage.len - 1
+            return;
+        };
+        self.ensure_unique();
+        let mutable left UInt = 0;
+        let mutable right = self.storage.len - 1;
         while left < right then {
-            let l = self.storage.source + left
-            let r = self.storage.source + right
-            let tmp = *l
-            l[0] = r[0]
-            r[0] = tmp
-            left += 1
-            right -= 1
-        }
-    }
+            let l = self.storage.source + left;
+            let r = self.storage.source + right;
+            let tmp = *l;
+            l[0] = r[0];
+            r[0] = tmp;
+            left += 1;
+            right -= 1;
+        };
+    };
 
-    public borrow_ptr(*self) *unsafe T = self.storage.source
+    public borrow_ptr(*self) *unsafe T = self.storage.source;
 
     public borrow_mut_ptr(*mutable self) *unsafe mutable T = {
-        self.ensure_unique()
-        return self.storage.source
-    }
+        self.ensure_unique();
+        return self.storage.source;
+    };
 
     file_private make_slice(*self, start UInt, len UInt) List[T] = {
         if start + len > self.storage.len then {
-            panic("List slice out of bounds")
-        }
-        let mutable result = List[T].with_capacity(len)
+            panic("List slice out of bounds");
+        };
+        let mutable result = List[T].with_capacity(len);
         for i in 0..<len then {
-            result.push(self.storage.source[start + i])
-        }
-        return result
-    }
+            result.push(self.storage.source[start + i]);
+        };
+        return result;
+    };
 
     public slice_spec(*self, range Range[UInt]) SliceSpec = {
-        let len = self.storage.len
-        let mutable start UInt = 0
-        let mutable end UInt = 0
+        let len = self.storage.len;
+        let mutable start UInt = 0;
+        let mutable end UInt = 0;
 
         when range in {
             .Closed(s, e) then {
                 if s > e then {
-                    panic("List.slice_spec invalid range")
-                }
+                    panic("List.slice_spec invalid range");
+                };
                 if e >= len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s
-                end = e + 1
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s;
+                end = e + 1;
             },
             .ClosedOpen(s, e) then {
                 if s > e then {
-                    panic("List.slice_spec invalid range")
-                }
+                    panic("List.slice_spec invalid range");
+                };
                 if e > len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s
-                end = e
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s;
+                end = e;
             },
             .OpenClosed(s, e) then {
                 if s > e then {
-                    panic("List.slice_spec invalid range")
-                }
+                    panic("List.slice_spec invalid range");
+                };
                 if s == UInt.max_value() or e >= len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s + 1
-                end = e + 1
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s + 1;
+                end = e + 1;
             },
             .Open(s, e) then {
                 if s >= e then {
-                    panic("List.slice_spec invalid range")
-                }
+                    panic("List.slice_spec invalid range");
+                };
                 if s == UInt.max_value() or e > len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s + 1
-                end = e
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s + 1;
+                end = e;
             },
             .From(s) then {
                 if s > len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s
-                end = len
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s;
+                end = len;
             },
             .After(s) then {
                 if s >= len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = s + 1
-                end = len
+                    panic("List.slice_spec out of bounds");
+                };
+                start = s + 1;
+                end = len;
             },
             .To(e) then {
                 if e >= len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = 0
-                end = e + 1
+                    panic("List.slice_spec out of bounds");
+                };
+                start = 0;
+                end = e + 1;
             },
             .Until(e) then {
                 if e > len then {
-                    panic("List.slice_spec out of bounds")
-                }
-                start = 0
-                end = e
+                    panic("List.slice_spec out of bounds");
+                };
+                start = 0;
+                end = e;
             },
             .Full then {
-                start = 0
-                end = len
+                start = 0;
+                end = len;
             },
-        }
+        };
 
-        return SliceSpec.new(start, end - start)
-    }
+        return SliceSpec.new(start, end - start);
+    };
 
     public sublist(*self, range Range[UInt]) List[T] = {
-        let span = self.slice_spec(range)
-        return self.make_slice(span.start(), span.len())
-    }
+        let span = self.slice_spec(range);
+        return self.make_slice(span.start(), span.len());
+    };
 
     // ============ 运算符 trait (Add) ============
 
     public enumerate(*self) EnumerateIterator[T, ListIterator[T]] =
-        ListIterator[T](self.storage, 0).enumerate()
+        ListIterator[T](self.storage, 0).enumerate();
 
     // Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(*mutable self, predicate Func(T) Bool) Void = {
         if self.storage.len == 0 then {
-            return
-        }
-        self.ensure_unique()
-        let mutable write UInt = 0
-        let mutable read UInt = 0
+            return;
+        };
+        self.ensure_unique();
+        let mutable write UInt = 0;
+        let mutable read UInt = 0;
         while read < self.storage.len then {
-            let v = self.storage.source[read]
+            let v = self.storage.source[read];
             if predicate(v) then {
                 if write <> read then {
-                    init_memory(self.storage.source + write, take_memory(self.storage.source + read))
-                }
-                write += 1
+                    init_memory(self.storage.source + write, take_memory(self.storage.source + read));
+                };
+                write += 1;
             } else {
-                deinit_memory(self.storage.source + read)
-            }
-            read += 1
-        }
-        self.storage.len = write
-    }
+                deinit_memory(self.storage.source + read);
+            };
+            read += 1;
+        };
+        self.storage.len = write;
+    };
 
     // Sort in-place using a key extraction function
     // key extracts an ordering-comparable value from each element
     public sort_by[K Ord](*mutable self, key Func(T) K) Void = {
         if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        self.merge_sort_by_key(key, 0, self.storage.len)
-    }
+            return;
+        };
+        self.ensure_unique();
+        self.merge_sort_by_key(key, 0, self.storage.len);
+    };
 
     // Binary search by key extraction. List must be sorted by the same key.
     // Returns (index, true) if found, (insertion_point, false) if not found.
     public binary_search_by[K Ord](*self, key Func(T) K, target K) Pair[UInt, Bool] = {
-        let mutable lo UInt = 0
-        let mutable hi = self.storage.len
+        let mutable lo UInt = 0;
+        let mutable hi = self.storage.len;
         while lo < hi then {
-            let mid = lo + (hi - lo) / 2
-            let k = key(self.storage.source[mid])
+            let mid = lo + (hi - lo) / 2;
+            let k = key(self.storage.source[mid]);
             if k == target then {
-                return Pair[UInt, Bool](mid, true)
+                return Pair[UInt, Bool](mid, true);
             } else if k < target then {
-                lo = mid + 1
+                lo = mid + 1;
             } else {
-                hi = mid
-            }
-        }
-        return Pair[UInt, Bool](lo, false)
-    }
-}
+                hi = mid;
+            };
+        };
+        return Pair[UInt, Bool](lo, false);
+    };
+};
 
 given[T Deref] List[T] as Default {
 
-    public default() Self = List[T].new()
-}
+    public default() Self = List[T].new();
+};
 
 given[T Eq and Deref] List[T] as Eq {
 
     public equals(self, other List[T]) Bool = {
         if self.storage.len <> other.storage.len then {
-            return false
-        }
+            return false;
+        };
         for i in 0..<self.storage.len then {
             if self.storage.source[i] <> other.storage.source[i] then {
-                return false
-            }
-        }
-        return true
-    }
-}
+                return false;
+            };
+        };
+        return true;
+    };
+};
 
 given[T Hash and Deref] List[T] as Hash {
 
     public hash(self) UInt = {
-        let mutable h UInt = self.storage.len.hash()
+        let mutable h UInt = self.storage.len.hash();
         for i in 0..<self.storage.len then {
-            h = h.combine_hash(self.storage.source[i].hash())
-        }
-        return h
-    }
-}
+            h = h.combine_hash(self.storage.source[i].hash());
+        };
+        return h;
+    };
+};
 
 given[T Ord and Deref] List[T] as Ord {
 
     public compare(self, other List[T]) Int = {
-        let self_len = self.storage.len
-        let other_len = other.storage.len
-        let limit = if self_len < other_len then self_len else other_len
+        let self_len = self.storage.len;
+        let other_len = other.storage.len;
+        let limit = if self_len < other_len then self_len else other_len;
 
-        let mutable idx UInt = 0
+        let mutable idx UInt = 0;
         while idx < limit then {
-            let ord = self.storage.source[idx].compare(other.storage.source[idx])
+            let ord = self.storage.source[idx].compare(other.storage.source[idx]);
             if ord <> 0 then {
-                return ord
-            }
-            idx += 1
-        }
+                return ord;
+            };
+            idx += 1;
+        };
 
         if self_len < other_len then {
-            return -1
-        }
+            return -1;
+        };
         if self_len > other_len then {
-            return 1
-        }
-        return 0
-    }
-}
+            return 1;
+        };
+        return 0;
+    };
+};
 
 given[T Eq and Deref] List[T] {
 
     public contains(*self, value T) Bool = {
         for i in 0..<self.storage.len then {
             if self.storage.source[i] == value then {
-                return true
-            }
-        }
-        return false
-    }
+                return true;
+            };
+        };
+        return false;
+    };
 
     // Removes consecutive duplicate elements. Requires T: Eq. O(n).
     // For global dedup, sort first then call dedup.
     public dedup(*mutable self) Void = {
         if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        let mutable write UInt = 1
-        let mutable read UInt = 1
+            return;
+        };
+        self.ensure_unique();
+        let mutable write UInt = 1;
+        let mutable read UInt = 1;
         while read < self.storage.len then {
-            let prev = self.storage.source[write - 1]
-            let curr = self.storage.source[read]
+            let prev = self.storage.source[write - 1];
+            let curr = self.storage.source[read];
             if curr <> prev then {
                 if write <> read then {
-                    init_memory(self.storage.source + write, take_memory(self.storage.source + read))
-                }
-                write += 1
+                    init_memory(self.storage.source + write, take_memory(self.storage.source + read));
+                };
+                write += 1;
             } else {
-                deinit_memory(self.storage.source + read)
-            }
-            read += 1
-        }
-        self.storage.len = write
-    }
-}
+                deinit_memory(self.storage.source + read);
+            };
+            read += 1;
+        };
+        self.storage.len = write;
+    };
+};
 
 public let make_bytes(count UInt) List[UInt8] = {
-    let mutable bytes = List[UInt8].with_capacity(count)
+    let mutable bytes = List[UInt8].with_capacity(count);
     if count == 0 then {
-        return bytes
-    }
-    let data = bytes.storage.source
+        return bytes;
+    };
+    let data = bytes.storage.source;
     for i in 0..<count then {
-        init_memory(data + i, 0(UInt8))
-    }
-    bytes.storage.len = count
-    return bytes
-}
+        init_memory(data + i, 0(UInt8));
+    };
+    bytes.storage.len = count;
+    return bytes;
+};
 
 public let make_uninitialized_bytes(count UInt) List[UInt8] = {
-    let mutable bytes = List[UInt8].with_capacity(count)
-    bytes.storage.len = count
-    return bytes
-}
+    let mutable bytes = List[UInt8].with_capacity(count);
+    bytes.storage.len = count;
+    return bytes;
+};
 
 // ============================================================================
 // List Iterator - Using new pattern matching
@@ -587,18 +587,18 @@ given[T Deref] ListIterator[T] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if self.index >= self.storage.len then {
-            return Option[T].None()
-        }
-        let value = self.storage.source[self.index]
-        self.index = self.index + 1
-        return Option[T].Some(value)
-    }
-}
+            return Option[T].None();
+        };
+        let value = self.storage.source[self.index];
+        self.index = self.index + 1;
+        return Option[T].Some(value);
+    };
+};
 
 given[T Deref] List[T] as Iterable[T, ListIterator[T]] {
 
-    public iterator(*self) ListIterator[T] = ListIterator[T](self.storage, 0)
-}
+    public iterator(*self) ListIterator[T] = ListIterator[T](self.storage, 0);
+};
 
 // ============================================================================
 // List Sorting - sort_by with key function
@@ -607,16 +607,16 @@ given[T Deref] List[T] {
 
     // Merge sort implementation with key function
     file_private merge_sort_by_key[K Ord](*mutable self, key Func(T) K, start UInt, end UInt) Void = {
-        let len = end - start
+        let len = end - start;
         if len <= 1 then {
-            return
-        }
+            return;
+        };
 
-        let mid = start + len / 2
-        self.merge_sort_by_key(key, start, mid)
-        self.merge_sort_by_key(key, mid, end)
-        self.merge_by_key(key, start, mid, end)
-    }
+        let mid = start + len / 2;
+        self.merge_sort_by_key(key, start, mid);
+        self.merge_sort_by_key(key, mid, end);
+        self.merge_by_key(key, start, mid, end);
+    };
 
     // Merge two sorted subarrays using key function
     file_private merge_by_key[K Ord](
@@ -626,123 +626,123 @@ given[T Deref] List[T] {
         mid UInt,
         end UInt,
     ) Void = {
-        let left_len = mid - start
-        let mutable temp = List[T].with_capacity(left_len)
+        let left_len = mid - start;
+        let mutable temp = List[T].with_capacity(left_len);
 
         // Copy left half to temp
         for i in 0..<left_len then {
-            temp.push(self.storage.source[start + i])
-        }
+            temp.push(self.storage.source[start + i]);
+        };
 
-        let mutable left_idx UInt = 0
-        let mutable right_idx = mid
-        let mutable dest_idx = start
+        let mutable left_idx UInt = 0;
+        let mutable right_idx = mid;
+        let mutable dest_idx = start;
 
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = temp.storage.source[left_idx]
-            let right_val = self.storage.source[right_idx]
+            let left_val = temp.storage.source[left_idx];
+            let right_val = self.storage.source[right_idx];
 
             // Use <= to ensure stability (prefer left on equal)
             if key(left_val) <= key(right_val) then {
-                self.storage.source[dest_idx] = left_val
-                left_idx += 1
+                self.storage.source[dest_idx] = left_val;
+                left_idx += 1;
             } else {
-                self.storage.source[dest_idx] = right_val
-                right_idx += 1
-            }
-            dest_idx += 1
-        }
+                self.storage.source[dest_idx] = right_val;
+                right_idx += 1;
+            };
+            dest_idx += 1;
+        };
 
         // Copy remaining left elements
         while left_idx < left_len then {
-            let value = temp.storage.source[left_idx]
-            self.storage.source[dest_idx] = value
-            left_idx += 1
-            dest_idx += 1
-        }
-    }
-}
+            let value = temp.storage.source[left_idx];
+            self.storage.source[dest_idx] = value;
+            left_idx += 1;
+            dest_idx += 1;
+        };
+    };
+};
 
 given[T Ord and Deref] List[T] {
 
     // Binary search on a sorted list.
     // Returns (index, true) if found, (insertion_point, false) if not found.
     public binary_search(*self, target T) Pair[UInt, Bool] = {
-        let mutable lo UInt = 0
-        let mutable hi = self.storage.len
+        let mutable lo UInt = 0;
+        let mutable hi = self.storage.len;
         while lo < hi then {
-            let mid = lo + (hi - lo) / 2
-            let v = self.storage.source[mid]
+            let mid = lo + (hi - lo) / 2;
+            let v = self.storage.source[mid];
             if v == target then {
-                return Pair[UInt, Bool](mid, true)
+                return Pair[UInt, Bool](mid, true);
             } else if v < target then {
-                lo = mid + 1
+                lo = mid + 1;
             } else {
-                hi = mid
-            }
-        }
-        return Pair[UInt, Bool](lo, false)
-    }
+                hi = mid;
+            };
+        };
+        return Pair[UInt, Bool](lo, false);
+    };
 
     // Sort in-place in ascending order using Ord trait
     public sort(*mutable self) Void = {
         if self.storage.len <= 1 then {
-            return
-        }
-        self.ensure_unique()
-        self.merge_sort_comparable(0, self.storage.len)
-    }
+            return;
+        };
+        self.ensure_unique();
+        self.merge_sort_comparable(0, self.storage.len);
+    };
 
     // Merge sort implementation using Ord
     file_private merge_sort_comparable(*mutable self, start UInt, end UInt) Void = {
-        let len = end - start
+        let len = end - start;
         if len <= 1 then {
-            return
-        }
+            return;
+        };
 
-        let mid = start + len / 2
-        self.merge_sort_comparable(start, mid)
-        self.merge_sort_comparable(mid, end)
-        self.merge_comparable(start, mid, end)
-    }
+        let mid = start + len / 2;
+        self.merge_sort_comparable(start, mid);
+        self.merge_sort_comparable(mid, end);
+        self.merge_comparable(start, mid, end);
+    };
 
     // Merge two sorted subarrays using Ord
     file_private merge_comparable(*mutable self, start UInt, mid UInt, end UInt) Void = {
-        let left_len = mid - start
-        let mutable temp = List[T].with_capacity(left_len)
+        let left_len = mid - start;
+        let mutable temp = List[T].with_capacity(left_len);
 
         // Copy left half to temp
         for i in 0..<left_len then {
-            temp.push(self.storage.source[start + i])
-        }
+            temp.push(self.storage.source[start + i]);
+        };
 
-        let mutable left_idx UInt = 0
-        let mutable right_idx = mid
-        let mutable dest_idx = start
+        let mutable left_idx UInt = 0;
+        let mutable right_idx = mid;
+        let mutable dest_idx = start;
 
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = temp.storage.source[left_idx]
-            let right_val = self.storage.source[right_idx]
+            let left_val = temp.storage.source[left_idx];
+            let right_val = self.storage.source[right_idx];
 
             // Use <= to ensure stability (prefer left on equal)
             if left_val <= right_val then {
-                self.storage.source[dest_idx] = left_val
-                left_idx += 1
+                self.storage.source[dest_idx] = left_val;
+                left_idx += 1;
             } else {
-                self.storage.source[dest_idx] = right_val
-                right_idx += 1
-            }
-            dest_idx += 1
-        }
+                self.storage.source[dest_idx] = right_val;
+                right_idx += 1;
+            };
+            dest_idx += 1;
+        };
 
         // Copy remaining left elements
         while left_idx < left_len then {
-            let value = temp.storage.source[left_idx]
-            self.storage.source[dest_idx] = value
-            left_idx += 1
-            dest_idx += 1
-        }
-    }
-}
+            let value = temp.storage.source[left_idx];
+            self.storage.source[dest_idx] = value;
+            left_idx += 1;
+            dest_idx += 1;
+        };
+    };
+};

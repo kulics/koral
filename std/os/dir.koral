@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.os - Directory Operations
 // ============================================================================
@@ -11,20 +11,20 @@ using std { .. }
 // ============================================================================
 
 // Opaque types for directory operations
-foreign type CDirHandle {}
-foreign type CDirEntry {}
+foreign type CDirHandle {};
+foreign type CDirEntry {};
 
 // Directory I/O
-foreign let __koral_opendir(path *unsafe UInt8) *unsafe CDirHandle
-foreign let __koral_readdir(dir *unsafe CDirHandle) *unsafe CDirEntry
-foreign let __koral_closedir(dir *unsafe CDirHandle) Int32
-foreign let __koral_dirent_name(entry *unsafe CDirEntry) *unsafe UInt8
-foreign let __koral_dirent_type(entry *unsafe CDirEntry) Int32
+foreign let __koral_opendir(path *unsafe UInt8) *unsafe CDirHandle;
+foreign let __koral_readdir(dir *unsafe CDirHandle) *unsafe CDirEntry;
+foreign let __koral_closedir(dir *unsafe CDirHandle) Int32;
+foreign let __koral_dirent_name(entry *unsafe CDirEntry) *unsafe UInt8;
+foreign let __koral_dirent_type(entry *unsafe CDirEntry) Int32;
 
 // Directory manipulation
-foreign let __koral_mkdir(path *unsafe UInt8, mode UInt32) Int32
-foreign let __koral_rmdir(path *unsafe UInt8) Int32
-foreign let __koral_mkdtemp(template *unsafe UInt8) *unsafe UInt8
+foreign let __koral_mkdir(path *unsafe UInt8, mode UInt32) Int32;
+foreign let __koral_rmdir(path *unsafe UInt8) Int32;
+foreign let __koral_mkdtemp(template *unsafe UInt8) *unsafe UInt8;
 
 // ============================================================================
 // Helpers
@@ -32,14 +32,14 @@ foreign let __koral_mkdtemp(template *unsafe UInt8) *unsafe UInt8
 
 /// Convert a dirent type code to FileType
 file_private let dir_entry_type(entry *unsafe CDirEntry) FileType = {
-    let t = __koral_dirent_type(entry)
+    let t = __koral_dirent_type(entry);
     return when t in {
         0 then FileType.RegularFile(),
         1 then FileType.Directory(),
         2 then FileType.Symlink(),
         _ then FileType.Other(),
-    }
-}
+    };
+};
 
 
 // ============================================================================
@@ -51,107 +51,107 @@ public type DirEntry(
     file_private _name String,
     file_private _path Path,
     file_private _file_type FileType,
-)
+);
 
 given DirEntry {
 
     /// File/directory name
-    public name(*self) String = self._name
+    public name(*self) String = self._name;
 
     /// Full path
-    public path(*self) Path = self._path
+    public path(*self) Path = self._path;
 
     /// File type
-    public file_type(*self) FileType = self._file_type
+    public file_type(*self) FileType = self._file_type;
 
-    public is_file(*self) Bool = self._file_type.is_file()
-    public is_dir(*self) Bool = self._file_type.is_dir()
-    public is_symlink(*self) Bool = self._file_type.is_symlink()
+    public is_file(*self) Bool = self._file_type.is_file();
+    public is_dir(*self) Bool = self._file_type.is_dir();
+    public is_symlink(*self) Bool = self._file_type.is_symlink();
 
     /// Get full file metadata (triggers stat system call)
-    public info(*self) Result[FileInfo] = file_info(self._path)
+    public info(*self) Result[FileInfo] = file_info(self._path);
 
-}
+};
 
 given DirEntry as ToString {
 
     public to_string(*self) String = {
-        let mutable s = String.new()
-        s.push_string("DirEntry(")
-        s.push_string(self._name)
-        s.push_string(", ")
-        s.push_string(self._file_type.to_string())
-        s.push_string(")")
-        return s
-    }
-}
+        let mutable s = String.new();
+        s.push_string("DirEntry(");
+        s.push_string(self._name);
+        s.push_string(", ");
+        s.push_string(self._file_type.to_string());
+        s.push_string(")");
+        return s;
+    };
+};
 
-file_private type DirIteratorStorage(handle *unsafe CDirHandle, base Path)
+file_private type DirIteratorStorage(handle *unsafe CDirHandle, base Path);
 
 given DirIteratorStorage as Drop {
 
     drop(source *unsafe mutable Self) Void = {
         if source.handle <> null_ptr[CDirHandle]() then {
-            __koral_closedir(source.handle)
-        }
-    }
-}
+            __koral_closedir(source.handle);
+        };
+    };
+};
 
-public type DirIterator(module_private storage *mutable DirIteratorStorage)
+public type DirIterator(module_private storage *mutable DirIteratorStorage);
 
-file_private type WalkDirStorage(mutable stack List[DirIterator])
+file_private type WalkDirStorage(mutable stack List[DirIterator]);
 
-public type WalkDirIterator(module_private mutable storage *mutable WalkDirStorage)
+public type WalkDirIterator(module_private mutable storage *mutable WalkDirStorage);
 
 given DirIterator as Iterator[DirEntry] {
 
     public next(*mutable self) Option[DirEntry] = {
-        let entry = __koral_readdir(self.storage.handle)
+        let entry = __koral_readdir(self.storage.handle);
         if entry == null_ptr[CDirEntry]() then {
-            return Option[DirEntry].None()
-        }
+            return Option[DirEntry].None();
+        };
 
-        let name = String.from_cstring_unchecked(__koral_dirent_name(entry))
+        let name = String.from_cstring_unchecked(__koral_dirent_name(entry));
         if name == "." or name == ".." then {
-            return self.next()
-        }
+            return self.next();
+        };
 
-        let full_path = self.storage.base.join(name)
-        let ft = dir_entry_type(entry)
-        return Option[DirEntry].Some(DirEntry(name, full_path, ft))
-    }
-}
+        let full_path = self.storage.base.join(name);
+        let ft = dir_entry_type(entry);
+        return Option[DirEntry].Some(DirEntry(name, full_path, ft));
+    };
+};
 
 given WalkDirIterator as Iterator[DirEntry] {
 
     public next(*mutable self) Option[DirEntry] = {
-        let top_opt = self.storage.stack.pop()
+        let top_opt = self.storage.stack.pop();
         if top_opt is .None then {
-            return Option[DirEntry].None()
-        }
+            return Option[DirEntry].None();
+        };
 
-        let mutable top = top_opt.unwrap()
+        let mutable top = top_opt.unwrap();
         when top.next() in {
             .Some(entry) then {
-                self.storage.stack.push(top)
+                self.storage.stack.push(top);
                 if entry.is_dir() then {
                     when read_dir(entry.path()) in {
                         .Ok(child) then {
-                            self.storage.stack.push(child)
+                            self.storage.stack.push(child);
                         },
                         .Error(_) then {},
-                    }
-                }
-                return Option[DirEntry].Some(entry)
+                    };
+                };
+                return Option[DirEntry].Some(entry);
             },
             .None then {
                 // Current iterator is exhausted. Not pushing it back ensures
                 // storage drop runs and closes the OS directory handle.
-                return self.next()
+                return self.next();
             },
-        }
-    }
-}
+        };
+    };
+};
 
 
 // ============================================================================
@@ -160,154 +160,148 @@ given WalkDirIterator as Iterator[DirEntry] {
 
 /// Create single directory (parent must exist)
 public let create_dir[T IntoPath](path T) Result[Void] = {
-    let s = path.into_path().to_string()
-    return if __koral_mkdir(s.storage.data, 493) == 0
-        then .Ok({})
-        else .Error(box(last_error_message()))
-}
+    let s = path.into_path().to_string();
+    return if __koral_mkdir(s.storage.data, 493) == 0 then .Ok({}) else .Error(box(last_error_message()));
+};
 
 /// Create directory recursively (creates all missing parent directories)
 public let create_dir_all[T IntoPath](path T) Result[Void] = {
-    let mutable normalized = path.into_path().to_string().replace_all("\\", "/")
+    let mutable normalized = path.into_path().to_string().replace_all("\\", "/");
     if normalized.is_empty() then {
-        return Result[Void].Ok({})
-    }
+        return Result[Void].Ok({});
+    };
 
     // Keep root and drive-root forms intact while trimming trailing separators.
-    while normalized.ends_with("/")
-        and normalized.count() > 1
-        and not (normalized.count() == 3 and normalized[1] == ':' and normalized[2] == '/') then {
-        normalized = normalized.substring(0..<(normalized.count() - 1))
-    }
+    while normalized.ends_with("/") and normalized.count() > 1 and not (normalized.count() == 3 and normalized[1] == ':' and normalized[2] == '/') then {
+        normalized = normalized.substring(0..<(normalized.count() - 1));
+    };
 
-    let target = normalized.into_path()
+    let target = normalized.into_path();
     if path_exist(target) then {
-        return Result[Void].Ok({})
-    }
+        return Result[Void].Ok({});
+    };
 
-    let mutable current = String.new()
-    let mutable i UInt = 0
-    let n = normalized.count()
+    let mutable current = String.new();
+    let mutable i UInt = 0;
+    let n = normalized.count();
 
     if normalized.starts_with("//") then {
-        current.push_string("//")
-        i = 2
+        current.push_string("//");
+        i = 2;
     } else if normalized.starts_with("/") then {
-        current.push_byte('/')
-        i = 1
+        current.push_byte('/');
+        i = 1;
     } else if n >= 2 and normalized[1] == ':' then {
-        current.push_byte(normalized[0])
-        current.push_byte(':')
-        i = 2
+        current.push_byte(normalized[0]);
+        current.push_byte(':');
+        i = 2;
         if n >= 3 and normalized[2] == '/' then {
-            current.push_byte('/')
-            i = 3
-        }
-    }
+            current.push_byte('/');
+            i = 3;
+        };
+    };
 
     while i < n then {
         while i < n and normalized[i] == '/' then {
-            i += 1
-        }
+            i += 1;
+        };
         if i >= n then {
-            break
-        }
+            break;
+        };
 
-        let start = i
+        let start = i;
         while i < n and normalized[i] <> '/' then {
-            i += 1
-        }
+            i += 1;
+        };
 
-        let part = normalized.substring(start..<i)
+        let part = normalized.substring(start..<i);
         if current.is_empty() then {
-            current.push_string(part)
+            current.push_string(part);
         } else {
             if not current.ends_with("/") then {
-                current.push_byte('/')
-            }
-            current.push_string(part)
-        }
+                current.push_byte('/');
+            };
+            current.push_string(part);
+        };
 
         // Skip mkdir on bare Windows drive prefixes like "C:".
         if current.count() == 2 and current[1] == ':' then {
-            continue
-        }
+            continue;
+        };
 
-        let current_path = current.into_path()
+        let current_path = current.into_path();
         if not path_exist(current_path) then {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
                 // Another process/thread may have created the directory concurrently.
                 if not path_exist(current_path) then {
-                    return Result[Void].Error(box(last_error_message()))
-                }
-            }
-        }
-    }
+                    return Result[Void].Error(box(last_error_message()));
+                };
+            };
+        };
+    };
 
-    return Result[Void].Ok({})
-}
+    return Result[Void].Ok({});
+};
 
 /// Remove empty directory
 public let remove_dir[T IntoPath](path T) Result[Void] = {
-    let s = path.into_path().to_string()
-    return if __koral_rmdir(s.storage.data) == 0
-        then .Ok({})
-        else .Error(box(last_error_message()))
-}
+    let s = path.into_path().to_string();
+    return if __koral_rmdir(s.storage.data) == 0 then .Ok({}) else .Error(box(last_error_message()));
+};
 
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all[T IntoPath](path T) Result[Void] = {
-    let p = path.into_path()
-    let mutable dirs List[Path] = []
+    let p = path.into_path();
+    let mutable dirs List[Path] = [];
     let mutable entries = walk_dir(p) or else {
-        return Result[Void].Error(it)
-    }
+        return Result[Void].Error(it);
+    };
 
     while entries.next() is .Some(entry) then {
-        let full_path = entry.path()
+        let full_path = entry.path();
         if entry.is_dir() then {
-            dirs.push(full_path)
+            dirs.push(full_path);
         } else {
             if __koral_remove(full_path.to_string().storage.data) <> 0 then {
-                return Result[Void].Error(box(last_error_message()))
-            }
-        }
-    }
+                return Result[Void].Error(box(last_error_message()));
+            };
+        };
+    };
 
     while dirs.pop() is .Some(dir_path) then {
         if __koral_rmdir(dir_path.to_string().storage.data) <> 0 then {
-            return Result[Void].Error(box(last_error_message()))
-        }
-    }
+            return Result[Void].Error(box(last_error_message()));
+        };
+    };
 
-    return remove_dir(p)
-}
+    return remove_dir(p);
+};
 
 
 /// Open a directory iterator.
 /// Handle is released in iterator drop logic.
 public let read_dir[T IntoPath](path T) Result[DirIterator] = {
-    let p = path.into_path()
-    let s = p.to_string()
-    let dir = __koral_opendir(s.storage.data)
+    let p = path.into_path();
+    let s = p.to_string();
+    let dir = __koral_opendir(s.storage.data);
     if dir == null_ptr[CDirHandle]() then {
-        return Result[DirIterator].Error(box(last_error_message()))
-    }
+        return Result[DirIterator].Error(box(last_error_message()));
+    };
 
-    return Result[DirIterator].Ok(DirIterator(box(DirIteratorStorage(dir, p))))
-}
+    return Result[DirIterator].Ok(DirIterator(box(DirIteratorStorage(dir, p))));
+};
 
 /// Recursively walk a directory tree (depth-first).
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
 public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
-    let mutable stack List[DirIterator] = []
+    let mutable stack List[DirIterator] = [];
     let root_iter = read_dir(path) or else {
-        return .Error(it)
-    }
-    stack.push(root_iter)
-    return .Ok(WalkDirIterator(box(WalkDirStorage(stack))))
-}
+        return .Error(it);
+    };
+    stack.push(root_iter);
+    return .Ok(WalkDirIterator(box(WalkDirStorage(stack))));
+};
 
 
 // ============================================================================
@@ -318,20 +312,20 @@ public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
 /// When dir is empty path, uses the system temp directory.
 /// Returns the full path of the created temporary directory.
 public let create_temp_dir[T IntoPath](dir T, prefix String) Result[Path] = {
-    let dir_path = dir.into_path()
-    let base = if dir_path.is_empty() then temp_dir() else dir_path
-    let base_str = base.to_string()
-    let mutable template = String.new()
-    template.push_string(base_str)
+    let dir_path = dir.into_path();
+    let base = if dir_path.is_empty() then temp_dir() else dir_path;
+    let base_str = base.to_string();
+    let mutable template = String.new();
+    template.push_string(base_str);
     if not base_str.ends_with("/") and not base_str.ends_with("\\") then {
-        template.push_byte('/')
-    }
-    template.push_string(prefix)
-    template.push_string("XXXXXX")
+        template.push_byte('/');
+    };
+    template.push_string(prefix);
+    template.push_string("XXXXXX");
     // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
-    let result = __koral_mkdtemp(template.storage.data)
+    let result = __koral_mkdtemp(template.storage.data);
     if result == null_ptr[UInt8]() then {
-        return .Error(box(last_error_message()))
-    }
-    return .Ok(String.from_cstring_unchecked(result).into_path())
-}
+        return .Error(box(last_error_message()));
+    };
+    return .Ok(String.from_cstring_unchecked(result).into_path());
+};

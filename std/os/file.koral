@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.os - OpenMode, FileStorage, File Types
 // ============================================================================
@@ -6,34 +6,34 @@ using std { .. }
 // Access via: using Std.Os
 // ============================================================================
 
-using std::io { Reader, Writer, Seeker, SeekOrigin }
+using std::io { Reader, Writer, Seeker, SeekOrigin };
 
 // ============================================================================
 // FFI Declarations (forward declaration for drop semantics)
 // ============================================================================
 
 /// Close a file descriptor (POSIX close wrapper)
-foreign let __koral_close(fd Int32) Int32
+foreign let __koral_close(fd Int32) Int32;
 
 /// Read from a file descriptor (POSIX read wrapper, unbuffered)
-foreign let __koral_read(fd Int32, buf *unsafe UInt8, count UInt) Int64
+foreign let __koral_read(fd Int32, buf *unsafe UInt8, count UInt) Int64;
 
 /// Write to a file descriptor (POSIX write wrapper, unbuffered)
-foreign let __koral_write(fd Int32, buf *unsafe UInt8, count UInt) Int64
+foreign let __koral_write(fd Int32, buf *unsafe UInt8, count UInt) Int64;
 
 /// Sync file data to disk (POSIX fsync wrapper)
-foreign let __koral_fsync(fd Int32) Int32
+foreign let __koral_fsync(fd Int32) Int32;
 
 /// Seek within a file (POSIX lseek wrapper)
-foreign let __koral_lseek(fd Int32, offset Int64, whence Int32) Int64
+foreign let __koral_lseek(fd Int32, offset Int64, whence Int32) Int64;
 
 /// File locking (cross-platform flock/LockFileEx wrapper)
 /// operation: 1=LOCK_SH, 2=LOCK_EX, 4=LOCK_NB (combinable), 8=LOCK_UN
-foreign let __koral_flock(fd Int32, operation Int32) Int32
+foreign let __koral_flock(fd Int32, operation Int32) Int32;
 
 /// Check if current errno is EWOULDBLOCK (cross-platform)
 /// Returns non-zero if errno is EWOULDBLOCK
-foreign let __koral_errno_is_wouldblock() Int32
+foreign let __koral_errno_is_wouldblock() Int32;
 
 // ============================================================================
 // OpenMode Enum
@@ -41,12 +41,12 @@ foreign let __koral_errno_is_wouldblock() Int32
 
 /// File open mode enumeration
 public type OpenMode {
-    Read(),          // O_RDONLY — read-only
-    Write(),         // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
-    Create(),        // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
-    Append(),        // O_WRONLY | O_CREAT | O_APPEND — append
-    ReadWrite(),     // O_RDWR — read-write (file must exist)
-}
+    Read(),// O_RDONLY — read-only
+    Write(),// O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
+    Create(),// O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
+    Append(),// O_WRONLY | O_CREAT | O_APPEND — append
+    ReadWrite(),// O_RDWR — read-write (file must exist)
+};
 
 // ============================================================================
 // FileStorage Type (internal)
@@ -54,7 +54,7 @@ public type OpenMode {
 
 /// Internal file storage holding the file descriptor and path.
 /// Responsible for closing the fd via drop when the last reference is released.
-type FileStorage(fd Int32, path Path)
+type FileStorage(fd Int32, path Path);
 
 given FileStorage as Drop {
 
@@ -62,10 +62,10 @@ given FileStorage as Drop {
     /// Only closes when fd >= 0 (valid file descriptor).
     drop(source *unsafe mutable Self) Void = {
         if source.fd >= 0 then {
-            __koral_close(source.fd)
-        }
-    }
-}
+            __koral_close(source.fd);
+        };
+    };
+};
 
 
 // ============================================================================
@@ -73,7 +73,7 @@ given FileStorage as Drop {
 // ============================================================================
 
 /// Query file metadata via file descriptor (fstat wrapper)
-foreign let __koral_fstat(fd Int32, out *unsafe KoralStatResult) Int32
+foreign let __koral_fstat(fd Int32, out *unsafe KoralStatResult) Int32;
 
 // ============================================================================
 // Helpers
@@ -88,31 +88,31 @@ foreign let __koral_fstat(fd Int32, out *unsafe KoralStatResult) Int32
 /// The file descriptor is automatically closed when the last reference is released.
 /// Unbuffered design: directly wraps the file descriptor (fd).
 /// For buffered I/O, wrap with std.io BufReader/BufWriter.
-public type File(module_private storage * FileStorage)
+public type File(module_private storage * FileStorage);
 
 given File {
 
     /// Returns the underlying OS file descriptor.
     /// This is a low-level operation for interop with OS APIs and cross-module fd sharing.
-    public fd(*self) Int = self.storage.fd(Int)
+    public fd(*self) Int = self.storage.fd(Int);
 
     /// Get the file path (returns the normalized path from when the file was opened).
     /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
-    public path(*self) Path = self.storage.path
+    public path(*self) Path = self.storage.path;
 
     /// Get file metadata by querying via the file descriptor (no path needed).
     public info(*self) Result[FileInfo] = {
-        let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
-        let result = __koral_fstat(self.storage.fd, &unsafe stat_buf)
+        let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        let result = __koral_fstat(self.storage.fd, &unsafe stat_buf);
         if result <> 0 then {
-            return Result[FileInfo].Error(box(last_error_message()))
-        }
+            return Result[FileInfo].Error(box(last_error_message()));
+        };
         let ft = when stat_buf.file_type in {
             0 then FileType.RegularFile(),
             1 then FileType.Directory(),
             2 then FileType.Symlink(),
             _ then FileType.Other(),
-        }
+        };
         return Result[FileInfo].Ok(FileInfo(
             stat_buf.size(UInt64),
             ft,
@@ -120,130 +120,130 @@ given File {
             Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
             Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
             Duration(stat_buf.created_secs, stat_buf.created_nanos)
-        ))
-    }
+        ));
+    };
 
     /// Sync file data to disk (fsync, ensures physical persistence).
     public sync(*self) Result[Void] = {
-        let result = __koral_fsync(self.storage.fd)
+        let result = __koral_fsync(self.storage.fd);
         if result <> 0 then {
-            return Result[Void].Error(box(last_error_message()))
-        }
-        return Result[Void].Ok({})
-    }
+            return Result[Void].Error(box(last_error_message()));
+        };
+        return Result[Void].Ok({});
+    };
 
     // ---- File locking operations ----
     // Based on flock(2) (Unix) / LockFileEx (Windows), whole-file advisory lock
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
     public lock(*self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 2) // LOCK_EX
+        let result = __koral_flock(self.storage.fd, 2);// LOCK_EX
         if result <> 0 then {
-            return Result[Void].Error(box(last_error_message()))
-        }
-        return Result[Void].Ok({})
-    }
+            return Result[Void].Error(box(last_error_message()));
+        };
+        return Result[Void].Ok({});
+    };
 
     /// Acquire a shared lock (blocking, waits until acquired)
     public lock_shared(*self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 1) // LOCK_SH
+        let result = __koral_flock(self.storage.fd, 1);// LOCK_SH
         if result <> 0 then {
-            return Result[Void].Error(box(last_error_message()))
-        }
-        return Result[Void].Ok({})
-    }
+            return Result[Void].Error(box(last_error_message()));
+        };
+        return Result[Void].Ok({});
+    };
 
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock(*self) Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 6) // LOCK_EX | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 6);// LOCK_EX | LOCK_NB
         if result == 0 then {
-            return Result[Bool].Ok(true)
-        }
+            return Result[Bool].Ok(true);
+        };
         if __koral_errno_is_wouldblock() <> 0 then {
-            return Result[Bool].Ok(false)
-        }
-        return Result[Bool].Error(box(last_error_message()))
-    }
+            return Result[Bool].Ok(false);
+        };
+        return Result[Bool].Error(box(last_error_message()));
+    };
 
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_shared(*self) Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 5) // LOCK_SH | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 5);// LOCK_SH | LOCK_NB
         if result == 0 then {
-            return Result[Bool].Ok(true)
-        }
+            return Result[Bool].Ok(true);
+        };
         if __koral_errno_is_wouldblock() <> 0 then {
-            return Result[Bool].Ok(false)
-        }
-        return Result[Bool].Error(box(last_error_message()))
-    }
+            return Result[Bool].Ok(false);
+        };
+        return Result[Bool].Error(box(last_error_message()));
+    };
 
     /// Release the lock
     public unlock(*self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 8) // LOCK_UN
+        let result = __koral_flock(self.storage.fd, 8);// LOCK_UN
         if result <> 0 then {
-            return Result[Void].Error(box(last_error_message()))
-        }
-        return Result[Void].Ok({})
-    }
-}
+            return Result[Void].Error(box(last_error_message()));
+        };
+        return Result[Void].Ok({});
+    };
+};
 
 given File as Reader {
 
     // Unbuffered: directly calls POSIX read, errors returned immediately
     public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt] = {
-        let span = into.slice_spec(range)
-        let start = span.start()
-        let end = span.end()
+        let span = into.slice_spec(range);
+        let start = span.start();
+        let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0)
-        }
-        let data_ptr = into.borrow_mut_ptr() + start
-        let n = __koral_read(self.storage.fd, data_ptr, span.len())
+            return Result[UInt].Ok(0);
+        };
+        let data_ptr = into.borrow_mut_ptr() + start;
+        let n = __koral_read(self.storage.fd, data_ptr, span.len());
         if n < 0 then {
-            return Result[UInt].Error(box(last_error_message()))
-        }
-        return Result[UInt].Ok(n(UInt))
-    }
-}
+            return Result[UInt].Error(box(last_error_message()));
+        };
+        return Result[UInt].Ok(n(UInt));
+    };
+};
 
 given File as Writer {
 
     // Unbuffered: directly calls POSIX write, errors returned immediately
     public write(*self, from List[UInt8], range Range[UInt]) Result[UInt] = {
-        let span = from.slice_spec(range)
-        let start = span.start()
-        let end = span.end()
+        let span = from.slice_spec(range);
+        let start = span.start();
+        let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0)
-        }
-        let data_ptr = from.borrow_ptr() + start
-        let n = __koral_write(self.storage.fd, data_ptr, span.len())
+            return Result[UInt].Ok(0);
+        };
+        let data_ptr = from.borrow_ptr() + start;
+        let n = __koral_write(self.storage.fd, data_ptr, span.len());
         if n < 0 then {
-            return Result[UInt].Error(box(last_error_message()))
-        }
-        return Result[UInt].Ok(n(UInt))
-    }
+            return Result[UInt].Error(box(last_error_message()));
+        };
+        return Result[UInt].Ok(n(UInt));
+    };
 
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
-    public flush(*self) Result[Void] = Result[Void].Ok({})
-}
+    public flush(*self) Result[Void] = Result[Void].Ok({});
+};
 
 given File as Seeker {
 
     public seek(*self, pos SeekOrigin) Result[UInt64] = {
-        let mutable offset Int64 = 0
-        let mutable whence Int32 = 0
+        let mutable offset Int64 = 0;
+        let mutable whence Int32 = 0;
         when pos in {
-            .Start(o) then { offset = o(Int64); whence = 0 },
-            .Current(o) then { offset = o; whence = 1 },
-            .End(o) then { offset = o; whence = 2 },
-        }
-        let new_pos = __koral_lseek(self.storage.fd, offset, whence)
+            .Start(o) then { offset = o(Int64); whence = 0;},
+            .Current(o) then { offset = o; whence = 1;},
+            .End(o) then { offset = o; whence = 2;},
+        };
+        let new_pos = __koral_lseek(self.storage.fd, offset, whence);
         if new_pos < 0 then {
-            return Result[UInt64].Error(box(last_error_message()))
-        }
-        return Result[UInt64].Ok(new_pos(UInt64))
-    }
-}
+            return Result[UInt64].Error(box(last_error_message()));
+        };
+        return Result[UInt64].Ok(new_pos(UInt64));
+    };
+};

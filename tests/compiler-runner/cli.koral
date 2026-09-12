@@ -1,44 +1,44 @@
-using std { .. }
-using std::os { .. }
+using std { .. };
+using std::os { .. };
 
 file_private let is_windows_host() Bool =
-    if env("OS") is .Some(os) then os.contains("Windows") else false
+    if env("OS") is .Some(os) then os.contains("Windows") else false;
 
 file_private let default_bootstrap_koralc_path() Path = {
     if is_windows_host() then {
-        return "bin/bootstrap/koralc.exe".into_path()
-    }
-    return "bin/bootstrap/koralc".into_path()
-}
+        return "bin/bootstrap/koralc.exe".into_path();
+    };
+    return "bin/bootstrap/koralc".into_path();
+};
 
 file_private let default_swift_koralc_path() Path = {
     if is_windows_host() then {
-        return "compiler/.build/debug/koralc.exe".into_path()
-    }
-    return "compiler/.build/debug/koralc".into_path()
-}
+        return "compiler/.build/debug/koralc.exe".into_path();
+    };
+    return "compiler/.build/debug/koralc".into_path();
+};
 
 file_private let parse_uint(value String, flag_name String) Result[UInt] = {
     return when UInt.parse(value) in {
         .Ok(v) then Result[UInt].Ok(v),
         .Error(_) then Result[UInt].Error(box("invalid value for \(flag_name): \(value)")),
-    }
-}
+    };
+};
 
 file_private let parse_int(value String, flag_name String) Result[Int] = {
     return when Int.parse(value) in {
         .Ok(v) then Result[Int].Ok(v),
         .Error(_) then Result[Int].Error(box("invalid value for \(flag_name): \(value)")),
-    }
-}
+    };
+};
 
 file_private let make_absolute(base Path, path Path) Path = {
-    return if path.is_absolute() then path else base.join(path.to_string()).normalize()
-}
+    return if path.is_absolute() then path else base.join(path.to_string()).normalize();
+};
 
 file_private let default_output_root(run_root Path) Path = {
-    return run_root.join("tests/compiler-cases_output").normalize()
-}
+    return run_root.join("tests/compiler-cases_output").normalize();
+};
 
 public let print_usage() Void =
     eprintln("""
@@ -57,182 +57,182 @@ public let print_usage() Void =
           --report-file <path>         write stable summary log (default: tests/compiler-cases_output/_reports/latest-summary.log)
           --verbose                    print verbose case command logs
           -h, --help                   show this help
-        """)
+        """);
 
 public let parse_runner_config() Result[RunnerConfig] = {
-    let argv = args()
+    let argv = args();
 
     let run_root = current_dir() or else {
-        return Result[RunnerConfig].Error(box("failed to determine current working directory: " + it.message()))
-    }
-    let mutable cases_root = "tests/compiler-cases".into_path()
-    let mutable filter = Option[String].None()
-    let mutable jobs UInt = 1
-    let mutable timeout_secs Int = 120
-    let mutable memory_limit_mb UInt = 1024
-    let mutable compiler_kind = "bootstrap"
-    let mutable compiler_bin_opt = Option[Path].None()
-    let mutable bootstrap_koralc = default_bootstrap_koralc_path()
-    let mutable swift_koralc = default_swift_koralc_path()
-    let mutable report_file_opt = Option[Path].None()
-    let mutable verbose = false
+        return Result[RunnerConfig].Error(box("failed to determine current working directory: " + it.message()));
+    };
+    let mutable cases_root = "tests/compiler-cases".into_path();
+    let mutable filter = Option[String].None();
+    let mutable jobs UInt = 1;
+    let mutable timeout_secs Int = 120;
+    let mutable memory_limit_mb UInt = 1024;
+    let mutable compiler_kind = "bootstrap";
+    let mutable compiler_bin_opt = Option[Path].None();
+    let mutable bootstrap_koralc = default_bootstrap_koralc_path();
+    let mutable swift_koralc = default_swift_koralc_path();
+    let mutable report_file_opt = Option[Path].None();
+    let mutable verbose = false;
 
-    let mutable i UInt = 1
+    let mutable i UInt = 1;
     while i < argv.count() then {
-        let arg = argv[i]
+        let arg = argv[i];
 
         if arg == "-h" or arg == "--help" then {
-            return Result[RunnerConfig].Error(box("__HELP__"))
-        }
+            return Result[RunnerConfig].Error(box("__HELP__"));
+        };
 
         if arg == "--verbose" then {
-            verbose = true
-            i += 1
-            continue
-        }
+            verbose = true;
+            i += 1;
+            continue;
+        };
 
         if arg == "--compiler" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --compiler"))
-            }
-            let value = argv[i]
+                return Result[RunnerConfig].Error(box("missing value for --compiler"));
+            };
+            let value = argv[i];
             if value <> "bootstrap" and value <> "swift" and value <> "custom" then {
-                return Result[RunnerConfig].Error(box("invalid value for --compiler: " + value))
-            }
-            compiler_kind = value
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("invalid value for --compiler: " + value));
+            };
+            compiler_kind = value;
+            i += 1;
+            continue;
+        };
 
         if arg == "--cases" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --cases"))
-            }
-            cases_root = argv[i].into_path()
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --cases"));
+            };
+            cases_root = argv[i].into_path();
+            i += 1;
+            continue;
+        };
 
         if arg == "--filter" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --filter"))
-            }
-            filter = Option[String].Some(argv[i])
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --filter"));
+            };
+            filter = Option[String].Some(argv[i]);
+            i += 1;
+            continue;
+        };
 
         if arg == "--timeout" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --timeout"))
-            }
+                return Result[RunnerConfig].Error(box("missing value for --timeout"));
+            };
             timeout_secs = parse_int(argv[i], "--timeout") or else {
-                return Result[RunnerConfig].Error(it)
-            }
+                return Result[RunnerConfig].Error(it);
+            };
             if timeout_secs <= 0 then {
-                return Result[RunnerConfig].Error(box("--timeout must be > 0"))
-            }
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("--timeout must be > 0"));
+            };
+            i += 1;
+            continue;
+        };
 
         if arg == "--memory-limit" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --memory-limit"))
-            }
+                return Result[RunnerConfig].Error(box("missing value for --memory-limit"));
+            };
             memory_limit_mb = parse_uint(argv[i], "--memory-limit") or else {
-                return Result[RunnerConfig].Error(it)
-            }
+                return Result[RunnerConfig].Error(it);
+            };
             if memory_limit_mb == 0 then {
-                return Result[RunnerConfig].Error(box("--memory-limit must be > 0"))
-            }
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("--memory-limit must be > 0"));
+            };
+            i += 1;
+            continue;
+        };
 
         if arg == "--bootstrap-koralc" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --bootstrap-koralc"))
-            }
-            bootstrap_koralc = argv[i].into_path()
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --bootstrap-koralc"));
+            };
+            bootstrap_koralc = argv[i].into_path();
+            i += 1;
+            continue;
+        };
 
         if arg == "--swift-koralc" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --swift-koralc"))
-            }
-            swift_koralc = argv[i].into_path()
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --swift-koralc"));
+            };
+            swift_koralc = argv[i].into_path();
+            i += 1;
+            continue;
+        };
 
         if arg == "--compiler-bin" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --compiler-bin"))
-            }
-            compiler_bin_opt = Option[Path].Some(argv[i].into_path())
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --compiler-bin"));
+            };
+            compiler_bin_opt = Option[Path].Some(argv[i].into_path());
+            i += 1;
+            continue;
+        };
 
         if arg == "--report-file" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for --report-file"))
-            }
-            report_file_opt = Option[Path].Some(argv[i].into_path())
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("missing value for --report-file"));
+            };
+            report_file_opt = Option[Path].Some(argv[i].into_path());
+            i += 1;
+            continue;
+        };
 
         if arg == "-j" then {
-            i += 1
+            i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error(box("missing value for -j"))
-            }
+                return Result[RunnerConfig].Error(box("missing value for -j"));
+            };
             jobs = parse_uint(argv[i], "-j") or else {
-                return Result[RunnerConfig].Error(it)
-            }
+                return Result[RunnerConfig].Error(it);
+            };
             if jobs == 0 then {
-                return Result[RunnerConfig].Error(box("-j must be >= 1"))
-            }
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("-j must be >= 1"));
+            };
+            i += 1;
+            continue;
+        };
 
         if arg.starts_with("-j=") then {
             jobs = parse_uint(arg.trim_prefix("-j="), "-j") or else {
-                return Result[RunnerConfig].Error(it)
-            }
+                return Result[RunnerConfig].Error(it);
+            };
             if jobs == 0 then {
-                return Result[RunnerConfig].Error(box("-j must be >= 1"))
-            }
-            i += 1
-            continue
-        }
+                return Result[RunnerConfig].Error(box("-j must be >= 1"));
+            };
+            i += 1;
+            continue;
+        };
 
-        return Result[RunnerConfig].Error(box("unknown argument: \(arg)"))
-    }
+        return Result[RunnerConfig].Error(box("unknown argument: \(arg)"));
+    };
 
-    let abs_cases_root = make_absolute(run_root, cases_root)
-    let abs_bootstrap_koralc = make_absolute(run_root, bootstrap_koralc)
-    let abs_swift_koralc = make_absolute(run_root, swift_koralc)
-    let output_root = default_output_root(run_root)
-    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize()
-    let mutable report_file = default_report_file
+    let abs_cases_root = make_absolute(run_root, cases_root);
+    let abs_bootstrap_koralc = make_absolute(run_root, bootstrap_koralc);
+    let abs_swift_koralc = make_absolute(run_root, swift_koralc);
+    let output_root = default_output_root(run_root);
+    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize();
+    let mutable report_file = default_report_file;
     if report_file_opt.is_some() then {
-        report_file = make_absolute(run_root, report_file_opt.unwrap()).normalize()
-    }
+        report_file = make_absolute(run_root, report_file_opt.unwrap()).normalize();
+    };
 
     let compiler_bin = when compiler_kind in {
         "bootstrap" then abs_bootstrap_koralc,
@@ -240,13 +240,13 @@ public let parse_runner_config() Result[RunnerConfig] = {
         "custom" then when compiler_bin_opt in {
             .Some(path) then make_absolute(run_root, path).normalize(),
             .None() then {
-                return Result[RunnerConfig].Error(box("--compiler-bin is required when --compiler custom"))
+                return Result[RunnerConfig].Error(box("--compiler-bin is required when --compiler custom"));
             },
         },
         _ then {
-            return Result[RunnerConfig].Error(box("invalid compiler kind: " + compiler_kind))
+            return Result[RunnerConfig].Error(box("invalid compiler kind: " + compiler_kind));
         },
-    }
+    };
 
     return Result[RunnerConfig].Ok(RunnerConfig(
         run_root,
@@ -262,5 +262,5 @@ public let parse_runner_config() Result[RunnerConfig] = {
         abs_bootstrap_koralc,
         abs_swift_koralc,
         verbose
-    ))
-}
+    ));
+};

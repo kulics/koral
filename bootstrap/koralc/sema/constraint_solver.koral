@@ -11,7 +11,7 @@ public type ConstraintSolverError {
     TraitNotSatisfied(target Type, trait_name String, span SourceSpan),
     // 约束冲突
     ConflictingConstraints(message String, span SourceSpan),
-}
+};
 
 given ConstraintSolverError as Error {
 
@@ -21,113 +21,113 @@ given ConstraintSolverError as Error {
             .UnsolvedTypeVariable(tv, _) then "Unsolved type variable: \(tv.display())",
             .TraitNotSatisfied(target, trait_name, _) then "Type '\(type_to_string(target))' does not satisfy trait '\(trait_name)'",
             .ConflictingConstraints(message, _) then "Conflicting constraints: \(message)",
-        }
-    }
-}
+        };
+    };
+};
 
 // 类型替换：将类型变量 ID 映射到具体类型。
 public type TypeSubstitution(
     mapping Dict[UInt, Type],
-)
+);
 
 given TypeSubstitution {
 
     public new() TypeSubstitution = {
-        return TypeSubstitution(Dict[UInt, Type].new())
-    }
+        return TypeSubstitution(Dict[UInt, Type].new());
+    };
 
     // 将替换应用到类型 t，递归替换所有已知的类型变量。
     // Fast path: if mapping is empty, return t unchanged (no allocation).
     public apply(self, t Type) Type = {
         if self.mapping.is_empty() then {
-            return t
-        }
-        return self.apply_impl(t)
-    }
+            return t;
+        };
+        return self.apply_impl(t);
+    };
 
     file_private apply_impl(self, t Type) Type = {
         return when t in {
             .TypeVar(tv_ref) then {
-                let tv = *tv_ref
+                let tv = *tv_ref;
                 yield when self.mapping.get(tv.id) in {
                     .Some(resolved) then self.apply_impl(resolved),
                     .None() then t,
-                }
+                };
             },
             .FunctionType(params, ret) then {
-                let mutable changed = false
-                let mutable new_params = List[* Type].new()
-                let mutable i = 0(UInt)
+                let mutable changed = false;
+                let mutable new_params = List[* Type].new();
+                let mutable i = 0(UInt);
                 while i < params.count() then {
-                    let original = (*params[i]).param_type
-                    let substituted = self.apply_impl(original)
-                    if original <> substituted then { changed = true }
-                    new_params.push(box(substituted))
-                    i += 1(UInt)
-                }
-                let original_ret = *ret
-                let substituted_ret = self.apply_impl(original_ret)
-                if original_ret <> substituted_ret then { changed = true }
+                    let original = (*params[i]).param_type;
+                    let substituted = self.apply_impl(original);
+                    if original <> substituted then { changed = true;};
+                    new_params.push(box(substituted));
+                    i += 1(UInt);
+                };
+                let original_ret = *ret;
+                let substituted_ret = self.apply_impl(original_ret);
+                if original_ret <> substituted_ret then { changed = true;};
                 if changed then {
-                    yield Type.FunctionType(types_to_param_entries(new_params), box(substituted_ret))
+                    yield Type.FunctionType(types_to_param_entries(new_params), box(substituted_ret));
                 } else {
-                    yield t
-                }
+                    yield t;
+                };
             },
             .MutableReferenceType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.MutableReferenceType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.MutableReferenceType(box(substituted));
             },
             .ReferenceType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.ReferenceType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.ReferenceType(box(substituted));
             },
             .MutablePointerType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.MutablePointerType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.MutablePointerType(box(substituted));
             },
             .PointerType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.PointerType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.PointerType(box(substituted));
             },
             .WeakReferenceType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.WeakReferenceType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.WeakReferenceType(box(substituted));
             },
             .MutableWeakReferenceType(inner) then {
-                let substituted = self.apply_impl(*inner)
-                yield if *inner == substituted then t else Type.MutableWeakReferenceType(box(substituted))
+                let substituted = self.apply_impl(*inner);
+                yield if *inner == substituted then t else Type.MutableWeakReferenceType(box(substituted));
             },
             .GenericStruct(template, args) then {
-                let mutable changed = false
-                let mutable new_args = List[* Type].new()
-                let mutable i = 0(UInt)
+                let mutable changed = false;
+                let mutable new_args = List[* Type].new();
+                let mutable i = 0(UInt);
                 while i < args.count() then {
-                    let original = (*args[i])
-                    let substituted = self.apply_impl(original)
-                    if original <> substituted then { changed = true }
-                    new_args.push(box(substituted))
-                    i += 1(UInt)
-                }
-                yield if changed then Type.GenericStruct(template, new_args) else t
+                    let original = (*args[i]);
+                    let substituted = self.apply_impl(original);
+                    if original <> substituted then { changed = true;};
+                    new_args.push(box(substituted));
+                    i += 1(UInt);
+                };
+                yield if changed then Type.GenericStruct(template, new_args) else t;
             },
             .GenericEnum(template, args) then {
-                let mutable changed = false
-                let mutable new_args = List[* Type].new()
-                let mutable i = 0(UInt)
+                let mutable changed = false;
+                let mutable new_args = List[* Type].new();
+                let mutable i = 0(UInt);
                 while i < args.count() then {
-                    let original = (*args[i])
-                    let substituted = self.apply_impl(original)
-                    if original <> substituted then { changed = true }
-                    new_args.push(box(substituted))
-                    i += 1(UInt)
-                }
-                yield if changed then Type.GenericEnum(template, new_args) else t
+                    let original = (*args[i]);
+                    let substituted = self.apply_impl(original);
+                    if original <> substituted then { changed = true;};
+                    new_args.push(box(substituted));
+                    i += 1(UInt);
+                };
+                yield if changed then Type.GenericEnum(template, new_args) else t;
             },
             _ then t,
-        }
-    }
-}
+        };
+    };
+};
 
 // 约束求解器。
 public type ConstraintSolver(
@@ -140,7 +140,7 @@ public type ConstraintSolver(
     // 用于 Instantiate 约束判断 struct/enum 的类型查找回调。
     // 由 TypeChecker 在创建 ConstraintSolver 后注入。
     mutable enum_type_names Set[String],
-)
+);
 
 given ConstraintSolver {
 
@@ -153,199 +153,197 @@ given ConstraintSolver {
             List[ConstraintSolverError].new(),
             0(UInt),
             Set[String].new()
-        )
-    }
+        );
+    };
 
     public fresh_type_variable(*mutable self, name Option[String], span SourceSpan) TypeVariable = {
-        let id = self.next_type_variable_id
-        self.next_type_variable_id += 1
-        return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span)
-    }
+        let id = self.next_type_variable_id;
+        self.next_type_variable_id += 1;
+        return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span);
+    };
 
     public fresh_literal_type_variable(*mutable self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
-        let id = self.next_type_variable_id
-        self.next_type_variable_id += 1
-        return TypeVariable(id, Option[String].None(), Option[LiteralDefaultKind].Some(kind), span)
-    }
+        let id = self.next_type_variable_id;
+        self.next_type_variable_id += 1;
+        return TypeVariable(id, Option[String].None(), Option[LiteralDefaultKind].Some(kind), span);
+    };
 
     // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
     public register_enum_type(*mutable self, name String) Void = {
-        self.enum_type_names.insert(name)
-    }
+        self.enum_type_names.insert(name);
+    };
 
     // Debug helper: clear in-flight solver state between declarations.
     // Keeps enum type registry intact for Instantiate classification.
     public clear_debug_state(*mutable self) Void = {
-        self.unifier = Unifier.new(self.context)
-        self.constraints = List[Constraint].new()
-        self.default_constraints = List[Constraint].new()
-        self.errors = List[ConstraintSolverError].new()
-    }
+        self.unifier = Unifier.new(self.context);
+        self.constraints = List[Constraint].new();
+        self.default_constraints = List[Constraint].new();
+        self.errors = List[ConstraintSolverError].new();
+    };
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
     public add_constraint(*mutable self, c Constraint) Void = {
         when c in {
-            .DefaultInt(_, _) then { self.default_constraints.push(c) },
-            .DefaultFloat(_, _) then { self.default_constraints.push(c) },
-            _ then { self.constraints.push(c) },
-        }
-    }
+            .DefaultInt(_, _) then { self.default_constraints.push(c);},
+            .DefaultFloat(_, _) then { self.default_constraints.push(c);},
+            _ then { self.constraints.push(c);},
+        };
+    };
 
     // 对 constraints 按 priority 做插入排序（priority 越小越优先）。
     file_private sort_constraints(*mutable self) Void = {
-        let n = self.constraints.count()
-        let mutable i = 1(UInt)
+        let n = self.constraints.count();
+        let mutable i = 1(UInt);
         while i < n then {
-            let key = self.constraints[i]
-            let key_priority = key.priority()
-            let mutable j = i
+            let key = self.constraints[i];
+            let key_priority = key.priority();
+            let mutable j = i;
             while j > 0(UInt) then {
-                let prev = self.constraints[j - 1(UInt)]
+                let prev = self.constraints[j - 1(UInt)];
                 if prev.priority() > key_priority then {
-                    self.constraints[j] = prev
-                    j -= 1(UInt)
+                    self.constraints[j] = prev;
+                    j -= 1(UInt);
                 } else {
-                    break
-                }
-            }
-            self.constraints[j] = key
-            i += 1(UInt)
-        }
-    }
+                    break;
+                };
+            };
+            self.constraints[j] = key;
+            i += 1(UInt);
+        };
+    };
 
     // 求解所有约束，返回 TypeSubstitution。
     public solve(*mutable self) Result[TypeSubstitution] = {
         // 1. 按优先级排序
-        self.sort_constraints()
+        self.sort_constraints();
 
         // 2. 依次处理每个约束（支持 re-queue）
-        let mutable max_iterations = self.constraints.count() * 3(UInt) + 100(UInt)
-        let mutable iteration = 0(UInt)
+        let mutable max_iterations = self.constraints.count() * 3(UInt) + 100(UInt);
+        let mutable iteration = 0(UInt);
         while self.constraints.count() > 0(UInt) and iteration < max_iterations then {
-            let c = self.constraints[0(UInt)]
+            let c = self.constraints[0(UInt)];
             // 移除第一个约束
-            let mutable remaining = List[Constraint].new()
-            let mutable j = 1(UInt)
+            let mutable remaining = List[Constraint].new();
+            let mutable j = 1(UInt);
             while j < self.constraints.count() then {
-                remaining.push(self.constraints[j])
-                j += 1(UInt)
-            }
-            self.constraints = remaining
-            self.process_constraint(c)
-            iteration += 1(UInt)
-        }
+                remaining.push(self.constraints[j]);
+                j += 1(UInt);
+            };
+            self.constraints = remaining;
+            self.process_constraint(c);
+            iteration += 1(UInt);
+        };
 
         // 3. 处理 default_constraints
-        let mutable di = 0(UInt)
+        let mutable di = 0(UInt);
         while di < self.default_constraints.count() then {
-            let c = self.default_constraints[di]
-            self.process_default_constraint(c)
-            di += 1(UInt)
-        }
+            let c = self.default_constraints[di];
+            self.process_default_constraint(c);
+            di += 1(UInt);
+        };
 
         // 4. 若有错误，返回第一个错误
         if self.errors.count() > 0(UInt) then {
-            return Result[TypeSubstitution].Error(box(self.errors[0(UInt)]))
-        }
+            return Result[TypeSubstitution].Error(box(self.errors[0(UInt)]));
+        };
 
         // 5. 构建 TypeSubstitution（完全解析所有绑定）
-        let bindings = self.unifier.current_bindings()
-        let mutable resolved_bindings = Dict[UInt, Type].new()
+        let bindings = self.unifier.current_bindings();
+        let mutable resolved_bindings = Dict[UInt, Type].new();
         for entry in bindings then {
-            resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second))
-        }
-        return Result[TypeSubstitution].Ok(TypeSubstitution(resolved_bindings))
-    }
+            resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second));
+        };
+        return Result[TypeSubstitution].Ok(TypeSubstitution(resolved_bindings));
+    };
 
     // 处理单个约束。
     file_private process_constraint(*mutable self, c Constraint) Void = {
         when c in {
             .Equal(lhs, rhs, span) then {
-                let result = self.unifier.unify(lhs, rhs, span)
+                let result = self.unifier.unify(lhs, rhs, span);
                 when result in {
                     .Error(e) then {
-                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
                     },
                     .Ok(_) then {},
-                }
+                };
             },
             .Instantiate(tv, template, args, span) then {
                 // 创建泛型实例类型并与类型变量合一。
                 // 使用注册的 enum 类型名称集合判断是 struct 还是 enum。
-                let is_enum = self.enum_type_names.contains(template)
-                let instance_type = if is_enum
-                    then Type.GenericEnum(template, self.types_to_refs(args))
-                    else Type.GenericStruct(template, self.types_to_refs(args))
-                let result = self.unifier.unify(Type.TypeVar(box(tv)), instance_type, span)
+                let is_enum = self.enum_type_names.contains(template);
+                let instance_type = if is_enum then Type.GenericEnum(template, self.types_to_refs(args)) else Type.GenericStruct(template, self.types_to_refs(args));
+                let result = self.unifier.unify(Type.TypeVar(box(tv)), instance_type, span);
                 when result in {
                     .Error(e) then {
-                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
                     },
                     .Ok(_) then {},
-                }
+                };
             },
             .TraitBound(target, trait_name, span) then {
                 // 解析目标类型
-                let resolved = self.unifier.resolve(target)
+                let resolved = self.unifier.resolve(target);
                 // 如果类型仍包含类型变量，重新入队稍后处理。
-                let still_has_tv = self.type_contains_tv(resolved)
+                let still_has_tv = self.type_contains_tv(resolved);
                 if still_has_tv then {
-                    self.constraints.push(Constraint.TraitBound(resolved, trait_name, span))
-                }
+                    self.constraints.push(Constraint.TraitBound(resolved, trait_name, span));
+                };
                 // 完整的 trait 一致性检查在 check_decl 阶段的 TraitChecker 中完成。
             },
             // DefaultInt/DefaultFloat 不应出现在 constraints 中，跳过
             _ then {},
-        }
-    }
+        };
+    };
 
     // 处理默认类型约束。
     file_private process_default_constraint(*mutable self, c Constraint) Void = {
         when c in {
             .DefaultInt(tv, span) then {
-                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)))
+                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)));
                 // 若类型变量仍未解决，应用默认类型 Int
                 when resolved in {
                     .TypeVar(_) then {
-                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.IntType(), span)
+                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.IntType(), span);
                         when result in {
                             .Error(e) then {
-                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
                             },
                             .Ok(_) then {},
-                        }
+                        };
                     },
                     _ then {},
-                }
+                };
             },
             .DefaultFloat(tv, span) then {
-                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)))
+                let resolved = self.unifier.resolve(Type.TypeVar(box(tv)));
                 // 若类型变量仍未解决，应用默认类型 Float64
                 when resolved in {
                     .TypeVar(_) then {
-                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.Float64Type(), span)
+                        let result = self.unifier.unify(Type.TypeVar(box(tv)), Type.Float64Type(), span);
                         when result in {
                             .Error(e) then {
-                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span))
+                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
                             },
                             .Ok(_) then {},
-                        }
+                        };
                     },
                     _ then {},
-                }
+                };
             },
             _ then {},
-        }
-    }
+        };
+    };
 
     // 辅助：将 [Type]List 转换为 [Type ref]List。
     file_private types_to_refs(self, types List[Type]) List[* Type] = {
-        let mutable out = List[* Type].new()
+        let mutable out = List[* Type].new();
         for t in types then {
-            out.push(box(t))
-        }
-        return out
-    }
+            out.push(box(t));
+        };
+        return out;
+    };
 
     // 辅助：检查类型是否包含类型变量。
     file_private type_contains_tv(*mutable self, t Type) Bool = {
@@ -353,9 +351,9 @@ given ConstraintSolver {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
                 for entry in params then {
-                    if self.type_contains_tv(entry.param_type) then { return true }
-                }
-                yield self.type_contains_tv(*ret)
+                    if self.type_contains_tv(entry.param_type) then { return true;};
+                };
+                yield self.type_contains_tv(*ret);
             },
             .MutableReferenceType(inner) then self.type_contains_tv(*inner),
             .ReferenceType(inner) then self.type_contains_tv(*inner),
@@ -365,22 +363,22 @@ given ConstraintSolver {
             .MutableWeakReferenceType(inner) then self.type_contains_tv(*inner),
             .GenericStruct(_, args) then {
                 for a in args then {
-                    if self.type_contains_tv(*a) then { return true }
-                }
-                yield false
+                    if self.type_contains_tv(*a) then { return true;};
+                };
+                yield false;
             },
             .GenericEnum(_, args) then {
                 for a in args then {
-                    if self.type_contains_tv(*a) then { return true }
-                }
-                yield false
+                    if self.type_contains_tv(*a) then { return true;};
+                };
+                yield false;
             },
             _ then false,
-        }
-    }
+        };
+    };
 
     // 解析类型：将类型变量替换为已绑定的类型。
     public resolve(*mutable self, t Type) Type = {
-        return self.unifier.resolve(t)
-    }
-}
+        return self.unifier.resolve(t);
+    };
+};

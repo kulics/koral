@@ -7,7 +7,7 @@ public type VisibilityChecker(
     import_graph * ImportGraph,
     current_module_path List[String],
     current_source_file String,
-)
+);
 
 given VisibilityChecker {
     public new(
@@ -15,20 +15,20 @@ given VisibilityChecker {
         current_module_path List[String],
         current_source_file String,
     ) VisibilityChecker = {
-        return VisibilityChecker(import_graph, current_module_path, current_source_file)
-    }
+        return VisibilityChecker(import_graph, current_module_path, current_source_file);
+    };
 
     file_private is_std_root(self, module_path List[String]) Bool = {
-        let _ = self
-        if module_path.count() <> 1(UInt) then { return false }
-        return module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std"
-    }
+        let _ = self;
+        if module_path.count() <> 1(UInt) then { return false;};
+        return module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std";
+    };
 
     file_private is_std_module(self, module_path List[String]) Bool = {
-        let _ = self
-        if module_path.is_empty() then { return false }
-        return module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std"
-    }
+        let _ = self;
+        if module_path.is_empty() then { return false;};
+        return module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std";
+    };
 
     // 检查符号是否可以直接访问
     // 返回 Ok 或 Error(显式导入建议)
@@ -40,24 +40,24 @@ given VisibilityChecker {
     ) Result[Void] = {
         // 泛型参数跳过验证
         if is_generic_param then {
-            return Result[Void].Ok({})
-        }
+            return Result[Void].Ok({});
+        };
 
         if self.can_access_directly(symbol_module_path, Option[String].Some(symbol_name)) then {
-            return Result[Void].Ok({})
-        }
+            return Result[Void].Ok({});
+        };
 
-        let mutable module_path_text = ""
-        let mutable first = true
+        let mutable module_path_text = "";
+        let mutable first = true;
         for seg in symbol_module_path then {
-            if not first then { module_path_text.push_string("::") }
-            module_path_text.push_string(seg)
-            first = false
-        }
+            if not first then { module_path_text.push_string("::");};
+            module_path_text.push_string(seg);
+            first = false;
+        };
         return Result[Void].Error(box(
             "'\(symbol_name)' is defined in module '\(module_path_text)'. Import it explicitly with using \(module_path_text) { \(symbol_name) }."
-        ))
-    }
+        ));
+    };
 
     // 检查类型的可见性
     public check_type(
@@ -70,8 +70,8 @@ given VisibilityChecker {
     ) Result[Void] = {
         // 局部绑定或泛型参数跳过验证
         if is_local_binding or is_generic_param then {
-            return Result[Void].Ok({})
-        }
+            return Result[Void].Ok({});
+        };
 
         // 获取类型的模块路径
         let module_path = when t in {
@@ -79,26 +79,26 @@ given VisibilityChecker {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
                     .None() then List[String].new(),
-                }
+                };
             },
             .EnumType(def_id) then {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
                     .None() then List[String].new(),
-                }
+                };
             },
             .OpaqueType(def_id) then {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
                     .None() then List[String].new(),
-                }
+                };
             },
-            .GenericParameter(_) then { return Result[Void].Ok({}) },
-            _ then { return Result[Void].Ok({}) },
-        }
+            .GenericParameter(_) then { return Result[Void].Ok({});},
+            _ then { return Result[Void].Ok({});},
+        };
 
-        return self.check_symbol(module_path, type_name, false)
-    }
+        return self.check_symbol(module_path, type_name, false);
+    };
 
     // 判断是否可以直接访问
     file_private can_access_directly(
@@ -108,18 +108,18 @@ given VisibilityChecker {
     ) Bool = {
         // 空路径：局部变量，总是可访问
         if symbol_module_path.count() == 0 then {
-            return true
-        }
+            return true;
+        };
 
         // 同一模块
         if string_list_eq(symbol_module_path, self.current_module_path) then {
-            return true
-        }
+            return true;
+        };
 
         // std root is a compiler-provided prelude for non-std modules only.
         if self.is_std_root(symbol_module_path) and not self.is_std_module(self.current_module_path) then {
-            return true
-        }
+            return true;
+        };
 
         // 查询 ImportGraph
         let kind = self.import_graph.get_import_kind(
@@ -127,13 +127,13 @@ given VisibilityChecker {
             symbol_name,
             self.current_module_path,
             Option[String].Some(self.current_source_file)
-        )
+        );
 
         return when kind in {
             .Local() then true,
             .MemberImport() then true,
             .BatchImport() then true,
             .ModuleImport() then false,
-        }
-    }
-}
+        };
+    };
+};

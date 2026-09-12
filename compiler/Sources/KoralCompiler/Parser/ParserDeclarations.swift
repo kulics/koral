@@ -278,8 +278,7 @@ extension Parser {
         throw ParserError.unexpectedToken(span: currentSpan, got: "Trait method should not have body")
       }
       
-      // Use newline-based termination for trait method declarations
-      try consumeOptionalSemicolon()
+      try requireSemicolon()
 
       methods.append(
         TraitMethodSignature(
@@ -378,8 +377,7 @@ extension Parser {
           span: currentSpan, got: "Intrinsic given method should not have body")
       }
       
-      // Use newline-based termination for intrinsic method declarations
-      try consumeOptionalSemicolon()
+      try requireSemicolon()
 
       methods.append(
         IntrinsicMethodDeclaration(
@@ -475,7 +473,7 @@ extension Parser {
 
       try match(.equal)
       let body = try expression()
-      try consumeOptionalSemicolon()
+      try requireSemicolon()
 
       methods.append(
         MethodDeclaration(
@@ -764,7 +762,7 @@ extension Parser {
       }
     }
 
-    if currentToken === .semicolon || shouldTerminateStatement() {
+    if currentToken === .semicolon {
       throw ParserError.missingReturnType(span: currentSpan)
     }
     let returnType = try parseType()

@@ -4,7 +4,7 @@
 
 /// Duration 表示时间间隔
 /// 内部存储与 C timespec 完全对齐
-public type Duration(package_private secs Int64, package_private nanos Int64)
+public type Duration(package_private secs Int64, package_private nanos Int64);
 
 given Duration {
 
@@ -14,71 +14,71 @@ given Duration {
     /// 要求 nanoseconds >= 0，且会归一化到 [0, 1_000_000_000) 区间。
     public new(seconds Int64, nanoseconds Int64) Result[Duration] = {
         if nanoseconds < 0 then {
-            return Result[Duration].Error(box("Duration.new: nanoseconds must be >= 0"))
-        }
+            return Result[Duration].Error(box("Duration.new: nanoseconds must be >= 0"));
+        };
 
-        let mutable out_secs = seconds
-        let mutable out_nanos = nanoseconds
+        let mutable out_secs = seconds;
+        let mutable out_nanos = nanoseconds;
 
         if out_nanos >= 1_000_000_000 then {
-            let extra_secs = out_nanos / 1_000_000_000
-            let new_secs = out_secs + extra_secs
+            let extra_secs = out_nanos / 1_000_000_000;
+            let new_secs = out_secs + extra_secs;
             if extra_secs > 0 and new_secs < out_secs then {
-                return Result[Duration].Error(box("Duration.new: seconds overflow"))
-            }
-            out_secs = new_secs
-            out_nanos = out_nanos % 1_000_000_000
-        }
+                return Result[Duration].Error(box("Duration.new: seconds overflow"));
+            };
+            out_secs = new_secs;
+            out_nanos = out_nanos % 1_000_000_000;
+        };
 
-        return Result[Duration].Ok(Duration(out_secs, out_nanos))
-    }
+        return Result[Duration].Ok(Duration(out_secs, out_nanos));
+    };
 
     // ============ 转换方法 ============
 
     /// 转换为纳秒总数
     public as_nanoseconds(self) Int64 =
-        self.secs * 1_000_000_000 + self.nanos
+        self.secs * 1_000_000_000 + self.nanos;
 
     /// 转换为微秒总数
     public as_microseconds(self) Int64 =
-        self.secs * 1_000_000 + self.nanos / 1_000
+        self.secs * 1_000_000 + self.nanos / 1_000;
 
     /// 转换为毫秒总数
     public as_milliseconds(self) Int64 =
-        self.secs * 1_000 + self.nanos / 1_000_000
+        self.secs * 1_000 + self.nanos / 1_000_000;
 
     /// 转换为秒数（截断）
     public as_seconds(self) Int64 =
-        self.secs
+        self.secs;
 
     /// 转换为分钟数（截断）
     public as_minutes(self) Int64 =
-        self.secs / 60
+        self.secs / 60;
 
     /// 转换为小时数（截断）
     public as_hours(self) Int64 =
-        self.secs / 3600
+        self.secs / 3600;
 
     /// 比率（Duration / Duration -> Float64）
     public ratio(self, other Duration) Float64 = {
-        let a Float64 = self.as_nanoseconds()(Float64)
-        let b Float64 = other.as_nanoseconds()(Float64)
-        return a / b
-    }
-}
+        let a Float64 = self.as_nanoseconds()(Float64);
+        let b Float64 = other.as_nanoseconds()(Float64);
+        return a / b;
+    };
+};
 
 given Duration as Default {
 
-    public default() Self = Duration(0(Int64), 0(Int64))
-}
+    public default() Self = Duration(0(Int64), 0(Int64));
+};
 
 
 given Duration as Eq {
 
     /// 相等比较
     public equals(self, other Duration) Bool =
-        self.secs == other.secs and self.nanos == other.nanos
-}
+        self.secs == other.secs and self.nanos == other.nanos;
+};
 
 given Duration as Ord {
 
@@ -86,44 +86,44 @@ given Duration as Ord {
     /// 返回: -1 (self < other), 0 (self == other), 1 (self > other)
     public compare(self, other Duration) Int = {
         if self.secs < other.secs then {
-            return -1
+            return -1;
         } else if self.secs > other.secs then {
-            return 1
+            return 1;
         } else if self.nanos < other.nanos then {
-            return -1
+            return -1;
         } else if self.nanos > other.nanos then {
-            return 1
+            return 1;
         } else {
-            return 0
-        }
-    }
-}
+            return 0;
+        };
+    };
+};
 
 // ============================================================================
 // Sleep API (__koral_nanosleep runtime)
 // ============================================================================
 
 // FFI 结构体：与 C timespec 布局对齐
-foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
+foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
 
 // FFI 函数声明
 // Runtime 提供 __koral_nanosleep，避免与系统 nanosleep 冲突
-foreign let __koral_nanosleep(req *unsafe KoralTimespec, rem *unsafe KoralTimespec) Int32
+foreign let __koral_nanosleep(req *unsafe KoralTimespec, rem *unsafe KoralTimespec) Int32;
 
 /// 休眠指定时间
 public let sleep(d Duration) Void = {
     if d.secs < 0 or d.nanos < 0 then {
-        panic("sleep: negative duration")
-    }
+        panic("sleep: negative duration");
+    };
 
-    let mutable secs = d.secs
-    let mutable nanos = d.nanos
+    let mutable secs = d.secs;
+    let mutable nanos = d.nanos;
     if nanos >= 1_000_000_000 then {
-        let extra = nanos / 1_000_000_000
-        secs = secs + extra
-        nanos = nanos % 1_000_000_000
-    }
+        let extra = nanos / 1_000_000_000;
+        secs = secs + extra;
+        nanos = nanos % 1_000_000_000;
+    };
 
-    let ts = KoralTimespec(secs, nanos)
-    let _ = __koral_nanosleep(&unsafe ts, null_ptr[KoralTimespec]())
-}
+    let ts = KoralTimespec(secs, nanos);
+    let _ = __koral_nanosleep(&unsafe ts, null_ptr[KoralTimespec]());
+};

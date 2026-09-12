@@ -1,148 +1,148 @@
-using std::container { .. }
+using std::container { .. };
 
 public type MIRVerifier(
     program * MIRProgram,
-)
+);
 
 given MIRVerifier {
     public new(program * MIRProgram) MIRVerifier = {
-        return MIRVerifier(program)
-    }
+        return MIRVerifier(program);
+    };
 
     public verify(self) Result[Void] = {
-        let _ = self.verify_trait_vtable_inventory() or return
+        let _ = self.verify_trait_vtable_inventory() or return;
         for global in self.program.globals then {
-            let _ = self.verify_global(global) or return
-        }
+            let _ = self.verify_global(global) or return;
+        };
         for function in self.program.functions then {
-            let _ = self.verify_function(function) or return
-        }
-        return Result[Void].Ok({})
-    }
+            let _ = self.verify_function(function) or return;
+        };
+        return Result[Void].Ok({});
+    };
 
     file_private verify_trait_vtable_inventory(self) Result[Void] = {
-        let mutable seen = Set[String].new()
+        let mutable seen = Set[String].new();
         for global in self.program.globals then {
             when global in {
                 .TraitVTable(vtable) then {
-                    let key = self.render_vtable_key(vtable.concrete_type, vtable.trait_name, vtable.trait_type_args)
+                    let key = self.render_vtable_key(vtable.concrete_type, vtable.trait_name, vtable.trait_type_args);
                     if seen.contains(key) then {
-                        return Result[Void].Error(box("MIR verification failed in trait vtable inventory: duplicate vtable key"))
-                    }
-                    seen.insert(key)
+                        return Result[Void].Error(box("MIR verification failed in trait vtable inventory: duplicate vtable key"));
+                    };
+                    seen.insert(key);
                 },
                 _ then {},
-            }
-        }
-        return Result[Void].Ok({})
-    }
+            };
+        };
+        return Result[Void].Ok({});
+    };
 
     file_private verify_global(self, global MIRGlobal) Result[Void] = {
         return when global in {
             .TraitVTable(vtable) then self.verify_trait_vtable(vtable),
             _ then Result[Void].Ok({}),
-        }
-    }
+        };
+    };
 
     file_private verify_trait_vtable(self, vtable MIRTraitVTable) Result[Void] = {
         if vtable.trait_name.is_empty() then {
-            return Result[Void].Error(box("MIR verification failed in trait vtable: empty trait name"))
-        }
+            return Result[Void].Error(box("MIR verification failed in trait vtable: empty trait name"));
+        };
         if self.program.context.contains_generic_parameter(vtable.concrete_type) then {
-            return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): unresolved concrete type"))
-        }
+            return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): unresolved concrete type"));
+        };
         for trait_arg in vtable.trait_type_args then {
             if self.program.context.contains_generic_parameter(trait_arg) then {
-                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): unresolved trait type argument"))
-            }
-        }
-        let mutable seen_methods = Set[String].new()
-        let mutable index UInt = 0
+                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): unresolved trait type argument"));
+            };
+        };
+        let mutable seen_methods = Set[String].new();
+        let mutable index UInt = 0;
         while index < vtable.methods.count() then {
-            let method = vtable.methods[index]
+            let method = vtable.methods[index];
             if method.name.is_empty() then {
-                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): empty method name"))
-            }
+                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): empty method name"));
+            };
             if seen_methods.contains(method.name) then {
-                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): duplicate method '\(method.name)'"))
-            }
-            seen_methods.insert(method.name)
+                return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name): duplicate method '\(method.name)'"));
+            };
+            seen_methods.insert(method.name);
             when method.return_type in {
                 .Some(return_type) then if self.program.context.contains_generic_parameter(return_type) then {
-                    return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): unresolved return type"))
+                    return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): unresolved return type"));
                 },
                 .None() then {},
-            }
-            let mutable param_index UInt = 0
+            };
+            let mutable param_index UInt = 0;
             while param_index < method.parameters.count() then {
-                let param = method.parameters[param_index]
+                let param = method.parameters[param_index];
                 when param.param_type in {
                     .Some(param_type) then if self.program.context.contains_generic_parameter(param_type) then {
-                        return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): unresolved parameter type"))
+                        return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): unresolved parameter type"));
                     },
                     .None() then {
-                        return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): missing parameter type"))
+                        return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): missing parameter type"));
                     },
-                }
+                };
                 if param.is_self and not (param.name == "self") then {
-                    return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): self slot name mismatch"))
-                }
-                param_index += 1
-            }
-            index += 1
-        }
-        return Result[Void].Ok({})
-    }
+                    return Result[Void].Error(box("MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): self slot name mismatch"));
+                };
+                param_index += 1;
+            };
+            index += 1;
+        };
+        return Result[Void].Ok({});
+    };
 
     file_private verify_function(self, function * MIRFunction) Result[Void] = {
         if function.blocks.is_empty() then {
-            return self.fail(function, "function has no basic blocks")
-        }
-        let mutable block_ids = Set[UInt].new()
+            return self.fail(function, "function has no basic blocks");
+        };
+        let mutable block_ids = Set[UInt].new();
         for block in function.blocks then {
             if block_ids.contains(block.id.raw_value) then {
-                return self.fail(function, "function has duplicate basic block IDs")
-            }
-            block_ids.insert(block.id.raw_value)
-        }
+                return self.fail(function, "function has duplicate basic block IDs");
+            };
+            block_ids.insert(block.id.raw_value);
+        };
         if not block_ids.contains(function.entry_block.raw_value) then {
-            return self.fail(function, "entry block is missing")
-        }
+            return self.fail(function, "entry block is missing");
+        };
 
-        let local_types = self.mir_local_type_map(*function)
-        let mutable local_ids = Set[UInt].new()
+        let local_types = self.mir_local_type_map(*function);
+        let mutable local_ids = Set[UInt].new();
         for local in function.locals then {
             if local_ids.contains(local.id.raw_value) then {
-                return self.fail(function, "function has duplicate local IDs")
-            }
-            local_ids.insert(local.id.raw_value)
+                return self.fail(function, "function has duplicate local IDs");
+            };
+            local_ids.insert(local.id.raw_value);
             if self.program.context.contains_generic_parameter(local.local_type) then {
-                return self.fail(function, "local \(local.name) has unresolved generic type")
-            }
-        }
+                return self.fail(function, "local \(local.name) has unresolved generic type");
+            };
+        };
 
         for block in function.blocks then {
             for statement in block.statements then {
-                let _ = self.verify_statement(function, statement, block_ids, local_ids, local_types) or return
-            }
-            let _ = self.verify_terminator(function, block.terminator, block_ids, local_ids, local_types) or return
-        }
-        return Result[Void].Ok({})
-    }
+                let _ = self.verify_statement(function, statement, block_ids, local_ids, local_types) or return;
+            };
+            let _ = self.verify_terminator(function, block.terminator, block_ids, local_ids, local_types) or return;
+        };
+        return Result[Void].Ok({});
+    };
 
     file_private verify_statement(self, function * MIRFunction, statement * MIRStatement, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
-        let _ = block_ids
+        let _ = block_ids;
         return when statement in {
             .Declare(local_id) then self.verify_local_id(function, local_id, local_ids),
             .Assign(place, value) then {
-                let _ = self.verify_place(function, place, local_ids, local_types) or return
-                let _ = self.verify_value(function, value, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_place(function, place, local_ids, local_types) or return;
+                let _ = self.verify_value(function, value, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .CompoundAssign(assignment) then {
-                let _ = self.verify_place(function, assignment.target, local_ids, local_types) or return
-                let _ = self.verify_value(function, assignment.value, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_place(function, assignment.target, local_ids, local_types) or return;
+                let _ = self.verify_value(function, assignment.value, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .Drop(place) then self.verify_place(function, place, local_ids, local_types),
             .Retain(value) then self.verify_value(function, value, local_ids, local_types),
@@ -151,450 +151,443 @@ given MIRVerifier {
             .ScopeEnter(_) then Result[Void].Ok({}),
             .ScopeExit(_) then Result[Void].Ok({}),
             .DebugSource(_) then Result[Void].Ok({}),
-        }
-    }
+        };
+    };
 
     file_private verify_terminator(self, function * MIRFunction, terminator MIRTerminator, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when terminator in {
             .Goto(target) then self.verify_target(function, target, block_ids),
             .Branch(condition, then_block, else_block) then {
-                let _ = self.verify_operand(function, condition, local_ids, local_types) or return
-                let _ = self.verify_target(function, then_block, block_ids) or return
-                let _ = self.verify_target(function, else_block, block_ids) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_operand(function, condition, local_ids, local_types) or return;
+                let _ = self.verify_target(function, then_block, block_ids) or return;
+                let _ = self.verify_target(function, else_block, block_ids) or return;
+                yield Result[Void].Ok({});
             },
             .SwitchValue(operand, cases, default_block) then {
-                let _ = self.verify_operand(function, operand, local_ids, local_types) or return
+                let _ = self.verify_operand(function, operand, local_ids, local_types) or return;
                 for switch_case in cases then {
-                    let _ = self.verify_target(function, switch_case.target, block_ids) or return
-                }
+                    let _ = self.verify_target(function, switch_case.target, block_ids) or return;
+                };
                 when default_block in {
                     .Some(target) then {
-                        let _ = self.verify_target(function, target, block_ids) or return
+                        let _ = self.verify_target(function, target, block_ids) or return;
                     },
                     .None() then {},
-                }
-                yield Result[Void].Ok({})
+                };
+                yield Result[Void].Ok({});
             },
             .ReturnValue(operand_opt) then {
                 when operand_opt in {
                     .Some(operand) then {
-                        let _ = self.verify_operand(function, operand, local_ids, local_types) or return
+                        let _ = self.verify_operand(function, operand, local_ids, local_types) or return;
                     },
                     .None() then {},
-                }
-                yield Result[Void].Ok({})
+                };
+                yield Result[Void].Ok({});
             },
             .Unreachable() then Result[Void].Ok({}),
-        }
-    }
+        };
+    };
 
     file_private verify_place(self, function * MIRFunction, place MIRPlace, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when place in {
             .Local(local_id) then self.verify_local_id(function, local_id, local_ids),
             .Global(_) then Result[Void].Ok({}),
             .Field(base, field) then {
-                let _ = self.verify_place(function, *base, local_ids, local_types) or return
+                let _ = self.verify_place(function, *base, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(field.symbol_type) then {
-                    return self.fail(function, "field place has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "field place has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .EnumPayload(base, _, _, _, field_type) then {
-                let _ = self.verify_place(function, *base, local_ids, local_types) or return
+                let _ = self.verify_place(function, *base, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(field_type) then {
-                    return self.fail(function, "enum payload place has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "enum payload place has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .Deref(base, pointee) then {
-                let _ = self.verify_value(function, *base, local_ids, local_types) or return
+                let _ = self.verify_value(function, *base, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(pointee) then {
-                    return self.fail(function, "place projection has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "place projection has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .PointerElement(base, pointee) then {
-                let _ = self.verify_value(function, *base, local_ids, local_types) or return
+                let _ = self.verify_value(function, *base, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(pointee) then {
-                    return self.fail(function, "place projection has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "place projection has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
-        }
-    }
+        };
+    };
 
     file_private verify_value(self, function * MIRFunction, value MIRValue, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when value in {
             .Operand(operand) then self.verify_operand(function, operand, local_ids, local_types),
             .PlaceRead(place, _) then self.verify_place(function, place, local_ids, local_types),
             .Binary(operation) then {
-                let _ = self.verify_operand(function, operation.left, local_ids, local_types) or return
-                let _ = self.verify_operand(function, operation.right, local_ids, local_types) or return
+                let _ = self.verify_operand(function, operation.left, local_ids, local_types) or return;
+                let _ = self.verify_operand(function, operation.right, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(operation.result_type) then {
-                    return self.fail(function, "binary operation has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "binary operation has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .Unary(operation) then {
-                let _ = self.verify_operand(function, operation.operand, local_ids, local_types) or return
+                let _ = self.verify_operand(function, operation.operand, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(operation.result_type) then {
-                    return self.fail(function, "unary operation has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "unary operation has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .Call(call) then {
-                let _ = self.verify_operand(function, call.callee, local_ids, local_types) or return
+                let _ = self.verify_operand(function, call.callee, local_ids, local_types) or return;
                 if call.argument_ownerships.count() <> call.arguments.count() then {
-                    return self.fail(function, "call argument ownership count does not match argument count")
-                }
+                    return self.fail(function, "call argument ownership count does not match argument count");
+                };
                 if self.program.context.contains_generic_parameter(call.result_type) then {
-                    return self.fail(function, "call result has unresolved generic type")
-                }
+                    return self.fail(function, "call result has unresolved generic type");
+                };
                 for argument in call.arguments then {
-                    let _ = self.verify_value(function, *argument, local_ids, local_types) or return
-                }
-                yield Result[Void].Ok({})
+                    let _ = self.verify_value(function, *argument, local_ids, local_types) or return;
+                };
+                yield Result[Void].Ok({});
             },
             .Aggregate(aggregate) then {
                 if self.program.context.contains_generic_parameter(aggregate.aggregate_type) then {
-                    return self.fail(function, "aggregate has unresolved generic type")
-                }
+                    return self.fail(function, "aggregate has unresolved generic type");
+                };
                 for field in aggregate.fields then {
-                    let _ = self.verify_value(function, *field, local_ids, local_types) or return
-                }
-                yield Result[Void].Ok({})
+                    let _ = self.verify_value(function, *field, local_ids, local_types) or return;
+                };
+                yield Result[Void].Ok({});
             },
             .EnumCase(construction) then {
                 if self.program.context.contains_generic_parameter(construction.enum_type) then {
-                    return self.fail(function, "enum construction has unresolved generic type")
-                }
+                    return self.fail(function, "enum construction has unresolved generic type");
+                };
                 for argument in construction.arguments then {
-                    let _ = self.verify_value(function, *argument, local_ids, local_types) or return
-                }
-                yield Result[Void].Ok({})
+                    let _ = self.verify_value(function, *argument, local_ids, local_types) or return;
+                };
+                yield Result[Void].Ok({});
             },
             .EnumTag(tag) then {
                 if self.program.context.contains_generic_parameter(tag.enum_type) then {
-                    return self.fail(function, "enum tag has unresolved generic type")
-                }
-                let _ = self.verify_value(function, *tag.subject, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                    return self.fail(function, "enum tag has unresolved generic type");
+                };
+                let _ = self.verify_value(function, *tag.subject, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .TraitObjectConversion(conversion) then self.verify_trait_object_conversion(function, conversion, local_ids, local_types),
             .TraitMethodCall(call) then self.verify_trait_method_call(function, call, local_ids, local_types),
             .Ref(place, _, _) then self.verify_place(function, place, local_ids, local_types),
             .Pointer(place) then self.verify_place(function, place, local_ids, local_types),
             .Cast(operand, target_type) then {
-                let _ = self.verify_operand(function, operand, local_ids, local_types) or return
+                let _ = self.verify_operand(function, operand, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(target_type) then {
-                    return self.fail(function, "cast target has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "cast target has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .Intrinsic(node) then self.verify_intrinsic(function, node, local_ids, local_types),
             .Lambda(lambda) then self.verify_lambda(function, lambda, local_ids, local_types),
-        }
-    }
+        };
+    };
 
     file_private verify_operand(self, function * MIRFunction, operand MIROperand, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
-        let _ = local_types
+        let _ = local_types;
         return when operand in {
             .Local(local_id) then self.verify_local_id(function, local_id, local_ids),
             .Constant(_) then Result[Void].Ok({}),
-            .Function(symbol) then if self.program.context.contains_generic_parameter(symbol.symbol_type)
-                then self.fail(function, "function operand has unresolved generic type")
-                else Result[Void].Ok({}),
-        }
-    }
+            .Function(symbol) then if self.program.context.contains_generic_parameter(symbol.symbol_type) then self.fail(function, "function operand has unresolved generic type") else Result[Void].Ok({}),
+        };
+    };
 
     file_private verify_intrinsic(self, function * MIRFunction, node MIRIntrinsic, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when node in {
             .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
-                let _ = self.verify_value(function, *value, local_ids, local_types) or return
+                let _ = self.verify_value(function, *value, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(concrete_type) then {
-                    return self.fail(function, "trait object match intrinsic has unresolved concrete type")
-                }
+                    return self.fail(function, "trait object match intrinsic has unresolved concrete type");
+                };
                 for trait_arg in trait_type_args then {
                     if self.program.context.contains_generic_parameter(trait_arg) then {
-                        return self.fail(function, "trait object match intrinsic has unresolved trait type argument")
-                    }
-                }
-                let value_type = self.mir_type_of_value(*value, local_types)
+                        return self.fail(function, "trait object match intrinsic has unresolved trait type argument");
+                    };
+                };
+                let value_type = self.mir_type_of_value(*value, local_types);
                 let actual = self.trait_object_reference_info(value_type) or else {
-                    return self.fail(function, "trait object match intrinsic value is not a trait object")
-                }
+                    return self.fail(function, "trait object match intrinsic value is not a trait object");
+                };
                 if actual.first <> trait_name or not self.type_list_equals(actual.second, trait_type_args) then {
-                    return self.fail(function, "trait object match intrinsic value type does not match intrinsic trait metadata")
-                }
+                    return self.fail(function, "trait object match intrinsic value type does not match intrinsic trait metadata");
+                };
                 if self.lookup_vtable(concrete_type, trait_name, trait_type_args) is .None() then {
-                    return self.fail(function, "trait object match intrinsic has no matching vtable")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "trait object match intrinsic has no matching vtable");
+                };
+                yield Result[Void].Ok({});
             },
             .TraitObjectDowncast(value, result_type) then {
-                let _ = self.verify_value(function, *value, local_ids, local_types) or return
+                let _ = self.verify_value(function, *value, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(result_type) then {
-                    return self.fail(function, "trait object downcast intrinsic has unresolved result type")
-                }
-                let value_type = self.mir_type_of_value(*value, local_types)
+                    return self.fail(function, "trait object downcast intrinsic has unresolved result type");
+                };
+                let value_type = self.mir_type_of_value(*value, local_types);
                 if self.trait_object_reference_info(value_type) is .None() then {
-                    return self.fail(function, "trait object downcast intrinsic value is not a trait object")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "trait object downcast intrinsic value is not a trait object");
+                };
+                yield Result[Void].Ok({});
             },
             .AllocMemory(count, result_type) then {
-                let _ = self.verify_value(function, *count, local_ids, local_types) or return
+                let _ = self.verify_value(function, *count, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(result_type) then {
-                    return self.fail(function, "intrinsic has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "intrinsic has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .DeallocMemory(pointer) then self.verify_value(function, *pointer, local_ids, local_types),
             .CopyMemory(dest, source, count) then {
-                let _ = self.verify_value(function, *dest, local_ids, local_types) or return
-                let _ = self.verify_value(function, *source, local_ids, local_types) or return
-                let _ = self.verify_value(function, *count, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_value(function, *dest, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *source, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *count, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .MoveMemory(dest, source, count) then {
-                let _ = self.verify_value(function, *dest, local_ids, local_types) or return
-                let _ = self.verify_value(function, *source, local_ids, local_types) or return
-                let _ = self.verify_value(function, *count, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_value(function, *dest, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *source, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *count, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .IsUniqueMutable(value) then self.verify_value(function, *value, local_ids, local_types),
             .RefCount(value) then self.verify_value(function, *value, local_ids, local_types),
             .MakeRef(pointer, owner, result_type) then {
-                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return
-                let _ = self.verify_value(function, *owner, local_ids, local_types) or return
+                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *owner, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(result_type) then {
-                    return self.fail(function, "intrinsic has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "intrinsic has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .MakeMutRef(pointer, owner, result_type) then {
-                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return
-                let _ = self.verify_value(function, *owner, local_ids, local_types) or return
+                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *owner, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(result_type) then {
-                    return self.fail(function, "intrinsic has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "intrinsic has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
             .DowngradeRef(value, _) then self.verify_value(function, *value, local_ids, local_types),
             .DowngradeMutRef(value, _) then self.verify_value(function, *value, local_ids, local_types),
             .UpgradeRef(value, _) then self.verify_value(function, *value, local_ids, local_types),
             .UpgradeMutRef(value, _) then self.verify_value(function, *value, local_ids, local_types),
             .InitMemory(pointer, value) then {
-                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return
-                let _ = self.verify_value(function, *value, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *value, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
             .DeinitMemory(pointer) then self.verify_value(function, *pointer, local_ids, local_types),
             .TakeMemory(pointer, result_type) then {
-                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return
+                let _ = self.verify_value(function, *pointer, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(result_type) then {
-                    return self.fail(function, "intrinsic has unresolved generic type")
-                }
-                yield Result[Void].Ok({})
+                    return self.fail(function, "intrinsic has unresolved generic type");
+                };
+                yield Result[Void].Ok({});
             },
-            .NullPtr(result_type) then if self.program.context.contains_generic_parameter(result_type)
-                then self.fail(function, "intrinsic has unresolved generic type")
-                else Result[Void].Ok({}),
+            .NullPtr(result_type) then if self.program.context.contains_generic_parameter(result_type) then self.fail(function, "intrinsic has unresolved generic type") else Result[Void].Ok({}),
             .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-                let _ = self.verify_value(function, *out_handle, local_ids, local_types) or return
-                let _ = self.verify_value(function, *out_tid, local_ids, local_types) or return
-                let _ = self.verify_value(function, *closure, local_ids, local_types) or return
-                let _ = self.verify_value(function, *stack_size, local_ids, local_types) or return
-                yield Result[Void].Ok({})
+                let _ = self.verify_value(function, *out_handle, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *out_tid, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *closure, local_ids, local_types) or return;
+                let _ = self.verify_value(function, *stack_size, local_ids, local_types) or return;
+                yield Result[Void].Ok({});
             },
-        }
-    }
+        };
+    };
 
     file_private verify_lambda(self, function * MIRFunction, lambda MIRLambda, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if self.program.context.contains_generic_parameter(lambda.lambda_type) then {
-            return self.fail(function, "lambda has unresolved generic type")
-        }
+            return self.fail(function, "lambda has unresolved generic type");
+        };
         if lambda.capture_sources.count() <> lambda.captures.count() then {
-            return self.fail(function, "lambda capture source count mismatch")
-        }
+            return self.fail(function, "lambda capture source count mismatch");
+        };
         for source in lambda.capture_sources then {
-            let _ = self.verify_place(function, source, local_ids, local_types) or return
-        }
-        return self.verify_function(lambda.function)
-    }
+            let _ = self.verify_place(function, source, local_ids, local_types) or return;
+        };
+        return self.verify_function(lambda.function);
+    };
 
     file_private verify_trait_object_conversion(self, function * MIRFunction, conversion MIRTraitObjectConversion, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if conversion.trait_name.is_empty() then {
-            return self.fail(function, "trait object conversion has empty trait name")
-        }
+            return self.fail(function, "trait object conversion has empty trait name");
+        };
         if self.program.context.contains_generic_parameter(conversion.result_type) then {
-            return self.fail(function, "trait object conversion has unresolved generic type")
-        }
+            return self.fail(function, "trait object conversion has unresolved generic type");
+        };
         if self.program.context.contains_generic_parameter(conversion.concrete_type) then {
-            return self.fail(function, "trait object conversion concrete type has unresolved generic type")
-        }
+            return self.fail(function, "trait object conversion concrete type has unresolved generic type");
+        };
         for trait_arg in conversion.trait_type_args then {
             if self.program.context.contains_generic_parameter(trait_arg) then {
-                return self.fail(function, "trait object conversion has unresolved trait type argument")
-            }
-        }
+                return self.fail(function, "trait object conversion has unresolved trait type argument");
+            };
+        };
         if self.lookup_vtable(conversion.concrete_type, conversion.trait_name, conversion.trait_type_args) is .None() then {
-            return self.fail(function, "trait object conversion has no matching vtable")
-        }
-        let inner_type = self.mir_type_of_value(*conversion.inner, local_types)
+            return self.fail(function, "trait object conversion has no matching vtable");
+        };
+        let inner_type = self.mir_type_of_value(*conversion.inner, local_types);
         let referenced = self.referenced_type(inner_type) or else {
-            return self.fail(function, "trait object conversion inner value is not a reference type")
-        }
+            return self.fail(function, "trait object conversion inner value is not a reference type");
+        };
         if not self.same_type(referenced, conversion.concrete_type) then {
-            return self.fail(function, "trait object conversion concrete type does not match inner reference type")
-        }
+            return self.fail(function, "trait object conversion concrete type does not match inner reference type");
+        };
         let target = self.trait_object_reference_info(conversion.result_type) or else {
-            return self.fail(function, "trait object conversion result is not a trait object reference")
-        }
+            return self.fail(function, "trait object conversion result is not a trait object reference");
+        };
         if target.first <> conversion.trait_name or not self.type_list_equals(target.second, conversion.trait_type_args) then {
-            return self.fail(function, "trait object conversion result type does not match conversion trait metadata")
-        }
-        return self.verify_value(function, *conversion.inner, local_ids, local_types)
-    }
+            return self.fail(function, "trait object conversion result type does not match conversion trait metadata");
+        };
+        return self.verify_value(function, *conversion.inner, local_ids, local_types);
+    };
 
     file_private verify_trait_method_call(self, function * MIRFunction, call MIRTraitMethodCall, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if call.trait_name.is_empty() then {
-            return self.fail(function, "trait method call has empty trait name")
-        }
+            return self.fail(function, "trait method call has empty trait name");
+        };
         if call.method_name.is_empty() then {
-            return self.fail(function, "trait method call has empty method name")
-        }
+            return self.fail(function, "trait method call has empty method name");
+        };
         if call.method_index < 0 then {
-            return self.fail(function, "trait method call has negative method index")
-        }
+            return self.fail(function, "trait method call has negative method index");
+        };
         if call.argument_ownerships.count() <> call.arguments.count() then {
-            return self.fail(function, "trait method call argument ownership count does not match argument count")
-        }
+            return self.fail(function, "trait method call argument ownership count does not match argument count");
+        };
         if self.program.context.contains_generic_parameter(call.result_type) then {
-            return self.fail(function, "trait method call has unresolved generic type")
-        }
+            return self.fail(function, "trait method call has unresolved generic type");
+        };
         for trait_arg in call.trait_type_args then {
             if self.program.context.contains_generic_parameter(trait_arg) then {
-                return self.fail(function, "trait method call has unresolved trait type argument")
-            }
-        }
-        let receiver_type = self.mir_type_of_value(*call.receiver, local_types)
+                return self.fail(function, "trait method call has unresolved trait type argument");
+            };
+        };
+        let receiver_type = self.mir_type_of_value(*call.receiver, local_types);
         let receiver_info = self.trait_object_reference_info(receiver_type) or else {
-            return self.fail(function, "trait method call receiver is not a trait object reference")
-        }
+            return self.fail(function, "trait method call receiver is not a trait object reference");
+        };
         if receiver_info.first <> call.trait_name or not self.type_list_equals(receiver_info.second, call.trait_type_args) then {
-            return self.fail(function, "trait method call receiver type does not match call trait metadata")
-        }
-        let ordered_names = self.ordered_trait_method_names_in_module(call.trait_name, self.function_module_path(function))
+            return self.fail(function, "trait method call receiver type does not match call trait metadata");
+        };
+        let ordered_names = self.ordered_trait_method_names_in_module(call.trait_name, self.function_module_path(function));
         if ordered_names.is_empty() then {
-            return self.fail(function, "trait method call references unknown trait metadata")
-        }
+            return self.fail(function, "trait method call references unknown trait metadata");
+        };
         if call.method_index(UInt) >= ordered_names.count() then {
-            return self.fail(function, "trait method call method index out of range")
-        }
-        let slot_name = ordered_names[call.method_index(UInt)]
+            return self.fail(function, "trait method call method index out of range");
+        };
+        let slot_name = ordered_names[call.method_index(UInt)];
         if slot_name <> call.method_name then {
-            return self.fail(function, "trait method call method index does not match method name")
-        }
-        let _ = self.verify_value(function, *call.receiver, local_ids, local_types) or return
+            return self.fail(function, "trait method call method index does not match method name");
+        };
+        let _ = self.verify_value(function, *call.receiver, local_ids, local_types) or return;
         for argument in call.arguments then {
-            let _ = self.verify_value(function, *argument, local_ids, local_types) or return
-        }
-        return Result[Void].Ok({})
-    }
+            let _ = self.verify_value(function, *argument, local_ids, local_types) or return;
+        };
+        return Result[Void].Ok({});
+    };
 
     file_private verify_local_id(self, function * MIRFunction, local_id MIRLocalID, local_ids Set[UInt]) Result[Void] = {
         if local_ids.contains(local_id.raw_value) then {
-            return Result[Void].Ok({})
-        }
-        return self.fail(function, "use of unknown local \(local_id.raw_value.to_string())")
-    }
+            return Result[Void].Ok({});
+        };
+        return self.fail(function, "use of unknown local \(local_id.raw_value.to_string())");
+    };
 
     file_private verify_target(self, function * MIRFunction, target MIRBlockID, block_ids Set[UInt]) Result[Void] = {
         if block_ids.contains(target.raw_value) then {
-            return Result[Void].Ok({})
-        }
-        return self.fail(function, "terminator targets missing block \(target.raw_value.to_string())")
-    }
+            return Result[Void].Ok({});
+        };
+        return self.fail(function, "terminator targets missing block \(target.raw_value.to_string())");
+    };
 
     file_private lookup_vtable(self, concrete_type Type, trait_name String, trait_type_args List[Type]) Option[MIRTraitVTable] = {
         for global in self.program.globals then {
             when global in {
                 .TraitVTable(vtable) then {
-                    if self.same_type(vtable.concrete_type, concrete_type)
-                       and vtable.trait_name == trait_name
-                       and self.type_list_equals(vtable.trait_type_args, trait_type_args)
-                    then {
-                        return Option[MIRTraitVTable].Some(vtable)
-                    }
+                    if self.same_type(vtable.concrete_type, concrete_type) and vtable.trait_name == trait_name and self.type_list_equals(vtable.trait_type_args, trait_type_args) then {
+                        return Option[MIRTraitVTable].Some(vtable);
+                    };
                 },
                 _ then {},
-            }
-        }
-        return Option[MIRTraitVTable].None()
-    }
+            };
+        };
+        return Option[MIRTraitVTable].None();
+    };
 
     file_private ordered_trait_method_names(self, trait_name String) List[String] = {
-        return self.ordered_trait_method_names_in_module(trait_name, List[String].new())
-    }
+        return self.ordered_trait_method_names_in_module(trait_name, List[String].new());
+    };
 
     file_private ordered_trait_method_names_in_module(self, trait_name String, preferred_module_path List[String]) List[String] = {
-        let mutable ordered = List[String].new()
-        let mutable seen = Set[String].new()
-        let mutable visited = Set[String].new()
-        self.collect_ordered_trait_method_names(trait_name, preferred_module_path, &mutable ordered, &mutable seen, &mutable visited)
-        return ordered
-    }
+        let mutable ordered = List[String].new();
+        let mutable seen = Set[String].new();
+        let mutable visited = Set[String].new();
+        self.collect_ordered_trait_method_names(trait_name, preferred_module_path, &mutable ordered, &mutable seen, &mutable visited);
+        return ordered;
+    };
 
     file_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
-        }
-    }
+        };
+    };
 
     file_private function_module_path(self, function * MIRFunction) List[String] = {
-        return self.program.context.get_module_path(function.identifier.def_id) or else List[String].new()
-    }
+        return self.program.context.get_module_path(function.identifier.def_id) or else List[String].new();
+    };
 
     file_private collect_ordered_trait_method_names(self, trait_name String, preferred_module_path List[String], ordered *mutable List[String], seen *mutable Set[String], visited *mutable Set[String]) Void = {
-        let _ = self
-        let visit_key = qualified_trait_key(preferred_module_path, trait_name)
+        let _ = self;
+        let visit_key = qualified_trait_key(preferred_module_path, trait_name);
         if visited.contains(visit_key) then {
-            return
-        }
-        visited.insert(visit_key)
+            return;
+        };
+        visited.insert(visit_key);
         when self.trait_info(trait_name, preferred_module_path) in {
             .Some(info) then {
                 for parent in info.parent_traits then {
-                    self.collect_ordered_trait_method_names(parent.name, info.module_path, ordered, seen, visited)
-                }
+                    self.collect_ordered_trait_method_names(parent.name, info.module_path, ordered, seen, visited);
+                };
                 for member in info.raw_members then {
                     if not seen.contains(member.name) then {
-                        seen.insert(member.name)
-                        ordered.push(member.name)
-                    }
-                }
+                        seen.insert(member.name);
+                        ordered.push(member.name);
+                    };
+                };
             },
             .None() then {},
-        }
-    }
+        };
+    };
 
     file_private trait_object_reference_info(self, t Type) Option[Pair[String, List[Type]]] = {
         return when t in {
             .TraitObject(trait_name, trait_args) then {
-                let mutable copied = List[Type].new()
-                for trait_arg in trait_args then { copied.push(*trait_arg) }
-                yield Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](trait_name, copied))
+                let mutable copied = List[Type].new();
+                for trait_arg in trait_args then { copied.push(*trait_arg);};
+                yield Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](trait_name, copied));
             },
             .ReferenceType(inner) then self.trait_object_reference_info(*inner),
             .MutableReferenceType(inner) then self.trait_object_reference_info(*inner),
             .BorrowedReferenceType(inner) then self.trait_object_reference_info(*inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_reference_info(*inner),
             _ then Option[Pair[String, List[Type]]].None(),
-        }
-    }
+        };
+    };
 
     file_private referenced_type(self, t Type) Option[Type] = {
         return when t in {
@@ -603,63 +596,63 @@ given MIRVerifier {
             .BorrowedReferenceType(inner) then Option[Type].Some(*inner),
             .MutableBorrowedReferenceType(inner) then Option[Type].Some(*inner),
             _ then Option[Type].None(),
-        }
-    }
+        };
+    };
 
     file_private same_type(self, left Type, right Type) Bool = {
-        let _ = self
-        return left == right
-    }
+        let _ = self;
+        return left == right;
+    };
 
     file_private type_list_equals(self, left List[Type], right List[Type]) Bool = {
-        let _ = self
-        if left.count() <> right.count() then { return false }
-        let mutable index UInt = 0
+        let _ = self;
+        if left.count() <> right.count() then { return false;};
+        let mutable index UInt = 0;
         while index < left.count() then {
             if left[index] <> right[index] then {
-                return false
-            }
-            index += 1
-        }
-        return true
-    }
+                return false;
+            };
+            index += 1;
+        };
+        return true;
+    };
 
     file_private render_vtable_key(self, concrete_type Type, trait_name String, trait_type_args List[Type]) String = {
-        let mutable rendered = trait_name
+        let mutable rendered = trait_name;
         if not trait_type_args.is_empty() then {
-            rendered.push_byte('<')
-            let mutable first = true
+            rendered.push_byte('<');
+            let mutable first = true;
             for trait_arg in trait_type_args then {
-                if not first then { rendered.push_string(", ") }
-                rendered.push_string(self.program.context.type_display_name(trait_arg))
-                first = false
-            }
-            rendered.push_byte('>')
-        }
-        rendered.push_string(" for ")
-        rendered.push_string(self.program.context.type_display_name(concrete_type))
-        return rendered
-    }
+                if not first then { rendered.push_string(", ");};
+                rendered.push_string(self.program.context.type_display_name(trait_arg));
+                first = false;
+            };
+            rendered.push_byte('>');
+        };
+        rendered.push_string(" for ");
+        rendered.push_string(self.program.context.type_display_name(concrete_type));
+        return rendered;
+    };
 
     file_private fail(self, function * MIRFunction, message String) Result[Void] = {
-        let name = self.program.context.symbol_name(*(function.identifier))
-        let mutable full = "MIR verification failed in "
-        full.push_string(name)
-        full.push_string(": ")
-        full.push_string(message)
-        return Result[Void].Error(box(full))
-    }
+        let name = self.program.context.symbol_name(*(function.identifier));
+        let mutable full = "MIR verification failed in ";
+        full.push_string(name);
+        full.push_string(": ");
+        full.push_string(message);
+        return Result[Void].Error(box(full));
+    };
 
     file_private mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
-        let mutable local_types = Dict[UInt, Type].new()
+        let mutable local_types = Dict[UInt, Type].new();
         for local in function.locals then {
-            local_types.insert(local.id.raw_value, local.local_type)
-        }
-        return local_types
-    }
+            local_types.insert(local.id.raw_value, local.local_type);
+        };
+        return local_types;
+    };
 
     file_private mir_type_of_operand(self, operand MIROperand, local_types Dict[UInt, Type]) Type = {
-        let _ = self
+        let _ = self;
         return when operand in {
             .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
             .Constant(constant) then when constant in {
@@ -670,11 +663,11 @@ given MIRVerifier {
                 .Void() then Type.VoidType(),
             },
             .Function(symbol) then symbol.symbol_type,
-        }
-    }
+        };
+    };
 
     file_private mir_type_of_place(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
-        let _ = self
+        let _ = self;
         return when place in {
             .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
             .Field(_, field) then field.symbol_type,
@@ -682,8 +675,8 @@ given MIRVerifier {
             .Deref(_, pointee) then pointee,
             .PointerElement(_, element) then element,
             .Global(_) then Type.Unknown(),
-        }
-    }
+        };
+    };
 
     file_private mir_type_of_value(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
         return when value in {
@@ -719,6 +712,6 @@ given MIRVerifier {
                 _ then Type.Unknown(),
             },
             .Lambda(lambda) then lambda.lambda_type,
-        }
-    }
-}
+        };
+    };
+};

@@ -1,13 +1,13 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // TimeZone — Timezone representation and offset queries
 // ============================================================================
 
 // FFI Declarations
-foreign let __koral_local_timezone_offset(out_offset_secs *unsafe Int32) Void
-foreign let __koral_local_timezone_name(buf *unsafe UInt8, buf_size Int32) Int32
-foreign let __koral_timezone_name_exists(name *unsafe UInt8) Int32
-foreign let __koral_timezone_offset_at(name *unsafe UInt8, unix_secs Int64, out_offset_secs *unsafe Int32) Void
+foreign let __koral_local_timezone_offset(out_offset_secs *unsafe Int32) Void;
+foreign let __koral_local_timezone_name(buf *unsafe UInt8, buf_size Int32) Int32;
+foreign let __koral_timezone_name_exists(name *unsafe UInt8) Int32;
+foreign let __koral_timezone_offset_at(name *unsafe UInt8, unix_secs Int64, out_offset_secs *unsafe Int32) Void;
 
 /// Internal enum representing the kind of timezone.
 type TimeZoneKind {
@@ -15,42 +15,40 @@ type TimeZoneKind {
     Local(name String),
     Fixed(offset_secs Int32),
     Named(name String),
-}
+};
 
 /// TimeZone represents a timezone for converting between UTC and local time.
-public type TimeZone(module_private kind TimeZoneKind)
+public type TimeZone(module_private kind TimeZoneKind);
 
 given TimeZone {
 
     /// Returns the UTC timezone (offset zero).
-    public utc() TimeZone = TimeZone(TimeZoneKind.Utc())
+    public utc() TimeZone = TimeZone(TimeZoneKind.Utc());
 
     /// Returns the local system timezone.
     public local() TimeZone = {
-        let buf_size = 256
-        let buf = alloc_memory[UInt8](buf_size(UInt))
-        defer dealloc_memory(buf)
-        let len = __koral_local_timezone_name(buf, buf_size(Int32))
-        let tz_name = if len > 0 then String.from_cstring_unchecked(buf) else "Local"
-        return TimeZone(TimeZoneKind.Local(tz_name))
-    }
+        let buf_size = 256;
+        let buf = alloc_memory[UInt8](buf_size(UInt));
+        defer dealloc_memory(buf);
+        let len = __koral_local_timezone_name(buf, buf_size(Int32));
+        let tz_name = if len > 0 then String.from_cstring_unchecked(buf) else "Local";
+        return TimeZone(TimeZoneKind.Local(tz_name));
+    };
 
     /// Creates a fixed-offset timezone from a Duration.
     /// Returns Error if the absolute offset is >= 86400 seconds.
     public from_offset(offset Duration) Result[TimeZone] =
         if offset.secs >= 86400 or offset.secs <= -86400 then
-            Result[TimeZone].Error(box("TimeZone offset must be less than 86400 seconds (24 hours)"))
-        else
-            Result[TimeZone].Ok(TimeZone(TimeZoneKind.Fixed(offset.secs(Int32))))
+            Result[TimeZone].Error(box("TimeZone offset must be less than 86400 seconds (24 hours)")) else
+            Result[TimeZone].Ok(TimeZone(TimeZoneKind.Fixed(offset.secs(Int32))));
 
     /// Creates a named timezone from an IANA timezone name.
     /// Returns Error if the timezone name is not found.
     public from_name(name String) Result[TimeZone] = {
-        let exists = __koral_timezone_name_exists(name.storage.data)
-        return if exists == 0 then Result[TimeZone].Error(box("unknown timezone: " + name))
-        else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Named(name)))
-    }
-}
+        let exists = __koral_timezone_name_exists(name.storage.data);
+        return if exists == 0 then Result[TimeZone].Error(box("unknown timezone: " + name)) else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Named(name)));
+    };
+};
 
 given TimeZone as Eq {
 
@@ -72,5 +70,5 @@ given TimeZone as Eq {
                 .Local(b) then a == b,
                 _ then false,
             },
-        }
-}
+        };
+};

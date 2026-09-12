@@ -111,20 +111,6 @@ public enum Token: CustomStringConvertible {
   case itKeyword // 'it' keyword
   case unsafeKeyword // 'unsafe' keyword
 
-  /// Whether this token is one of the narrow line-join tokens allowed after a newline.
-  /// These are limited to grammar join keywords and structural connectors.
-  public var isLineJoinToken: Bool {
-    switch self {
-    case .andKeyword, .orKeyword, .isKeyword, .thenKeyword, .elseKeyword:
-      return true
-    case .dot:
-      return true
-    case .arrow:
-      return true
-    default:
-      return false
-    }
-  }
 
   // Add static operator function to compare if the same item
   public static func === (lhs: Token, rhs: Token) -> Bool {

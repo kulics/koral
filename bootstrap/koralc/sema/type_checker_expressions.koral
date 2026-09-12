@@ -10,53 +10,51 @@
 
 given TypeChecker {
     module_private lookup_non_global_scope_symbol(self, scope Scope, name String) Option[Symbol] = {
-        let _ = self
-        let mutable current_opt = Option[Scope].Some(scope)
-        let mutable traversed UInt = 0
+        let _ = self;
+        let mutable current_opt = Option[Scope].Some(scope);
+        let mutable traversed UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
                 .Some(found_scope) then found_scope,
                 .None() then scope,
-            }
+            };
 
             when current.lookup_local(name) in {
-                .Some(symbol) then { return Option[Symbol].Some(symbol) },
+                .Some(symbol) then { return Option[Symbol].Some(symbol);},
                 .None() then {},
-            }
+            };
 
-            traversed += 1
+            traversed += 1;
             if traversed > 4096(UInt) then {
-                return Option[Symbol].None()
-            }
+                return Option[Symbol].None();
+            };
 
             current_opt = when current.parent_scope() in {
-                .Some(parent) then if parent.parent_scope() is .None()
-                    then Option[Scope].None()
-                    else Option[Scope].Some(parent),
+                .Some(parent) then if parent.parent_scope() is .None() then Option[Scope].None() else Option[Scope].Some(parent),
                 .None() then Option[Scope].None(),
-            }
-        }
+            };
+        };
 
-        return Option[Symbol].None()
-    }
+        return Option[Symbol].None();
+    };
 
     module_private report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointer_type Type, pointee Type, member String) Void = {
         if resolved is not .Unknown() or has_pointer_method then {
-            return
-        }
+            return;
+        };
         when pointee in {
             .StructureType(def_id) then {
                 if self.context().is_foreign_struct(def_id) then {
-                    let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
+                    let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee);
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
                             "foreign struct '\(type_name)' has no field '\(member)'"
                         )
-                    )
-                }
+                    );
+                };
             },
             .GenericStruct(_, _) then {},
             _ then {
@@ -66,35 +64,35 @@ given TypeChecker {
                         self.storage.file_path,
                         "cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(pointer_type))'"
                     )
-                )
+                );
             },
-        }
-    }
+        };
+    };
 
     module_private report_weak_member_access_issue_if_needed(self, resolved Type, has_method Bool, base_type Type, member String) Void = {
         if resolved is not .Unknown() or has_method then {
-            return
-        }
+            return;
+        };
         self.storage.diagnostics.push(
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
                 "Invalid operation member access between types \(self.display_type_name(base_type)) and "
             )
-        )
-    }
+        );
+    };
 
     module_private expr_contains_or_return(self, expr * Expr) Bool = {
-        let _ = self
+        let _ = self;
         return when expr in {
             .OrReturnExpr(_, _) then true,
             .ArithmeticExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
             .ComparisonExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
             .ComparisonChainExpr(operands, _, _) then {
                 for operand in operands then {
-                    if self.expr_contains_or_return(operand) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(operand) then { return true;};
+                };
+                yield false;
             },
             .BitwiseExpr(left, _, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
             .AndExpr(left, right, _) then self.expr_contains_or_return(left) or self.expr_contains_or_return(right),
@@ -105,12 +103,12 @@ given TypeChecker {
                 let left_has = when left in {
                     .Some(value) then self.expr_contains_or_return(value),
                     .None() then false,
-                }
+                };
                 let right_has = when right in {
                     .Some(value) then self.expr_contains_or_return(value),
                     .None() then false,
-                }
-                yield left_has or right_has
+                };
+                yield left_has or right_has;
             },
             .Unary(_, inner, _) then self.expr_contains_or_return(inner),
             .CastExpr(_, inner, _) then self.expr_contains_or_return(inner),
@@ -121,89 +119,89 @@ given TypeChecker {
             .UnsafeDerefExpr(inner, _) then self.expr_contains_or_return(inner),
             .Call(callee, args, _) then {
                 if self.expr_contains_or_return(callee) then {
-                    return true
-                }
+                    return true;
+                };
                 for arg in args then {
-                    if self.expr_contains_or_return(arg) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(arg) then { return true;};
+                };
+                yield false;
             },
             .StaticMethodCall(_, _, _, args, _) then {
                 for arg in args then {
-                    if self.expr_contains_or_return(arg) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(arg) then { return true;};
+                };
+                yield false;
             },
             .MemberPath(base, _, _) then self.expr_contains_or_return(base),
             .SubscriptExpr(base, args, _) then {
                 if self.expr_contains_or_return(base) then {
-                    return true
-                }
+                    return true;
+                };
                 for arg in args then {
-                    if self.expr_contains_or_return(arg) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(arg) then { return true;};
+                };
+                yield false;
             },
             .Block(statements, _) then self.stmts_contain_or_return(statements),
             .IfExpr(condition, then_expr, else_expr, _) then {
                 let else_has = when else_expr in {
                     .Some(value) then self.expr_contains_or_return(value),
                     .None() then false,
-                }
-                yield self.expr_contains_or_return(condition) or self.expr_contains_or_return(then_expr) or else_has
+                };
+                yield self.expr_contains_or_return(condition) or self.expr_contains_or_return(then_expr) or else_has;
             },
             .WhileExpr(condition, body, _) then self.expr_contains_or_return(condition) or self.expr_contains_or_return(body),
             .ForExpr(_, iterable, body, _) then self.expr_contains_or_return(iterable) or self.expr_contains_or_return(body),
             .WhenExpr(subject, arms, _) then {
                 if self.expr_contains_or_return(subject) then {
-                    return true
-                }
+                    return true;
+                };
                 for arm in arms then {
-                    if self.expr_contains_or_return(arm.body) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(arm.body) then { return true;};
+                };
+                yield false;
             },
             .LambdaExpr(_, _, body, _) then self.expr_contains_or_return(body),
             .ImplicitMemberExpr(_, args, _) then {
                 for arg in args then {
-                    if self.expr_contains_or_return(arg) then { return true }
-                }
-                yield false
+                    if self.expr_contains_or_return(arg) then { return true;};
+                };
+                yield false;
             },
             .NamedArgument(_, inner, _) then self.expr_contains_or_return(inner),
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private stmts_contain_or_return(self, statements List[Statement]) Bool = {
         for stmt in statements then {
             when stmt in {
-                .LetStmt(_, _, _, value, _) then if self.expr_contains_or_return(value) then { return true },
-                .PairLetStmt(_, _, value, _) then if self.expr_contains_or_return(value) then { return true },
-                .AssignmentStmt(target, _, value, _) then if self.expr_contains_or_return(target) or self.expr_contains_or_return(value) then { return true },
-                .ExprStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
+                .LetStmt(_, _, _, value, _) then if self.expr_contains_or_return(value) then { return true;},
+                .PairLetStmt(_, _, value, _) then if self.expr_contains_or_return(value) then { return true;},
+                .AssignmentStmt(target, _, value, _) then if self.expr_contains_or_return(target) or self.expr_contains_or_return(value) then { return true;},
+                .ExprStmt(value, _) then if self.expr_contains_or_return(value) then { return true;},
                 .ReturnStmt(value_opt, _) then when value_opt in {
-                    .Some(value) then if self.expr_contains_or_return(value) then { return true },
+                    .Some(value) then if self.expr_contains_or_return(value) then { return true;},
                     .None() then {},
                 },
-                .DeferStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
+                .DeferStmt(value, _) then if self.expr_contains_or_return(value) then { return true;},
                 _ then {},
-            }
-        }
-        return false
-    }
+            };
+        };
+        return false;
+    };
 
     module_private is_std_drop_trait(self, trait_name String) Bool = {
-        if trait_name <> "Drop" then { return false }
+        if trait_name <> "Drop" then { return false;};
         return when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
-                if info.module_path.is_empty() then { return false }
-                let root = info.module_path[0(UInt)]
-                yield root == "Std" or root == "std"
+                if info.module_path.is_empty() then { return false;};
+                let root = info.module_path[0(UInt)];
+                yield root == "Std" or root == "std";
             },
             .None() then false,
-        }
-    }
+        };
+    };
 
     module_private has_explicit_std_drop_conformance(self, base_type Type) Bool = {
         let normalized = when base_type in {
@@ -214,152 +212,140 @@ given TypeChecker {
             .WeakReferenceType(inner) then *inner,
             .MutableWeakReferenceType(inner) then *inner,
             _ then base_type,
-        }
+        };
         if not self.has_explicit_trait_conformance(normalized, "Drop") then {
-            return false
-        }
-        return self.is_std_drop_trait("Drop")
-    }
+            return false;
+        };
+        return self.is_std_drop_trait("Drop");
+    };
 
     module_private resolve_source_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
-        let raw_method_signature = self.resolve_method_signature(base_type, method_name)
-        return self.resolve_source_method_signature_from_raw(base_type, method_name, raw_method_signature)
-    }
+        let raw_method_signature = self.resolve_method_signature(base_type, method_name);
+        return self.resolve_source_method_signature_from_raw(base_type, method_name, raw_method_signature);
+    };
 
     module_private resolve_source_method_signature_from_raw(self, base_type Type, method_name String, raw_method_signature Option[Symbol]) Option[Symbol] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
-            return Option[Symbol].None()
-        }
+            return Option[Symbol].None();
+        };
         return when raw_method_signature in {
-            .Some(method) then if self.is_method_accessible_from_current_context(method)
-                then Option[Symbol].Some(method)
-                else Option[Symbol].None(),
+            .Some(method) then if self.is_method_accessible_from_current_context(method) then Option[Symbol].Some(method) else Option[Symbol].None(),
             .None() then Option[Symbol].None(),
-        }
-    }
+        };
+    };
 
     module_private check_expr_global_ref(self, expr * Expr, expected Option[Type]) TypedExpr = {
-        let prev_function_return_context = self.storage.function_return_context
-        let prev_in_loop = self.storage.in_loop
-        let prev_loop_depth = self.storage.loop_depth
-        let prev_exitable_construct_stack = self.storage.exitable_construct_stack
-        let prev_in_defer = self.storage.in_defer
-        let prev_branch_break_targets = self.storage.branch_break_targets
-        self.storage.function_return_context.expected_return_type = Option[Type].None()
-        self.storage.function_return_context.inferred_return_type = Option[Type].None()
-        self.storage.function_return_context.is_inferring = false
-        self.storage.in_loop = false
-        self.storage.loop_depth = 0
-        self.storage.exitable_construct_stack = List[ExitableConstruct].new()
-        self.storage.in_defer = false
-        self.storage.branch_break_targets = List[*mutable BranchBreakTarget].new()
-        let mutable scope = Scope.new_child(self.storage.global_scope)
+        let prev_function_return_context = self.storage.function_return_context;
+        let prev_in_loop = self.storage.in_loop;
+        let prev_loop_depth = self.storage.loop_depth;
+        let prev_exitable_construct_stack = self.storage.exitable_construct_stack;
+        let prev_in_defer = self.storage.in_defer;
+        let prev_branch_break_targets = self.storage.branch_break_targets;
+        self.storage.function_return_context.expected_return_type = Option[Type].None();
+        self.storage.function_return_context.inferred_return_type = Option[Type].None();
+        self.storage.function_return_context.is_inferring = false;
+        self.storage.in_loop = false;
+        self.storage.loop_depth = 0;
+        self.storage.exitable_construct_stack = List[ExitableConstruct].new();
+        self.storage.in_defer = false;
+        self.storage.branch_break_targets = List[*mutable BranchBreakTarget].new();
+        let mutable scope = Scope.new_child(self.storage.global_scope);
         let typed = if self.expr_contains_or_return(expr) then {
-            self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr))
+            self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr));
             let fallback_type = when expected in {
                 .Some(expected_type) then expected_type,
                 .None() then Type.Unknown(),
-            }
-            yield self.empty_typed_block(fallback_type)
+            };
+            yield self.empty_typed_block(fallback_type);
         } else {
-            yield self.check_expr_scoped_ref(expr, expected, scope)
-        }
-        self.storage.function_return_context = prev_function_return_context
-        self.storage.in_loop = prev_in_loop
-        self.storage.loop_depth = prev_loop_depth
-        self.storage.exitable_construct_stack = prev_exitable_construct_stack
-        self.storage.in_defer = prev_in_defer
-        self.storage.branch_break_targets = prev_branch_break_targets
-        return typed
-    }
+            yield self.check_expr_scoped_ref(expr, expected, scope);
+        };
+        self.storage.function_return_context = prev_function_return_context;
+        self.storage.in_loop = prev_in_loop;
+        self.storage.loop_depth = prev_loop_depth;
+        self.storage.exitable_construct_stack = prev_exitable_construct_stack;
+        self.storage.in_defer = prev_in_defer;
+        self.storage.branch_break_targets = prev_branch_break_targets;
+        return typed;
+    };
 
-    module_private ast_expr_span(self, expr * Expr) SourceSpan = expr_span(expr)
+    module_private ast_expr_span(self, expr * Expr) SourceSpan = expr_span(expr);
 
     module_private check_identifier_expr_at(self, name String, span SourceSpan, scope Scope) TypedExpr = {
-        let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name)
-        let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None() else self.lookup_current_file_symbol(name)
-        let file_sym_opt = raw_file_sym_opt
-        let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_)
-            then Option[Symbol].None()
-            else self.storage.global_scope.lookup(name)
-        let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_)
-            then Option[Symbol].None()
-            else self.resolve_imported_alias_symbol(name)
-        let sym = if local_sym_opt is .Some(s) then s
-        else if file_sym_opt is .Some(s) then s
-        else if global_sym_opt is .Some(s) then s
-        else if alias_sym_opt is .Some(s) then s
-        else {
-            let fallback_type_opt = self.storage.global_scope.lookup_type(name)
-            let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name)
-            let resolved_named_is_type = if resolved_named_type_opt is .Some(_) then true else false
-            let is_type_name = if fallback_type_opt is .Some(_) then true else resolved_named_is_type
-            let is_upper = self.is_upper_first_char(name)
-            let fallback_type = if resolved_named_type_opt is .Some(t) then t
-            else if fallback_type_opt is .Some(t) then t
-            else Type.Unknown()
+        let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name);
+        let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None() else self.lookup_current_file_symbol(name);
+        let file_sym_opt = raw_file_sym_opt;
+        let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) then Option[Symbol].None() else self.storage.global_scope.lookup(name);
+        let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then Option[Symbol].None() else self.resolve_imported_alias_symbol(name);
+        let sym = if local_sym_opt is .Some(s) then s else if file_sym_opt is .Some(s) then s else if global_sym_opt is .Some(s) then s else if alias_sym_opt is .Some(s) then s else {
+            let fallback_type_opt = self.storage.global_scope.lookup_type(name);
+            let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name);
+            let resolved_named_is_type = if resolved_named_type_opt is .Some(_) then true else false;
+            let is_type_name = if fallback_type_opt is .Some(_) then true else resolved_named_is_type;
+            let is_upper = self.is_upper_first_char(name);
+            let fallback_type = if resolved_named_type_opt is .Some(t) then t else if fallback_type_opt is .Some(t) then t else Type.Unknown();
             if is_type_name then {
-                self.check_type_visibility(fallback_type, name, scope)
-            }
+                self.check_type_visibility(fallback_type, name, scope);
+            };
             if not is_type_name and not is_upper then {
-                self.push_diagnostic_at_span("Undefined variable: \(name)", span)
-            }
-            let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
-            let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
-            let def_id = self.allocate_unindexed_def_id(name, def_kind)
-            yield Symbol(def_id, fallback_type, symbol_kind)
-        }
-        let mutable normalized_sym = sym
+                self.push_diagnostic_at_span("Undefined variable: \(name)", span);
+            };
+            let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value());
+            let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable();
+            let def_id = self.allocate_unindexed_def_id(name, def_kind);
+            yield Symbol(def_id, fallback_type, symbol_kind);
+        };
+        let mutable normalized_sym = sym;
         if sym.kind is .TypeSymbol() then {
             when self.try_resolve_named_type_without_diag(name) in {
                 .Some(bt) then {
-                    normalized_sym = Symbol(sym.def_id, bt, sym.kind)
+                    normalized_sym = Symbol(sym.def_id, bt, sym.kind);
                 },
                 .None() then {},
-            }
-        }
+            };
+        };
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is .Function() then {
             when self.storage.generic_templates.lookup_function_by_def_id(gs.def_id) in {
                 .Some(template) then {
                     for tp in template.type_parameters then {
                         for constraint in tp.constraints then {
-                            let trait_name = self.type_node_name(constraint)
+                            let trait_name = self.type_node_name(constraint);
                             if trait_name == "Any" then {
-                                continue
-                            }
+                                continue;
+                            };
                             when self.storage.trait_registry.get(trait_name) in {
                                 .Some(info) then {
                                     if self.make_visibility_checker() is .Some(checker) then {
                                         when checker.check_symbol(info.module_path, trait_name, false) in {
                                             .Ok(_) then {},
                                             .Error(message) then {
-                                                self.push_diagnostic(message.message())
-                                                return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
+                                                self.push_diagnostic(message.message());
+                                                return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type);
                                             },
-                                        }
-                                    }
+                                        };
+                                    };
                                 },
                                 .None() then {},
-                            }
-                        }
-                    }
+                            };
+                        };
+                    };
                 },
                 .None() then {},
-            }
-        }
+            };
+        };
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
-            self.check_symbol_visibility(normalized_sym)
-        }
-        return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
-    }
+            self.check_symbol_visibility(normalized_sym);
+        };
+        return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type);
+    };
 
     module_private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
-        return self.check_identifier_expr_at(name, unknown_span(), scope)
-    }
+        return self.check_identifier_expr_at(name, unknown_span(), scope);
+    };
 
     module_private check_operand_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
-        return self.check_child_expr_ref(expr, expected, scope)
-    }
+        return self.check_child_expr_ref(expr, expected, scope);
+    };
 
     module_private check_child_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
@@ -369,238 +355,237 @@ given TypeChecker {
             .ComparisonChainExpr(operands, operators, _) then self.check_comparison_chain_expr_ref(operands, operators, scope),
             .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, expected, scope),
             .DerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .ReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .MutableBorrowedReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .BorrowedReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .WeakReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .MutableWeakReferenceType(inner_ref) then {
                         yield when *inner_ref in {
                             .TraitObject(_, _) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .PointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .MutablePointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     _ then {
                         let actual = when typed_inner.expr_type in {
                             .TypeVar(_) then "Int",
                             _ then type_to_string(typed_inner.expr_type),
-                        }
-                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference or raw pointer type, got \(actual)")
-                        yield Type.Unknown()
+                        };
+                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference or raw pointer type, got \(actual)");
+                        yield Type.Unknown();
                     },
-                }
+                };
                 let checked_inner_t = when inner_t in {
                     .Unknown() then inner_t,
                     _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
-                }
+                };
                 yield when typed_inner.expr_type in {
                     .PointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
                     .MutablePointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
                     _ then make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t),
-                }
+                };
             },
             .UnsafeDerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
                     .PointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     .MutablePointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
-                                yield Type.Unknown()
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time");
+                                yield Type.Unknown();
                             },
                             _ then *inner_ref,
-                        }
+                        };
                     },
                     _ then {
                         let actual = when typed_inner.expr_type in {
                             .TypeVar(_) then "Int",
                             _ then type_to_string(typed_inner.expr_type),
-                        }
-                        self.push_expr_diagnostic(expr, "Type mismatch: expected Unsafe pointer type, got \(actual)")
-                        yield Type.Unknown()
+                        };
+                        self.push_expr_diagnostic(expr, "Type mismatch: expected Unsafe pointer type, got \(actual)");
+                        yield Type.Unknown();
                     },
-                }
+                };
                 let checked_inner_t = when inner_t in {
                     .Unknown() then inner_t,
                     _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t)
+                };
+                yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t);
             },
             _ then self.check_expr_core_ref(expr, expected, scope),
-        }
-    }
+        };
+    };
 
     module_private make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
         let member_access = when typed_base.expr_kind in {
             .MemberPath(path_base, path) then {
                 if self.is_ref_like_assignment_type(typed_base.expr_type) then {
-                    let mutable nested_path = List[String].new()
-                    nested_path.push(member)
-                    return make_typed_expr(TypedExprKind.MemberPath(box(typed_base), nested_path), member_type)
-                }
-                let mutable extended = List[String].new()
+                    let mutable nested_path = List[String].new();
+                    nested_path.push(member);
+                    return make_typed_expr(TypedExprKind.MemberPath(box(typed_base), nested_path), member_type);
+                };
+                let mutable extended = List[String].new();
                 for segment in path then {
-                    extended.push(segment)
-                }
-                extended.push(member)
-                yield make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type)
+                    extended.push(segment);
+                };
+                extended.push(member);
+                yield make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type);
             },
             _ then {
-                let mutable path = List[String].new()
-                path.push(member)
-                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
+                let mutable path = List[String].new();
+                path.push(member);
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type);
             },
-        }
+        };
         if self.receiver_is_addressable_without_temp(typed_base) then {
-            return member_access
-        }
+            return member_access;
+        };
         return when member_access.expr_kind in {
             .MemberPath(_, path) then {
-                let temp_symbol = self.make_expr_temp_symbol("__member_base", typed_base.expr_type, VariableKind.Value())
-                let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
-                let temp_member_access = make_typed_expr(TypedExprKind.MemberPath(box(temp_var), path), member_type)
-                let mutable block_statements = List[* TypedStatement].new()
-                block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span())))
-                block_statements.push(box(TypedStatement.ExprStmt(box(temp_member_access), unknown_span())))
-                yield make_typed_expr(TypedExprKind.Block(block_statements), member_type)
+                let temp_symbol = self.make_expr_temp_symbol("__member_base", typed_base.expr_type, VariableKind.Value());
+                let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
+                let temp_member_access = make_typed_expr(TypedExprKind.MemberPath(box(temp_var), path), member_type);
+                let mutable block_statements = List[* TypedStatement].new();
+                block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span())));
+                block_statements.push(box(TypedStatement.ExprStmt(box(temp_member_access), unknown_span())));
+                yield make_typed_expr(TypedExprKind.Block(block_statements), member_type);
             },
             _ then member_access,
-        }
-    }
+        };
+    };
 
     module_private split_member_path_call_callee(self, callee * Expr) Option[Pair[* Expr, String]] = {
         return when callee in {
             .MemberPath(base, path, _) then {
-                let mutable copied_path = List[String].new()
+                let mutable copied_path = List[String].new();
                 for seg in path then {
-                    copied_path.push(seg)
-                }
+                    copied_path.push(seg);
+                };
                 if copied_path.is_empty() then {
-                    return Option[Pair[* Expr, String]].None()
-                }
-                let method_name = copied_path[copied_path.count() - 1]
+                    return Option[Pair[* Expr, String]].None();
+                };
+                let method_name = copied_path[copied_path.count() - 1];
                 let receiver_expr = if copied_path.count() == 1 then base else {
-                    let mutable receiver_path = List[String].new()
-                    let mutable idx UInt = 0
+                    let mutable receiver_path = List[String].new();
+                    let mutable idx UInt = 0;
                     while idx + 1 < copied_path.count() then {
-                        receiver_path.push(copied_path[idx])
-                        idx += 1
-                    }
-                    yield box(Expr.MemberPath(base, receiver_path, expr_span(callee)))
-                }
-                yield Option[Pair[* Expr, String]].Some(Pair[* Expr, String](receiver_expr, method_name))
+                        receiver_path.push(copied_path[idx]);
+                        idx += 1;
+                    };
+                    yield box(Expr.MemberPath(base, receiver_path, expr_span(callee)));
+                };
+                yield Option[Pair[* Expr, String]].Some(Pair[* Expr, String](receiver_expr, method_name));
             },
             _ then Option[Pair[* Expr, String]].None(),
-        }
-    }
+        };
+    };
 
     module_private check_member_expr_ref(self, base * Expr, member String, scope Scope) TypedExpr = {
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             _ then self.check_expr_core_ref(base, .None(), scope),
-        }
-        let raw_method = self.resolve_method_signature(typed_base.expr_type, member)
-        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member)
+        };
+        let raw_method = self.resolve_method_signature(typed_base.expr_type, member);
+        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member);
         when raw_method in {
             .Some(method) then {
-                if visible_method is .None()
-                    and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)) then {
-                    return self.empty_typed_block(Type.Unknown())
-                }
+                if visible_method is .None() and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)) then {
+                    return self.empty_typed_block(Type.Unknown());
+                };
             },
             .None() then {},
-        }
-        let mutable inaccessible_method_member = false
+        };
+        let mutable inaccessible_method_member = false;
         let member_type = when typed_base.expr_type in {
             .PointerType(inner) then {
-                let pointee = *inner
-                let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = visible_method is .Some(_)
+                let pointee = *inner;
+                let resolved = self.resolve_member_type(pointee, member);
+                let has_pointer_method = visible_method is .Some(_);
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
                         .StructureType(def_id) then {
                             if self.context().is_foreign_struct(def_id) then {
-                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
+                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee);
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
                                         "foreign struct '\(type_name)' has no field '\(member)'"
                                     )
-                                )
-                            }
+                                );
+                            };
                         },
                         .GenericStruct(_, _) then {},
                         _ then {
@@ -610,64 +595,63 @@ given TypeChecker {
                                     self.storage.file_path,
                                     "cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(typed_base.expr_type))'"
                                 )
-                            )
+                            );
                         },
-                    }
-                }
-                yield resolved
+                    };
+                };
+                yield resolved;
             },
             .MutablePointerType(inner) then {
-                let pointee = *inner
-                let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = visible_method is .Some(_)
-                self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, typed_base.expr_type, pointee, member)
-                yield resolved
+                let pointee = *inner;
+                let resolved = self.resolve_member_type(pointee, member);
+                let has_pointer_method = visible_method is .Some(_);
+                self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, typed_base.expr_type, pointee, member);
+                yield resolved;
             },
             .MutableReferenceType(inner) then self.resolve_member_type(*inner, member),
             .ReferenceType(inner) then self.resolve_member_type(*inner, member),
             .MutableBorrowedReferenceType(inner) then self.resolve_member_type(*inner, member),
             .BorrowedReferenceType(inner) then self.resolve_member_type(*inner, member),
             .WeakReferenceType(inner) then {
-                let resolved = self.resolve_member_type(*inner, member)
-                let has_method = raw_method is .Some(_) or visible_method is .Some(_)
-                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member)
-                yield resolved
+                let resolved = self.resolve_member_type(*inner, member);
+                let has_method = raw_method is .Some(_) or visible_method is .Some(_);
+                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member);
+                yield resolved;
             },
             .MutableWeakReferenceType(inner) then {
-                let resolved = self.resolve_member_type(*inner, member)
-                let has_method = raw_method is .Some(_) or visible_method is .Some(_)
-                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member)
-                yield resolved
+                let resolved = self.resolve_member_type(*inner, member);
+                let has_method = raw_method is .Some(_) or visible_method is .Some(_);
+                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member);
+                yield resolved;
             },
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
-                    let mutable found = Type.Unknown()
+                    let mutable found = Type.Unknown();
                     for f in fields then {
                         if f.name == member then {
                             if self.is_field_accessible_from_current_context(f.access, def_id) then {
-                                found = f.field_type
+                                found = f.field_type;
                             } else {
                                 let access_label = when f.access in {
                                     .FilePrivate() then "file_private",
                                     _ then "module_private",
-                                }
+                                };
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
                                         DiagnosticStage.Semantic(),
                                         self.storage.file_path,
                                         "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(typed_base.expr_type))'"
                                     )
-                                )
-                            }
-                        }
-                    }
+                                );
+                            };
+                        };
+                    };
                     if found is .Unknown() then {
                         let inaccessible_method = when raw_method in {
-                            .Some(method) then visible_method is .None()
-                                and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
+                            .Some(method) then visible_method is .None() and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
                             .None() then false,
-                        }
-                        inaccessible_method_member = inaccessible_method
+                        };
+                        inaccessible_method_member = inaccessible_method;
                         if not inaccessible_method then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
@@ -675,10 +659,10 @@ given TypeChecker {
                                     self.storage.file_path,
                                     "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
                                 )
-                            )
-                        }
-                    }
-                    yield found
+                            );
+                        };
+                    };
+                    yield found;
                 },
                 .None() then Type.Unknown(),
             },
@@ -686,33 +670,32 @@ given TypeChecker {
                 let raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
                     .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
-                            let mutable found = Type.Unknown()
+                            let mutable found = Type.Unknown();
                             for f in fields then {
                                 if f.name == member then {
                                         if self.is_field_accessible_from_current_context(f.access, struct_template.def_id) then {
-                                            found = f.field_type
+                                            found = f.field_type;
                                         } else {
                                             let access_label = when f.access in {
                                                 .FilePrivate() then "file_private",
                                                 _ then "module_private",
-                                            }
+                                            };
                                             self.storage.diagnostics.push(
                                                 make_diagnostic(
                                                     DiagnosticStage.Semantic(),
                                                     self.storage.file_path,
                                                     "Cannot access \(access_label) field '\(member)' of type '\(template)'"
                                                 )
-                                            )
-                                        }
-                                }
-                            }
+                                            );
+                                        };
+                                };
+                            };
                             if found is .Unknown() then {
                                 let inaccessible_method = when raw_method in {
-                                    .Some(method) then visible_method is .None()
-                                        and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
+                                    .Some(method) then visible_method is .None() and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
                                     .None() then false,
-                                }
-                                inaccessible_method_member = inaccessible_method
+                                };
+                                inaccessible_method_member = inaccessible_method;
                                 if not inaccessible_method then {
                                     self.storage.diagnostics.push(
                                         make_diagnostic(
@@ -720,40 +703,40 @@ given TypeChecker {
                                             self.storage.file_path,
                                             "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(template, args)))'"
                                         )
-                                    )
-                                }
-                            }
-                            yield found
+                                    );
+                                };
+                            };
+                            yield found;
                         },
                         .None() then Type.Unknown(),
                     },
                     .None() then Type.Unknown(),
-                }
+                };
                 yield when self.storage.generic_templates.lookup_struct(template) in {
                     .Some(struct_template) then {
-                        let mutable bindings = Dict[String, Type].new()
-                        let mutable i UInt = 0
-                        let param_count = struct_template.type_parameters.count()
-                        let arg_count = args.count()
-                        let n = if param_count < arg_count then param_count else arg_count
+                        let mutable bindings = Dict[String, Type].new();
+                        let mutable i UInt = 0;
+                        let param_count = struct_template.type_parameters.count();
+                        let arg_count = args.count();
+                        let n = if param_count < arg_count then param_count else arg_count;
                         while i < n then {
-                            let tp = struct_template.type_parameters[i]
-                            bindings.insert(tp.name, (*args[i]))
-                            i += 1
-                        }
-                        yield self.apply_type_bindings(raw_field_type, bindings)
+                            let tp = struct_template.type_parameters[i];
+                            bindings.insert(tp.name, (*args[i]));
+                            i += 1;
+                        };
+                        yield self.apply_type_bindings(raw_field_type, bindings);
                     },
                     .None() then raw_field_type,
-                }
+                };
             },
             .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
-        }
+        };
         if inaccessible_method_member then {
-            return self.empty_typed_block(Type.Unknown())
-        }
-        return self.make_typed_member_path_expr(typed_base, member, member_type)
-    }
+            return self.empty_typed_block(Type.Unknown());
+        };
+        return self.make_typed_member_path_expr(typed_base, member, member_type);
+    };
 
     module_private check_call_callee_expr_ref(self, callee * Expr, scope Scope) TypedExpr = {
         return when callee in {
@@ -761,143 +744,139 @@ given TypeChecker {
             .MemberPath(_, _, _) then {
                 yield when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
-                        let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
-                    let normalized_receiver_type = self.concretize_default_literal_type(raw_typed_receiver.expr_type)
-                    let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type)
-                        then raw_typed_receiver
-                        else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type)
-                    let mutable has_method = false
-                    let mutable inaccessible_method = false
-                        let mutable raw_pointer_pointee_method = false
-                    let mutable resolved_visible_method = Option[Symbol].None()
+                        let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope);
+                    let normalized_receiver_type = self.concretize_default_literal_type(raw_typed_receiver.expr_type);
+                    let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type) then raw_typed_receiver else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type);
+                    let mutable has_method = false;
+                    let mutable inaccessible_method = false;
+                        let mutable raw_pointer_pointee_method = false;
+                    let mutable resolved_visible_method = Option[Symbol].None();
                     when typed_receiver.expr_type in {
                         .PointerType(inner) then {
-                            let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                            let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw)
+                            let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second);
+                            let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw);
                             when outer_raw in {
                                 .Some(method) then {
                                     if outer_visible is .Some(_) then {
-                                        has_method = true
-                                        raw_pointer_pointee_method = false
-                                        resolved_visible_method = outer_visible
+                                        has_method = true;
+                                        raw_pointer_pointee_method = false;
+                                        resolved_visible_method = outer_visible;
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
-                                        inaccessible_method = true
-                                    }
+                                        inaccessible_method = true;
+                                    };
                                 },
                                 .None() then {},
-                            }
+                            };
                             if not has_method and not inaccessible_method then {
-                                let inner_raw = self.resolve_method_signature(*inner, parts.second)
-                                let inner_visible = self.resolve_source_method_signature_from_raw(*inner, parts.second, inner_raw)
+                                let inner_raw = self.resolve_method_signature(*inner, parts.second);
+                                let inner_visible = self.resolve_source_method_signature_from_raw(*inner, parts.second, inner_raw);
                                 when inner_raw in {
                                     .Some(method) then {
                                         if inner_visible is .Some(_) then {
-                                            has_method = true
-                                            raw_pointer_pointee_method = true
-                                            resolved_visible_method = inner_visible
+                                            has_method = true;
+                                            raw_pointer_pointee_method = true;
+                                            resolved_visible_method = inner_visible;
                                         } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
-                                            inaccessible_method = true
-                                        }
+                                            inaccessible_method = true;
+                                        };
                                     },
                                     .None() then {},
-                                }
-                            }
+                                };
+                            };
                         },
                         .MutablePointerType(inner) then {
-                            let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                            let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw)
+                            let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second);
+                            let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw);
                             when outer_raw in {
                                 .Some(method) then {
                                     if outer_visible is .Some(_) then {
-                                        has_method = true
-                                        raw_pointer_pointee_method = false
-                                        resolved_visible_method = outer_visible
+                                        has_method = true;
+                                        raw_pointer_pointee_method = false;
+                                        resolved_visible_method = outer_visible;
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
-                                        inaccessible_method = true
-                                    }
+                                        inaccessible_method = true;
+                                    };
                                 },
                                 .None() then {},
-                            }
+                            };
                             if not has_method and not inaccessible_method then {
-                                let inner_raw = self.resolve_method_signature(*inner, parts.second)
-                                let inner_visible = self.resolve_source_method_signature_from_raw(*inner, parts.second, inner_raw)
+                                let inner_raw = self.resolve_method_signature(*inner, parts.second);
+                                let inner_visible = self.resolve_source_method_signature_from_raw(*inner, parts.second, inner_raw);
                                 when inner_raw in {
                                     .Some(method) then {
                                         if inner_visible is .Some(_) then {
-                                            has_method = true
-                                            raw_pointer_pointee_method = true
-                                            resolved_visible_method = inner_visible
+                                            has_method = true;
+                                            raw_pointer_pointee_method = true;
+                                            resolved_visible_method = inner_visible;
                                         } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
-                                            inaccessible_method = true
-                                        }
+                                            inaccessible_method = true;
+                                        };
                                     },
                                     .None() then {},
-                                }
-                            }
+                                };
+                            };
                         },
                         _ then {
-                            let raw_method = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                            let visible_method = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, raw_method)
+                            let raw_method = self.resolve_method_signature(typed_receiver.expr_type, parts.second);
+                            let visible_method = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, raw_method);
                             when raw_method in {
                                 .Some(method) then {
                                     if visible_method is .Some(_) then {
-                                        has_method = true
-                                        resolved_visible_method = visible_method
+                                        has_method = true;
+                                        resolved_visible_method = visible_method;
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
-                                        inaccessible_method = true
-                                    }
+                                        inaccessible_method = true;
+                                    };
                                 },
                                 .None() then {},
-                            }
+                            };
                         },
-                    }
+                    };
                     if inaccessible_method then {
-                        return self.empty_typed_block(Type.Unknown())
-                    }
+                        return self.empty_typed_block(Type.Unknown());
+                    };
                     if has_method then {
                         when typed_receiver.expr_type in {
                             .PointerType(_) or .MutablePointerType(_) then if raw_pointer_pointee_method then {
                                 self.push_diagnostic_at_span(
                                     "cannot call method '\(parts.second)' on pointer type '\(self.display_type_name(typed_receiver.expr_type))'; pointers support direct field access only",
                                     expr_span(callee)
-                                )
-                                return self.empty_typed_block(Type.Unknown())
+                                );
+                                return self.empty_typed_block(Type.Unknown());
                             },
                             _ then {},
-                        }
+                        };
                         // Use the full method symbol with FunctionType (matching Swift compiler behavior)
-                        let method_symbol = resolved_visible_method
+                        let method_symbol = resolved_visible_method;
                         when method_symbol in {
                             .Some(sym) then {
-                                let sym_type = sym.symbol_type
+                                let sym_type = sym.symbol_type;
                                 yield when self.trait_object_dispatch_type(typed_receiver.expr_type) in {
-                                    .Some(trait_type) then if self.trait_type_declares_dispatch_method(trait_type, parts.second)
-                                        then make_typed_expr(TypedExprKind.TraitMethodPlaceholder(box(typed_receiver), trait_type, box(sym), List[Type].new(), .None()), sym_type)
-                                        else make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type),
+                                    .Some(trait_type) then if self.trait_type_declares_dispatch_method(trait_type, parts.second) then make_typed_expr(TypedExprKind.TraitMethodPlaceholder(box(typed_receiver), trait_type, box(sym), List[Type].new(), .None()), sym_type) else make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type),
                                     .None() then make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type),
-                                }
+                                };
                             },
                             .None() then {},
-                        }
-                    }
+                        };
+                    };
                     let member_field_type = when typed_receiver.expr_type in {
                         .PointerType(inner) then self.resolve_member_type(*inner, parts.second),
                         .MutablePointerType(inner) then self.resolve_member_type(*inner, parts.second),
                         _ then self.resolve_member_type(typed_receiver.expr_type, parts.second),
-                    }
+                    };
                     if member_field_type is .FunctionType(_, _) then {
-                        let mutable field_path = List[String].new()
-                        field_path.push(parts.second)
-                        return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type)
-                    }
-                    return self.check_expr_core_ref(callee, .None(), scope)
+                        let mutable field_path = List[String].new();
+                        field_path.push(parts.second);
+                        return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type);
+                    };
+                    return self.check_expr_core_ref(callee, .None(), scope);
                     },
                     .None() then self.check_expr_core_ref(callee, .None(), scope),
-                }
+                };
             },
             _ then self.check_expr_core_ref(callee, .None(), scope),
-        }
-    }
+        };
+    };
 
     module_private ref_target_expr_name(self, expr * Expr) String = {
         return when expr in {
@@ -907,8 +886,8 @@ given TypeChecker {
             .DerefExpr(_, _) then "*e",
             .UnsafeDerefExpr(_, _) then "*e",
             _ then self.describe_expr_shallow(expr),
-        }
-    }
+        };
+    };
 
     module_private ref_target_typed_name(self, expr * TypedExpr) String = {
         return when expr.expr_kind in {
@@ -917,8 +896,8 @@ given TypeChecker {
             .DerefExpr(_) then "*e",
             .UnsafeDerefExpr(_) then "*e",
             _ then "value",
-        }
-    }
+        };
+    };
 
     module_private is_literal_expr(self, expr * Expr) Bool = {
         return when expr in {
@@ -932,8 +911,8 @@ given TypeChecker {
             .CollectionLiteral(_, _) then true,
             .EmptyLiteral(_) then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private is_implicit_ref_candidate_shape(self, expr * TypedExpr) Bool = {
         return when expr.expr_kind in {
@@ -942,36 +921,36 @@ given TypeChecker {
             .DerefExpr(_) then true,
             .UnsafeDerefExpr(_) then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private can_take_implicit_ref_receiver(self, expr * TypedExpr) Bool = {
-        return self.can_take_ref_of_expr(expr)
-    }
+        return self.can_take_ref_of_expr(expr);
+    };
 
     module_private type_matches_expected_pattern(self, expected_pattern Type, actual_type Type) Bool = {
         if self.same_expr_type(expected_pattern, actual_type) then {
-            return true
-        }
-        let mutable bindings = Dict[String, Type].new()
-        self.infer_type_bindings(expected_pattern, actual_type, &mutable bindings)
-        return self.same_expr_type(self.apply_type_bindings(expected_pattern, bindings), actual_type)
-    }
+            return true;
+        };
+        let mutable bindings = Dict[String, Type].new();
+        self.infer_type_bindings(expected_pattern, actual_type, &mutable bindings);
+        return self.same_expr_type(self.apply_type_bindings(expected_pattern, bindings), actual_type);
+    };
 
     module_private report_trait_flatten_failure(self, trait_name String, method_name String, error * Error) Void = {
-        let mutable message = "failed to flatten trait "
-        message.push_string(trait_name)
-        message.push_string(" while resolving method '")
-        message.push_string(method_name)
-        message.push_string("': ")
-        message.push_string(error.message())
-        self.push_diagnostic(message)
-    }
+        let mutable message = "failed to flatten trait ";
+        message.push_string(trait_name);
+        message.push_string(" while resolving method '");
+        message.push_string(method_name);
+        message.push_string("': ");
+        message.push_string(error.message());
+        self.push_diagnostic(message);
+    };
 
     module_private find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
-            return Option[String].None()
-        }
+            return Option[String].None();
+        };
 
         let normalized = when base_type in {
             .MutableReferenceType(inner) then *inner,
@@ -981,10 +960,10 @@ given TypeChecker {
             .WeakReferenceType(inner) then *inner,
             .MutableWeakReferenceType(inner) then *inner,
             _ then base_type,
-        }
+        };
 
-        let type_key = self.context().type_display_name(normalized)
-        let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_)
+        let type_key = self.context().type_display_name(normalized);
+        let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_);
         let template_hit = when normalized in {
             .GenericStruct(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
             .GenericEnum(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
@@ -997,64 +976,64 @@ given TypeChecker {
                 .None() then false,
             },
             _ then false,
-        }
-        let direct_method_exists = direct_type_hit or template_hit
+        };
+        let direct_method_exists = direct_type_hit or template_hit;
 
         return when normalized in {
             .TraitObject(trait_name, _) then Option[String].Some(trait_name),
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for constraint in constraints then {
-                        let cn = constraint.trait_name
+                        let cn = constraint.trait_name;
                         if self.lookup_method_signature(cn, method_name) is .Some(_) then {
-                            return Option[String].Some(cn)
-                        }
+                            return Option[String].Some(cn);
+                        };
                         when self.storage.trait_registry.flatten_methods(cn) in {
                             .Ok(methods) then {
                                 if methods.get(method_name) is .Some(_) then {
-                                    return Option[String].Some(cn)
-                                }
+                                    return Option[String].Some(cn);
+                                };
                             },
                             .Error(e) then self.report_trait_flatten_failure(cn, method_name, e),
-                        }
-                    }
-                }
-                yield Option[String].None()
+                        };
+                    };
+                };
+                yield Option[String].None();
             },
             _ then {
                 if direct_method_exists then {
-                    return Option[String].None()
-                }
+                    return Option[String].None();
+                };
                 // Use the type-keyed index for O(1) lookup instead of O(N) scan
-                let key = self.conformance_template_key(normalized)
+                let key = self.conformance_template_key(normalized);
                 let templates = when self.storage.conformance_index.get(key) in {
                     .Some(list) then list,
                     .None() then {
-                        return Option[String].None()
+                        return Option[String].None();
                     },
-                }
+                };
                 for template in templates then {
-                    let mutable bindings = Dict[String, Type].new()
+                    let mutable bindings = Dict[String, Type].new();
                     if not self.conformance_type_key_matches(template.target_type, normalized, &mutable bindings) then {
-                        continue
-                    }
-                    let trait_name = template.trait_name
+                        continue;
+                    };
+                    let trait_name = template.trait_name;
                     when self.storage.trait_registry.flatten_methods(trait_name) in {
                         .Ok(methods) then {
                             if methods.get(method_name) is .Some(_) then {
-                                return Option[String].Some(trait_name)
-                            }
+                                return Option[String].Some(trait_name);
+                            };
                         },
                         .Error(e) then self.report_trait_flatten_failure(trait_name, method_name, e),
-                    }
+                    };
                     if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
-                        return Option[String].Some(trait_name)
-                    }
-                }
-                yield Option[String].None()
+                        return Option[String].Some(trait_name);
+                    };
+                };
+                yield Option[String].None();
             },
-        }
-    }
+        };
+    };
 
     module_private can_convert_to_trait_object(self, actual_type Type, trait_name String) Bool = {
         let normalized = when actual_type in {
@@ -1065,24 +1044,24 @@ given TypeChecker {
             .WeakReferenceType(inner) then *inner,
             .MutableWeakReferenceType(inner) then *inner,
             _ then actual_type,
-        }
+        };
         return when normalized in {
             .TraitObject(name, _) then name == trait_name,
             .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                 .Some(constraints) then {
-                    let mutable matched = false
+                    let mutable matched = false;
                     for constraint in constraints then {
                         if constraint.trait_name == trait_name then {
-                            matched = true
-                        }
-                    }
-                    yield matched
+                            matched = true;
+                        };
+                    };
+                    yield matched;
                 },
                 .None() then false,
             },
             _ then self.satisfies_trait_requirement(normalized, trait_name),
-        }
-    }
+        };
+    };
 
 
     module_private trait_object_concrete_type(self, source_type Type) Type = {
@@ -1104,8 +1083,8 @@ given TypeChecker {
                 _ then *inner,
             },
             _ then source_type,
-        }
-    }
+        };
+    };
 
     module_private wrap_trait_object_conversion(self, expr TypedExpr, trait_type Type, result_type Type) TypedExpr = {
         let already_trait_object = when expr.expr_type in {
@@ -1117,9 +1096,9 @@ given TypeChecker {
             .WeakReferenceType(inner) then *inner is .TraitObject(_, _),
             .MutableWeakReferenceType(inner) then *inner is .TraitObject(_, _),
             _ then false,
-        }
-        if already_trait_object then { return expr }
-        let converted_result_type = result_type
+        };
+        if already_trait_object then { return expr;};
+        let converted_result_type = result_type;
         let erased_trait_type = when trait_type in {
             .ReferenceType(inner) then when *inner in {
                 .TraitObject(_, _) then *inner,
@@ -1138,12 +1117,12 @@ given TypeChecker {
                 _ then trait_type,
             },
             _ then trait_type,
-        }
+        };
         return make_typed_expr(
             TypedExprKind.TraitObjectConversion(box(expr), erased_trait_type, self.trait_object_concrete_type(expr.expr_type)),
             converted_result_type,
-        )
-    }
+        );
+    };
 
     module_private trait_object_conversion_result_type(self, source_type Type, trait_type Type) Type = {
         return when source_type in {
@@ -1154,33 +1133,33 @@ given TypeChecker {
             .WeakReferenceType(_) then Type.WeakReferenceType(box(trait_type)),
             .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(box(trait_type)),
             _ then trait_type,
-        }
-    }
+        };
+    };
     module_private adapt_expr_to_expected_type_at(self, expr TypedExpr, expected_type_opt Option[Type], source_span_opt Option[SourceSpan]) TypedExpr = {
-        let expr_ref = box(expr)
+        let expr_ref = box(expr);
         let diagnostic_span = when source_span_opt in {
             .Some(source_span) then if is_known_span(source_span) then source_span else self.typed_expr_span(expr_ref),
             .None() then self.typed_expr_span(expr_ref),
-        }
+        };
         if expected_type_opt is .Some(expected_type) then {
             when expr.expr_kind in {
                 .IntegerLiteral(value) then {
                     if self.is_numeric_type(expected_type) then {
-                        return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected_type)
-                    }
+                        return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected_type);
+                    };
                 },
                 .FloatLiteral(value) then {
                     if self.is_numeric_type(expected_type) then {
-                        return make_typed_expr(TypedExprKind.FloatLiteral(value), expected_type)
-                    }
+                        return make_typed_expr(TypedExprKind.FloatLiteral(value), expected_type);
+                    };
                 },
                 _ then {},
-            }
+            };
             if self.same_expr_type(expr.expr_type, expected_type) then {
-                return expr
-            }
+                return expr;
+            };
 
-            let mutable adapted = expr
+            let mutable adapted = expr;
             let declared_ref_like_type_opt = when expr.expr_kind in {
                 .Variable(symbol) then when symbol.symbol_type in {
                     .ReferenceType(_) then Option[Type].Some(symbol.symbol_type),
@@ -1192,207 +1171,195 @@ given TypeChecker {
                     _ then Option[Type].None(),
                 },
                 _ then Option[Type].None(),
-            }
+            };
             when expected_type in {
                 .MutableReferenceType(inner) then {
-                    let expected_inner = *inner
+                    let expected_inner = *inner;
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .MutableReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableBorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .MutableReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            return expr
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            return expr;
                         },
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            return expr
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            return expr;
                         },
                         _ then {},
-                    }
+                    };
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
                         if self.can_take_mutable_ref_of_expr(expr_ref) then {
-                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                            return adapted
-                        }
-                        return adapted
-                    }
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                            return adapted;
+                        };
+                        return adapted;
+                    };
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
                         self.push_diagnostic_at_span(
                             "Invalid operation: cannot take reference of types \(self.display_type_name(expr.expr_type)) and rvalue",
                             diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                        return adapted
-                    }
+                        );
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                        return adapted;
+                    };
                 },
                 .ReferenceType(inner) then {
-                    let expected_inner = *inner
-                    let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner)
+                    let expected_inner = *inner;
+                    let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner);
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .ReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .BorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableBorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .ReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .MutableReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .BorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         _ then {},
-                    }
+                    };
                     let expr_is_ref_like = when expr.expr_type in {
                         .ReferenceType(_) then true,
                         .MutableReferenceType(_) then true,
@@ -1403,219 +1370,207 @@ given TypeChecker {
                         .PointerType(_) then true,
                         .MutablePointerType(_) then true,
                         _ then false,
-                    }
-                    let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like
+                    };
+                    let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like;
                     if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
                     } else if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
                         self.push_diagnostic_at_span(
                             "Invalid operation: cannot take reference of types \(self.display_type_name(expr.expr_type)) and rvalue",
                             diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                    }
+                        );
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                    };
                 },
                 .MutableBorrowedReferenceType(inner) then {
-                    let expected_inner = *inner
+                    let expected_inner = *inner;
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .MutableReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableBorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .MutableReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         _ then {},
-                    }
+                    };
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
                         if self.can_take_mutable_ref_of_expr(expr_ref) then {
-                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                            return adapted
-                        }
-                        let value_name = self.ref_target_typed_name(expr_ref)
+                            adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                            return adapted;
+                        };
+                        let value_name = self.ref_target_typed_name(expr_ref);
                         self.push_diagnostic_at_span(
                             "Cannot take '&' of immutable value: \(value_name). Only 'let mutable' lvalues (and lvalues reached through * or *unsafe links) can use '&'.",
                             diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                        return adapted
-                    }
+                        );
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                        return adapted;
+                    };
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
                         self.push_diagnostic_at_span(
                             "Invalid operation: cannot take reference of types \(self.display_type_name(expr.expr_type)) and rvalue",
                             diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                        return adapted
-                    }
+                        );
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                        return adapted;
+                    };
                 },
                 .BorrowedReferenceType(inner) then {
-                    let expected_inner = *inner
-                    let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner)
+                    let expected_inner = *inner;
+                    let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner);
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .ReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .BorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableBorrowedReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .ReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .MutableReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .BorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
+                            let actual_inner = *actual_inner_ref;
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, trait_name) then {
-                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
-                                        return adapted
-                                    }
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
+                                        return adapted;
+                                    };
                                 },
                                 _ then {},
-                            }
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                            };
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                             if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         _ then {},
-                    }
+                    };
                     let expr_is_ref_like = when expr.expr_type in {
                         .ReferenceType(_) then true,
                         .MutableReferenceType(_) then true,
@@ -1626,128 +1581,118 @@ given TypeChecker {
                         .PointerType(_) then true,
                         .MutablePointerType(_) then true,
                         _ then false,
-                    }
-                    let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like
+                    };
+                    let should_defer_generic_ref_inference = self.contains_generic_parameter(expected_inner) and expr_is_ref_like;
                     if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
                     } else if not should_defer_generic_ref_inference and self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
                         self.push_diagnostic_at_span(
                             "Invalid operation: cannot take reference of types \(self.display_type_name(expr.expr_type)) and rvalue",
                             diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
-                    }
+                        );
+                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type);
+                    };
                 },
                 .WeakReferenceType(inner) then {
-                    let expected_inner = *inner
+                    let expected_inner = *inner;
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .WeakReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             .MutableWeakReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .WeakReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                            }
+                            let actual_inner = *actual_inner_ref;
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                            };
                         },
                         .MutableWeakReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                            }
+                            let actual_inner = *actual_inner_ref;
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 .MutableWeakReferenceType(inner) then {
-                    let expected_inner = *inner
+                    let expected_inner = *inner;
                     when declared_ref_like_type_opt in {
                         .Some(declared_ref_type) then when declared_ref_type in {
                             .MutableWeakReferenceType(actual_inner_ref) then {
-                                let actual_inner = *actual_inner_ref
+                                let actual_inner = *actual_inner_ref;
                                 if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
-                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                    return adapted
-                                }
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                    return adapted;
+                                };
                             },
                             _ then {},
                         },
                         .None() then {},
-                    }
+                    };
                     when expr.expr_type in {
                         .MutableWeakReferenceType(actual_inner_ref) then {
-                            let actual_inner = *actual_inner_ref
-                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
-                               and not self.contains_generic_parameter(expected_inner)
-                            then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                            }
+                            let actual_inner = *actual_inner_ref;
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner)) and not self.contains_generic_parameter(expected_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 .TraitObject(trait_name, _) then {
                     when expr.expr_type in {
                         .TraitObject(expr_trait_name, _) then {
                             if expr_trait_name == trait_name then {
-                                return expr
-                            }
+                                return expr;
+                            };
                         },
                         _ then {},
-                    }
+                    };
                     let should_defer_generic_deref_receiver_ref = when expr.expr_type in {
                         .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                             .Some(constraints) then {
-                                let mutable found = false
+                                let mutable found = false;
                                 for c in constraints then {
-                                    if c.trait_name == "Deref" then { found = true }
-                                }
-                                yield found
+                                    if c.trait_name == "Deref" then { found = true;};
+                                };
+                                yield found;
                             },
                             .None() then false,
                         },
                         _ then false,
-                    }
+                    };
                     let ref_expr = when expr.expr_type in {
                         .ReferenceType(_) then expr,
                         .BorrowedReferenceType(_) then expr,
-                        _ then if not should_defer_generic_deref_receiver_ref
-                            and self.can_take_implicit_ref_receiver(expr_ref)
-                            and self.can_convert_to_trait_object(expr.expr_type, trait_name)
-                        then make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(box(expr.expr_type)))
-                        else expr,
-                    }
+                        _ then if not should_defer_generic_deref_receiver_ref and self.can_take_implicit_ref_receiver(expr_ref) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(box(expr.expr_type))) else expr,
+                    };
                     let can_cast = when ref_expr.expr_type in {
                         .ReferenceType(inner) then self.can_convert_to_trait_object(*inner, trait_name),
                         .MutableReferenceType(inner) then self.can_convert_to_trait_object(*inner, trait_name),
                         .BorrowedReferenceType(inner) then self.can_convert_to_trait_object(*inner, trait_name),
                         .MutableBorrowedReferenceType(inner) then self.can_convert_to_trait_object(*inner, trait_name),
                         _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
-                    }
+                    };
                     if can_cast then {
-                        adapted = self.wrap_trait_object_conversion(ref_expr, expected_type, expected_type)
-                    }
+                        adapted = self.wrap_trait_object_conversion(ref_expr, expected_type, expected_type);
+                    };
                 },
                 .PointerType(_) then {
                     when expr.expr_type in {
@@ -1755,52 +1700,52 @@ given TypeChecker {
                             let expected_inner = when expected_type in {
                                 .PointerType(inner_ref) then *inner_ref,
                                 _ then Type.Unknown(),
-                            }
+                            };
                             if self.type_matches_expected_pattern(expected_inner, *actual_inner_ref) then {
-                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
-                                return adapted
-                            }
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type);
+                                return adapted;
+                            };
                         },
                         _ then {},
-                    }
+                    };
                     when expr.expr_kind in {
                         .IntrinsicCall(node) then {
                             when node in {
                                 .NullPtr(_) then {
-                                    adapted = make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(expected_type)), expected_type)
+                                    adapted = make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(expected_type)), expected_type);
                                 },
                                 _ then {},
-                            }
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 .MutablePointerType(_) then {
                     when expr.expr_kind in {
                         .IntrinsicCall(node) then {
                             when node in {
                                 .NullPtr(_) then {
-                                    adapted = make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(expected_type)), expected_type)
+                                    adapted = make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(expected_type)), expected_type);
                                 },
                                 _ then {},
-                            }
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 _ then {
                     // Swift-aligned rule: implicit auto-deref from ref/pointer to value
                     // is not allowed in general expression adaptation. Method receivers
                     // are handled separately by receiver-specific preparation paths.
                 },
-            }
-            return adapted
-        }
+            };
+            return adapted;
+        };
 
-        return expr
-    }
+        return expr;
+    };
 
     module_private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt Option[Type]) TypedExpr = {
-        return self.adapt_expr_to_expected_type_at(expr, expected_type_opt, Option[SourceSpan].None())
-    }
-}
+        return self.adapt_expr_to_expected_type_at(expr, expected_type_opt, Option[SourceSpan].None());
+    };
+};

@@ -1,145 +1,145 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.text - Type Definitions
 // ============================================================================
 
 // 编译选项（位标志）
-public type RegexFlag(value UInt)
+public type RegexFlag(value UInt);
 
 given RegexFlag {
 
     // 无特殊选项（默认）
-    public none() RegexFlag = RegexFlag(0)
+    public none() RegexFlag = RegexFlag(0);
 
     // 大小写不敏感
-    public ignore_case() RegexFlag = RegexFlag(1)
+    public ignore_case() RegexFlag = RegexFlag(1);
 
     // 多行模式（^/$ 匹配行首/行尾而非字符串首/尾）
-    public multiline() RegexFlag = RegexFlag(2)
+    public multiline() RegexFlag = RegexFlag(2);
 
     // 组合标志：a | b
     public combine(self, other RegexFlag) RegexFlag =
-        RegexFlag(self.value | other.value)
+        RegexFlag(self.value | other.value);
 
     // 测试是否包含某标志
     public has(self, flag RegexFlag) Bool =
-        (self.value & flag.value) == flag.value
+        (self.value & flag.value) == flag.value;
 
     // 转换为 C 层 flags（内部使用）
     // REG_EXTENDED = 1, REG_ICASE = 2, REG_NEWLINE = 4
     to_c_flags(self) Int32 = {
-        let mutable flags Int32 = 1  // REG_EXTENDED 始终启用
+        let mutable flags Int32 = 1;// REG_EXTENDED 始终启用
         if self.has(RegexFlag.ignore_case()) then {
-            flags = flags | 2
-        }
+            flags = flags | 2;
+        };
         if self.has(RegexFlag.multiline()) then {
-            flags = flags | 4
-        }
-        return flags
-    }
-}
+            flags = flags | 4;
+        };
+        return flags;
+    };
+};
 
 // 编译后的正则表达式内部存储（持有 C 层资源）
 type RegexStorage(
-    handle *unsafe UInt8,  // C 层 regex_t 句柄（堆分配）
-    pat      String,     // 原始正则表达式字符串
-    groups   UInt        // 捕获组数量（不含 $0）
-)
+    handle *unsafe UInt8,// C 层 regex_t 句柄（堆分配）
+    pat      String,// 原始正则表达式字符串
+    groups   UInt// 捕获组数量（不含 $0）
+);
 
 given RegexStorage as Drop {
 
     drop(source *unsafe mutable Self) Void = {
-        __koral_regex_free(source.handle)
-    }
-}
+        __koral_regex_free(source.handle);
+    };
+};
 
 // 编译后的正则表达式（通过 * 引用计数管理 C 层资源）
-public type Regex(storage * RegexStorage)
+public type Regex(storage * RegexStorage);
 
 given Regex {
 
-    public pattern(*self) String = self.storage.pat
+    public pattern(*self) String = self.storage.pat;
 
-    public group_count(*self) UInt = self.storage.groups
-}
+    public group_count(*self) UInt = self.storage.groups;
+};
 
 // 轻量匹配结果（仅位置，不含捕获组）
 public type Match(
-    module_private source     String,   // 原始文本
-    module_private match_start UInt,    // 匹配起始位置（字节偏移）
-    module_private match_end   UInt     // 匹配结束位置（字节偏移，不含）
-)
+    module_private source     String,// 原始文本
+    module_private match_start UInt,// 匹配起始位置（字节偏移）
+    module_private match_end   UInt// 匹配结束位置（字节偏移，不含）
+);
 
 given Match {
 
-    public text(*self) String = self.source.substring(self.match_start..<self.match_end)
+    public text(*self) String = self.source.substring(self.match_start..<self.match_end);
 
-    public start(*self) UInt = self.match_start
+    public start(*self) UInt = self.match_start;
 
-    public end(*self) UInt = self.match_end
-}
+    public end(*self) UInt = self.match_end;
+};
 
 // 带捕获组的匹配结果
 public type Captures(
-    module_private source     String,       // 原始文本
-    module_private starts     List[Int32],  // 各捕获组起始位置（-1 = 未匹配）
-    module_private ends       List[Int32]   // 各捕获组结束位置（-1 = 未匹配）
-)
+    module_private source     String,// 原始文本
+    module_private starts     List[Int32],// 各捕获组起始位置（-1 = 未匹配）
+    module_private ends       List[Int32]// 各捕获组结束位置（-1 = 未匹配）
+);
 
 given Captures {
 
     public text(*self) String = {
-        let s = self.starts[0](UInt)
-        let e = self.ends[0](UInt)
-        return self.source.substring(s..<e)
-    }
+        let s = self.starts[0](UInt);
+        let e = self.ends[0](UInt);
+        return self.source.substring(s..<e);
+    };
 
-    public start(*self) UInt = self.starts[0](UInt)
+    public start(*self) UInt = self.starts[0](UInt);
 
-    public end(*self) UInt = self.ends[0](UInt)
+    public end(*self) UInt = self.ends[0](UInt);
 
-    public group_count(*self) UInt = self.starts.count()
+    public group_count(*self) UInt = self.starts.count();
 
     public group(*self, index UInt) Option[String] = {
         if index >= self.starts.count() then {
-            return Option[String].None()
-        }
-        let s = self.starts[index]
-        let e = self.ends[index]
+            return Option[String].None();
+        };
+        let s = self.starts[index];
+        let e = self.ends[index];
         if s < 0 or e < 0 then {
-            return Option[String].None()
-        }
-        return Option[String].Some(self.source.substring(s(UInt)..<e(UInt)))
-    }
+            return Option[String].None();
+        };
+        return Option[String].Some(self.source.substring(s(UInt)..<e(UInt)));
+    };
 
     public group_start(*self, index UInt) Option[UInt] = {
         if index >= self.starts.count() then {
-            return Option[UInt].None()
-        }
-        let s = self.starts[index]
+            return Option[UInt].None();
+        };
+        let s = self.starts[index];
         if s < 0 then {
-            return Option[UInt].None()
-        }
-        return Option[UInt].Some(s(UInt))
-    }
+            return Option[UInt].None();
+        };
+        return Option[UInt].Some(s(UInt));
+    };
 
     public group_end(*self, index UInt) Option[UInt] = {
         if index >= self.ends.count() then {
-            return Option[UInt].None()
-        }
-        let e = self.ends[index]
+            return Option[UInt].None();
+        };
+        let e = self.ends[index];
         if e < 0 then {
-            return Option[UInt].None()
-        }
-        return Option[UInt].Some(e(UInt))
-    }
-}
+            return Option[UInt].None();
+        };
+        return Option[UInt].Some(e(UInt));
+    };
+};
 
 // 匹配结果迭代器
-public type MatchIterator(module_private regex Regex, module_private text String, module_private mutable offset UInt)
+public type MatchIterator(module_private regex Regex, module_private text String, module_private mutable offset UInt);
 
 // 捕获组结果迭代器
-public type CapturesIterator(module_private regex Regex, module_private text String, module_private mutable offset UInt)
+public type CapturesIterator(module_private regex Regex, module_private text String, module_private mutable offset UInt);
 
 // 分割结果迭代器
 public type RegexSplitIterator(
@@ -147,7 +147,7 @@ public type RegexSplitIterator(
     module_private text String,
     module_private mutable offset UInt,
     module_private mutable done Bool
-)
+);
 
 // ============================================================================
 // MatchIterator — Iterator implementation
@@ -157,24 +157,24 @@ given MatchIterator as Iterator[Match] {
 
     public next(*mutable self) Option[Match] = {
         if self.offset > self.text.count() then {
-            return Option[Match].None()
-        }
+            return Option[Match].None();
+        };
         when Regex.find_at(&self.regex, self.text, self.offset) in {
             .Some(m) then {
                 if m.end() == self.offset then {
-                    self.offset += 1
+                    self.offset += 1;
                 } else {
-                    self.offset = m.end()
-                }
-                return Option[Match].Some(m)
+                    self.offset = m.end();
+                };
+                return Option[Match].Some(m);
             },
             .None then {
-                self.offset = self.text.count() + 1
-                return Option[Match].None()
+                self.offset = self.text.count() + 1;
+                return Option[Match].None();
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // ============================================================================
 // CapturesIterator — Iterator implementation
@@ -184,24 +184,24 @@ given CapturesIterator as Iterator[Captures] {
 
     public next(*mutable self) Option[Captures] = {
         if self.offset > self.text.count() then {
-            return Option[Captures].None()
-        }
+            return Option[Captures].None();
+        };
         when Regex.captures_at(&self.regex, self.text, self.offset) in {
             .Some(c) then {
                 if c.end() == self.offset then {
-                    self.offset += 1
+                    self.offset += 1;
                 } else {
-                    self.offset = c.end()
-                }
-                return Option[Captures].Some(c)
+                    self.offset = c.end();
+                };
+                return Option[Captures].Some(c);
             },
             .None then {
-                self.offset = self.text.count() + 1
-                return Option[Captures].None()
+                self.offset = self.text.count() + 1;
+                return Option[Captures].None();
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // ============================================================================
 // RegexSplitIterator — Iterator implementation
@@ -211,37 +211,37 @@ given RegexSplitIterator as Iterator[String] {
 
     public next(*mutable self) Option[String] = {
         if self.done then {
-            return Option[String].None()
-        }
+            return Option[String].None();
+        };
 
-        let text_len = self.text.count()
+        let text_len = self.text.count();
         if self.offset > text_len then {
-            self.done = true
-            return Option[String].None()
-        }
+            self.done = true;
+            return Option[String].None();
+        };
 
         when Regex.find_at(&self.regex, self.text, self.offset) in {
             .Some(m) then {
-                let mutable part = self.text.substring(self.offset..<m.start())
+                let mutable part = self.text.substring(self.offset..<m.start());
 
                 // 避免零长度匹配导致无限循环
                 if m.end() == self.offset then {
                     if self.offset < text_len then {
-                        part.push_byte(self.text[self.offset])
-                    }
-                    self.offset += 1
+                        part.push_byte(self.text[self.offset]);
+                    };
+                    self.offset += 1;
                 } else {
-                    self.offset = m.end()
-                }
+                    self.offset = m.end();
+                };
 
-                return Option[String].Some(part)
+                return Option[String].Some(part);
             },
             .None then {
-                let tail = self.text.substring(self.offset..)
-                self.offset = text_len + 1
-                self.done = true
-                return Option[String].Some(tail)
+                let tail = self.text.substring(self.offset..);
+                self.offset = text_len + 1;
+                self.done = true;
+                return Option[String].Some(tail);
             },
-        }
-    }
-}
+        };
+    };
+};

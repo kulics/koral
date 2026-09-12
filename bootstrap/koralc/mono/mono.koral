@@ -2,15 +2,15 @@
 // This file defines the auxiliary types and the output structure produced
 // by the Monomorphizer after processing all instantiation requests.
 
-using std::container { .. }
-using std::os { env }
-using "instantiation_request"
-using "generic_template_registry"
-using "codegen_view"
-using "mono_types"
-using "mono_functions"
-using "mono_type_resolution"
-using "mono_expr_substitution"
+using std::container { .. };
+using std::os { env };
+using "instantiation_request";
+using "generic_template_registry";
+using "codegen_view";
+using "mono_types";
+using "mono_functions";
+using "mono_type_resolution";
+using "mono_expr_substitution";
 
 // ── InstantiatedFunction ──────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ using "mono_expr_substitution"
 public type InstantiatedFunction(
     mangled_name String,
     function_type Type,
-)
+);
 
 // ── ConcreteMethodEntry ───────────────────────────────────────────────────────
 
@@ -29,14 +29,14 @@ public type InstantiatedFunction(
 public type ConcreteMethodEntry(
     symbol Symbol,
     trait_conformance Option[String],
-)
+);
 
 public type ConcreteCallableInfo(
     def_id DefId,
     logical_name String,
     owner_type Option[Type],
     trait_conformance Option[String],
-)
+);
 
 file_private let mono_receiver_lookup_type(context * CompilerContext, t Type) Type = {
     return when t in {
@@ -44,7 +44,7 @@ file_private let mono_receiver_lookup_type(context * CompilerContext, t Type) Ty
             yield when context.lookup_type(def_id) in {
                 .Some(mapped) then mono_receiver_lookup_type(context, mapped),
                 .None() then t,
-            }
+            };
         },
         .ReferenceType(inner_ref) then Type.ReferenceType(box(mono_receiver_lookup_type(context, *inner_ref))),
         .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(mono_receiver_lookup_type(context, *inner_ref))),
@@ -55,8 +55,8 @@ file_private let mono_receiver_lookup_type(context * CompilerContext, t Type) Ty
         .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(mono_receiver_lookup_type(context, *inner_ref))),
         .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(mono_receiver_lookup_type(context, *inner_ref))),
         _ then t,
-    }
-}
+    };
+};
 
 /// Get the simple type name for a type, matching Swift's context.getName(defId).
 /// Used as the type-name component in method lookup keys ("typeName.methodName").
@@ -68,7 +68,7 @@ module_private let mono_type_simple_name(context * CompilerContext, t Type) Stri
             yield when context.lookup_type(def_id) in {
                 .Some(mapped) then mono_type_simple_name(context, mapped),
                 .None() then context.get_name(def_id) or else context.type_display_name(t),
-            }
+            };
         },
         .GenericStruct(template, _) then template,
         .GenericEnum(template, _) then template,
@@ -81,47 +81,47 @@ module_private let mono_type_simple_name(context * CompilerContext, t Type) Stri
         .WeakReferenceType(_) then "WeakRef",
         .MutableWeakReferenceType(_) then "MutWeakRef",
         _ then context.type_display_name(t),
-    }
-}
+    };
+};
 
 file_private let mono_concrete_layout_key_for_def_id(context * CompilerContext, def_id DefId) Option[String] = {
-    let name = context.get_name(def_id) or else { return Option[String].None() }
-    let module_path = context.get_module_path(def_id) or else List[String].new()
+    let name = context.get_name(def_id) or else { return Option[String].None();};
+    let module_path = context.get_module_path(def_id) or else List[String].new();
     let is_private = when context.get_access(def_id) in {
         .Some(access) then access is .FilePrivate(),
         .None() then false,
-    }
-    let source_file = context.get_source_file(def_id) or else ""
+    };
+    let source_file = context.get_source_file(def_id) or else "";
 
-    let mutable parts = List[String].new()
+    let mutable parts = List[String].new();
     if not module_path.is_empty() then {
-        let mutable path_str = String.new()
-        let mutable first = true
+        let mutable path_str = String.new();
+        let mutable first = true;
         for seg in module_path then {
-            if not first then { path_str.push_byte('_') }
-            path_str.push_string(seg)
-            first = false
-        }
-        parts.push(path_str)
-    }
+            if not first then { path_str.push_byte('_');};
+            path_str.push_string(seg);
+            first = false;
+        };
+        parts.push(path_str);
+    };
     if is_private and not source_file.is_empty() then {
-        let mutable hash UInt32 = 0
+        let mutable hash UInt32 = 0;
         for byte in source_file.bytes() then {
-            hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32))
-        }
-        parts.push("f\((hash % 10000)(UInt))")
-    }
-    parts.push(name)
+            hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32));
+        };
+        parts.push("f\((hash % 10000)(UInt))");
+    };
+    parts.push(name);
 
-    let mutable out = String.new()
-    let mutable first = true
+    let mutable out = String.new();
+    let mutable first = true;
     for part in parts then {
-        if not first then { out.push_byte('_') }
-        out.push_string(part)
-        first = false
-    }
-    return Option[String].Some(out)
-}
+        if not first then { out.push_byte('_');};
+        out.push_string(part);
+        first = false;
+    };
+    return Option[String].Some(out);
+};
 
 file_private type MonoConcreteLayoutWrapperKind {
     Reference(),
@@ -132,55 +132,55 @@ file_private type MonoConcreteLayoutWrapperKind {
     MutablePointer(),
     WeakReference(),
     MutableWeakReference(),
-}
+};
 
 file_private type MonoConcreteLayoutWrapperChain(
     wrappers List[MonoConcreteLayoutWrapperKind],
     inner Type,
-)
+);
 
 file_private let split_mono_concrete_layout_wrappers(t Type) MonoConcreteLayoutWrapperChain = {
-    let mutable wrappers = List[MonoConcreteLayoutWrapperKind].new()
-    let mutable current = t
+    let mutable wrappers = List[MonoConcreteLayoutWrapperKind].new();
+    let mutable current = t;
     while true then {
         when current in {
             .ReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.Reference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.Reference());
+                current = *inner;
             },
             .MutableReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.MutableReference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.MutableReference());
+                current = *inner;
             },
             .BorrowedReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.BorrowedReference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.BorrowedReference());
+                current = *inner;
             },
             .MutableBorrowedReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.MutableBorrowedReference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.MutableBorrowedReference());
+                current = *inner;
             },
             .PointerType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.Pointer())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.Pointer());
+                current = *inner;
             },
             .MutablePointerType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.MutablePointer())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.MutablePointer());
+                current = *inner;
             },
             .WeakReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.WeakReference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.WeakReference());
+                current = *inner;
             },
             .MutableWeakReferenceType(inner) then {
-                wrappers.push(MonoConcreteLayoutWrapperKind.MutableWeakReference())
-                current = *inner
+                wrappers.push(MonoConcreteLayoutWrapperKind.MutableWeakReference());
+                current = *inner;
             },
-            _ then { break },
-        }
-    }
-    return MonoConcreteLayoutWrapperChain(wrappers, current)
-}
+            _ then { break;},
+        };
+    };
+    return MonoConcreteLayoutWrapperChain(wrappers, current);
+};
 
 file_private let mono_concrete_layout_wrapper_prefix(kind MonoConcreteLayoutWrapperKind) String = {
     return when kind in {
@@ -192,24 +192,24 @@ file_private let mono_concrete_layout_wrapper_prefix(kind MonoConcreteLayoutWrap
         .MutablePointer() then "mutptr_",
         .WeakReference() then "weakref_",
         .MutableWeakReference() then "mutweakref_",
-    }
-}
+    };
+};
 
 file_private let prefix_mono_concrete_layout_key(base String, wrappers List[MonoConcreteLayoutWrapperKind]) String = {
     if wrappers.is_empty() then {
-        return base
-    }
+        return base;
+    };
 
-    let mutable out = String.new()
+    let mutable out = String.new();
     for wrapper in wrappers then {
-        out.push_string(mono_concrete_layout_wrapper_prefix(wrapper))
-    }
-    out.push_string(base)
-    return out
-}
+        out.push_string(mono_concrete_layout_wrapper_prefix(wrapper));
+    };
+    out.push_string(base);
+    return out;
+};
 
 file_private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type) String = {
-    let chain = split_mono_concrete_layout_wrappers(t)
+    let chain = split_mono_concrete_layout_wrappers(t);
     let inner_key = when chain.inner in {
         .ReferenceType(inner) then "ref_\(mono_concrete_layout_key_for_type(context, *inner))",
         .MutableReferenceType(inner) then "mutref_\(mono_concrete_layout_key_for_type(context, *inner))",
@@ -220,89 +220,89 @@ file_private let mono_concrete_layout_key_for_type(context * CompilerContext, t 
         .WeakReferenceType(inner) then "weakref_\(mono_concrete_layout_key_for_type(context, *inner))",
         .MutableWeakReferenceType(inner) then "mutweakref_\(mono_concrete_layout_key_for_type(context, *inner))",
         .FunctionType(fn_params, return_type) then {
-            let param_types = param_entry_types(fn_params)
-            let mutable out = "fn"
+            let param_types = param_entry_types(fn_params);
+            let mutable out = "fn";
             for pt in param_types then {
-                out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(context, *pt))
-            }
-            out.push_string("_")
-            out.push_string(mono_concrete_layout_key_for_type(context, *return_type))
-            yield out
+                out.push_string("_");
+                out.push_string(mono_concrete_layout_key_for_type(context, *pt));
+            };
+            out.push_string("_");
+            out.push_string(mono_concrete_layout_key_for_type(context, *return_type));
+            yield out;
         },
         .GenericStruct(template, args) then {
-            let mutable out = template
+            let mutable out = template;
             for arg in args then {
-                out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(context, *arg))
-            }
-            yield out
+                out.push_string("_");
+                out.push_string(mono_concrete_layout_key_for_type(context, *arg));
+            };
+            yield out;
         },
         .GenericEnum(template, args) then {
-            let mutable out = template
+            let mutable out = template;
             for arg in args then {
-                out.push_string("_")
-                out.push_string(mono_concrete_layout_key_for_type(context, *arg))
-            }
-            yield out
+                out.push_string("_");
+                out.push_string(mono_concrete_layout_key_for_type(context, *arg));
+            };
+            yield out;
         },
         .StructureType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
         .EnumType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
         .OpaqueType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
         _ then layout_key(t),
-    }
-    return prefix_mono_concrete_layout_key(inner_key, chain.wrappers)
-}
+    };
+    return prefix_mono_concrete_layout_key(inner_key, chain.wrappers);
+};
 
 file_private let concrete_receiver_method_lookup_key(context * CompilerContext, receiver_type Type, method_name String) String = {
-    let normalized = mono_receiver_lookup_type(context, receiver_type)
-    let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
-    return "\(receiver_key).\(method_name)"
-}
+    let normalized = mono_receiver_lookup_type(context, receiver_type);
+    let receiver_key = mono_concrete_layout_key_for_type(context, normalized);
+    return "\(receiver_key).\(method_name)";
+};
 
 file_private let push_concrete_receiver_lookup_alias(alias_list List[String], alias String) List[String] = {
-    if alias.is_empty() then { return alias_list }
-    if alias_list.contains(alias) then { return alias_list }
-    let mutable updated = alias_list
-    updated.push(alias)
-    return updated
-}
+    if alias.is_empty() then { return alias_list;};
+    if alias_list.contains(alias) then { return alias_list;};
+    let mutable updated = alias_list;
+    updated.push(alias);
+    return updated;
+};
 
 file_private let concrete_receiver_lookup_aliases(context * CompilerContext, t Type) List[String] = {
-    let mutable aliases = List[String].new()
-    aliases = push_concrete_receiver_lookup_alias(aliases, mono_concrete_layout_key_for_type(context, t))
+    let mutable aliases = List[String].new();
+    aliases = push_concrete_receiver_lookup_alias(aliases, mono_concrete_layout_key_for_type(context, t));
 
     when t in {
         .StructureType(def_id) then {
-            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
-            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "")
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "");
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "");
         },
         .EnumType(def_id) then {
-            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
-            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "")
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "");
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "");
         },
         .OpaqueType(def_id) then {
-            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "");
             when context.lookup_type(def_id) in {
                 .Some(mapped_type) then {
                     for alias in concrete_receiver_lookup_aliases(context, mapped_type) then {
-                        aliases = push_concrete_receiver_lookup_alias(aliases, alias)
-                    }
+                        aliases = push_concrete_receiver_lookup_alias(aliases, alias);
+                    };
                 },
                 .None() then {},
-            }
+            };
         },
         _ then {},
-    }
+    };
 
-    return aliases
-}
+    return aliases;
+};
 
 file_private let concrete_trait_method_lookup_key(context * CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
-    let normalized = mono_receiver_lookup_type(context, receiver_type)
-    let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
-    return "\(receiver_key)|\(trait_name)|\(method_name)"
-}
+    let normalized = mono_receiver_lookup_type(context, receiver_type);
+    let receiver_key = mono_concrete_layout_key_for_type(context, normalized);
+    return "\(receiver_key)|\(trait_name)|\(method_name)";
+};
 
 // ── TemplateInfo ──────────────────────────────────────────────────────────────
 
@@ -312,7 +312,7 @@ file_private let concrete_trait_method_lookup_key(context * CompilerContext, rec
 public type TemplateInfo(
     base_name String,
     args List[* Type],
-)
+);
 
 // ── VtableRequest ─────────────────────────────────────────────────────────────
 
@@ -322,7 +322,7 @@ public type VtableRequest(
     concrete_type Type,
     trait_name String,
     trait_type_args List[* Type],
-)
+);
 
 // ── MonomorphizedProgram ──────────────────────────────────────────────────────
 
@@ -343,37 +343,37 @@ public type MonomorphizedProgram(
     mutable extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
     mutable extension_method_def_ids Dict[String, DefId],
     mutable remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
-)
+);
 
 given MonomorphizedProgram {
     public merge_generated_node(*mutable self, node * TypedDecl) Void = {
-        self.global_nodes.push(node)
-    }
+        self.global_nodes.push(node);
+    };
 
     public merge_concrete_callable(*mutable self, def_id DefId, info ConcreteCallableInfo) Void = {
-        self.concrete_callables_by_def_id.insert(def_id, info)
-    }
+        self.concrete_callables_by_def_id.insert(def_id, info);
+    };
 
     public merge_receiver_method_dispatch(*mutable self, def_id DefId, info ReceiverMethodDispatchInfo) Void = {
-        self.receiver_method_dispatch.insert(def_id, info)
-    }
+        self.receiver_method_dispatch.insert(def_id, info);
+    };
 
     public merge_extension_method_map(*mutable self, key String, value Dict[String, ConcreteMethodEntry]) Void = {
-        self.extension_methods.insert(key, value)
-    }
+        self.extension_methods.insert(key, value);
+    };
 
     public merge_extension_method_def_id(*mutable self, key String, def_id DefId) Void = {
-        self.extension_method_def_ids.insert(key, def_id)
-    }
+        self.extension_method_def_ids.insert(key, def_id);
+    };
 
     public merge_remapped_function_def_ids(*mutable self, key UInt, values List[Pair[DefId, Type]]) Void = {
-        self.remapped_function_def_ids.insert(key, values)
-    }
+        self.remapped_function_def_ids.insert(key, values);
+    };
 
     public merge_static_method_lookup_entry(*mutable self, key String, def_id DefId) Void = {
-        self.static_method_by_key.insert(key, def_id)
-    }
-}
+        self.static_method_by_key.insert(key, def_id);
+    };
+};
 
 // ── TypeCheckerOutput ─────────────────────────────────────────────────────────
 
@@ -394,7 +394,7 @@ public type TypeCheckerOutput(
     method_table MethodTable,
     trait_registry TraitRegistry,
     conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
-)
+);
 
 // ── MonomorphizerStorage ──────────────────────────────────────────────────────
 
@@ -477,13 +477,13 @@ module_private type MonomorphizerStorage(
 
     // ── Diagnostics ─────────────────────────────────────────────────────────
     mutable diagnostics DiagnosticCollector,
-)
+);
 
 // ── Monomorphizer ─────────────────────────────────────────────────────────────
 
 // Core monomorphization engine.  All mutable state lives in storage (heap-allocated)
 // so passing Monomorphizer by ref never copies large data onto the stack.
-public type Monomorphizer(module_private mutable storage *mutable MonomorphizerStorage)
+public type Monomorphizer(module_private mutable storage *mutable MonomorphizerStorage);
 
 // ── Monomorphizer initialisation ──────────────────────────────────────────────
 
@@ -500,37 +500,37 @@ file_private let is_non_generic_decl(decl * TypedDecl) Bool = {
         .TypeStructDecl(_, _, _, _, _)      then true,
         .TypeEnumDecl(_, _, _, _, _)       then true,
         .GivenDecl(target_type, members, _) then {
-            let _ = members
-            yield not has_generic_parameter(target_type)
+            let _ = members;
+            yield not has_generic_parameter(target_type);
         },
         .GivenTraitDecl(target_type, _, _, members, _) then {
-            let _ = members
-            yield not has_generic_parameter(target_type)
+            let _ = members;
+            yield not has_generic_parameter(target_type);
         },
         .IntrinsicGivenDecl(target_type, members, _) then {
-            let _ = members
-            yield not has_generic_parameter(target_type)
+            let _ = members;
+            yield not has_generic_parameter(target_type);
         },
         // 泛型模板主体由 GenericTemplateRegistry 持有，TypedProgram 仅保留占位。
         .GenericTypeStructDecl(_, _, _) then false,
         .GenericTypeEnumDecl(_, _, _)  then false,
         _ then false,
-    }
-}
+    };
+};
 
 file_private let given_member_has_generic_parameter(member * TypedGivenMember) Bool = {
     for param in member.params then {
-        if has_generic_parameter(param.param_type) then { return true }
-    }
-    return has_generic_parameter(member.return_type)
-}
+        if has_generic_parameter(param.param_type) then { return true;};
+    };
+    return has_generic_parameter(member.return_type);
+};
 
 file_private let given_members_have_generic_parameter(members List[* TypedGivenMember]) Bool = {
     for member_ref in members then {
-        if given_member_has_generic_parameter(member_ref) then { return true }
-    }
-    return false
-}
+        if given_member_has_generic_parameter(member_ref) then { return true;};
+    };
+    return false;
+};
 
 file_private let is_source_given_decl(decl * TypedDecl) Bool = {
     return when decl in {
@@ -538,8 +538,8 @@ file_private let is_source_given_decl(decl * TypedDecl) Bool = {
         .GivenTraitDecl(_, _, _, _, _) then true,
         .IntrinsicGivenDecl(_, _, _) then true,
         _ then false,
-    }
-}
+    };
+};
 
 file_private let mono_env_uint(_name String, fallback UInt) UInt = {
     return when env(_name) in {
@@ -548,8 +548,8 @@ file_private let mono_env_uint(_name String, fallback UInt) UInt = {
             .Error(_) then fallback,
         },
         .None() then fallback,
-    }
-}
+    };
+};
 
 file_private let instantiation_kind_profile_name(kind InstantiationKind) String = {
     return when kind in {
@@ -558,8 +558,8 @@ file_private let instantiation_kind_profile_name(kind InstantiationKind) String 
         .Function(_, _) then "function",
         .ExtensionMethod(_, _, _, _, _) then "extension-method",
         .TraitMethod(_, _, _) then "trait-method",
-    }
-}
+    };
+};
 
 file_private let mono_decl_kind_name(decl * TypedDecl) String = {
     return when decl in {
@@ -581,49 +581,49 @@ file_private let mono_decl_kind_name(decl * TypedDecl) String = {
         .IntrinsicGivenDecl(_, _, _) then "intrinsic-given",
         .ForeignTypeDecl(_, _, _, _, _) then "foreign-type",
         .UsingDecl(_, _, _) then "using",
-    }
-}
+    };
+};
 
 file_private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
     when decl_def_id(decl) in {
         .Some(node_def_id) then {
-            return Option[String].Some("def:\(node_def_id.id)")
+            return Option[String].Some("def:\(node_def_id.id)");
         },
         .None() then {},
-    }
+    };
 
     return when decl in {
         .GivenDecl(target_type, members, _) then {
-            let mutable out = "given:\(layout_key(target_type))"
+            let mutable out = "given:\(layout_key(target_type))";
             for m_ref in members then {
-                out.push_string("|")
-                out.push_string("\(m_ref.def_id.id)")
-            }
-            yield Option[String].Some(out)
+                out.push_string("|");
+                out.push_string("\(m_ref.def_id.id)");
+            };
+            yield Option[String].Some(out);
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
-            let mutable out = "given-trait:\(layout_key(target_type)):\(trait_name)"
+            let mutable out = "given-trait:\(layout_key(target_type)):\(trait_name)";
             for trait_arg in trait_args then {
-                out.push_string("#")
-                out.push_string(layout_key(trait_arg))
-            }
+                out.push_string("#");
+                out.push_string(layout_key(trait_arg));
+            };
             for m_ref in members then {
-                out.push_string("|")
-                out.push_string("\(m_ref.def_id.id)")
-            }
-            yield Option[String].Some(out)
+                out.push_string("|");
+                out.push_string("\(m_ref.def_id.id)");
+            };
+            yield Option[String].Some(out);
         },
         .IntrinsicGivenDecl(target_type, members, _) then {
-            let mutable out = "intrinsic-given:\(layout_key(target_type))"
+            let mutable out = "intrinsic-given:\(layout_key(target_type))";
             for m_ref in members then {
-                out.push_string("|")
-                out.push_string("\(m_ref.def_id.id)")
-            }
-            yield Option[String].Some(out)
+                out.push_string("|");
+                out.push_string("\(m_ref.def_id.id)");
+            };
+            yield Option[String].Some(out);
         },
         _ then Option[String].None(),
-    }
-}
+    };
+};
 
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
 module_private let decl_def_id(decl * TypedDecl) Option[DefId] = {
@@ -637,101 +637,101 @@ module_private let decl_def_id(decl * TypedDecl) Option[DefId] = {
         .TypeEnumDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
         .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
         _ then Option[DefId].None(),
-    }
-}
+    };
+};
 
 file_private type MonoProgramInputs(
     initial_nodes List[* TypedDecl],
     source_given_decls List[* TypedDecl],
-)
+);
 
 file_private let strip_given_member_body(member_ref * TypedGivenMember) * TypedGivenMember = {
-    return box(TypedGivenMember(member_ref.def_id, member_ref.name, member_ref.params, member_ref.return_type, Option[* TypedExpr].None()))
-}
+    return box(TypedGivenMember(member_ref.def_id, member_ref.name, member_ref.params, member_ref.return_type, Option[* TypedExpr].None()));
+};
 
 file_private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * TypedDecl = {
     return when decl_ref in {
         .GivenDecl(target_type, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new()
+            let mutable stripped_members = List[* TypedGivenMember].new();
             for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref))
-            }
-            yield box(TypedDecl.GivenDecl(target_type, stripped_members, span))
+                stripped_members.push(strip_given_member_body(member_ref));
+            };
+            yield box(TypedDecl.GivenDecl(target_type, stripped_members, span));
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new()
+            let mutable stripped_members = List[* TypedGivenMember].new();
             for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref))
-            }
-            yield box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span))
+                stripped_members.push(strip_given_member_body(member_ref));
+            };
+            yield box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span));
         },
         .IntrinsicGivenDecl(target_type, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new()
+            let mutable stripped_members = List[* TypedGivenMember].new();
             for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref))
-            }
-            yield box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span))
+                stripped_members.push(strip_given_member_body(member_ref));
+            };
+            yield box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span));
         },
         _ then decl_ref,
-    }
-}
+    };
+};
 
 file_private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
-    let mutable initial_nodes = List[* TypedDecl].new()
-    let mutable source_given_decls = List[* TypedDecl].new()
+    let mutable initial_nodes = List[* TypedDecl].new();
+    let mutable source_given_decls = List[* TypedDecl].new();
     for decl_ref in program.declarations then {
         if is_source_given_decl(decl_ref) then {
-            source_given_decls.push(strip_given_decl_bodies_for_source_lookup(decl_ref))
-        }
+            source_given_decls.push(strip_given_decl_bodies_for_source_lookup(decl_ref));
+        };
         if is_non_generic_decl(decl_ref) then {
-            initial_nodes.push(decl_ref)
-        }
-    }
-    return MonoProgramInputs(initial_nodes, source_given_decls)
-}
+            initial_nodes.push(decl_ref);
+        };
+    };
+    return MonoProgramInputs(initial_nodes, source_given_decls);
+};
 
 given Monomorphizer {
-    public diagnostics(self) DiagnosticCollector = self.storage.diagnostics
+    public diagnostics(self) DiagnosticCollector = self.storage.diagnostics;
 
     module_private report_monomorphization_error(*self, def_id DefId, message String) Void = {
-        let file_path = self.storage.context.get_source_file(def_id) or else ""
-        let span = self.storage.context.get_span(def_id) or else unknown_span()
-        self.storage.diagnostics.push(make_diagnostic_at(DiagnosticStage.Other(), file_path, message, span))
-    }
+        let file_path = self.storage.context.get_source_file(def_id) or else "";
+        let span = self.storage.context.get_span(def_id) or else unknown_span();
+        self.storage.diagnostics.push(make_diagnostic_at(DiagnosticStage.Other(), file_path, message, span));
+    };
 
     module_private report_monomorphization_internal_error(*self, message String) Void = {
-        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Other(), "", message))
-    }
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Other(), "", message));
+    };
 
     module_private receiver_method_dispatch_info(*self, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
-        return self.storage.receiver_method_dispatch.get(def_id)
-    }
+        return self.storage.receiver_method_dispatch.get(def_id);
+    };
 
     module_private concrete_callable_info(*self, def_id DefId) Option[ConcreteCallableInfo] = {
-        return self.storage.concrete_callables_by_def_id.get(def_id)
-    }
+        return self.storage.concrete_callables_by_def_id.get(def_id);
+    };
 
     module_private register_concrete_callable_if_absent(*self, info ConcreteCallableInfo) Void = {
         if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
-            self.storage.concrete_callables_by_def_id.insert(info.def_id, info)
+            self.storage.concrete_callables_by_def_id.insert(info.def_id, info);
             // Build secondary index: "layout_key(owner).method_name" -> [def_id, ...]
             when info.owner_type in {
                 .Some(owner_type) then {
-                    let index_key = "\(layout_key(owner_type)).\(info.logical_name)"
-                    let mutable existing = self.storage.concrete_callable_name_index.get(index_key) or else List[DefId].new()
-                    existing.push(info.def_id)
-                    self.storage.concrete_callable_name_index.insert(index_key, existing)
+                    let index_key = "\(layout_key(owner_type)).\(info.logical_name)";
+                    let mutable existing = self.storage.concrete_callable_name_index.get(index_key) or else List[DefId].new();
+                    existing.push(info.def_id);
+                    self.storage.concrete_callable_name_index.insert(index_key, existing);
                 },
                 _ then {},
-            }
-        }
-    }
+            };
+        };
+    };
 
     module_private set_receiver_method_dispatch_if_absent(*self, callsite_def_id DefId, info ReceiverMethodDispatchInfo) Void = {
         if not self.storage.receiver_method_dispatch.contains_key(callsite_def_id) then {
-            self.storage.receiver_method_dispatch.insert(callsite_def_id, info)
-        }
-    }
+            self.storage.receiver_method_dispatch.insert(callsite_def_id, info);
+        };
+    };
 
     public new_with_inputs(
         program TypedProgram,
@@ -744,9 +744,9 @@ given Monomorphizer {
         trait_registry TraitRegistry,
         conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
     ) Monomorphizer = {
-        let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context, global_scope, import_graph, method_table, trait_registry, conformance_index)
-        return Monomorphizer.new(box(input))
-    }
+        let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context, global_scope, import_graph, method_table, trait_registry, conformance_index);
+        return Monomorphizer.new(box(input));
+    };
 
     // Construct a Monomorphizer from a TypeCheckerOutput.
     //
@@ -754,21 +754,21 @@ given Monomorphizer {
     // • All InstantiationRequests from the input are enqueued in pending_requests.
     // • Every cache / map / set is initialised empty.
     public new(input * TypeCheckerOutput) Monomorphizer = {
-        let collected = collect_mono_program_inputs(input.program)
-        let initial_nodes = collected.initial_nodes
-        let source_given_decls = collected.source_given_decls
+        let collected = collect_mono_program_inputs(input.program);
+        let initial_nodes = collected.initial_nodes;
+        let source_given_decls = collected.source_given_decls;
 
         // Copy and deduplicate instantiation requests up front to avoid
         // pathological queue growth from repeated identical requests.
-        let mutable requests = Queue[InstantiationRequest].with_capacity(input.instantiation_requests.count())
-        let mutable queued_keys = Set[InstantiationKey].new()
+        let mutable requests = Queue[InstantiationRequest].with_capacity(input.instantiation_requests.count());
+        let mutable queued_keys = Set[InstantiationKey].new();
         for req in input.instantiation_requests then {
-            let key = req.deduplication_key()
+            let key = req.deduplication_key();
             if not queued_keys.contains(key) then {
-                queued_keys.insert(key)
-                requests.push(req)
-            }
-        }
+                queued_keys.insert(key);
+                requests.push(req);
+            };
+        };
 
         let s = box(MonomorphizerStorage(
             input.generic_templates,
@@ -837,9 +837,9 @@ given Monomorphizer {
             // shared metadata context
             input.context,
             DiagnosticCollector.new(),
-        ))
-        return Monomorphizer(s)
-    }
+        ));
+        return Monomorphizer(s);
+    };
 
     // ── Seed GivenDecl method DefIds ──────────────────────────────────────────
 
@@ -849,17 +849,17 @@ given Monomorphizer {
     file_private seed_given_method_def_ids(*self, node * TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].None(), members)
+                self.register_given_members_def_ids(target_type, Option[String].None(), members);
             },
             .GivenTraitDecl(target_type, trait_name, _, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].Some(trait_name), members)
+                self.register_given_members_def_ids(target_type, Option[String].Some(trait_name), members);
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].None(), members)
+                self.register_given_members_def_ids(target_type, Option[String].None(), members);
             },
             _ then {},
-        }
-    }
+        };
+    };
 
     file_private register_given_members_def_ids(*self, target_type Type, trait_conformance Option[String], members List[* TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
@@ -868,30 +868,30 @@ given Monomorphizer {
                 yield when self.storage.context.lookup_type(def_id) in {
                     .Some(underlying) then underlying,
                     .None() then target_type,
-                }
+                };
             },
             _ then target_type,
-        }
-        let type_keys = concrete_receiver_lookup_aliases(&(self.storage.context), resolved_type)
+        };
+        let type_keys = concrete_receiver_lookup_aliases(&(self.storage.context), resolved_type);
 
         for m_ref in members then {
             if given_member_has_generic_parameter(m_ref) then {
-                continue
-            }
+                continue;
+            };
             self.register_concrete_callable_if_absent(
                 ConcreteCallableInfo(m_ref.def_id, m_ref.name, Option[Type].Some(resolved_type), trait_conformance)
-            )
+            );
             for type_key in type_keys then {
-                let key1 = "\(type_key).\(m_ref.name)"
+                let key1 = "\(type_key).\(m_ref.name)";
                 if not self.storage.extension_method_def_ids.contains_key(key1) then {
-                    self.storage.extension_method_def_ids.insert(key1, m_ref.def_id)
-                }
-            }
-        }
-    }
+                    self.storage.extension_method_def_ids.insert(key1, m_ref.def_id);
+                };
+            };
+        };
+    };
 
     file_private enqueue_forced_drop_request_for_type_def(*self, def_id DefId) Void = {
-        let mapped_type = self.storage.context.lookup_type(def_id)
+        let mapped_type = self.storage.context.lookup_type(def_id);
 
         let template_name = when self.storage.context.get_template_name(def_id) in {
             .Some(name) then name,
@@ -899,43 +899,43 @@ given Monomorphizer {
                 .Some(mapped) then when mapped in {
                     .GenericStruct(template, _) then template,
                     .GenericEnum(template, _) then template,
-                    _ then { return },
+                    _ then { return;},
                 },
-                .None() then { return },
+                .None() then { return;},
             },
-        }
+        };
 
         let type_args_raw = when self.storage.context.get_type_arguments(def_id) in {
             .Some(args) then args,
             .None() then when mapped_type in {
                 .Some(mapped) then when mapped in {
                     .GenericStruct(_, args) then {
-                        let mutable unpacked = List[Type].new()
+                        let mutable unpacked = List[Type].new();
                         for arg in args then {
-                            unpacked.push(*arg)
-                        }
-                        yield unpacked
+                            unpacked.push(*arg);
+                        };
+                        yield unpacked;
                     },
                     .GenericEnum(_, args) then {
-                        let mutable unpacked = List[Type].new()
+                        let mutable unpacked = List[Type].new();
                         for arg in args then {
-                            unpacked.push(*arg)
-                        }
-                        yield unpacked
+                            unpacked.push(*arg);
+                        };
+                        yield unpacked;
                     },
-                    _ then { return },
+                    _ then { return;},
                 },
-                .None() then { return },
+                .None() then { return;},
             },
-        }
+        };
 
-        let mutable type_args = List[* Type].new()
+        let mutable type_args = List[* Type].new();
         for type_arg in type_args_raw then {
             if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
-                return
-            }
-            type_args.push(box(type_arg))
-        }
+                return;
+            };
+            type_args.push(box(type_arg));
+        };
 
         let base_type = when mapped_type in {
             .Some(mapped) then mapped,
@@ -944,17 +944,17 @@ given Monomorphizer {
                     .TypeDef(type_kind) then when type_kind in {
                         .Structure() then Type.StructureType(def_id),
                         .Enum() then Type.EnumType(def_id),
-                        _ then { return },
+                        _ then { return;},
                     },
-                    _ then { return },
+                    _ then { return;},
                 },
-                .None() then { return },
+                .None() then { return;},
             },
-        }
+        };
 
         if has_generic_parameter(base_type) or is_placeholder_inferred_type(base_type) then {
-            return
-        }
+            return;
+        };
 
         when self.storage.generic_templates.lookup_extension_methods(template_name) in {
             .Some(ext_templates) then {
@@ -962,10 +962,10 @@ given Monomorphizer {
                     let is_drop_trait = when ext_template.conformance_trait_name in {
                         .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
                         .None() then false,
-                    }
+                    };
                     if ext_template.method.name <> "drop" and not is_drop_trait then {
-                        continue
-                    }
+                        continue;
+                    };
                     let req = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
                             template_name,
@@ -976,17 +976,17 @@ given Monomorphizer {
                         ),
                         0,
                         "",
-                    )
-                    let key = req.deduplication_key()
+                    );
+                    let key = req.deduplication_key();
                     if not self.storage.processed_request_keys.contains(key) and not self.storage.pending_request_keys.contains(key) then {
-                        self.storage.pending_request_keys.insert(key)
-                        self.storage.pending_requests.push(req)
-                    }
-                }
+                        self.storage.pending_request_keys.insert(key);
+                        self.storage.pending_requests.push(req);
+                    };
+                };
             },
             .None() then {},
-        }
-    }
+        };
+    };
 
     file_private enqueue_forced_drop_request_for_extension_base(
         *self,
@@ -995,18 +995,18 @@ given Monomorphizer {
         type_args List[* Type],
     ) Void = {
         if has_generic_parameter(base_type) or is_placeholder_inferred_type(base_type) or args_have_generic_parameter(type_args) then {
-            return
-        }
+            return;
+        };
         when self.storage.generic_templates.lookup_extension_methods(template_name) in {
             .Some(ext_templates) then {
                 for ext_template in ext_templates then {
                     let is_drop_trait = when ext_template.conformance_trait_name in {
                         .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
                         .None() then false,
-                    }
+                    };
                     if ext_template.method.name <> "drop" and not is_drop_trait then {
-                        continue
-                    }
+                        continue;
+                    };
 
                     let req = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
@@ -1018,17 +1018,17 @@ given Monomorphizer {
                         ),
                         0,
                         "",
-                    )
-                    let key = req.deduplication_key()
+                    );
+                    let key = req.deduplication_key();
                     if not self.storage.processed_request_keys.contains(key) and not self.storage.pending_request_keys.contains(key) then {
-                        self.storage.pending_request_keys.insert(key)
-                        self.storage.pending_requests.push(req)
-                    }
-                }
+                        self.storage.pending_request_keys.insert(key);
+                        self.storage.pending_requests.push(req);
+                    };
+                };
             },
             .None() then {},
-        }
-    }
+        };
+    };
 
     // ── Main monomorphization loop ────────────────────────────────────────────
 
@@ -1046,220 +1046,220 @@ given Monomorphizer {
         // Seed forced Drop-method instantiation for already-materialized
         // concrete generic nominal types tracked only in CompilerContext.
         // removed noisy phase logging
-        let mutable seed_def_id UInt = 1
+        let mutable seed_def_id UInt = 1;
         while seed_def_id < self.storage.context.next_def_id() then {
-            self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id))
-            seed_def_id += 1
-        }
+            self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id));
+            seed_def_id += 1;
+        };
         // removed noisy phase logging
 // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
         // removed noisy phase logging
         for node_ref in self.storage.generated_nodes then {
-            self.seed_given_method_def_ids(node_ref)
-        }
+            self.seed_given_method_def_ids(node_ref);
+        };
         // removed noisy phase logging
 
-        let mutable processed_iterations = 0
+        let mutable processed_iterations = 0;
         // removed noisy phase logging
 // ── Work-queue loop ───────────────────────────────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
-                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop");
+                break;
+            };
 
-            processed_iterations += 1
+            processed_iterations += 1;
             if processed_iterations % 100(UInt) == 0(UInt) then {
                 // removed noisy progress logging
-            }
+            };
             if processed_iterations > 200000 then {
-                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop");
+                break;
+            };
 
             // Recursion depth guard
             if self.storage.current_recursion_depth > 100 then {
-                self.report_monomorphization_internal_error("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation");
+                break;
+            };
 
             // Take the first request from the queue
-            let req_opt = self.storage.pending_requests.pop()
+            let req_opt = self.storage.pending_requests.pop();
             if req_opt is .None() then {
-                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty");
+                break;
+            };
             let req = req_opt or else {
-                continue
-            }
-            let key = req.deduplication_key()
+                continue;
+            };
+            let key = req.deduplication_key();
             // removed noisy phase logging
 
             // Deduplication check
             if self.storage.processed_request_keys.contains(key) then {
-                continue
-            }
-            self.storage.processed_request_keys.insert(key)
+                continue;
+            };
+            self.storage.processed_request_keys.insert(key);
 
             // Increment recursion depth before dispatching
-            self.storage.current_recursion_depth += 1
+            self.storage.current_recursion_depth += 1;
             // removed noisy phase logging
 
             // Dispatch by kind
             when req.kind in {
                 .StructType(template, args) then {
-                    self.instantiate_struct_impl(template, args)
+                    self.instantiate_struct_impl(template, args);
                 },
                 .EnumType(template, args) then {
-                    self.instantiate_enum_impl(template, args)
+                    self.instantiate_enum_impl(template, args);
                 },
                 .Function(template, args) then {
-                    self.instantiate_function_impl(template, args)
+                    self.instantiate_function_impl(template, args);
                 },
                 .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
                     if template.method.name <> "drop" then {
-                        self.enqueue_forced_drop_request_for_extension_base(template_name, base_type, type_args)
-                    }
-                    self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args)
+                        self.enqueue_forced_drop_request_for_extension_base(template_name, base_type, type_args);
+                    };
+                    self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args);
                 },
                 .TraitMethod(base_type, method_name, method_type_args) then {
-                    self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
+                    self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args);
                 },
-            }
+            };
 
             // removed noisy phase logging
 
             // Decrement recursion depth after dispatching
-            self.storage.current_recursion_depth -= 1
-        }
+            self.storage.current_recursion_depth -= 1;
+        };
 
         // ── Post-loop: resolve parameterized types in all generated nodes ─────
         //
         // Re-seed extension_method_def_ids from any newly-generated GivenDecl nodes
         // (the work-queue loop may have instantiated new extension methods).
         for node_ref in self.storage.generated_nodes then {
-            self.seed_given_method_def_ids(node_ref)
-        }
+            self.seed_given_method_def_ids(node_ref);
+        };
 
-        let mutable dedup_seen_keys = Set[String].new()
-        let mutable deduped_nodes = List[* TypedDecl].new()
-        let mutable dedup_removed = 0(UInt)
+        let mutable dedup_seen_keys = Set[String].new();
+        let mutable deduped_nodes = List[* TypedDecl].new();
+        let mutable dedup_removed = 0(UInt);
         for node_ref in self.storage.generated_nodes then {
             when mono_decl_dedup_key(node_ref) in {
                 .Some(dedup_key) then {
                     if dedup_seen_keys.contains(dedup_key) then {
-                        dedup_removed += 1(UInt)
+                        dedup_removed += 1(UInt);
                     } else {
-                        dedup_seen_keys.insert(dedup_key)
-                        deduped_nodes.push(node_ref)
-                    }
+                        dedup_seen_keys.insert(dedup_key);
+                        deduped_nodes.push(node_ref);
+                    };
                 },
                 .None() then {
-                    deduped_nodes.push(node_ref)
+                    deduped_nodes.push(node_ref);
                 },
-            }
-        }
+            };
+        };
         if dedup_removed > 0(UInt) then {
-            self.storage.generated_nodes = deduped_nodes
-        }
+            self.storage.generated_nodes = deduped_nodes;
+        };
         // removed noisy phase logging
         // removed noisy phase logging
-        let mutable unique_def_ids = Set[UInt].new()
-        let mutable duplicate_def_nodes = 0(UInt)
+        let mutable unique_def_ids = Set[UInt].new();
+        let mutable duplicate_def_nodes = 0(UInt);
         for node_ref in self.storage.generated_nodes then {
             when decl_def_id(node_ref) in {
                 .Some(node_def_id) then {
                     if unique_def_ids.contains(node_def_id.id) then {
-                        duplicate_def_nodes += 1(UInt)
+                        duplicate_def_nodes += 1(UInt);
                     } else {
-                        unique_def_ids.insert(node_def_id.id)
-                    }
+                        unique_def_ids.insert(node_def_id.id);
+                    };
                 },
                 .None() then {},
-            }
-        }
-        self.storage.expression_resolve_total_steps = 0(UInt)
-        self.storage.expression_resolve_total_limited = false
+            };
+        };
+        self.storage.expression_resolve_total_steps = 0(UInt);
+        self.storage.expression_resolve_total_limited = false;
         // removed noisy phase logging
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
-        let mutable resolved_nodes = List[* TypedDecl].new()
-        let mutable ri = 0(UInt)
+        let mutable resolved_nodes = List[* TypedDecl].new();
+        let mutable ri = 0(UInt);
         while ri < self.storage.generated_nodes.count() then {
-            let node = self.storage.generated_nodes[ri]
-            let node_kind = mono_decl_kind_name(node)
+            let node = self.storage.generated_nodes[ri];
+            let node_kind = mono_decl_kind_name(node);
             // removed noisy phase logging
-            resolved_nodes.push(box(resolve_types_in_global_node(self, node)))
+            resolved_nodes.push(box(resolve_types_in_global_node(self, node)));
             // removed noisy phase logging
-            ri += 1(UInt)
-        }
-        self.storage.generated_nodes = resolved_nodes
+            ri += 1(UInt);
+        };
+        self.storage.generated_nodes = resolved_nodes;
         // removed noisy phase logging
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
-                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop");
+                break;
+            };
 
-            processed_iterations += 1
+            processed_iterations += 1;
             if processed_iterations % 100(UInt) == 0(UInt) then {
                 // removed noisy progress logging
-            }
+            };
             if processed_iterations > 200000 then {
-                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop");
+                break;
+            };
 
-            let req_opt = self.storage.pending_requests.pop()
+            let req_opt = self.storage.pending_requests.pop();
             if req_opt is .None() then {
-                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty")
-                break
-            }
+                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty");
+                break;
+            };
             let req = req_opt or else {
-                continue
-            }
-            let key = req.deduplication_key()
+                continue;
+            };
+            let key = req.deduplication_key();
             // removed noisy phase logging
             if self.storage.processed_request_keys.contains(key) then {
-                continue
-            }
-            self.storage.processed_request_keys.insert(key)
+                continue;
+            };
+            self.storage.processed_request_keys.insert(key);
 
             when req.kind in {
                 .StructType(template, args) then {
-                    self.instantiate_struct_impl(template, args)
+                    self.instantiate_struct_impl(template, args);
                 },
                 .EnumType(template, args) then {
-                    self.instantiate_enum_impl(template, args)
+                    self.instantiate_enum_impl(template, args);
                 },
                 .Function(template, args) then {
-                    self.instantiate_function_impl(template, args)
+                    self.instantiate_function_impl(template, args);
                 },
                 .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
-                    self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args)
+                    self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args);
                 },
                 .TraitMethod(base_type, method_name, method_type_args) then {
-                    self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
+                    self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args);
                 },
-            }
+            };
             // removed noisy phase logging
-        }
+        };
 
         // ── Build static method lookup ────────────────────────────────────────
         //
-        let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes)
-        let concrete_callables = self.storage.concrete_callables_by_def_id
-        let type_def_ids_by_name = self.build_codegen_type_def_id_name_index()
-        let mutable c_identifier_by_def_id = Dict[UInt, String].new()
-        let mutable foreign_def_ids = Set[UInt].new()
-        self.collect_codegen_foreign_def_ids(&mutable foreign_def_ids)
-        self.collect_codegen_c_identifiers(type_def_ids_by_name, foreign_def_ids, &mutable c_identifier_by_def_id)
+        let static_lookup = self.build_static_method_lookup(self.storage.generated_nodes);
+        let concrete_callables = self.storage.concrete_callables_by_def_id;
+        let type_def_ids_by_name = self.build_codegen_type_def_id_name_index();
+        let mutable c_identifier_by_def_id = Dict[UInt, String].new();
+        let mutable foreign_def_ids = Set[UInt].new();
+        self.collect_codegen_foreign_def_ids(&mutable foreign_def_ids);
+        self.collect_codegen_c_identifiers(type_def_ids_by_name, foreign_def_ids, &mutable c_identifier_by_def_id);
         for entry in c_identifier_by_def_id.iterator() then {
-            self.storage.context.set_cname(DefId(entry.first), entry.second)
-        }
+            self.storage.context.set_cname(DefId(entry.first), entry.second);
+        };
 
         // ── Assemble and return MonomorphizedProgram ──────────────────────────
         return MonomorphizedProgram(
@@ -1278,9 +1278,9 @@ given Monomorphizer {
             self.storage.extension_methods,
             self.storage.extension_method_def_ids,
             self.storage.remapped_function_def_ids,
-        )
+        );
 
-    }
+    };
 
     // ── Resolve body expression in program context ─────────────────────────────
 
@@ -1288,7 +1288,7 @@ given Monomorphizer {
     // This is used for rechecking concrete function/initializer bodies that were
     // deferred during the initial monomorphization pass.
     public resolve_program_body_expression(program *mutable MonomorphizedProgram, context * CompilerContext, expr * TypedExpr) * TypedExpr = {
-        let existing_node_count = 0(UInt)
+        let existing_node_count = 0(UInt);
         let s = box(MonomorphizerStorage(
             program.generic_templates,
             List[* TypedDecl].new(),
@@ -1349,101 +1349,101 @@ given Monomorphizer {
             Option[Type].None(),
             *context,
             DiagnosticCollector.new(),
-        ))
-        let mutable mono = Monomorphizer(s)
-        let resolved = resolve_types_in_expression(&mutable mono, expr)
+        ));
+        let mutable mono = Monomorphizer(s);
+        let resolved = resolve_types_in_expression(&mutable mono, expr);
         for node in mono.storage.generated_nodes then {
-            program.merge_generated_node(node)
-        }
+            program.merge_generated_node(node);
+        };
         for entry in mono.storage.concrete_callables_by_def_id.iterator() then {
-            program.merge_concrete_callable(entry.first, entry.second)
-        }
+            program.merge_concrete_callable(entry.first, entry.second);
+        };
         for entry in mono.storage.receiver_method_dispatch.iterator() then {
-            program.merge_receiver_method_dispatch(entry.first, entry.second)
-        }
+            program.merge_receiver_method_dispatch(entry.first, entry.second);
+        };
         for entry in mono.storage.extension_methods.iterator() then {
-            program.merge_extension_method_map(entry.first, entry.second)
-        }
+            program.merge_extension_method_map(entry.first, entry.second);
+        };
         for entry in mono.storage.extension_method_def_ids.iterator() then {
-            program.merge_extension_method_def_id(entry.first, entry.second)
-        }
+            program.merge_extension_method_def_id(entry.first, entry.second);
+        };
         for entry in mono.storage.remapped_function_def_ids.iterator() then {
-            program.merge_remapped_function_def_ids(entry.first, entry.second)
-        }
-        return resolved
-    }
+            program.merge_remapped_function_def_ids(entry.first, entry.second);
+        };
+        return resolved;
+    };
 
     // ── Stub methods (implemented in later tasks) ─────────────────────────────
 
     // Instantiate a generic struct template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.3).
     instantiate_struct_impl(*self, template GenericStructTemplate, args List[* Type]) Type = {
-        return instantiate_struct(self, template, args)
-    }
+        return instantiate_struct(self, template, args);
+    };
 
     // Instantiate a generic enum template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.4).
     instantiate_enum_impl(*self, template GenericEnumTemplate, args List[* Type]) Type = {
-        return instantiate_enum(self, template, args)
-    }
+        return instantiate_enum(self, template, args);
+    };
 
     // Instantiate a generic function template with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.1).
     instantiate_function_impl(*self, template * GenericFunctionTemplate, args List[* Type]) InstantiatedFunction = {
-        return instantiate_function(self, template, args)
-    }
+        return instantiate_function(self, template, args);
+    };
 
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
     instantiate_extension_method_impl(*self, base_type Type, template_name String, template * GenericExtensionMethodTemplate, type_args List[* Type], method_type_args List[* Type]) Symbol = {
-        let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args)
-        return sym
-    }
+        let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args);
+        return sym;
+    };
 
     instantiate_extension_method_def_id_impl(*self, base_type Type, template_name String, template * GenericExtensionMethodTemplate, type_args List[* Type], method_type_args List[* Type]) DefId = {
-        return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args)
-    }
+        return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args);
+    };
 
     // Resolve a trait placeholder method call to a concrete implementation.
     // Implemented in mono_functions.koral (task 6.6).
     instantiate_trait_placeholder_method_impl(*self, base_type Type, method_name String, method_type_args List[* Type]) Void = {
-        instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args)
-    }
+        instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args);
+    };
 
     instantiate_trait_vtable_methods_impl(*self, concrete_type Type, trait_name String, trait_type_args List[* Type]) Void = {
-        instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args)
-    }
+        instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args);
+    };
 
     // Substitute generic type parameters in a Type.
     // Implemented in mono_type_resolution.koral (task 8.1).
     substitute_type_impl(*self, t Type, substitution Dict[String, Type]) Type = {
-        return substitute_type(self, t, substitution)
-    }
+        return substitute_type(self, t, substitution);
+    };
 
     // Substitute generic type parameters in a TypeNode, resolving to a concrete Type.
     // Implemented in mono_type_resolution.koral (task 8.3).
     resolve_type_node_impl(*self, node TypeNode, substitution Dict[String, Type]) Type = {
-        return resolve_type_node(self, node, substitution)
-    }
+        return resolve_type_node(self, node, substitution);
+    };
 
     // Substitute generic type parameters throughout a TypedExpr tree.
     // Implemented in mono_expr_substitution.koral (task 9.1).
     substitute_types_in_expression_impl(*self, expr * TypedExpr, substitution Dict[String, Type]) * TypedExpr = {
-        return substitute_types_in_expression(self, expr, substitution)
-    }
+        return substitute_types_in_expression(self, expr, substitution);
+    };
 
     // Unified method lookup table matching Swift's buildStaticMethodLookup.
     // Key format: concrete receiver layout key + method name, preserving
     // ref/mutref/ptr wrappers so blanket impls do not overwrite value impls.
     // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
     build_static_method_lookup(self, nodes List[* TypedDecl]) Dict[String, DefId] = {
-        let materialized = self.build_materialized_def_ids()
-        let mutable lookup = Dict[String, DefId].new()
+        let materialized = self.build_materialized_def_ids();
+        let mutable lookup = Dict[String, DefId].new();
 
         // Step 1: Merge extension_method_def_ids (populated during instantiation).
         for entry in self.storage.extension_method_def_ids.iterator() then {
-            lookup.insert(entry.first, entry.second)
-        }
+            lookup.insert(entry.first, entry.second);
+        };
 
         // Step 2: Register methods from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl.
         // GivenDecl (inherent) overwrites; GivenTraitDecl only inserts if absent.
@@ -1451,145 +1451,143 @@ given Monomorphizer {
             when node_ref in {
                 .GivenTraitDecl(target_type, _, _, members, _) then {
                     for m_ref in members then {
-                        if given_member_has_generic_parameter(m_ref) then { continue }
+                        if given_member_has_generic_parameter(m_ref) then { continue;};
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
-                        }
-                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, method_name)
+                        };
+                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, method_name);
                         if not lookup.contains_key(key) then {
-                            lookup.insert(key, m_ref.def_id)
-                        }
-                    }
+                            lookup.insert(key, m_ref.def_id);
+                        };
+                    };
                 },
                 .GivenDecl(target_type, members, _) then {
                     for m_ref in members then {
-                        if given_member_has_generic_parameter(m_ref) then { continue }
+                        if given_member_has_generic_parameter(m_ref) then { continue;};
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
-                        }
-                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, method_name)
-                        lookup.insert(key, m_ref.def_id)
-                    }
+                        };
+                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, method_name);
+                        lookup.insert(key, m_ref.def_id);
+                    };
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     for m_ref in members then {
-                        if given_member_has_generic_parameter(m_ref) then { continue }
-                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, m_ref.name)
+                        if given_member_has_generic_parameter(m_ref) then { continue;};
+                        let key = concrete_receiver_method_lookup_key(&(self.storage.context), target_type, m_ref.name);
                         if not lookup.contains_key(key) then {
-                            lookup.insert(key, m_ref.def_id)
-                        }
-                    }
+                            lookup.insert(key, m_ref.def_id);
+                        };
+                    };
                 },
                 _ then {},
-            }
-        }
+            };
+        };
 
         // Step 3: Merge concrete_callables entries (prefer materialized over stale).
         for entry in self.storage.concrete_callables_by_def_id.iterator() then {
-            let def_id = entry.first
-            let concrete = entry.second
-            let owner_type = concrete.owner_type or else { continue }
-            let key = concrete_receiver_method_lookup_key(&(self.storage.context), owner_type, concrete.logical_name)
-            lookup.insert(key, def_id)
-        }
+            let def_id = entry.first;
+            let concrete = entry.second;
+            let owner_type = concrete.owner_type or else { continue;};
+            let key = concrete_receiver_method_lookup_key(&(self.storage.context), owner_type, concrete.logical_name);
+            lookup.insert(key, def_id);
+        };
 
-        return lookup
-    }
+        return lookup;
+    };
 
     file_private build_materialized_def_ids(self) Set[UInt] = {
-        let mutable materialized = Set[UInt].new()
+        let mutable materialized = Set[UInt].new();
 
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
-                .FunctionDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .IntrinsicFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .ForeignFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .LetDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .ForeignLetDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .TypeStructDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .TypeEnumDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
-                .ForeignTypeDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
+                .FunctionDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .IntrinsicFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .ForeignFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .LetDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .ForeignLetDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .TypeStructDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .TypeEnumDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id);},
+                .ForeignTypeDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id);},
                 .GivenDecl(_, members, _) then {
                     for member_ref in members then {
-                        materialized.insert(member_ref.def_id.id)
-                    }
+                        materialized.insert(member_ref.def_id.id);
+                    };
                 },
                 .GivenTraitDecl(_, _, _, members, _) then {
                     for member_ref in members then {
-                        materialized.insert(member_ref.def_id.id)
-                    }
+                        materialized.insert(member_ref.def_id.id);
+                    };
                 },
                 .IntrinsicGivenDecl(_, members, _) then {
                     for member_ref in members then {
-                        materialized.insert(member_ref.def_id.id)
-                    }
+                        materialized.insert(member_ref.def_id.id);
+                    };
                 },
                 _ then {},
-            }
-        }
+            };
+        };
 
-        return materialized
-    }
+        return materialized;
+    };
 
     build_trait_method_lookup(self) Dict[String, DefId] = {
-        let materialized = self.build_materialized_def_ids()
-        let mutable lookup = Dict[String, DefId].new()
+        let materialized = self.build_materialized_def_ids();
+        let mutable lookup = Dict[String, DefId].new();
         for entry in self.storage.concrete_callables_by_def_id.iterator() then {
-            let def_id = entry.first
-            let concrete = entry.second
+            let def_id = entry.first;
+            let concrete = entry.second;
             when concrete.trait_conformance in {
                 .Some(trait_name) then {
-                    let owner_type = concrete.owner_type or else { continue }
-                    let key = concrete_trait_method_lookup_key(&(self.storage.context), owner_type, trait_name, concrete.logical_name)
+                    let owner_type = concrete.owner_type or else { continue;};
+                    let key = concrete_trait_method_lookup_key(&(self.storage.context), owner_type, trait_name, concrete.logical_name);
                     let should_insert = when lookup.get(key) in {
                         .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                         .None() then true,
-                    }
+                    };
                     if should_insert then {
-                        lookup.insert(key, def_id)
-                    }
+                        lookup.insert(key, def_id);
+                    };
                 },
                 .None() then {},
-            }
-        }
-        return lookup
-    }
+            };
+        };
+        return lookup;
+    };
 
     file_private append_codegen_def_id_name_index(self, index *mutable Dict[String, List[DefId]], name String, def_id DefId) Void = {
         if name.is_empty() then {
-            return
-        }
+            return;
+        };
 
-        let mutable def_ids = index.get(name) or else List[DefId].new()
+        let mutable def_ids = index.get(name) or else List[DefId].new();
         if not def_ids.iterator().any((existing) -> existing.id == def_id.id) then {
-            def_ids.push(def_id)
-            index.insert(name, def_ids)
-        }
-    }
+            def_ids.push(def_id);
+            index.insert(name, def_ids);
+        };
+    };
 
     file_private build_codegen_type_def_id_name_index(self) Dict[String, List[DefId]] = {
-        let mutable index = Dict[String, List[DefId]].new()
-        let mutable id UInt = 1
+        let mutable index = Dict[String, List[DefId]].new();
+        let mutable id UInt = 1;
         while id < self.storage.context.next_def_id() then {
-            let def_id = DefId(id)
-            let is_type = if self.storage.context.get_kind(def_id) is .Some(kind)
-                then kind is .TypeDef(_) or kind is .GenericTemplate(_)
-                else false
+            let def_id = DefId(id);
+            let is_type = if self.storage.context.get_kind(def_id) is .Some(kind) then kind is .TypeDef(_) or kind is .GenericTemplate(_) else false;
 
             if is_type and self.storage.context.get_name(def_id) is .Some(name) then {
-                self.append_codegen_def_id_name_index(&mutable index, name, def_id)
+                self.append_codegen_def_id_name_index(&mutable index, name, def_id);
                 if self.storage.context.lookup_type(def_id) is .Some(mapped_type) then {
-                    let display_name = self.storage.context.type_display_name(mapped_type)
-                    self.append_codegen_def_id_name_index(&mutable index, display_name, def_id)
-                    self.append_codegen_def_id_name_index(&mutable index, mono_concrete_layout_key_for_type(&(self.storage.context), mapped_type), def_id)
-                }
-            }
-            id += 1
-        }
-        return index
-    }
+                    let display_name = self.storage.context.type_display_name(mapped_type);
+                    self.append_codegen_def_id_name_index(&mutable index, display_name, def_id);
+                    self.append_codegen_def_id_name_index(&mutable index, mono_concrete_layout_key_for_type(&(self.storage.context), mapped_type), def_id);
+                };
+            };
+            id += 1;
+        };
+        return index;
+    };
 
     file_private find_codegen_type_def_id(self, type_def_ids_by_name Dict[String, List[DefId]], name String) Option[DefId] = {
         return when type_def_ids_by_name.get(name) in {
@@ -1598,32 +1596,30 @@ given Monomorphizer {
                 .None() then Option[DefId].None(),
             },
             .None() then Option[DefId].None(),
-        }
-    }
+        };
+    };
 
     file_private codegen_emitted_identifier_for_def(self, def_id DefId, name String, foreign_def_ids Set[UInt]) String = {
         if foreign_def_ids.contains(def_id.id) then {
-            return name
-        }
+            return name;
+        };
 
         if name.starts_with("_k__") then {
-            return name
-        }
+            return name;
+        };
 
-        return self.storage.context.get_c_identifier(def_id) or else name
-    }
+        return self.storage.context.get_c_identifier(def_id) or else name;
+    };
 
     file_private codegen_compose_method_c_name(self, type_c_name String, method_name String) String = {
-        let prefix = "\(type_c_name)_"
-        let raw_name = if method_name.starts_with(prefix)
-            then method_name
-            else "\(type_c_name)_\(method_name)"
-        return if raw_name.starts_with("_k__k__") then raw_name.substring(3..) else raw_name
-    }
+        let prefix = "\(type_c_name)_";
+        let raw_name = if method_name.starts_with(prefix) then method_name else "\(type_c_name)_\(method_name)";
+        return if raw_name.starts_with("_k__k__") then raw_name.substring(3..) else raw_name;
+    };
 
     file_private codegen_identifier_for_def_id(self, c_identifier_by_def_id Dict[UInt, String], def_id DefId) Option[String] = {
-        return c_identifier_by_def_id.get(def_id.id)
-    }
+        return c_identifier_by_def_id.get(def_id.id);
+    };
 
     file_private codegen_emitted_type_name(self, c_identifier_by_def_id Dict[UInt, String], type_def_ids_by_name Dict[String, List[DefId]], t Type) String = {
         return when t in {
@@ -1634,7 +1630,7 @@ given Monomorphizer {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
                         .None() then "T_\(def_id.id)",
                     },
-                }
+                };
             },
             .EnumType(def_id) then {
                 yield when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
@@ -1643,27 +1639,27 @@ given Monomorphizer {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
                         .None() then "U_\(def_id.id)",
                     },
-                }
+                };
             },
             .GenericStruct(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t)
+                let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t);
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
                         .None() then layout_name,
                     },
                     .None() then layout_name,
-                }
+                };
             },
             .GenericEnum(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t)
+                let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t);
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
                         .None() then layout_name,
                     },
                     .None() then layout_name,
-                }
+                };
             },
             .OpaqueType(def_id) then {
                 yield when self.storage.context.lookup_type(def_id) in {
@@ -1675,7 +1671,7 @@ given Monomorphizer {
                             .None() then self.storage.context.get_name(def_id) or else "opaque_\(def_id.id)",
                         },
                     },
-                }
+                };
             },
             .ReferenceType(_) then mono_concrete_layout_key_for_type(&(self.storage.context), t),
             .IntType() then "Int",
@@ -1692,8 +1688,8 @@ given Monomorphizer {
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
             _ then mono_concrete_layout_key_for_type(&(self.storage.context), t),
-        }
-    }
+        };
+    };
 
     file_private collect_codegen_foreign_def_ids(
         self,
@@ -1702,18 +1698,18 @@ given Monomorphizer {
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
                 .ForeignFunctionDecl(_, _, _, _, _, id) then {
-                    foreign_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id);
                 },
                 .ForeignLetDecl(_, _, _, _, _, id) then {
-                    foreign_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id);
                 },
                 .ForeignTypeDecl(_, _, _, _, id) then {
-                    foreign_def_ids.insert(id.def_id.id)
+                    foreign_def_ids.insert(id.def_id.id);
                 },
                 _ then {},
-            }
-        }
-    }
+            };
+        };
+    };
 
     file_private collect_codegen_c_identifiers(
         self,
@@ -1727,62 +1723,62 @@ given Monomorphizer {
                 .GivenDecl(_, _, _) then {},
                 .GivenTraitDecl(_, _, _, _, _) then {},
                 .FunctionDecl(_, name, _, _, _, _, fn_id) then {
-                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids))
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids));
                 },
                 .IntrinsicFunctionDecl(_, name, _, _, _, fn_id) then {
-                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids))
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids));
                 },
                 .ForeignFunctionDecl(_, name, _, _, _, fn_id) then {
-                    c_identifier_by_def_id.insert(fn_id.def_id.id, name)
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, name);
                 },
                 .ForeignLetDecl(_, name, _, _, _, var_id) then {
-                    c_identifier_by_def_id.insert(var_id.def_id.id, name)
+                    c_identifier_by_def_id.insert(var_id.def_id.id, name);
                 },
                 .ForeignTypeDecl(_, name, _, _, type_id) then {
-                    c_identifier_by_def_id.insert(type_id.def_id.id, name)
+                    c_identifier_by_def_id.insert(type_id.def_id.id, name);
                 },
                 .TypeStructDecl(_, name, _, _, type_id) then {
-                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids))
+                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids));
                 },
                 .TypeEnumDecl(_, name, _, _, type_id) then {
-                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids))
+                    c_identifier_by_def_id.insert(type_id.def_id.id, self.codegen_emitted_identifier_for_def(type_id.def_id, name, foreign_def_ids));
                 },
                 .LetDecl(_, name, _, _, _, _, var_id) then {
-                    c_identifier_by_def_id.insert(var_id.def_id.id, self.codegen_emitted_identifier_for_def(var_id.def_id, name, foreign_def_ids))
+                    c_identifier_by_def_id.insert(var_id.def_id.id, self.codegen_emitted_identifier_for_def(var_id.def_id, name, foreign_def_ids));
                 },
                 _ then {},
-            }
-        }
+            };
+        };
 
         // Second pass: register c identifiers for GivenDecl/GivenTraitDecl methods.
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
                 .GivenDecl(target_type, members, _) then {
-                    let type_c_name = self.codegen_emitted_type_name(*c_identifier_by_def_id, type_def_ids_by_name, target_type)
+                    let type_c_name = self.codegen_emitted_type_name(*c_identifier_by_def_id, type_def_ids_by_name, target_type);
                     for m_ref in members then {
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
-                        }
-                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, method_name))
-                    }
+                        };
+                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, method_name));
+                    };
                 },
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    let type_c_name = self.codegen_emitted_type_name(*c_identifier_by_def_id, type_def_ids_by_name, target_type)
+                    let type_c_name = self.codegen_emitted_type_name(*c_identifier_by_def_id, type_def_ids_by_name, target_type);
                     for m_ref in members then {
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
-                        }
-                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, method_name))
-                    }
+                        };
+                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, method_name));
+                    };
                 },
                 _ then {},
-            }
-        }
-    }
+            };
+        };
+    };
 
-}
+};
 
 // ── MonomorphizedProgram printing ─────────────────────────────────────────────
 
@@ -1792,56 +1788,56 @@ file_private let mono_type_name(t Type, context * CompilerContext) String = {
             yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "struct#\(def_id.id)",
-            }
+            };
         },
         .EnumType(def_id) then {
             yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "enum#\(def_id.id)",
-            }
+            };
         },
         _ then type_to_string(t),
-    }
-}
+    };
+};
 
 file_private let print_mono_node(node TypedDecl, context * CompilerContext) Void = {
     when node in {
         .FunctionDecl(access, name, params, return_type, body, span, _) then {
-            println("  fn \(name)(...): \(mono_type_name(return_type, context))")
+            println("  fn \(name)(...): \(mono_type_name(return_type, context))");
         },
         .IntrinsicFunctionDecl(access, name, params, return_type, span, _) then {
-            println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, context))")
+            println("  intrinsic fn \(name)(...): \(mono_type_name(return_type, context))");
         },
         .ForeignFunctionDecl(access, name, params, return_type, span, _) then {
-            println("  foreign fn \(name)(...): \(mono_type_name(return_type, context))")
+            println("  foreign fn \(name)(...): \(mono_type_name(return_type, context))");
         },
         .TypeStructDecl(access, name, fields, span, _) then {
-            println("  struct \(name) { \(fields.count()) fields }")
+            println("  struct \(name) { \(fields.count()) fields }");
         },
         .TypeEnumDecl(access, name, cases, span, _) then {
-            println("  enum \(name) { \(cases.count()) cases }")
+            println("  enum \(name) { \(cases.count()) cases }");
         },
         .TraitDecl(access, name, members, span) then {
-            println("  trait \(name)")
+            println("  trait \(name)");
         },
         .GivenDecl(target_type, members, span) then {
-            println("  given \(mono_type_name(target_type, context)) { \(members.count()) methods }")
+            println("  given \(mono_type_name(target_type, context)) { \(members.count()) methods }");
         },
         .GivenTraitDecl(target_type, trait_name, _, members, span) then {
-            println("  given \(mono_type_name(target_type, context)) as \(trait_name) { \(members.count()) methods }")
+            println("  given \(mono_type_name(target_type, context)) as \(trait_name) { \(members.count()) methods }");
         },
         _ then {},
-    }
-}
+    };
+};
 
 public let print_monomorphized_program(program MonomorphizedProgram, context * CompilerContext) Void = {
-    let node_count = program.global_nodes.count()
-    let vtable_count = program.vtable_requests.count()
-    println("MonomorphizedProgram {")
-    println("  global_nodes: \(node_count)")
+    let node_count = program.global_nodes.count();
+    let vtable_count = program.vtable_requests.count();
+    println("MonomorphizedProgram {");
+    println("  global_nodes: \(node_count)");
     for node_ref in program.global_nodes then {
-        print_mono_node(*node_ref, context)
-    }
-    println("  vtable_requests: \(vtable_count)")
-    println("}")
-}
+        print_mono_node(*node_ref, context);
+    };
+    println("  vtable_requests: \(vtable_count)");
+    println("}");
+};

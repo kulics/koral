@@ -1,78 +1,78 @@
-using std::os { .. }
+using std::os { .. };
 
 file_private let case_group_for_name(name String) String = {
-    if name.starts_with("sync_") then { return "sync" }
-    if name.starts_with("net_") then { return "net" }
-    if name.starts_with("os_env_") then { return "env" }
-    return "normal"
-}
+    if name.starts_with("sync_") then { return "sync";};
+    if name.starts_with("net_") then { return "net";};
+    if name.starts_with("os_env_") then { return "env";};
+    return "normal";
+};
 
 file_private let matches_filter(config RunnerConfig, file_name String, relative_path String) Bool = {
     return when config.filter in {
         .Some(sub) then file_name.contains(sub) or relative_path.contains(sub),
         .None then true,
-    }
-}
+    };
+};
 
 file_private let should_include_case(relative_path String, file_name String) Bool = {
-    let normalized = relative_path.replace_all("\\", "/")
+    let normalized = relative_path.replace_all("\\", "/");
     if not normalized.contains("/") then {
-        return true
-    }
+        return true;
+    };
 
-    let slash_index = normalized.find("/")
+    let slash_index = normalized.find("/");
     if slash_index is .None() then {
-        return true
-    }
+        return true;
+    };
 
-    let idx = slash_index.unwrap()
+    let idx = slash_index.unwrap();
     if normalized.substring(.From(idx + 1)).contains("/") then {
-        return false
-    }
+        return false;
+    };
 
-    let dir_name = normalized.substring(.Until(idx))
-    return file_name == dir_name + ".koral"
-}
+    let dir_name = normalized.substring(.Until(idx));
+    return file_name == dir_name + ".koral";
+};
 
 public let discover_cases(config RunnerConfig) Result[List[CaseInfo]] = {
-    let root = config.cases_root.normalize()
+    let root = config.cases_root.normalize();
     if not path_exist(root) then {
-        return Result[List[CaseInfo]].Error(box("cases root not found: \(root.to_string())"))
-    }
+        return Result[List[CaseInfo]].Error(box("cases root not found: \(root.to_string())"));
+    };
 
     let mutable iter = walk_dir(root) or else {
-        return Result[List[CaseInfo]].Error(it)
-    }
+        return Result[List[CaseInfo]].Error(it);
+    };
 
-    let mutable cases = List[CaseInfo].new()
+    let mutable cases = List[CaseInfo].new();
     while iter.next() is .Some(entry) then {
         if not entry.is_file() then {
-            continue
-        }
+            continue;
+        };
 
-        let name = entry.name()
+        let name = entry.name();
         if not name.ends_with(".koral") then {
-            continue
-        }
+            continue;
+        };
 
-        let abs_path = entry.path().normalize()
+        let abs_path = entry.path().normalize();
         let relative = when abs_path.relative_to(root) in {
             .Ok(p) then p.to_string(),
             .Error(_) then name,
-        }
+        };
 
         if not should_include_case(relative, name) then {
-            continue
-        }
+            continue;
+        };
 
         if not matches_filter(config, name, relative) then {
-            continue
-        }
+            continue;
+        };
 
-        let group_key = case_group_for_name(name)
-        cases.push(CaseInfo(name, relative, abs_path, group_key))
-    }
+        let group_key = case_group_for_name(name);
+        cases.push(CaseInfo(name, relative, abs_path, group_key));
+    };
 
-    cases.sort()
-    return Result[List[CaseInfo]].Ok(cases)
-}
+    cases.sort();
+    return Result[List[CaseInfo]].Ok(cases);
+};

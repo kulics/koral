@@ -3,158 +3,155 @@
 public type Parser(
     tokens List[Token],
     mutable pos UInt,
-)
+);
 
 given Parser {
-    public new(tokens List[Token]) Parser = Parser(tokens, 0)
+    public new(tokens List[Token]) Parser = Parser(tokens, 0);
 
     file_private peek(*self) Token = {
         if self.pos >= self.tokens.count() then {
-            return Token.EOF()
-        }
-        return self.tokens[self.pos]
-    }
+            return Token.EOF();
+        };
+        return self.tokens[self.pos];
+    };
 
     file_private peek_next(*self) Token = {
         if self.pos + 1 >= self.tokens.count() then {
-            return Token.EOF()
-        }
-        return self.tokens[self.pos + 1]
-    }
+            return Token.EOF();
+        };
+        return self.tokens[self.pos + 1];
+    };
 
     file_private advance(*mutable self) Token = {
-        let token = self.peek()
-        self.pos += 1
-        return token
-    }
+        let token = self.peek();
+        self.pos += 1;
+        return token;
+    };
 
-    file_private check_plus(*self) Bool = self.peek() is .Plus
-    file_private check_minus(*self) Bool = self.peek() is .Minus
-    file_private check_star(*self) Bool = self.peek() is .Star
-    file_private check_slash(*self) Bool = self.peek() is .Slash
-    file_private check_percent(*self) Bool = self.peek() is .Percent
-    file_private check_power(*self) Bool = self.peek() is .Power
-    file_private check_left_paren(*self) Bool = self.peek() is .LeftParen
-    file_private check_right_paren(*self) Bool = self.peek() is .RightParen
-    file_private check_comma(*self) Bool = self.peek() is .Comma
-    file_private check_eof(*self) Bool = self.peek() is .EOF
+    file_private check_plus(*self) Bool = self.peek() is .Plus;
+    file_private check_minus(*self) Bool = self.peek() is .Minus;
+    file_private check_star(*self) Bool = self.peek() is .Star;
+    file_private check_slash(*self) Bool = self.peek() is .Slash;
+    file_private check_percent(*self) Bool = self.peek() is .Percent;
+    file_private check_power(*self) Bool = self.peek() is .Power;
+    file_private check_left_paren(*self) Bool = self.peek() is .LeftParen;
+    file_private check_right_paren(*self) Bool = self.peek() is .RightParen;
+    file_private check_comma(*self) Bool = self.peek() is .Comma;
+    file_private check_eof(*self) Bool = self.peek() is .EOF;
 
     file_private expect_right_paren(*mutable self) Result[Void] =
         if self.check_right_paren() then {
-            self.advance()
-            yield .Ok({})
-        } else .Error(box("Parse error: expected ')', found \(self.peek().to_string())"))
+            self.advance();
+            yield .Ok({});
+        } else .Error(box("Parse error: expected ')', found \(self.peek().to_string())"));
 
     public parse(*mutable self) Result[* Expr] = {
-        let expr = self.parse_expression() or return
-        return if self.check_eof() then .Ok(expr)
-               else .Error(box("Parse error: unexpected token \(self.peek().to_string())"))
-    }
+        let expr = self.parse_expression() or return;
+        return if self.check_eof() then .Ok(expr) else .Error(box("Parse error: unexpected token \(self.peek().to_string())"));
+    };
 
-    file_private parse_expression(*mutable self) Result[* Expr] = self.parse_assignment()
+    file_private parse_expression(*mutable self) Result[* Expr] = self.parse_assignment();
 
     file_private parse_assignment(*mutable self) Result[* Expr] = {
         if self.peek() is .Identifier(name) and self.peek_next() is .Equals then {
-            self.advance()
-            self.advance()
-            let value = self.parse_assignment() or return
-            return .Ok(box(Expr.Assignment(name, value)))
-        }
-        return self.parse_additive()
-    }
+            self.advance();
+            self.advance();
+            let value = self.parse_assignment() or return;
+            return .Ok(box(Expr.Assignment(name, value)));
+        };
+        return self.parse_additive();
+    };
 
     file_private parse_additive(*mutable self) Result[* Expr] = {
-        let mutable left = self.parse_multiplicative() or return
+        let mutable left = self.parse_multiplicative() or return;
         while self.check_plus() or self.check_minus() then {
-            let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
-            self.advance()
-            let right = self.parse_multiplicative() or return
-            left = box(Expr.BinaryOp(op, left, right))
-        }
-        return .Ok(left)
-    }
+            let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub();
+            self.advance();
+            let right = self.parse_multiplicative() or return;
+            left = box(Expr.BinaryOp(op, left, right));
+        };
+        return .Ok(left);
+    };
 
     file_private parse_multiplicative(*mutable self) Result[* Expr] = {
-        let mutable left = self.parse_power() or return
+        let mutable left = self.parse_power() or return;
         while self.check_star() or self.check_slash() or self.check_percent() then {
-            let op = if self.check_star() then BinaryOperator.Mul()
-                     else if self.check_slash() then BinaryOperator.Div()
-                     else BinaryOperator.Mod()
-            self.advance()
-            let right = self.parse_power() or return
-            left = box(Expr.BinaryOp(op, left, right))
-        }
-        return .Ok(left)
-    }
+            let op = if self.check_star() then BinaryOperator.Mul() else if self.check_slash() then BinaryOperator.Div() else BinaryOperator.Mod();
+            self.advance();
+            let right = self.parse_power() or return;
+            left = box(Expr.BinaryOp(op, left, right));
+        };
+        return .Ok(left);
+    };
     
 
     file_private parse_power(*mutable self) Result[* Expr] = {
-        let left = self.parse_unary() or return
+        let left = self.parse_unary() or return;
         if self.check_power() then {
-            self.advance()
-            let right = self.parse_power() or return
-            return .Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right)))
-        }
-        return .Ok(left)
-    }
+            self.advance();
+            let right = self.parse_power() or return;
+            return .Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right)));
+        };
+        return .Ok(left);
+    };
 
     file_private parse_unary(*mutable self) Result[* Expr] = {
         if self.check_minus() then {
-            self.advance()
-            let operand = self.parse_unary() or return
-            return .Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand)))
-        }
-        return self.parse_call()
-    }
+            self.advance();
+            let operand = self.parse_unary() or return;
+            return .Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand)));
+        };
+        return self.parse_call();
+    };
 
     file_private parse_call(*mutable self) Result[* Expr] = {
-        let primary = self.parse_primary() or return
+        let primary = self.parse_primary() or return;
         if *primary is .Variable(name) and self.check_left_paren() then {
-            self.advance()
-            let args = self.parse_arguments() or return
-            let _ = self.expect_right_paren() or return
-            return .Ok(box(Expr.FunctionCall(name, args)))
-        }
-        return .Ok(primary)
-    }
+            self.advance();
+            let args = self.parse_arguments() or return;
+            let _ = self.expect_right_paren() or return;
+            return .Ok(box(Expr.FunctionCall(name, args)));
+        };
+        return .Ok(primary);
+    };
 
     file_private parse_arguments(*mutable self) Result[List[* Expr]] = {
-        let mutable args = List[* Expr].new()
+        let mutable args = List[* Expr].new();
         
         if self.check_right_paren() then {
-            return .Ok(args)
-        }
+            return .Ok(args);
+        };
 
-        let first = self.parse_expression() or return
-        args.push(first)
+        let first = self.parse_expression() or return;
+        args.push(first);
         while self.check_comma() then {
-            self.advance()
-            let arg = self.parse_expression() or return
-            args.push(arg)
-        }
-        return .Ok(args)
-    }
+            self.advance();
+            let arg = self.parse_expression() or return;
+            args.push(arg);
+        };
+        return .Ok(args);
+    };
 
     file_private parse_primary(*mutable self) Result[* Expr] =
         when self.peek() in {
             .IntLiteral(v) then {
-                self.advance()
-                yield .Ok(box(Expr.Number(Value.IntVal(v))))
+                self.advance();
+                yield .Ok(box(Expr.Number(Value.IntVal(v))));
             },
             .FloatLiteral(v) then {
-                self.advance()
-                yield .Ok(box(Expr.Number(Value.FloatVal(v))))
+                self.advance();
+                yield .Ok(box(Expr.Number(Value.FloatVal(v))));
             },
             .Identifier(name) then {
-                self.advance()
-                yield .Ok(box(Expr.Variable(name)))
+                self.advance();
+                yield .Ok(box(Expr.Variable(name)));
             },
             .LeftParen then {
-                self.advance()
-                let expr = self.parse_expression() or return
-                let _ = self.expect_right_paren() or return
-                yield .Ok(expr)
+                self.advance();
+                let expr = self.parse_expression() or return;
+                let _ = self.expect_right_paren() or return;
+                yield .Ok(expr);
             },
             _ then .Error(box("Parse error: unexpected token \(self.peek().to_string())")),
-        }
-}
+        };
+};

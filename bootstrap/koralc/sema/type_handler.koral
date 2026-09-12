@@ -24,7 +24,7 @@ public type TypeHandlerKind {
     Module(),
     TypeVariable(),
     Opaque(),
-}
+};
 
 /// 从 Type 获取对应的 TypeHandlerKind
 public let type_handler_kind_from(t Type) TypeHandlerKind = {
@@ -63,8 +63,8 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
         .TraitObject(_, _) then TypeHandlerKind.Reference(),
         .TypeVar(_) then TypeHandlerKind.TypeVariable(),
         .Unknown() then TypeHandlerKind.Primitive(),
-    }
-}
+    };
+};
 
 // ── TypeHandlerResult types ───────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ public type TypeMemberInfo(
     member_type Type,
     is_mutable Bool,
     access AccessModifier,
-)
+);
 
 // ── TypeHandler 查询函数 ──────────────────────────────────────────────────────
 
@@ -91,8 +91,8 @@ public let type_needs_copy(t Type) Bool = {
         .GenericStruct(_, _) then true,
         .GenericEnum(_, _) then true,
         _ then false,
-    }
-}
+    };
+};
 
 /// 检查类型是否需要 drop 函数
 public let type_needs_drop(t Type) Bool = {
@@ -111,8 +111,8 @@ public let type_needs_drop(t Type) Bool = {
         .TraitObject(_, _) then true,
         .TypeVar(_) then true,
         _ then false,
-    }
-}
+    };
+};
 
 /// 生成原始类型的 C 类型名
 public let primitive_c_type_name(t Type) String = {
@@ -133,146 +133,146 @@ public let primitive_c_type_name(t Type) String = {
         .VoidType() then "void",
         .NeverType() then "void",
         _ then "void",
-    }
-}
+    };
+};
 
 /// 检查类型是否包含泛型参数（递归检查，带循环检测）
 public let type_contains_generic_parameter(t Type, context * CompilerContext) Bool = {
-    let mutable visited = Set[UInt].new()
-    return type_contains_generic_parameter_internal(t, context, &mutable visited)
-}
+    let mutable visited = Set[UInt].new();
+    return type_contains_generic_parameter_internal(t, context, &mutable visited);
+};
 
 /// 仅检查类型表面是否仍提及未解析的泛型占位。
 ///
 /// 这与 `type_contains_generic_parameter` 的语义不同：它不会递归展开
 /// 已定义的结构体/枚举，只用于判断当前类型节点是否还未完全具体化。
 public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
-    let mutable worklist = List[* Type].new()
-    worklist.push(box(t))
+    let mutable worklist = List[* Type].new();
+    worklist.push(box(t));
 
     while not worklist.is_empty() then {
-        let current_opt = worklist.pop()
-        if current_opt is .None() then { break }
-        let current = current_opt.unwrap()
+        let current_opt = worklist.pop();
+        if current_opt is .None() then { break;};
+        let current = current_opt.unwrap();
         when *current in {
-            .GenericParameter(_) then { return true },
-            .TypeVar(_) then { return true },
+            .GenericParameter(_) then { return true;},
+            .TypeVar(_) then { return true;},
             .FunctionType(params, ret) then {
-                worklist.push(ret)
+                worklist.push(ret);
                 for entry in params then {
-                    worklist.push(box(entry.param_type))
-                }
+                    worklist.push(box(entry.param_type));
+                };
             },
-            .ReferenceType(inner) then { worklist.push(inner) },
-            .MutableReferenceType(inner) then { worklist.push(inner) },
-            .PointerType(inner) then { worklist.push(inner) },
-            .MutablePointerType(inner) then { worklist.push(inner) },
-            .WeakReferenceType(inner) then { worklist.push(inner) },
-            .MutableWeakReferenceType(inner) then { worklist.push(inner) },
+            .ReferenceType(inner) then { worklist.push(inner);},
+            .MutableReferenceType(inner) then { worklist.push(inner);},
+            .PointerType(inner) then { worklist.push(inner);},
+            .MutablePointerType(inner) then { worklist.push(inner);},
+            .WeakReferenceType(inner) then { worklist.push(inner);},
+            .MutableWeakReferenceType(inner) then { worklist.push(inner);},
             .GenericStruct(_, args) then {
                 for a in args then {
-                    worklist.push(a)
-                }
+                    worklist.push(a);
+                };
             },
             .GenericEnum(_, args) then {
                 for a in args then {
-                    worklist.push(a)
-                }
+                    worklist.push(a);
+                };
             },
             _ then {},
-        }
-    }
-    return false
-}
+        };
+    };
+    return false;
+};
 
 /// Returns the children types that need to be checked for generic parameters.
 /// This is used by the iterative version to avoid deep recursion.
 file_private let collect_type_children(t Type, context * CompilerContext, visited *mutable Set[UInt]) List[* Type] = {
-    let mutable children = List[* Type].new()
+    let mutable children = List[* Type].new();
     when t in {
         .FunctionType(params, ret) then {
-            children.push(ret)
+            children.push(ret);
             for entry in params then {
-                children.push(box(entry.param_type))
-            }
+                children.push(box(entry.param_type));
+            };
         },
-        .ReferenceType(inner) then { children.push(inner) },
-        .MutableReferenceType(inner) then { children.push(inner) },
-        .BorrowedReferenceType(inner) then { children.push(inner) },
-        .MutableBorrowedReferenceType(inner) then { children.push(inner) },
-        .PointerType(inner) then { children.push(inner) },
-        .MutablePointerType(inner) then { children.push(inner) },
-        .WeakReferenceType(inner) then { children.push(inner) },
-        .MutableWeakReferenceType(inner) then { children.push(inner) },
+        .ReferenceType(inner) then { children.push(inner);},
+        .MutableReferenceType(inner) then { children.push(inner);},
+        .BorrowedReferenceType(inner) then { children.push(inner);},
+        .MutableBorrowedReferenceType(inner) then { children.push(inner);},
+        .PointerType(inner) then { children.push(inner);},
+        .MutablePointerType(inner) then { children.push(inner);},
+        .WeakReferenceType(inner) then { children.push(inner);},
+        .MutableWeakReferenceType(inner) then { children.push(inner);},
         .StructureType(def_id) then {
             if not visited.contains(def_id.id) then {
-                visited.insert(def_id.id)
+                visited.insert(def_id.id);
                 when context.get_type_arguments(def_id) in {
                     .Some(args) then {
-                        for a in args then { children.push(box(a)) }
+                        for a in args then { children.push(box(a));};
                     },
                     .None() then {
                         when context.get_struct_fields(def_id) in {
                             .Some(fields) then {
-                                for f in fields then { children.push(box(f.field_type)) }
+                                for f in fields then { children.push(box(f.field_type));};
                             },
                             .None() then {},
-                        }
+                        };
                     },
-                }
-            }
+                };
+            };
         },
         .EnumType(def_id) then {
             if not visited.contains(def_id.id) then {
-                visited.insert(def_id.id)
+                visited.insert(def_id.id);
                 when context.get_type_arguments(def_id) in {
                     .Some(args) then {
-                        for a in args then { children.push(box(a)) }
+                        for a in args then { children.push(box(a));};
                     },
                     .None() then {
                         when context.get_enum_cases(def_id) in {
                             .Some(cases) then {
                                 for c in cases then {
-                                    for p in c.params then { children.push(box(p.param_type)) }
-                                }
+                                    for p in c.params then { children.push(box(p.param_type));};
+                                };
                             },
                             .None() then {},
-                        }
+                        };
                     },
-                }
-            }
+                };
+            };
         },
         .GenericStruct(_, args) then {
-            for a in args then { children.push(a) }
+            for a in args then { children.push(a);};
         },
         .GenericEnum(_, args) then {
-            for a in args then { children.push(a) }
+            for a in args then { children.push(a);};
         },
         _ then {},
-    }
-    return children
-}
+    };
+    return children;
+};
 
 /// Iterative version of type_contains_generic_parameter_internal.
 /// Uses an explicit worklist to avoid stack overflow on deeply nested types.
 file_private let type_contains_generic_parameter_internal(t Type, context * CompilerContext, visited *mutable Set[UInt]) Bool = {
-    let mutable worklist = List[* Type].new()
-    worklist.push(box(t))
+    let mutable worklist = List[* Type].new();
+    worklist.push(box(t));
 
     while not worklist.is_empty() then {
-        let current_opt = worklist.pop()
-        if current_opt is .None() then { break }
-        let current = current_opt.unwrap()
+        let current_opt = worklist.pop();
+        if current_opt is .None() then { break;};
+        let current = current_opt.unwrap();
         when *current in {
-            .GenericParameter(_) then { return true },
-            .TypeVar(_) then { return true },
+            .GenericParameter(_) then { return true;},
+            .TypeVar(_) then { return true;},
             _ then {
-                let children = collect_type_children(*current, context, visited)
+                let children = collect_type_children(*current, context, visited);
                 for child in children then {
-                    worklist.push(child)
-                }
+                    worklist.push(child);
+                };
             },
-        }
-    }
-    return false
-}
+        };
+    };
+    return false;
+};

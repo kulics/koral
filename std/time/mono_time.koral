@@ -1,41 +1,40 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // MonoTime — Monotonic clock timestamp
 // ============================================================================
 
 // FFI Declaration
-foreign let __koral_monotonic_now(out_secs *unsafe Int64, out_nanos *unsafe Int64) Void
+foreign let __koral_monotonic_now(out_secs *unsafe Int64, out_nanos *unsafe Int64) Void;
 
 /// MonoTime represents a point in time from a monotonic clock.
 /// It is only useful for measuring elapsed time and is not affected
 /// by system clock adjustments (e.g. NTP).
-public type MonoTime(file_private secs Int64, file_private nanos Int64)
+public type MonoTime(file_private secs Int64, file_private nanos Int64);
 
 given MonoTime {
 
     /// Get the current monotonic time.
     public now() MonoTime = {
-        let mutable s Int64 = 0
-        let mutable n Int64 = 0
-        __koral_monotonic_now(&unsafe s, &unsafe n)
-        return MonoTime(s, n)
-    }
+        let mutable s Int64 = 0;
+        let mutable n Int64 = 0;
+        __koral_monotonic_now(&unsafe s, &unsafe n);
+        return MonoTime(s, n);
+    };
 
     /// Return the Duration elapsed since this MonoTime was captured.
     /// If the clock appears to have gone backwards (should not happen
     /// with a monotonic clock), returns Duration.zero().
     public elapsed(self) Duration = {
-        let current = MonoTime.now()
-        let mutable diff_secs = current.secs - self.secs
-        let mutable diff_nanos = current.nanos - self.nanos
+        let current = MonoTime.now();
+        let mutable diff_secs = current.secs - self.secs;
+        let mutable diff_nanos = current.nanos - self.nanos;
         if diff_nanos < 0 then {
-            diff_secs = diff_secs - 1
-            diff_nanos = diff_nanos + 1_000_000_000
-        }
-        return if diff_secs < 0 then Duration.zero()
-        else Duration(diff_secs, diff_nanos)
-    }
-}
+            diff_secs = diff_secs - 1;
+            diff_nanos = diff_nanos + 1_000_000_000;
+        };
+        return if diff_secs < 0 then Duration.zero() else Duration(diff_secs, diff_nanos);
+    };
+};
 
 // Trait Implementations: Add, Sub, duration_to, Eq, Ord
 
@@ -43,73 +42,68 @@ given MonoTime as Add[Duration] {
 
     /// [Duration]Add: add — MonoTime + Duration
     public add(self, v Duration) MonoTime = {
-        let mutable new_nanos = self.nanos + v.nanos
-        let mutable new_secs = self.secs + v.secs
+        let mutable new_nanos = self.nanos + v.nanos;
+        let mutable new_secs = self.secs + v.secs;
         if new_nanos >= 1_000_000_000 then {
-            new_secs = new_secs + new_nanos / 1_000_000_000
-            new_nanos = new_nanos % 1_000_000_000
+            new_secs = new_secs + new_nanos / 1_000_000_000;
+            new_nanos = new_nanos % 1_000_000_000;
         } else if new_nanos < 0 then {
-            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000
-            new_secs = new_secs - borrow
-            new_nanos = new_nanos + borrow * 1_000_000_000
-        }
-        return MonoTime(new_secs, new_nanos)
-    }
-}
+            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000;
+            new_secs = new_secs - borrow;
+            new_nanos = new_nanos + borrow * 1_000_000_000;
+        };
+        return MonoTime(new_secs, new_nanos);
+    };
+};
 
 given MonoTime as Sub[Duration] {
 
     /// [Duration]Sub: sub — MonoTime - Duration
     public sub(self, v Duration) MonoTime = {
-        let mutable new_nanos = self.nanos - v.nanos
-        let mutable new_secs = self.secs - v.secs
+        let mutable new_nanos = self.nanos - v.nanos;
+        let mutable new_secs = self.secs - v.secs;
         if new_nanos < 0 then {
-            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000
-            new_secs = new_secs - borrow
-            new_nanos = new_nanos + borrow * 1_000_000_000
+            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000;
+            new_secs = new_secs - borrow;
+            new_nanos = new_nanos + borrow * 1_000_000_000;
         } else if new_nanos >= 1_000_000_000 then {
-            new_secs = new_secs + new_nanos / 1_000_000_000
-            new_nanos = new_nanos % 1_000_000_000
-        }
-        return MonoTime(new_secs, new_nanos)
-    }
-}
+            new_secs = new_secs + new_nanos / 1_000_000_000;
+            new_nanos = new_nanos % 1_000_000_000;
+        };
+        return MonoTime(new_secs, new_nanos);
+    };
+};
 
 given MonoTime {
 
     /// Computes the Duration from self to other (returns other - self).
     /// If the result would be negative, returns Duration.zero().
     public duration_to(self, other MonoTime) Duration = {
-        let mutable diff_secs = other.secs - self.secs
-        let mutable diff_nanos = other.nanos - self.nanos
+        let mutable diff_secs = other.secs - self.secs;
+        let mutable diff_nanos = other.nanos - self.nanos;
         if diff_nanos < 0 then {
-            diff_secs = diff_secs - 1
-            diff_nanos = diff_nanos + 1_000_000_000
-        }
-        return if diff_secs < 0 then Duration.zero()
-        else Duration(diff_secs, diff_nanos)
-    }
-}
+            diff_secs = diff_secs - 1;
+            diff_nanos = diff_nanos + 1_000_000_000;
+        };
+        return if diff_secs < 0 then Duration.zero() else Duration(diff_secs, diff_nanos);
+    };
+};
 
 given MonoTime as Eq {
 
     /// Eq: equals
     public equals(self, other MonoTime) Bool =
-        self.secs == other.secs and self.nanos == other.nanos
-}
+        self.secs == other.secs and self.nanos == other.nanos;
+};
 
 given MonoTime as Ord {
 
     /// Ord: compare — returns -1, 0, or 1
-    public compare(self, other MonoTime) Int = 
+    public compare(self, other MonoTime) Int =
         if self.secs < other.secs then
-            -1
-        else if self.secs > other.secs then
-            1
-        else if self.nanos < other.nanos then
-            -1
-        else if self.nanos > other.nanos then
-            1
-        else
-            0
-}
+            -1 else if self.secs > other.secs then
+            1 else if self.nanos < other.nanos then
+            -1 else if self.nanos > other.nanos then
+            1 else
+            0;
+};

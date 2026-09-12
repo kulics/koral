@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.text - Core Operations
 // ============================================================================
@@ -9,15 +9,15 @@ foreign let __koral_regex_compile(
     out_handle *unsafe *unsafe UInt8,
     out_error_buf *unsafe UInt8, error_buf_size Int32,
     out_error_len *unsafe Int32
-) Int32
+) Int32;
 
 foreign let __koral_regex_match(
     handle *unsafe UInt8, text *unsafe UInt8, text_offset Int32,
     max_groups Int32,
     out_starts *unsafe Int32, out_ends *unsafe Int32
-) Int32
+) Int32;
 
-foreign let __koral_regex_free(handle *unsafe UInt8) Void
+foreign let __koral_regex_free(handle *unsafe UInt8) Void;
 
 // ============================================================================
 // Regex — Compilation
@@ -26,63 +26,63 @@ foreign let __koral_regex_free(handle *unsafe UInt8) Void
 given Regex {
 
     public compile(pattern String) Result[Regex] =
-        Regex.compile_with_flags(pattern, RegexFlag.none())
+        Regex.compile_with_flags(pattern, RegexFlag.none());
 
     public compile_with_flags(pattern String, flags RegexFlag) Result[Regex] = {
-        let c_flags = flags.to_c_flags()
+        let c_flags = flags.to_c_flags();
 
         // 分配输出缓冲区
-        let handle_out = alloc_memory[*unsafe UInt8](1)
-        let error_buf = alloc_memory[UInt8](256)
-        let error_len_out = alloc_memory[Int32](1)
-        defer dealloc_memory(handle_out)
-        defer dealloc_memory(error_buf)
-        defer dealloc_memory(error_len_out)
+        let handle_out = alloc_memory[*unsafe UInt8](1);
+        let error_buf = alloc_memory[UInt8](256);
+        let error_len_out = alloc_memory[Int32](1);
+        defer dealloc_memory(handle_out);
+        defer dealloc_memory(error_buf);
+        defer dealloc_memory(error_len_out);
 
         let rc = __koral_regex_compile(
             pattern.storage.data, c_flags,
             handle_out,
             error_buf, 256,
             error_len_out
-        )
+        );
 
         if rc <> 0 then {
-            let err_len = *error_len_out
-            let msg = String.from_utf8_ptr(error_buf, err_len(UInt))
+            let err_len = *error_len_out;
+            let msg = String.from_utf8_ptr(error_buf, err_len(UInt));
             return when msg in {
                 .Ok(msg) then .Error(box(msg)),
                 .Error(e) then .Error(e),
-            }
-        }
+            };
+        };
 
-        let handle = *handle_out
+        let handle = *handle_out;
 
         // 计算捕获组数量：扫描 pattern 中未转义的 '('
-        let groups = Regex.count_groups(pattern)
+        let groups = Regex.count_groups(pattern);
 
-        let storage = box(RegexStorage(handle, pattern, groups))
-        return .Ok(Regex(storage))
-    }
+        let storage = box(RegexStorage(handle, pattern, groups));
+        return .Ok(Regex(storage));
+    };
 
     // 计算正则表达式中的捕获组数量
     count_groups(pattern String) UInt = {
-        let mutable count UInt = 0
-        let mutable i UInt = 0
-        let len = pattern.count()
+        let mutable count UInt = 0;
+        let mutable i UInt = 0;
+        let len = pattern.count();
         while i < len then {
-            let ch = pattern[i]
+            let ch = pattern[i];
             if ch == '\\' then {
-                i += 2  // 跳过转义字符
-                continue
-            }
+                i += 2;// 跳过转义字符
+                continue;
+            };
             if ch == '(' then {
-                count += 1
-            }
-            i += 1
-        }
-        return count
-    }
-}
+                count += 1;
+            };
+            i += 1;
+        };
+        return count;
+    };
+};
 
 // ============================================================================
 // Regex — Matching & Searching
@@ -92,45 +92,45 @@ given Regex {
 
     // 最快路径：不捕获任何 group，只测试是否匹配
     public matches(*self, text String) Bool = {
-        let starts = alloc_memory[Int32](1)
-        let ends = alloc_memory[Int32](1)
-        defer dealloc_memory(starts)
-        defer dealloc_memory(ends)
+        let starts = alloc_memory[Int32](1);
+        let ends = alloc_memory[Int32](1);
+        defer dealloc_memory(starts);
+        defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, 0,
             1, starts, ends
-        )
+        );
 
-        return matched > 0
-    }
+        return matched > 0;
+    };
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
     public find(*self, text String) Option[Match] =
-        Regex.find_at(self, text, 0)
+        Regex.find_at(self, text, 0);
 
     // 从指定偏移开始查找（内部方法，仅 $0）
     find_at(*self, text String, offset UInt) Option[Match] = {
-        let starts = alloc_memory[Int32](1)
-        let ends = alloc_memory[Int32](1)
-        defer dealloc_memory(starts)
-        defer dealloc_memory(ends)
+        let starts = alloc_memory[Int32](1);
+        let ends = alloc_memory[Int32](1);
+        defer dealloc_memory(starts);
+        defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, offset(Int32),
             1, starts, ends
-        )
+        );
 
         if matched == 0 then {
-            return Option[Match].None()
-        }
+            return Option[Match].None();
+        };
 
-        let s = (*starts)(UInt)
-        let e = (*ends)(UInt)
+        let s = (*starts)(UInt);
+        let e = (*ends)(UInt);
 
-        return Option[Match].Some(Match(text, s, e))
-    }
-}
+        return Option[Match].Some(Match(text, s, e));
+    };
+};
 
 // ============================================================================
 // Regex — Captures & Collection Methods
@@ -139,42 +139,42 @@ given Regex {
 given Regex {
 
     public find_all(*self, text String) MatchIterator =
-        MatchIterator(*self, text, 0)
+        MatchIterator(*self, text, 0);
 
     // 完整路径：捕获所有 group
     public captures(*self, text String) Option[Captures] =
-        Regex.captures_at(self, text, 0)
+        Regex.captures_at(self, text, 0);
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
     captures_at(*self, text String, offset UInt) Option[Captures] = {
-        let max_groups = (self.storage.groups + 1)(Int32)  // +1 for $0
-        let starts = alloc_memory[Int32](max_groups(UInt))
-        let ends = alloc_memory[Int32](max_groups(UInt))
-        defer dealloc_memory(starts)
-        defer dealloc_memory(ends)
+        let max_groups = (self.storage.groups + 1)(Int32);// +1 for $0
+        let starts = alloc_memory[Int32](max_groups(UInt));
+        let ends = alloc_memory[Int32](max_groups(UInt));
+        defer dealloc_memory(starts);
+        defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, offset(Int32),
             max_groups, starts, ends
-        )
+        );
 
         if matched == 0 then {
-            return Option[Captures].None()
-        }
+            return Option[Captures].None();
+        };
 
-        let mutable start_list List[Int32] = []
-        let mutable end_list List[Int32] = []
+        let mutable start_list List[Int32] = [];
+        let mutable end_list List[Int32] = [];
         for i in 0..<max_groups(UInt) then {
-            start_list.push(starts[i])
-            end_list.push(ends[i])
-        }
+            start_list.push(starts[i]);
+            end_list.push(ends[i]);
+        };
 
-        return Option[Captures].Some(Captures(text, start_list, end_list))
-    }
+        return Option[Captures].Some(Captures(text, start_list, end_list));
+    };
 
     public captures_all(*self, text String) CapturesIterator =
-        CapturesIterator(*self, text, 0)
-}
+        CapturesIterator(*self, text, 0);
+};
 
 // ============================================================================
 // Regex — Replace
@@ -185,89 +185,89 @@ given Regex {
     public replace(*self, text String, with String) String = {
         when self.captures(text) in {
             .None then {
-                return text
+                return text;
             },
             .Some(c) then {
-                let mutable result = String.new()
+                let mutable result = String.new();
                 if c.start() > 0 then {
-                    result.push_string(text.substring(0..<c.start()))
-                }
-                result.push_string(Regex.expand_replacement(with, c))
+                    result.push_string(text.substring(0..<c.start()));
+                };
+                result.push_string(Regex.expand_replacement(with, c));
                 if c.end() < text.count() then {
-                    result.push_string(text.substring(c.end()..))
-                }
-                return result
+                    result.push_string(text.substring(c.end()..));
+                };
+                return result;
             },
-        }
-    }
+        };
+    };
 
     public replace_all(*self, text String, with String) String = {
-        let mutable result = String.new()
-        let mutable offset UInt = 0
-        let text_len = text.count()
-        let mutable had_match = false
+        let mutable result = String.new();
+        let mutable offset UInt = 0;
+        let text_len = text.count();
+        let mutable had_match = false;
 
         while offset <= text_len then {
             when Regex.captures_at(self, text, offset) in {
                 .Some(c) then {
-                    had_match = true
+                    had_match = true;
                     if c.start() > offset then {
-                        result.push_string(text.substring(offset..<c.start()))
-                    }
-                    result.push_string(Regex.expand_replacement(with, c))
+                        result.push_string(text.substring(offset..<c.start()));
+                    };
+                    result.push_string(Regex.expand_replacement(with, c));
                     if c.end() == offset then {
                         if offset < text_len then {
-                            result.push_byte(text[offset])
-                        }
-                        offset += 1
+                            result.push_byte(text[offset]);
+                        };
+                        offset += 1;
                     } else {
-                        offset = c.end()
-                    }
+                        offset = c.end();
+                    };
                 },
                 .None then {
                     if offset < text_len then {
-                        result.push_string(text.substring(offset..))
-                    }
-                    break
+                        result.push_string(text.substring(offset..));
+                    };
+                    break;
                 },
-            }
-        }
+            };
+        };
 
-        return if not had_match then text else result
-    }
+        return if not had_match then text else result;
+    };
 
     // 展开替换字符串中的 $0..$9 反向引用
     expand_replacement(replacement String, c Captures) String = {
-        let mutable result = String.new()
-        let mutable i UInt = 0
-        let len = replacement.count()
+        let mutable result = String.new();
+        let mutable i UInt = 0;
+        let len = replacement.count();
 
         while i < len then {
-            let ch = replacement[i]
+            let ch = replacement[i];
             if ch == '$' and i + 1 < len then {
-                let next = replacement[i + 1]
+                let next = replacement[i + 1];
                 if next >= '0' and next <= '9' then {
-                    let group_idx = (next - '0')(UInt)
+                    let group_idx = (next - '0')(UInt);
                     when c.group(group_idx) in {
                         .Some(g) then result.push_string(g),
-                        .None then {},  // 未匹配的组替换为空
-                    }
-                    i += 2
-                    continue
-                }
+                        .None then {},// 未匹配的组替换为空
+                    };
+                    i += 2;
+                    continue;
+                };
                 if next == '$' then {
-                    result.push_byte('$')  // $$ 转义为字面 $
-                    i += 2
-                    continue
-                }
-            }
-            result.push_byte(ch)
-            i += 1
-        }
+                    result.push_byte('$');// $$ 转义为字面 $
+                    i += 2;
+                    continue;
+                };
+            };
+            result.push_byte(ch);
+            i += 1;
+        };
 
-        return result
-    }
-}
+        return result;
+    };
+};
 
 // ============================================================================
 // Regex — Split
@@ -276,5 +276,5 @@ given Regex {
 given Regex {
 
     public split(*self, text String) RegexSplitIterator =
-    RegexSplitIterator(*self, text, 0, false)
-}
+    RegexSplitIterator(*self, text, 0, false);
+};

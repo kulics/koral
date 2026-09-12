@@ -1,4 +1,4 @@
-using std::os { .. }
+﻿using std::os { .. };
 
 file_private type ParseDeclFlags(
     access AccessModifier,
@@ -6,47 +6,47 @@ file_private type ParseDeclFlags(
     is_foreign Bool,
     is_intrinsic Bool,
     invalid_access_message Option[String],
-)
+);
 
 public type Parser(
     tokens List[Token],
     file_path String,
     mutable index UInt,
-    mutable line_join_grouping_depth UInt,
-)
+
+);
 
 given Parser {
     module_private parse_debug(self, message String) Void = {
         if env("KORAL_DEBUG_PARSE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
-            eprintln("[parse] \(message)")
-        }
-    }
+            eprintln("[parse] \(message)");
+        };
+    };
 
     module_private token_position_text(self, token Token) String = {
-        let _ = self
-        let mutable text = token.line.to_string()
-        text.push_byte(':')
-        text.push_string(token.column.to_string())
-        return text
-    }
+        let _ = self;
+        let mutable text = token.line.to_string();
+        text.push_byte(':');
+        text.push_string(token.column.to_string());
+        return text;
+    };
 
     module_private format_context_position_error(self, prefix String, context String, token Token) String = {
-        let mutable text = prefix
-        text.push_string(context)
+        let mutable text = prefix;
+        text.push_string(context);
         if self.file_path.is_empty() then {
-            text.push_string(" at ")
-            text.push_string(self.token_position_text(token))
-        }
-        return text
-    }
+            text.push_string(" at ");
+            text.push_string(self.token_position_text(token));
+        };
+        return text;
+    };
 
     module_private format_progress_error(self, prefix String, context String, token Token) String = {
-        let mutable text = self.format_context_position_error(prefix, context, token)
-        text.push_string(" (token: ")
-        text.push_string(token_text(token))
-        text.push_byte(')')
-        return text
-    }
+        let mutable text = self.format_context_position_error(prefix, context, token);
+        text.push_string(" (token: ");
+        text.push_string(token_text(token));
+        text.push_byte(')');
+        return text;
+    };
 
     module_private parser_error_at(self, message String, token Token) * Error = {
         return box(make_diagnostic_at(
@@ -54,237 +54,237 @@ given Parser {
             self.file_path,
             message,
             self.token_span(token)
-        ))
-    }
+        ));
+    };
 
     module_private parser_error(self, message String) * Error = {
-        return self.parser_error_at(message, self.current())
-    }
+        return self.parser_error_at(message, self.current());
+    };
 
     module_private parser_error_without_span(self, message String) * Error = {
-        return box(make_diagnostic(DiagnosticStage.Parser(), self.file_path, message))
-    }
+        return box(make_diagnostic(DiagnosticStage.Parser(), self.file_path, message));
+    };
 
     module_private previous_token(self) Option[Token] = {
         if self.index == 0 then {
-            return .None()
-        }
-        return .Some(self.tokens[self.index - 1])
-    }
+            return .None();
+        };
+        return .Some(self.tokens[self.index - 1]);
+    };
 
     module_private span_from_start(self, start Token) SourceSpan = {
-        let start_loc = SourceLocation(start.line, start.column)
+        let start_loc = SourceLocation(start.line, start.column);
         let end_tok = self.previous_token() or else {
-            return SourceSpan(start_loc, start_loc)
-        }
-        let end_loc = SourceLocation(end_tok.line, end_tok.column)
-        return SourceSpan(start_loc, end_loc)
-    }
+            return SourceSpan(start_loc, start_loc);
+        };
+        let end_loc = SourceLocation(end_tok.line, end_tok.column);
+        return SourceSpan(start_loc, end_loc);
+    };
 
     module_private token_span(self, token Token) SourceSpan = {
-        let loc = SourceLocation(token.line, token.column)
-        return SourceSpan(loc, loc)
-    }
+        let loc = SourceLocation(token.line, token.column);
+        return SourceSpan(loc, loc);
+    };
 
     module_private span_from_expr_start(self, expr * Expr) SourceSpan = {
-        let expr_base_span = expr_span(expr)
+        let expr_base_span = expr_span(expr);
         let end_tok = self.previous_token() or else {
-            return expr_base_span
-        }
+            return expr_base_span;
+        };
         if not is_known_span(expr_base_span) then {
-            let end_loc = SourceLocation(end_tok.line, end_tok.column)
-            return SourceSpan(end_loc, end_loc)
-        }
-        let end_loc = SourceLocation(end_tok.line, end_tok.column)
-        return SourceSpan(expr_base_span.start, end_loc)
-    }
+            let end_loc = SourceLocation(end_tok.line, end_tok.column);
+            return SourceSpan(end_loc, end_loc);
+        };
+        let end_loc = SourceLocation(end_tok.line, end_tok.column);
+        return SourceSpan(expr_base_span.start, end_loc);
+    };
 
     module_private is_decimal_digits(self, text String) Bool = {
-        let runes = text.to_runes()
+        let runes = text.to_runes();
         if runes.is_empty() then {
-            return false
-        }
+            return false;
+        };
         for r in runes then {
             if not r.is_ascii_digit() then {
-                return false
-            }
-        }
-        return true
-    }
+                return false;
+            };
+        };
+        return true;
+    };
 
     module_private pattern_from_text(self, text String, span SourceSpan) PatternNode = {
         if text == "_" then {
-            return PatternNode.Wildcard(span)
-        }
+            return PatternNode.Wildcard(span);
+        };
         if text == "true" then {
-            return PatternNode.BoolLiteral(true, span)
-        }
+            return PatternNode.BoolLiteral(true, span);
+        };
         if text == "false" then {
-            return PatternNode.BoolLiteral(false, span)
-        }
+            return PatternNode.BoolLiteral(false, span);
+        };
         if self.is_decimal_digits(text) then {
-            return PatternNode.IntegerLiteral(text, span)
-        }
+            return PatternNode.IntegerLiteral(text, span);
+        };
         if text.starts_with("mutable ") then {
-            let name = text.substring(4..)
+            let name = text.substring(4..);
             if not name.is_empty() then {
-                return PatternNode.Variable(name, true, span)
-            }
-        }
+                return PatternNode.Variable(name, true, span);
+            };
+        };
         if text.starts_with(".") then {
-            let rest = text.substring(1..)
+            let rest = text.substring(1..);
             // 检查是否有括号参数：". SomeName ( ... )"
             when rest.find("(") in {
                 .Some(lparen_idx) then {
-                    let case_name = rest.substring(0..<lparen_idx).trim_ascii()
+                    let case_name = rest.substring(0..<lparen_idx).trim_ascii();
                     // 找最后一个 ')'
                     when rest.find_last(")") in {
                         .Some(rparen_idx) then {
-                            let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii()
-                            let mutable elements = List[PatternElement].new()
+                            let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii();
+                            let mutable elements = List[PatternElement].new();
                             if not inner.is_empty() then {
                                 // 按逗号分割，每个子 pattern 递归解析
-                                let parts = self.split_pattern_args(inner)
+                                let parts = self.split_pattern_args(inner);
                                 for part in parts then {
-                                    let trimmed = part.trim_ascii()
+                                    let trimmed = part.trim_ascii();
                                     if not trimmed.is_empty() then {
-                                        elements.push(PatternElement(Option[String].None(), box(self.pattern_from_text(trimmed, span))))
-                                    }
-                                }
-                            }
-                            return PatternNode.EnumCase(case_name, elements, span)
+                                        elements.push(PatternElement(Option[String].None(), box(self.pattern_from_text(trimmed, span))));
+                                    };
+                                };
+                            };
+                            return PatternNode.EnumCase(case_name, elements, span);
                         },
                         .None() then {},
-                    }
+                    };
                 },
                 .None() then {
-                    let case_name = rest.trim_ascii()
+                    let case_name = rest.trim_ascii();
                     if not case_name.is_empty() then {
-                        return PatternNode.EnumCase(case_name, List[PatternElement].new(), span)
-                    }
+                        return PatternNode.EnumCase(case_name, List[PatternElement].new(), span);
+                    };
                 },
-            }
-        }
-        return PatternNode.Variable(text, false, span)
-    }
+            };
+        };
+        return PatternNode.Variable(text, false, span);
+    };
 
     // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
     module_private split_pattern_args(self, text String) List[String] = {
-        let mutable result = List[String].new()
-        let mutable current = String.new()
-        let mutable depth UInt = 0
-        let runes = text.to_runes()
+        let mutable result = List[String].new();
+        let mutable current = String.new();
+        let mutable depth UInt = 0;
+        let runes = text.to_runes();
         for ch in runes then {
             if ch == '(' or ch == '[' then {
-                depth += 1
-                current.push_rune(ch)
+                depth += 1;
+                current.push_rune(ch);
             } else if ch == ')' or ch == ']' then {
-                if depth > 0 then { depth -= 1 }
-                current.push_rune(ch)
+                if depth > 0 then { depth -= 1;};
+                current.push_rune(ch);
             } else if ch == ',' and depth == 0 then {
-                result.push(current)
-                current = String.new()
+                result.push(current);
+                current = String.new();
             } else {
-                current.push_rune(ch)
-            }
-        }
+                current.push_rune(ch);
+            };
+        };
         if not current.trim_ascii().is_empty() then {
-            result.push(current)
-        }
-        return result
-    }
+            result.push(current);
+        };
+        return result;
+    };
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, "", 0, 0(UInt))
-    }
+        return Parser(tokens, "", 0);
+    };
 
     public new_in_file(tokens List[Token], file_path String) Parser = {
-        return Parser(tokens, file_path, 0, 0(UInt))
-    }
+        return Parser(tokens, file_path, 0);
+    };
 
     module_private current(self) Token = {
         if self.index < self.tokens.count() then {
-            return self.tokens[self.index]
-        }
-        return Token(TokenKind.Eof(), 0, 0, false)
-    }
+            return self.tokens[self.index];
+        };
+        return Token(TokenKind.Eof(), 0, 0, false);
+    };
 
-    module_private save_state(self) UInt = self.index
+    module_private save_state(self) UInt = self.index;
 
     module_private restore_state(*mutable self, saved UInt) Void = {
-        self.index = saved
-    }
+        self.index = saved;
+    };
 
     module_private peek_kind(self) Option[TokenKind] = {
         if self.index + 1 < self.tokens.count() then {
-            return .Some(self.tokens[self.index + 1].kind)
-        }
-        return .None()
-    }
+            return .Some(self.tokens[self.index + 1].kind);
+        };
+        return .None();
+    };
 
     module_private next_is_colon(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
-            return false
-        }
-        return self.tokens[self.index + 1].kind is .Colon()
-    }
+            return false;
+        };
+        return self.tokens[self.index + 1].kind is .Colon();
+    };
 
     module_private current_labeled_argument_name(self, allow_underscore Bool) Option[String] = {
         return when self.current().kind in {
             .Identifier(label) then {
                 if self.is_upper_first(label) then {
-                    return Option[String].None()
-                }
+                    return Option[String].None();
+                };
                 if not allow_underscore and label == "_" then {
-                    return Option[String].None()
-                }
+                    return Option[String].None();
+                };
                 if self.next_is_colon() then {
-                    return Option[String].Some(label)
-                }
-                yield Option[String].None()
+                    return Option[String].Some(label);
+                };
+                yield Option[String].None();
             },
             _ then Option[String].None(),
-        }
-    }
+        };
+    };
 
     module_private next_is_then(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
-            return false
-        }
-        return self.tokens[self.index + 1].kind is .KwThen()
-    }
+            return false;
+        };
+        return self.tokens[self.index + 1].kind is .KwThen();
+    };
 
     module_private next_is_else(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
-            return false
-        }
-        return self.tokens[self.index + 1].kind is .KwElse()
-    }
+            return false;
+        };
+        return self.tokens[self.index + 1].kind is .KwElse();
+    };
 
     module_private lookahead_lambda_return_clause(*mutable self, start_index UInt) Bool = {
-        let saved = self.save_state()
-        self.restore_state(start_index)
+        let saved = self.save_state();
+        self.restore_state(start_index);
         let looks_like_return_type = when self.parse_type() in {
             .Ok(_) then true,
             .Error(_) then false,
-        }
-        self.restore_state(saved)
-        return looks_like_return_type
-    }
+        };
+        self.restore_state(saved);
+        return looks_like_return_type;
+    };
 
     module_private next_is_return(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
-            return false
-        }
-        return self.tokens[self.index + 1].kind is .KwReturn()
-    }
+            return false;
+        };
+        return self.tokens[self.index + 1].kind is .KwReturn();
+    };
 
     module_private is_eof(self) Bool = {
         when self.current().kind in {
-            .Eof() then { return true },
-            _ then { return false },
-        }
-    }
+            .Eof() then { return true;},
+            _ then { return false;},
+        };
+    };
 
     // Range bounds start at the comparison-operand layer, not the full expression grammar.
     module_private can_start_range_bound(self, kind TokenKind) Bool = {
@@ -313,237 +313,182 @@ given Parser {
             .KwIt() then true,
             .Dot() then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     // 检查当前位置是否是泛型类型表达式 [T, U]TypeName
     // 判断字符串首字母是否大写（用于区分类型名和变量名）
     module_private is_upper_first(self, s String) Bool = {
-        let runes = s.to_runes()
-        if runes.is_empty() then { return false }
-        let mutable i UInt = 0
+        let runes = s.to_runes();
+        if runes.is_empty() then { return false;};
+        let mutable i UInt = 0;
         while i < runes.count() then {
-            let ch = runes[i]
+            let ch = runes[i];
             if ch == '_' then {
-                i += 1
-                continue
-            }
-            return ch.is_ascii_uppercase()
-        }
-        return false
-    }
+                i += 1;
+                continue;
+            };
+            return ch.is_ascii_uppercase();
+        };
+        return false;
+    };
 
     module_private is_lower_first(self, s String) Bool = {
-        let runes = s.to_runes()
-        if runes.is_empty() then { return false }
-        let mutable i UInt = 0
+        let runes = s.to_runes();
+        if runes.is_empty() then { return false;};
+        let mutable i UInt = 0;
         while i < runes.count() then {
-            let ch = runes[i]
+            let ch = runes[i];
             if ch == '_' then {
-                i += 1
-                continue
-            }
-            return ch.is_ascii_lowercase()
-        }
-        return false
-    }
+                i += 1;
+                continue;
+            };
+            return ch.is_ascii_lowercase();
+        };
+        return false;
+    };
 
     module_private is_valid_value_name(self, s String) Bool = {
-        if s.is_empty() then { return false }
-        let runes = s.to_runes()
-        if runes.is_empty() then { return false }
-        let mutable all_underscore = true
+        if s.is_empty() then { return false;};
+        let runes = s.to_runes();
+        if runes.is_empty() then { return false;};
+        let mutable all_underscore = true;
         for ch in runes then {
             if ch <> '_' then {
-                all_underscore = false
-                break
-            }
-        }
-        return all_underscore or self.is_lower_first(s)
-    }
+                all_underscore = false;
+                break;
+            };
+        };
+        return all_underscore or self.is_lower_first(s);
+    };
 
     module_private is_valid_module_segment_name(self, s String) Bool = {
-        if s.is_empty() then { return false }
-        let runes = s.to_runes()
-        if runes.is_empty() then { return false }
-        let first = runes[0]
-        if not first.is_ascii_lowercase() then { return false }
-        let mutable i UInt = 1
+        if s.is_empty() then { return false;};
+        let runes = s.to_runes();
+        if runes.is_empty() then { return false;};
+        let first = runes[0];
+        if not first.is_ascii_lowercase() then { return false;};
+        let mutable i UInt = 1;
         while i < runes.count() then {
-            let ch = runes[i]
+            let ch = runes[i];
             if not ch.is_ascii_lowercase() and not ch.is_ascii_digit() and ch <> '_' then {
-                return false
-            }
-            i += 1
-        }
-        return true
-    }
+                return false;
+            };
+            i += 1;
+        };
+        return true;
+    };
 
-    module_private invalid_variable_name_error(self, name String) String = "Variable name '\(name)' must start with a lowercase letter"
-    module_private invalid_function_name_error(self, name String) String = "Function name '\(name)' must start with a lowercase letter"
-    module_private invalid_type_name_error(self, name String) String = "Type name '\(name)' must start with an uppercase letter"
-    module_private invalid_field_name_error(self, name String) String = "Field name '\(name)' must start with a lowercase letter"
-    module_private invalid_parameter_name_error(self, name String) String = "Parameter name '\(name)' must start with a lowercase letter"
-    module_private invalid_enum_case_name_error(self, name String) String = "Enum case name '\(name)' must start with an uppercase letter"
-    module_private invalid_module_name_error(self, name String) String = "Module name '\(name)' must start with a lowercase letter"
+    module_private invalid_variable_name_error(self, name String) String = "Variable name '\(name)' must start with a lowercase letter";
+    module_private invalid_function_name_error(self, name String) String = "Function name '\(name)' must start with a lowercase letter";
+    module_private invalid_type_name_error(self, name String) String = "Type name '\(name)' must start with an uppercase letter";
+    module_private invalid_field_name_error(self, name String) String = "Field name '\(name)' must start with a lowercase letter";
+    module_private invalid_parameter_name_error(self, name String) String = "Parameter name '\(name)' must start with a lowercase letter";
+    module_private invalid_enum_case_name_error(self, name String) String = "Enum case name '\(name)' must start with an uppercase letter";
+    module_private invalid_module_name_error(self, name String) String = "Module name '\(name)' must start with a lowercase letter";
 
     // 通过 lookahead 检查 [...] 后面是否跟着标识符
     module_private is_generic_type_expr(self) Bool = {
         when self.current().kind in {
             .LBracket() then {},
-            _ then { return false },
-        }
+            _ then { return false;},
+        };
         
         // Lookahead: 跳过 [...] 找到 ] 后的 token
-        let mutable depth UInt = 0
-        let mutable i = self.index
+        let mutable depth UInt = 0;
+        let mutable i = self.index;
         while i < self.tokens.count() then {
-            let tok = self.tokens[i]
+            let tok = self.tokens[i];
             when tok.kind in {
-                .LBracket() then { depth += 1 },
+                .LBracket() then { depth += 1;},
                 .RBracket() then {
                     if depth == 1 then {
                         // 找到匹配的 ]，检查下一个 token
                         if i + 1 < self.tokens.count() then {
-                            let next_tok = self.tokens[i + 1]
+                            let next_tok = self.tokens[i + 1];
                             return when next_tok.kind in {
                                 .Identifier(_) then not next_tok.has_newline_before,
                                 _ then false,
-                            }
-                        }
-                        return false
-                    }
-                    depth -= 1
+                            };
+                        };
+                        return false;
+                    };
+                    depth -= 1;
                 },
-                .Eof() then { return false },
+                .Eof() then { return false;},
                 _ then {},
-            }
-            i += 1
-        }
-        return false
-    }
+            };
+            i += 1;
+        };
+        return false;
+    };
 
     module_private advance(*mutable self) Token = {
-        let t = self.current()
+        let t = self.current();
         if not self.is_eof() then {
-            self.index += 1
-        }
-        return t
-    }
+            self.index += 1;
+        };
+        return t;
+    };
 
     module_private consume_semicolon(*mutable self) Void = {
         if self.current().kind is .Semicolon() then {
-            self.advance()
-        }
-    }
+            self.advance();
+        };
+    };
 
-    module_private enter_line_join_grouping(*mutable self) Void = {
-        self.line_join_grouping_depth += 1(UInt)
-    }
-
-    module_private leave_line_join_grouping(*mutable self) Void = {
-        if self.line_join_grouping_depth > 0(UInt) then {
-            self.line_join_grouping_depth -= 1(UInt)
-        }
-    }
-
-    module_private is_inside_line_join_grouping(self) Bool = self.line_join_grouping_depth > 0(UInt)
-
-    // 判断当前 token 是否属于少数允许换行接续的 join token。
-    module_private is_line_join_token(self) Bool = {
-        return when self.current().kind in {
-            .KwAnd() then true,
-            .KwOr() then true,
-            .KwIs() then true,
-            .KwThen() then true,
-            .KwElse() then true,
-            .Dot() then true,
-            .Arrow() then true,
-            _ then false,
-        }
-    }
-
-    module_private should_break_binary_at_current_token(self) Bool = {
-        return self.current().has_newline_before and not (self.is_line_join_token() or self.is_inside_line_join_grouping())
-    }
-
-    module_private can_continue_range_bound_after_newline(self) Bool = {
-        return not self.current().has_newline_before or self.is_inside_line_join_grouping()
-    }
-
-    module_private require_no_line_break_before_rhs(*mutable self) Result[Void] = {
-        if self.current().has_newline_before and not self.is_inside_line_join_grouping() then {
-            return Result[Void].Error(self.parser_error("Unexpected token: \(token_text(self.current()))"))
-        }
-        return Result[Void].Ok({})
-    }
-
-    // 判断是否应该终止当前语句（自动分号插入规则）
+    // 只有分号是语句终止符，RBrace 和换行不终止语句
     module_private should_terminate_statement(self) Bool = {
-        // 显式分号
         if self.current().kind is .Semicolon() then {
-            return true
-        }
-        // 文件结束或块结束
+            return true;
+        };
         if self.current().kind is .Eof() then {
-            return true
-        }
-        if self.current().kind is .RBrace() then {
-            return true
-        }
-        // 换行规则：有换行且当前 token 不是允许接续的 join token
-        if self.current().has_newline_before then {
-            if not self.is_line_join_token() then {
-                return true
-            }
-        }
-        return false
-    }
+            return true;
+        };
+        return false;
+    };
 
-    // 消耗可选的语句终止符（分号或换行）
+    // 消耗显式分号终止符
     module_private consume_statement_terminator(*mutable self) Void = {
         if self.current().kind is .Semicolon() then {
-            self.advance()
-        }
-        // 换行自动终止不需要消耗 token
-    }
-
-    module_private can_omit_control_statement_value(self) Bool = self.should_terminate_statement()
+            self.advance();
+        };
+    };
 
     module_private expect_statement_terminator_after(*mutable self, keyword String) Result[Void] = {
         if self.should_terminate_statement() then {
-            self.consume_statement_terminator()
-            return .Ok({})
-        }
-        return .Error(self.parser_error("Expected statement terminator after '\(keyword)'"))
-    }
+            self.consume_statement_terminator();
+            return .Ok({});
+        };
+        return .Error(self.parser_error("Expected ';' after '$(keyword)'"));
+    };
 
-    module_private can_continue_dot_postfix(self) Bool = self.current().kind is .Dot()
+    module_private can_continue_dot_postfix(self) Bool = self.current().kind is .Dot();
 
     module_private should_continue_postfix_after_expression(self) Bool = {
         return when self.current().kind in {
-            .LParen() then not self.current().has_newline_before,
-            .LBracket() then not self.current().has_newline_before,
+            .LParen() then true,
+            .LBracket() then true,
             .Dot() then self.can_continue_dot_postfix(),
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private expect_identifier(*mutable self, label String) Result[String] = {
-        let t = self.current()
+        let t = self.current();
         if t.kind is .Identifier(name) then {
-            self.advance()
-            return .Ok(name)
-        }
-        return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", label, t), t))
-    }
+            self.advance();
+            return .Ok(name);
+        };
+        return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", label, t), t));
+    };
 
     module_private parse_decl_flags(*mutable self) ParseDeclFlags = {
-        let mutable access = AccessModifier.ModulePrivate()
-        let mutable has_explicit_access = false
-        let mutable is_foreign = false
-        let mutable is_intrinsic = false
-        let mutable invalid_access_message = Option[String].None()
+        let mutable access = AccessModifier.ModulePrivate();
+        let mutable has_explicit_access = false;
+        let mutable is_foreign = false;
+        let mutable is_intrinsic = false;
+        let mutable invalid_access_message = Option[String].None();
 
         while true then {
             when self.current().kind in {
@@ -554,17 +499,17 @@ given Parser {
                             .ModulePrivate() then "module_private",
                             .PackagePrivate() then "package_private",
                             .FilePrivate() then "file_private",
-                        }
+                        };
                         if invalid_access_message is .None() then {
                             invalid_access_message = .Some(
                                 "Invalid access modifier order: '\(previous) public'."
-                            )
-                        }
-                        break
-                    }
-                    has_explicit_access = true
-                    access = AccessModifier.Public()
-                    self.advance()
+                            );
+                        };
+                        break;
+                    };
+                    has_explicit_access = true;
+                    access = AccessModifier.Public();
+                    self.advance();
                 },
                 .KwModulePrivate() then {
                     if has_explicit_access then {
@@ -573,17 +518,17 @@ given Parser {
                             .ModulePrivate() then "module_private",
                             .PackagePrivate() then "package_private",
                             .FilePrivate() then "file_private",
-                        }
+                        };
                         if invalid_access_message is .None() then {
                             invalid_access_message = .Some(
                                 "Invalid access modifier order: '\(previous) module_private'."
-                            )
-                        }
-                        break
-                    }
-                    has_explicit_access = true
-                    access = AccessModifier.ModulePrivate()
-                    self.advance()
+                            );
+                        };
+                        break;
+                    };
+                    has_explicit_access = true;
+                    access = AccessModifier.ModulePrivate();
+                    self.advance();
                 },
                 .KwPackagePrivate() then {
                     if has_explicit_access then {
@@ -592,17 +537,17 @@ given Parser {
                             .ModulePrivate() then "module_private",
                             .PackagePrivate() then "package_private",
                             .FilePrivate() then "file_private",
-                        }
+                        };
                         if invalid_access_message is .None() then {
                             invalid_access_message = .Some(
                                 "Invalid access modifier order: '\(previous) package_private'."
-                            )
-                        }
-                        break
-                    }
-                    has_explicit_access = true
-                    access = AccessModifier.PackagePrivate()
-                    self.advance()
+                            );
+                        };
+                        break;
+                    };
+                    has_explicit_access = true;
+                    access = AccessModifier.PackagePrivate();
+                    self.advance();
                 },
                 .KwFilePrivate() then {
                     if has_explicit_access then {
@@ -611,51 +556,51 @@ given Parser {
                             .ModulePrivate() then "module_private",
                             .PackagePrivate() then "package_private",
                             .FilePrivate() then "file_private",
-                        }
+                        };
                         if invalid_access_message is .None() then {
                             invalid_access_message = .Some(
                                 "Invalid access modifier order: '\(previous) file_private'."
-                            )
-                        }
-                        break
-                    }
-                    has_explicit_access = true
-                    access = AccessModifier.FilePrivate()
-                    self.advance()
+                            );
+                        };
+                        break;
+                    };
+                    has_explicit_access = true;
+                    access = AccessModifier.FilePrivate();
+                    self.advance();
                 },
                 .KwForeign() then {
                     if is_foreign then {
                         if invalid_access_message is .None() then {
-                            invalid_access_message = .Some("Duplicate declaration modifier: foreign")
-                        }
-                        break
-                    }
-                    is_foreign = true
-                    self.advance()
+                            invalid_access_message = .Some("Duplicate declaration modifier: foreign");
+                        };
+                        break;
+                    };
+                    is_foreign = true;
+                    self.advance();
                 },
                 .KwIntrinsic() then {
                     if is_intrinsic then {
                         if invalid_access_message is .None() then {
-                            invalid_access_message = .Some("Duplicate declaration modifier: intrinsic")
-                        }
-                        break
-                    }
-                    is_intrinsic = true
-                    self.advance()
+                            invalid_access_message = .Some("Duplicate declaration modifier: intrinsic");
+                        };
+                        break;
+                    };
+                    is_intrinsic = true;
+                    self.advance();
                 },
                 _ then {
-                    break
+                    break;
                 },
-            }
-        }
+            };
+        };
 
-        return ParseDeclFlags(access, has_explicit_access, is_foreign, is_intrinsic, invalid_access_message)
-    }
+        return ParseDeclFlags(access, has_explicit_access, is_foreign, is_intrinsic, invalid_access_message);
+    };
 
     module_private wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) Result[Decl] = {
         if is_foreign and is_intrinsic then {
-            return .Error(self.parser_error_without_span("foreign and intrinsic cannot be used together"))
-        }
+            return .Error(self.parser_error_without_span("foreign and intrinsic cannot be used together"));
+        };
 
         if is_foreign then {
             return when base in {
@@ -670,8 +615,8 @@ given Parser {
                 .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
                 .GivenNotTraitDecl(_, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
                 _ then .Error(self.parser_error_without_span("unsupported foreign declaration kind")),
-            }
-        }
+            };
+        };
 
         if is_intrinsic then {
             return when base in {
@@ -681,10 +626,10 @@ given Parser {
                 .GivenNotTraitDecl(_, _, _, _) then .Error(self.parser_error_without_span("intrinsic given declaration is not supported")),
                 .TypeStructDecl(_, name, type_params, _, span) then .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, span)),
                 _ then .Error(self.parser_error_without_span("unsupported intrinsic declaration kind")),
-            }
-        }
-        return .Ok(base)
-    }
+            };
+        };
+        return .Ok(base);
+    };
 
     module_private is_type_start(self) Bool = {
         return when self.current().kind in {
@@ -694,702 +639,702 @@ given Parser {
             .KwSelfType() then true,
             .Identifier(_) then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private parse_type_arg_list(*mutable self) Result[List[* TypeNode]] = {
         when self.current().kind in {
-            .LBracket() then { self.advance() },
-            _ then { return .Error(self.parser_error("Expected '[' to start type argument list")) },
-        }
+            .LBracket() then { self.advance();},
+            _ then { return .Error(self.parser_error("Expected '[' to start type argument list"));},
+        };
 
-        let mutable args = List[* TypeNode].new()
+        let mutable args = List[* TypeNode].new();
         while true then {
             if self.current().kind is .RBracket() then {
-                self.advance()
-                break
-            }
+                self.advance();
+                break;
+            };
             let arg = self.parse_type() or else {
-                return .Error(self.parser_error("parse type argument error"))
-            }
-            args.push(box(arg))
+                return .Error(self.parser_error("parse type argument error"));
+            };
+            args.push(box(arg));
 
             when self.current().kind in {
                 .Comma() then {
-                    self.advance()
+                    self.advance();
                 },
                 .RBracket() then {},
                 _ then {
-                    return .Error(self.parser_error("Expected ',' or ']' in type argument list"))
+                    return .Error(self.parser_error("Expected ',' or ']' in type argument list"));
                 },
-            }
-        }
+            };
+        };
 
-        return .Ok(args)
-    }
+        return .Ok(args);
+    };
 
     module_private parse_function_type_param_list(*mutable self) Result[List[* TypeNode]] = {
         when self.current().kind in {
-            .LParen() then { self.advance() },
-            _ then { return .Error(self.parser_error("Expected '(' to start function type parameter list")) },
-        }
+            .LParen() then { self.advance();},
+            _ then { return .Error(self.parser_error("Expected '(' to start function type parameter list"));},
+        };
 
-        let mutable params = List[* TypeNode].new()
+        let mutable params = List[* TypeNode].new();
         while true then {
             if self.current().kind is .RParen() then {
-                self.advance()
-                break
-            }
+                self.advance();
+                break;
+            };
             let param_type = self.parse_type() or else {
-                return .Error(self.parser_error("parse type error"))
-            }
-            params.push(box(param_type))
+                return .Error(self.parser_error("parse type error"));
+            };
+            params.push(box(param_type));
 
             when self.current().kind in {
                 .Comma() then {
-                    self.advance()
+                    self.advance();
                 },
                 .RParen() then {},
                 _ then {
-                    return .Error(self.parser_error("Expected ',' or ')' in function type parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ')' in function type parameter list"));
                 },
-            }
-        }
+            };
+        };
 
-        return .Ok(params)
-    }
+        return .Ok(params);
+    };
 
     module_private parse_type(*mutable self) Result[TypeNode] = {
         when self.current().kind in {
             .QuestionMark() then {
-                self.advance()
+                self.advance();
                 if self.current().kind is .Star() then {
-                    self.advance()
+                    self.advance();
                 } else {
-                    return .Error(self.parser_error("Expected '*' after '?'"))
-                }
-                let mutable is_mutable = false
+                    return .Error(self.parser_error("Expected '*' after '?'"));
+                };
+                let mutable is_mutable = false;
                 if self.current().kind is .KwMut() then {
-                    self.advance()
-                    is_mutable = true
-                }
+                    self.advance();
+                    is_mutable = true;
+                };
                 let inner = self.parse_type() or else {
-                    return .Error(self.parser_error("parse type error"))
-                }
-                return .Ok(TypeNode.WeakReference(box(inner), is_mutable))
+                    return .Error(self.parser_error("parse type error"));
+                };
+                return .Ok(TypeNode.WeakReference(box(inner), is_mutable));
             },
             .Star() then {
-                self.advance()
+                self.advance();
                 if self.current().kind is .KwUnsafe() then {
-                    self.advance()
-                    let mutable is_mutable = false
+                    self.advance();
+                    let mutable is_mutable = false;
                     if self.current().kind is .KwMut() then {
-                        self.advance()
-                        is_mutable = true
-                    }
+                        self.advance();
+                        is_mutable = true;
+                    };
                     let inner = self.parse_type() or else {
-                        return .Error(self.parser_error("parse type error"))
-                    }
-                    return .Ok(TypeNode.Pointer(box(inner), is_mutable))
-                }
-                let mutable is_mutable = false
+                        return .Error(self.parser_error("parse type error"));
+                    };
+                    return .Ok(TypeNode.Pointer(box(inner), is_mutable));
+                };
+                let mutable is_mutable = false;
                 if self.current().kind is .KwMut() then {
-                    self.advance()
-                    is_mutable = true
-                }
+                    self.advance();
+                    is_mutable = true;
+                };
                 let inner = self.parse_type() or else {
-                    return .Error(self.parser_error("parse type error"))
-                }
-                return .Ok(TypeNode.Reference(box(inner), is_mutable))
+                    return .Error(self.parser_error("parse type error"));
+                };
+                return .Ok(TypeNode.Reference(box(inner), is_mutable));
             },
             .KwSelfType() then {
-                self.advance()
-                return .Ok(TypeNode.InferredSelf())
+                self.advance();
+                return .Ok(TypeNode.InferredSelf());
             },
             .Identifier(module_or_name) then {
-                self.advance()
+                self.advance();
 
                 if module_or_name == "Func" then {
                     if self.current().kind is .LParen() then {
                         let param_types = self.parse_function_type_param_list() or else {
-                            return .Error(self.parser_error("parse type error"))
-                        }
+                            return .Error(self.parser_error("parse type error"));
+                        };
                         if not self.is_type_start() then {
-                            return .Error(self.parser_error_without_span("Function type must include a return type, e.g. Func(Int, String) Bool"))
-                        }
+                            return .Error(self.parser_error_without_span("Function type must include a return type, e.g. Func(Int, String) Bool"));
+                        };
                         let return_type = self.parse_type() or else {
-                            return .Error(self.parser_error("parse type error"))
-                        }
-                        return .Ok(TypeNode.FunctionType(param_types, box(return_type)))
-                    }
+                            return .Error(self.parser_error("parse type error"));
+                        };
+                        return .Ok(TypeNode.FunctionType(param_types, box(return_type)));
+                    };
                     if self.current().kind is .LBracket() then {
-                        return .Error(self.parser_error_without_span("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"))
-                    }
-                }
+                        return .Error(self.parser_error_without_span("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"));
+                    };
+                };
 
                 if not self.is_upper_first(module_or_name) then {
-                    let mutable message = "Type name '"
-                    message.push_string(module_or_name)
-                    message.push_string("' must start with an uppercase letter")
-                    return .Error(self.parser_error_without_span(message))
-                }
+                    let mutable message = "Type name '";
+                    message.push_string(module_or_name);
+                    message.push_string("' must start with an uppercase letter");
+                    return .Error(self.parser_error_without_span(message));
+                };
 
                 if self.current().kind is .LBracket() then {
                     let args = self.parse_type_arg_list() or else {
-                        return .Error(self.parser_error("parse type error"))
-                    }
-                    return .Ok(TypeNode.Generic(module_or_name, args))
-                }
+                        return .Error(self.parser_error("parse type error"));
+                    };
+                    return .Ok(TypeNode.Generic(module_or_name, args));
+                };
 
-                return .Ok(TypeNode.Identifier(module_or_name))
+                return .Ok(TypeNode.Identifier(module_or_name));
             },
             _ then {
-                return .Error(self.parser_error("Expected type"))
+                return .Error(self.parser_error("Expected type"));
             },
-        }
-    }
+        };
+    };
 
     module_private parse_type_parameters(*mutable self) Result[List[TypeParameter]] = {
-        let mutable params = List[TypeParameter].new()
+        let mutable params = List[TypeParameter].new();
 
         if self.current().kind is .LBracket() then {
-            self.advance()
+            self.advance();
         } else {
-            return .Ok(params)
-        }
+            return .Ok(params);
+        };
 
         while true then {
             if self.current().kind is .RBracket() then {
-                self.advance()
-                break
-            }
+                self.advance();
+                break;
+            };
 
             // Accept both Identifier and LifetimeIdentifier as type parameter names
             let param_name = when self.current().kind in {
                 .Identifier(name) then {
-                    self.advance()
-                    yield name
+                    self.advance();
+                    yield name;
                 },
                 _ then {
-                    return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", "type parameter", self.current()), self.current()))
+                    return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", "type parameter", self.current()), self.current()));
                 },
-            }
+            };
 
             // Reject lifetime parameters in generic parameter lists
-            let is_lifetime_param = param_name.starts_with("'")
+            let is_lifetime_param = param_name.starts_with("'");
             if is_lifetime_param then {
-                return .Error(self.parser_error_without_span("Lifetime syntax has been removed. Use *T/*mutable T for managed references."))
-            }
+                return .Error(self.parser_error_without_span("Lifetime syntax has been removed. Use *T/*mutable T for managed references."));
+            };
             if not self.is_type_start() then {
-                let t = self.current()
-                let mutable message = "Type parameter '"
-                message.push_string(param_name)
-                message.push_string("' requires a constraint at ")
-                message.push_string(self.token_position_text(t))
-                return .Error(self.parser_error_at(message, t))
-            }
-            let mutable constraints = List[* TypeNode].new()
+                let t = self.current();
+                let mutable message = "Type parameter '";
+                message.push_string(param_name);
+                message.push_string("' requires a constraint at ");
+                message.push_string(self.token_position_text(t));
+                return .Error(self.parser_error_at(message, t));
+            };
+            let mutable constraints = List[* TypeNode].new();
             let first_constraint = self.parse_type() or else {
-                return .Error(self.parser_error("parse type parameter constraint error"))
-            }
-            constraints.push(box(first_constraint))
+                return .Error(self.parser_error("parse type parameter constraint error"));
+            };
+            constraints.push(box(first_constraint));
 
             while self.current().kind is .KwAnd() then {
-                self.advance()
+                self.advance();
                 let next_constraint = self.parse_type() or else {
-                    return .Error(self.parser_error("parse type parameter constraint error"))
-                }
-                constraints.push(box(next_constraint))
-            }
+                    return .Error(self.parser_error("parse type parameter constraint error"));
+                };
+                constraints.push(box(next_constraint));
+            };
 
-            params.push(TypeParameter(param_name, constraints))
+            params.push(TypeParameter(param_name, constraints));
 
             when self.current().kind in {
                 .Comma() then {
-                    self.advance()
+                    self.advance();
                 },
                 .RBracket() then {},
                 _ then {
-                    return .Error(self.parser_error("Expected ',' or ']' in type parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ']' in type parameter list"));
                 },
-            }
-        }
+            };
+        };
 
-        return .Ok(params)
-    }
+        return .Ok(params);
+    };
 
     module_private parse_param_list(*mutable self) Result[List[Param]] = {
-        let mutable params = List[Param].new()
+        let mutable params = List[Param].new();
 
         while true then {
             if self.current().kind is .RParen() then {
-                return .Ok(params)
-            }
+                return .Ok(params);
+            };
 
-            let mutable is_mut = false
+            let mutable is_mut = false;
             if self.current().kind is .KwMut() then {
-                is_mut = true
-                self.advance()
-            }
+                is_mut = true;
+                self.advance();
+            };
 
             // Check for *self / *mutable self prefix receiver
             if self.current().kind is .Star() then {
-                self.advance()
-                let mutable is_mutable = false
+                self.advance();
+                let mutable is_mutable = false;
                 if self.current().kind is .KwMut() then {
-                    self.advance()
-                    is_mutable = true
-                }
+                    self.advance();
+                    is_mutable = true;
+                };
                 if self.current().kind is .KwSelf() then {
-                    self.advance()
-                    let self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), is_mutable)
-                    params.push(Param("self", false, self_type, false))
+                    self.advance();
+                    let self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), is_mutable);
+                    params.push(Param("self", false, self_type, false));
                 } else {
-                    return .Error(self.parser_error("Expected 'self' after '*' in receiver"))
-                }
+                    return .Error(self.parser_error("Expected 'self' after '*' in receiver"));
+                };
             } else if self.current().kind is .KwSelf() then {
-                self.advance()
-                let mutable self_type = TypeNode.InferredSelf()
+                self.advance();
+                let mutable self_type = TypeNode.InferredSelf();
                 if self.current().kind is .KwSelfType() then {
-                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
-                }
+                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"));
+                };
                 if self.is_type_start() then {
-                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
-                }
-                params.push(Param("self", false, self_type, false))
+                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"));
+                };
+                params.push(Param("self", false, self_type, false));
             } else {
                 let name = self.expect_identifier("parameter") or else {
-                    return .Error(self.parser_error("parse parameter error"))
-                }
+                    return .Error(self.parser_error("parse parameter error"));
+                };
                 if not self.is_valid_value_name(name) then {
-                    return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(name)))
-                }
+                    return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(name)));
+                };
 
                 if self.current().kind is .Colon() then {
-                    return .Error(self.parser_error_without_span("Function parameters use 'name Type', not 'name: Type'"))
-                }
+                    return .Error(self.parser_error_without_span("Function parameters use 'name Type', not 'name: Type'"));
+                };
 
                 if not self.is_type_start() then {
-                    return .Error(self.parser_error("parameter type is required"))
-                }
+                    return .Error(self.parser_error("parameter type is required"));
+                };
                 let param_type = self.parse_type() or else {
-                    return .Error(self.parser_error("parse parameter type error"))
-                }
+                    return .Error(self.parser_error("parse parameter type error"));
+                };
 
-                params.push(Param(name, is_mut, param_type, false))
-            }
+                params.push(Param(name, is_mut, param_type, false));
+            };
 
             when self.current().kind in {
                 .Comma() then {
-                    self.advance()
+                    self.advance();
                 },
                 .RParen() then {
-                    return .Ok(params)
+                    return .Ok(params);
                 },
                 .Eof() then {
-                    return .Error(self.parser_error("Unexpected EOF in parameter list"))
+                    return .Error(self.parser_error("Unexpected EOF in parameter list"));
                 },
                 _ then {
-                    return .Error(self.parser_error("Expected ',' or ')' in parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ')' in parameter list"));
                 },
-            }
-        }
+            };
+        };
 
-        return .Ok(params)
-    }
+        return .Ok(params);
+    };
 
     module_private parse_let_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
-        let start = self.current()
-        self.advance()
+        let start = self.current();
+        self.advance();
 
-        let mutable is_mut = false
+        let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
-            is_mut = true
-            self.advance()
-        }
+            is_mut = true;
+            self.advance();
+        };
 
-        let name = self.expect_identifier("let declaration") or return
+        let name = self.expect_identifier("let declaration") or return;
         if self.current().kind is .LParen() then {
             if not self.is_valid_value_name(name) then {
-                return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)))
-            }
+                return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)));
+            };
         } else if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
-        }
-        let type_params = self.parse_type_parameters() or return
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)));
+        };
+        let type_params = self.parse_type_parameters() or return;
 
         if self.current().kind is .LParen() then {
             if is_mut then {
-                return .Error(self.parser_error_without_span("Function declaration cannot use mutable before name"))
-            }
+                return .Error(self.parser_error_without_span("Function declaration cannot use mutable before name"));
+            };
 
             if is_foreign and not type_params.is_empty() then {
-                return .Error(self.parser_error_without_span("foreign function does not support generics"))
-            }
+                return .Error(self.parser_error_without_span("foreign function does not support generics"));
+            };
 
-            self.advance()
-            let params = self.parse_param_list() or return
+            self.advance();
+            let params = self.parse_param_list() or return;
 
             when self.current().kind in {
                 .RParen() then {},
-                _ then { return .Error(self.parser_error("Expected ')' after parameters")) },
-            }
-            self.advance()
+                _ then { return .Error(self.parser_error("Expected ')' after parameters"));},
+            };
+            self.advance();
 
             if self.current().kind is .Assign() then {
-                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"))
-            }
+                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"));
+            };
             if not self.is_type_start() then {
-                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"))
-            }
+                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"));
+            };
             let return_type = self.parse_type() or else {
-                return .Error(self.parser_error("parse function return type error"))
-            }
+                return .Error(self.parser_error("parse function return type error"));
+            };
 
             if is_foreign or is_intrinsic then {
                 if self.current().kind is .Assign() then {
                     if is_foreign then {
-                        return .Error(self.parser_error_without_span("foreign function cannot have a body"))
-                    }
-                    return .Error(self.parser_error_without_span("intrinsic function declaration should not have body"))
-                }
-                self.consume_semicolon()
-                let span = self.span_from_start(start)
-                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>", span)), span)
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
-            }
+                        return .Error(self.parser_error_without_span("foreign function cannot have a body"));
+                    };
+                    return .Error(self.parser_error_without_span("intrinsic function declaration should not have body"));
+                };
+                self.consume_semicolon();
+                let span = self.span_from_start(start);
+                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>", span)), span);
+                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+            };
 
             while true then {
                 when self.current().kind in {
                     .Assign() then {
-                        break
+                        break;
                     },
                     .Eof() then {
-                        return .Error(self.parser_error("Unexpected EOF in function declaration"))
+                        return .Error(self.parser_error("Unexpected EOF in function declaration"));
                     },
                     _ then {
-                        self.advance()
+                        self.advance();
                     },
-                }
-            }
+                };
+            };
 
-            self.advance()
-            let body = self.parse_expression_checked("function body") or return
-            self.consume_semicolon()
-            let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start))
-            return self.wrap_decl(access, is_foreign, is_intrinsic, base)
-        }
+            self.advance();
+            let body = self.parse_expression_checked("function body") or return;
+            self.consume_semicolon();
+            let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start));
+            return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+        };
 
         // Variable declaration
         if not type_params.is_empty() then {
-            return .Error(self.parser_error_without_span("variable declaration cannot use type parameters"))
-        }
+            return .Error(self.parser_error_without_span("variable declaration cannot use type parameters"));
+        };
 
         if is_foreign then {
             if not self.is_type_start() then {
-                return .Error(self.parser_error_without_span("foreign let declaration requires explicit type"))
-            }
+                return .Error(self.parser_error_without_span("foreign let declaration requires explicit type"));
+            };
             let foreign_type = self.parse_type() or else {
-                return .Error(self.parser_error("parse foreign let type error"))
-            }
-            self.consume_semicolon()
-            let span = self.span_from_start(start)
-            let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), box(Expr.Identifier("<foreign-init>", span)), span)
-            return self.wrap_decl(access, is_foreign, is_intrinsic, base)
-        }
+                return .Error(self.parser_error("parse foreign let type error"));
+            };
+            self.consume_semicolon();
+            let span = self.span_from_start(start);
+            let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), box(Expr.Identifier("<foreign-init>", span)), span);
+            return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+        };
 
-        let mutable type_name = Option[TypeNode].None()
+        let mutable type_name = Option[TypeNode].None();
         if self.is_type_start() then {
             let parsed = self.parse_type() or else {
-                return .Error(self.parser_error("parse let declaration type error"))
-            }
-            type_name = .Some(parsed)
-        }
+                return .Error(self.parser_error("parse let declaration type error"));
+            };
+            type_name = .Some(parsed);
+        };
 
         // expect '='
         if self.current().kind is .Eof() then {
-            return .Error(self.parser_error("Expected '=' in let declaration"))
-        }
+            return .Error(self.parser_error("Expected '=' in let declaration"));
+        };
         if not (self.current().kind is .Assign()) then {
-            return .Error(self.parser_error("Expected '=' in let declaration, got \(token_text(self.current()))"))
-        }
-        self.advance()
-        let initializer = self.parse_expression_checked("let declaration initializer") or return
-        self.consume_semicolon()
-        let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start))
-        return self.wrap_decl(access, is_foreign, is_intrinsic, base)
-    }
+            return .Error(self.parser_error("Expected '=' in let declaration, got \(token_text(self.current()))"));
+        };
+        self.advance();
+        let initializer = self.parse_expression_checked("let declaration initializer") or return;
+        self.consume_semicolon();
+        let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start));
+        return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+    };
 
     module_private parse_type_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
-        let start = self.current()
-        self.advance()
+        let start = self.current();
+        self.advance();
 
-        let mutable foreign_cname = Option[String].None()
+        let mutable foreign_cname = Option[String].None();
         if is_foreign then {
             if self.current().kind is .StringLiteral(v) then {
-                foreign_cname = .Some(v)
-                self.advance()
-            }
-        }
+                foreign_cname = .Some(v);
+                self.advance();
+            };
+        };
 
-        let name = self.expect_identifier("type declaration") or return
+        let name = self.expect_identifier("type declaration") or return;
         if not self.is_upper_first(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_type_name_error(name)))
-        }
-        let type_params = self.parse_type_parameters() or return
+            return .Error(self.parser_error_without_span(self.invalid_type_name_error(name)));
+        };
+        let type_params = self.parse_type_parameters() or return;
 
         when self.current().kind in {
             .Assign() then {
-                self.advance()
+                self.advance();
                 let target = self.parse_type() or else {
-                    return .Error(self.parser_error("parse type alias target error"))
-                }
-                self.consume_semicolon()
-                let base = Decl.TypeAliasDecl(access, name, target, self.span_from_start(start))
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+                    return .Error(self.parser_error("parse type alias target error"));
+                };
+                self.consume_semicolon();
+                let base = Decl.TypeAliasDecl(access, name, target, self.span_from_start(start));
+                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .LParen() then {
-                self.advance()
-                let mutable fields = List[Field].new()
+                self.advance();
+                let mutable fields = List[Field].new();
                 while true then {
                     when self.current().kind in {
                         .RParen() then {
-                            self.advance()
-                            break
+                            self.advance();
+                            break;
                         },
                         .Eof() then {
-                            return .Error(self.parser_error("Unexpected EOF in struct declaration"))
+                            return .Error(self.parser_error("Unexpected EOF in struct declaration"));
                         },
                         _ then {
-                            let field_access = self.parse_access_modifier(AccessModifier.Public())
-                            let mutable field_mut = false
+                            let field_access = self.parse_access_modifier(AccessModifier.Public());
+                            let mutable field_mut = false;
                             if self.current().kind is .KwMut() then {
-                                field_mut = true
-                                self.advance()
-                            }
+                                field_mut = true;
+                                self.advance();
+                            };
 
-                            let field_name = self.expect_identifier("field name") or return
+                            let field_name = self.expect_identifier("field name") or return;
                             if not self.is_valid_value_name(field_name) then {
-                                return .Error(self.parser_error_without_span(self.invalid_field_name_error(field_name)))
-                            }
+                                return .Error(self.parser_error_without_span(self.invalid_field_name_error(field_name)));
+                            };
                             if self.current().kind is .Colon() then {
-                                return .Error(self.parser_error_without_span("Constructor field declarations use 'name Type', not 'name: Type'"))
-                            }
+                                return .Error(self.parser_error_without_span("Constructor field declarations use 'name Type', not 'name: Type'"));
+                            };
 
                             let field_type = self.parse_type() or else {
-                                return .Error(self.parser_error("parse field type error"))
-                            }
+                                return .Error(self.parser_error("parse field type error"));
+                            };
 
-                            fields.push(Field(field_access, field_name, field_mut, field_type, false))
+                            fields.push(Field(field_access, field_name, field_mut, field_type, false));
                             if self.current().kind is .Comma() then {
-                                self.advance()
-                            }
+                                self.advance();
+                            };
                         },
-                    }
-                }
-                self.consume_semicolon()
+                    };
+                };
+                self.consume_semicolon();
                 if is_foreign then {
-                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start)))
-                }
-                let base = Decl.TypeStructDecl(access, name, type_params, fields, self.span_from_start(start))
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start)));
+                };
+                let base = Decl.TypeStructDecl(access, name, type_params, fields, self.span_from_start(start));
+                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .LBrace() then {
                 if is_foreign then {
-                    self.advance()
+                    self.advance();
                     if self.current().kind is .RBrace() then {
-                        self.advance()
-                        self.consume_semicolon()
-                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)))
-                    }
-                    return .Error(self.parser_error_without_span("foreign type must use an empty body: {}"))
-                }
-                self.advance()
-                let mutable cases = List[EnumCase].new()
+                        self.advance();
+                        self.consume_semicolon();
+                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)));
+                    };
+                    return .Error(self.parser_error_without_span("foreign type must use an empty body: {}"));
+                };
+                self.advance();
+                let mutable cases = List[EnumCase].new();
                 while true then {
                     when self.current().kind in {
                         .RBrace() then {
-                            self.advance()
-                            break
+                            self.advance();
+                            break;
                         },
                         .Eof() then {
-                            return .Error(self.parser_error("Unexpected EOF in enum declaration"))
+                            return .Error(self.parser_error("Unexpected EOF in enum declaration"));
                         },
                         _ then {
-                            let case_name = self.expect_identifier("enum case") or return
+                            let case_name = self.expect_identifier("enum case") or return;
                             if not self.is_upper_first(case_name) then {
-                                return .Error(self.parser_error_without_span(self.invalid_enum_case_name_error(case_name)))
-                            }
-                            let mutable case_fields = List[EnumCaseField].new()
+                                return .Error(self.parser_error_without_span(self.invalid_enum_case_name_error(case_name)));
+                            };
+                            let mutable case_fields = List[EnumCaseField].new();
 
                             if self.current().kind is .LParen() then {
-                                self.advance()
+                                self.advance();
                                 while true then {
                                     when self.current().kind in {
                                         .RParen() then {
-                                            self.advance()
-                                            break
+                                            self.advance();
+                                            break;
                                         },
                                         .Eof() then {
-                                            return .Error(self.parser_error("Unexpected EOF in enum payload"))
+                                            return .Error(self.parser_error("Unexpected EOF in enum payload"));
                                         },
                                         _ then {
-                                            let payload_name = self.expect_identifier("enum payload name") or return
+                                            let payload_name = self.expect_identifier("enum payload name") or return;
                                             if not self.is_valid_value_name(payload_name) then {
-                                                return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(payload_name)))
-                                            }
+                                                return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(payload_name)));
+                                            };
                                             if self.current().kind is .Colon() then {
-                                                return .Error(self.parser_error_without_span("Enum payload field declarations use 'name Type', not 'name: Type'"))
-                                            }
+                                                return .Error(self.parser_error_without_span("Enum payload field declarations use 'name Type', not 'name: Type'"));
+                                            };
                                             let payload_type = self.parse_type() or else {
-                                                return .Error(self.parser_error("parse enum payload type error"))
-                                            }
-                                            case_fields.push(EnumCaseField(payload_name, payload_type, false))
+                                                return .Error(self.parser_error("parse enum payload type error"));
+                                            };
+                                            case_fields.push(EnumCaseField(payload_name, payload_type, false));
                                             when self.current().kind in {
                                                 .Comma() then {
-                                                    self.advance()
+                                                    self.advance();
                                                 },
                                                 .RParen() then {},
                                                 _ then {
-                                                    return .Error(self.parser_error("Expected ',' or ')' in enum payload"))
+                                                    return .Error(self.parser_error("Expected ',' or ')' in enum payload"));
                                                 },
-                                            }
+                                            };
                                         },
-                                    }
-                                }
-                            }
+                                    };
+                                };
+                            };
 
-                            cases.push(EnumCase(case_name, case_fields))
+                            cases.push(EnumCase(case_name, case_fields));
                             if self.current().kind is .Comma() then {
-                                self.advance()
-                            }
+                                self.advance();
+                            };
                         },
-                    }
-                }
-                self.consume_semicolon()
-                let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start))
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+                    };
+                };
+                self.consume_semicolon();
+                let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start));
+                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .Semicolon() then {
                 if is_foreign then {
-                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"))
-                }
+                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"));
+                };
                 if is_intrinsic then {
-                    self.consume_semicolon()
-                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)))
-                }
-                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"))
+                    self.consume_semicolon();
+                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)));
+                };
+                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"));
             },
             _ then {
                 if is_foreign then {
-                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"))
-                }
+                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"));
+                };
                 if is_intrinsic then {
-                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)))
-                }
-                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"))
+                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)));
+                };
+                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"));
             },
-        }
-    }
+        };
+    };
 
     module_private parse_let_statement(*mutable self) Result[Statement] = {
-        let start = self.current()
-        self.advance()
+        let start = self.current();
+        self.advance();
 
         if self.current().kind is .LParen() then {
-            return self.parse_pair_let_statement(start)
-        }
+            return self.parse_pair_let_statement(start);
+        };
 
-        let mutable is_mut = false
+        let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
-            is_mut = true
-            self.advance()
-        }
+            is_mut = true;
+            self.advance();
+        };
 
-        let name = self.expect_identifier("let statement") or return
+        let name = self.expect_identifier("let statement") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
-        }
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)));
+        };
 
-        let mutable type_name = Option[TypeNode].None()
+        let mutable type_name = Option[TypeNode].None();
         if self.is_type_start() then {
             let parsed_type_name = self.parse_type() or else {
-                return .Error(self.parser_error("parse let statement type error"))
-            }
-            type_name = .Some(parsed_type_name)
-        }
+                return .Error(self.parser_error("parse let statement type error"));
+            };
+            type_name = .Some(parsed_type_name);
+        };
 
         // skip to '='
         if self.current().kind is .Eof() then {
-            return .Error(self.parser_error("Expected '=' in let statement"))
-        }
+            return .Error(self.parser_error("Expected '=' in let statement"));
+        };
 
-        self.advance()
-        let value = self.parse_expression_checked("let statement value") or return
-        self.consume_semicolon()
-        return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
-    }
+        self.advance();
+        let value = self.parse_expression_checked("let statement value") or return;
+        self.consume_semicolon();
+        return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)));
+    };
 
     module_private parse_pair_let_statement(*mutable self, start Token) Result[Statement] = {
-        self.advance()
+        self.advance();
 
-        let first = self.parse_pair_binding_element() or return
+        let first = self.parse_pair_binding_element() or return;
 
         if self.current().kind is not .Comma() then {
-            return .Error(self.parser_error("Expected ',' in pair let statement"))
-        }
-        self.advance()
+            return .Error(self.parser_error("Expected ',' in pair let statement"));
+        };
+        self.advance();
 
-        let second = self.parse_pair_binding_element() or return
+        let second = self.parse_pair_binding_element() or return;
 
         if self.current().kind is not .RParen() then {
-            return .Error(self.parser_error("Expected ')' in pair let statement"))
-        }
-        self.advance()
+            return .Error(self.parser_error("Expected ')' in pair let statement"));
+        };
+        self.advance();
 
         if self.current().kind is .Eof() then {
-            return .Error(self.parser_error("Expected '=' in pair let statement"))
-        }
-        self.advance()
+            return .Error(self.parser_error("Expected '=' in pair let statement"));
+        };
+        self.advance();
 
-        let value = self.parse_expression_checked("pair let statement value") or return
-        self.consume_semicolon()
-        return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
-    }
+        let value = self.parse_expression_checked("pair let statement value") or return;
+        self.consume_semicolon();
+        return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)));
+    };
 
     module_private parse_pair_binding_element(*mutable self) Result[PairBindingElement] = {
-        let start = self.current()
+        let start = self.current();
 
         if start.kind is .Identifier(name) and name == "_" then {
-            self.advance()
-            return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)))
-        }
+            self.advance();
+            return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)));
+        };
 
-        let mutable is_mut = false
+        let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
-            is_mut = true
-            self.advance()
-        }
+            is_mut = true;
+            self.advance();
+        };
 
-        let name = self.expect_identifier("pair let binding") or return
+        let name = self.expect_identifier("pair let binding") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
-        }
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)));
+        };
 
-        let mutable type_name = Option[TypeNode].None()
+        let mutable type_name = Option[TypeNode].None();
         when self.current().kind in {
             .Comma() then {},
             .RParen() then {},
             _ then {
                 let parsed_type_name = self.parse_type() or else {
-                    return .Error(self.parser_error("parse pair let binding type error"))
-                }
-                type_name = .Some(parsed_type_name)
+                    return .Error(self.parser_error("parse pair let binding type error"));
+                };
+                type_name = .Some(parsed_type_name);
             },
-        }
+        };
 
-        return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)))
-    }
+        return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)));
+    };
 
     module_private is_assignment_operator(self) Bool = {
         return when self.current().kind in {
@@ -1405,8 +1350,8 @@ given Parser {
             .LeftShiftAssign() then true,
             .RightShiftAssign() then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private parse_assignment_operator(self) Result[Option[CompoundAssignmentOperator]] = {
         return when self.current().kind in {
@@ -1422,111 +1367,111 @@ given Parser {
             .LeftShiftAssign() then .Ok(.Some(CompoundAssignmentOperator.LeftShiftAssign())),
             .RightShiftAssign() then .Ok(.Some(CompoundAssignmentOperator.RightShiftAssign())),
             _ then .Error(self.parser_error_without_span("token is not an assignment operator")),
-        }
-    }
+        };
+    };
 
     module_private parse_expression_checked(*mutable self, context String) Result[* Expr] = {
-        let t = self.current()
-        self.parse_debug("expr begin")
-        let before = self.index
-        let parsed_expr = self.parse_expression() or return
+        let t = self.current();
+        self.parse_debug("expr begin");
+        let before = self.index;
+        let parsed_expr = self.parse_expression() or return;
         if self.index == before then {
-            let t = self.current()
-            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress while parsing ", context, t), t))
-        }
-        let mutable expr = parsed_expr
+            let t = self.current();
+            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress while parsing ", context, t), t));
+        };
+        let mutable expr = parsed_expr;
         if self.should_continue_postfix_after_expression() then {
-            expr = self.parse_postfix_suffixes(expr) or return
-        }
-        return .Ok(expr)
-    }
+            expr = self.parse_postfix_suffixes(expr) or return;
+        };
+        return .Ok(expr);
+    };
 
     module_private parse_statement_list_until_rbrace(*mutable self, context String) Result[List[Statement]] = {
-        let mutable statements = List[Statement].new()
-        self.parse_debug("stmt-list begin")
+        let mutable statements = List[Statement].new();
+        self.parse_debug("stmt-list begin");
         while true then {
             when self.current().kind in {
                 .RBrace() then {
-                    self.advance()
-                    break
+                    self.advance();
+                    break;
                 },
                 .Eof() then {
-                    let mutable message = "Unexpected EOF in "
-                    message.push_string(context)
-                    return .Error(self.parser_error(message))
+                    let mutable message = "Unexpected EOF in ";
+                    message.push_string(context);
+                    return .Error(self.parser_error(message));
                 },
                 _ then {
-                    let before = self.index
-                    let parsed = self.parse_statement() or return
+                    let before = self.index;
+                    let parsed = self.parse_statement() or return;
                     if self.index == before then {
-                        let t = self.current()
-                        return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", context, t), t))
-                    }
-                    statements.push(parsed)
+                        let t = self.current();
+                        return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", context, t), t));
+                    };
+                    statements.push(parsed);
                 },
-            }
-        }
-        return .Ok(statements)
-    }
+            };
+        };
+        return .Ok(statements);
+    };
 
     module_private parse_statement(*mutable self) Result[Statement] = {
-        let start = self.current()
-        self.parse_debug("statement dispatch")
+        let start = self.current();
+        self.parse_debug("statement dispatch");
         when self.current().kind in {
             .KwLet() then {
-                return self.parse_let_statement()
+                return self.parse_let_statement();
             },
             .KwReturn() then {
-                self.advance()
-                if self.can_omit_control_statement_value() then {
-                    self.consume_statement_terminator()
-                    return .Ok(Statement.ReturnStmt(Option[* Expr].None(), self.span_from_start(start)))
-                }
-                let value = self.parse_expression_checked("return statement value") or return
-                self.consume_statement_terminator()
-                return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)))
+                self.advance();
+                if self.should_terminate_statement() then {
+                    self.consume_statement_terminator();
+                    return .Ok(Statement.ReturnStmt(Option[* Expr].None(), self.span_from_start(start)));
+                };
+                let value = self.parse_expression_checked("return statement value") or return;
+                self.consume_statement_terminator();
+                return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)));
             },
             .KwYield() then {
-                self.advance()
-                let value = self.parse_expression_checked("yield statement value") or return
-                self.consume_semicolon()
-                return .Ok(Statement.YieldStmt(value, self.span_from_start(start)))
+                self.advance();
+                let value = self.parse_expression_checked("yield statement value") or return;
+                self.consume_semicolon();
+                return .Ok(Statement.YieldStmt(value, self.span_from_start(start)));
             },
             .KwBreak() then {
-                self.advance()
-                let _ = self.expect_statement_terminator_after("break") or return
-                return .Ok(Statement.BreakStmt(self.span_from_start(start)))
+                self.advance();
+                let _ = self.expect_statement_terminator_after("break") or return;
+                return .Ok(Statement.BreakStmt(self.span_from_start(start)));
             },
             .KwContinue() then {
-                self.advance()
-                let _ = self.expect_statement_terminator_after("continue") or return
-                return .Ok(Statement.ContinueStmt(self.span_from_start(start)))
+                self.advance();
+                let _ = self.expect_statement_terminator_after("continue") or return;
+                return .Ok(Statement.ContinueStmt(self.span_from_start(start)));
             },
             .KwDefer() then {
-                self.advance()
-                let value = self.parse_expression_checked("defer statement value") or return
-                self.consume_semicolon()
-                return .Ok(Statement.DeferStmt(value, self.span_from_start(start)))
+                self.advance();
+                let value = self.parse_expression_checked("defer statement value") or return;
+                self.consume_semicolon();
+                return .Ok(Statement.DeferStmt(value, self.span_from_start(start)));
             },
             _ then {
-                let value = self.parse_expression_checked("statement expression") or return
+                let value = self.parse_expression_checked("statement expression") or return;
 
                 if self.is_assignment_operator() then {
                     let op = self.parse_assignment_operator() or else {
-                        return .Error(self.parser_error_without_span("Unknown assignment operator"))
-                    }
-                    self.advance()
-                    let rhs = self.parse_expression_checked("assignment right-hand side") or return
-                    self.consume_semicolon()
-                    return .Ok(Statement.AssignmentStmt(value, op, rhs, self.span_from_start(start)))
-                }
+                        return .Error(self.parser_error_without_span("Unknown assignment operator"));
+                    };
+                    self.advance();
+                    let rhs = self.parse_expression_checked("assignment right-hand side") or return;
+                    self.consume_semicolon();
+                    return .Ok(Statement.AssignmentStmt(value, op, rhs, self.span_from_start(start)));
+                };
 
-                self.consume_semicolon()
-                return .Ok(Statement.ExprStmt(value, self.span_from_start(start)))
+                self.consume_semicolon();
+                return .Ok(Statement.ExprStmt(value, self.span_from_start(start)));
             },
-        }
-    }
+        };
+    };
 
     // Lookahead: check if current position starts a lambda expression.
     // Lambda forms: () [RetType] ->  or  (name [Type], ...) [RetType] ->
-}
+};

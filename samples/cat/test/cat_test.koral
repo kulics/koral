@@ -2,281 +2,280 @@
 // Run example: koralc run test/cat_test.koral -o .
 // Assumes cat binary is built to ./bin/sample-cat/cat(.exe) from src/cat.koral.
 
-using std::os { .. }
-using std::proc { .. }
+using std::os { .. };
+using std::proc { .. };
 
 type TestResult {
     Pass(),
     Fail(message String),
-}
+};
 
 type TestCase(
     name String,
     result TestResult,
-)
+);
 
 type ProcessOutput(
     stdout String,
     stderr String,
     exit_code Int,
-)
+);
 
-let pass() TestResult = TestResult.Pass()
-let fail(msg String) TestResult = TestResult.Fail(msg)
+let pass() TestResult = TestResult.Pass();
+let fail(msg String) TestResult = TestResult.Fail(msg);
 
 let create_temp_text_file(name String, content String) Result[String] = {
-    let path = name.into_path()
-    write_text_file(path, content: content) or return
-    return Result[String].Ok(name)
-}
+    let path = name.into_path();
+    write_text_file(path, content: content) or return;
+    return Result[String].Ok(name);
+};
 
 let cleanup_temp_file(path String) Void = {
-    let _ = remove_file(path.into_path())
-}
+    let _ = remove_file(path.into_path());
+};
 
 let cleanup_temp_files(paths List[String]) Void = {
     for path in paths then {
-        cleanup_temp_file(path)
-    }
-}
+        cleanup_temp_file(path);
+    };
+};
 
 let run_cat(args List[String]) Result[ProcessOutput] = {
     let cat_bin =
-        if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-cat/cat.exe"
-        else "./bin/sample-cat/cat"
-    let cmd = Command.new(cat_bin).args(args).set_stdin(IoRedirect.Null())
-    let out = cmd.run_output() or return
-    let exit_code = out.status.code() or else 0
-    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code))
-}
+        if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-cat/cat.exe" else "./bin/sample-cat/cat";
+    let cmd = Command.new(cat_bin).args(args).set_stdin(IoRedirect.Null());
+    let out = cmd.run_output() or return;
+    let exit_code = out.status.code() or else 0;
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
+};
 
 let assert_eq(actual String, expected String, msg String) TestResult = {
     if actual == expected then {
-        return pass()
-    }
-    let mutable m = String.new()
-    m.push_string(msg)
-    m.push_string(" | expected=")
-    m.push_string(expected)
-    m.push_string(" | actual=")
-    m.push_string(actual)
-    return fail(m)
-}
+        return pass();
+    };
+    let mutable m = String.new();
+    m.push_string(msg);
+    m.push_string(" | expected=");
+    m.push_string(expected);
+    m.push_string(" | actual=");
+    m.push_string(actual);
+    return fail(m);
+};
 
 let normalize_newlines(s String) String = {
-    return s.replace_all("\r\n", with: "\n")
-}
+    return s.replace_all("\r\n", with: "\n");
+};
 
 let assert_true(cond Bool, msg String) TestResult = {
     if cond then {
-        return pass()
-    }
-    return fail(msg)
-}
+        return pass();
+    };
+    return fail(msg);
+};
 
 let test_single_file() TestResult = {
     let path = create_temp_text_file("tmp_cat_single.txt", "Hello\nWorld\n") or else {
-        return fail("cannot create temp file for single file test")
-    }
-    defer cleanup_temp_file(path)
+        return fail("cannot create temp file for single file test");
+    };
+    defer cleanup_temp_file(path);
 
-    let out = run_cat([path]) or else { return fail("single file command failed") }
+    let out = run_cat([path]) or else { return fail("single file command failed");};
 
     if out.exit_code == 0 then {
-        return assert_eq(normalize_newlines(out.stdout), "Hello\nWorld\n", "single file output mismatch")
-    }
-    return fail("single file exit code is not 0")
-}
+        return assert_eq(normalize_newlines(out.stdout), "Hello\nWorld\n", "single file output mismatch");
+    };
+    return fail("single file exit code is not 0");
+};
 
 let test_multiple_files() TestResult = {
     let a = create_temp_text_file("tmp_cat_multi_1.txt", "A\n") or else {
-        return fail("cannot create first temp file")
-    }
-    defer cleanup_temp_file(a)
+        return fail("cannot create first temp file");
+    };
+    defer cleanup_temp_file(a);
 
     let b = create_temp_text_file("tmp_cat_multi_2.txt", "B\n") or else {
-        return fail("cannot create second temp file")
-    }
-    defer cleanup_temp_file(b)
+        return fail("cannot create second temp file");
+    };
+    defer cleanup_temp_file(b);
 
-    let out = run_cat([a, b]) or else { return fail("multiple file command failed") }
-    return assert_eq(normalize_newlines(out.stdout), "A\nB\n", "multiple file concat mismatch")
-}
+    let out = run_cat([a, b]) or else { return fail("multiple file command failed");};
+    return assert_eq(normalize_newlines(out.stdout), "A\nB\n", "multiple file concat mismatch");
+};
 
 let test_number_all_lines() TestResult = {
     let path = create_temp_text_file("tmp_cat_n.txt", "Line 1\nLine 2\n\nLine 4\n") or else {
-        return fail("cannot create temp file for -n test")
-    }
-    defer cleanup_temp_file(path)
+        return fail("cannot create temp file for -n test");
+    };
+    defer cleanup_temp_file(path);
 
-    let out = run_cat(["-n", path]) or else { return fail("-n command failed") }
+    let out = run_cat(["-n", path]) or else { return fail("-n command failed");};
 
-    let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n"
-    return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch")
-}
+    let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n";
+    return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch");
+};
 
 let test_number_nonblank() TestResult = {
     let path = create_temp_text_file("tmp_cat_b.txt", "Line 1\n\nLine 3\n") or else {
-        return fail("cannot create temp file for -b test")
-    }
-    defer cleanup_temp_file(path)
+        return fail("cannot create temp file for -b test");
+    };
+    defer cleanup_temp_file(path);
 
-    let out = run_cat(["-b", path]) or else { return fail("-b command failed") }
+    let out = run_cat(["-b", path]) or else { return fail("-b command failed");};
 
-    let expected = "     1\tLine 1\n\n     2\tLine 3\n"
-    return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch")
-}
+    let expected = "     1\tLine 1\n\n     2\tLine 3\n";
+    return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch");
+};
 
 let test_squeeze_blank() TestResult = {
     let path = create_temp_text_file("tmp_cat_s.txt", "A\n\n\n\nB\n") or else {
-        return fail("cannot create temp file for -s test")
-    }
-    defer cleanup_temp_file(path)
+        return fail("cannot create temp file for -s test");
+    };
+    defer cleanup_temp_file(path);
 
-    let out = run_cat(["-s", path]) or else { return fail("-s command failed") }
+    let out = run_cat(["-s", path]) or else { return fail("-s command failed");};
 
-    return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch")
-}
+    return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch");
+};
 
 let test_show_ends_tabs_all() TestResult = {
     let path = create_temp_text_file("tmp_cat_special.txt", "X\tY\n") or else {
-        return fail("cannot create temp file for -E/-T/-A test")
-    }
-    defer cleanup_temp_file(path)
+        return fail("cannot create temp file for -E/-T/-A test");
+    };
+    defer cleanup_temp_file(path);
 
-    let e1 = run_cat(["-E", path]) or else { return fail("-E command failed") }
-    let t1 = run_cat(["-T", path]) or else { return fail("-T command failed") }
-    let a1 = run_cat(["-A", path]) or else { return fail("-A command failed") }
-    let vet1 = run_cat(["-v", "-E", "-T", path]) or else { return fail("-vET command failed") }
+    let e1 = run_cat(["-E", path]) or else { return fail("-E command failed");};
+    let t1 = run_cat(["-T", path]) or else { return fail("-T command failed");};
+    let a1 = run_cat(["-A", path]) or else { return fail("-A command failed");};
+    let vet1 = run_cat(["-v", "-E", "-T", path]) or else { return fail("-vET command failed");};
 
-    let e_out = normalize_newlines(e1.stdout)
-    let t_out = normalize_newlines(t1.stdout)
-    let a_out = normalize_newlines(a1.stdout)
-    let vet_out = normalize_newlines(vet1.stdout)
-    let ok_e = e_out == "X\tY$\n"
-    let ok_t = t_out == "X^IY\n"
-    let ok_a = a_out == vet_out and a_out == "X^IY$\n"
-    return assert_true(ok_e and ok_t and ok_a, "-E/-T/-A behavior mismatch")
-}
+    let e_out = normalize_newlines(e1.stdout);
+    let t_out = normalize_newlines(t1.stdout);
+    let a_out = normalize_newlines(a1.stdout);
+    let vet_out = normalize_newlines(vet1.stdout);
+    let ok_e = e_out == "X\tY$\n";
+    let ok_t = t_out == "X^IY\n";
+    let ok_a = a_out == vet_out and a_out == "X^IY$\n";
+    return assert_true(ok_e and ok_t and ok_a, "-E/-T/-A behavior mismatch");
+};
 
 let test_invalid_option() TestResult = {
-    let out = run_cat(["--badopt"]) or else { return fail("invalid option command failed") }
-    let ok = out.exit_code <> 0 and out.stderr.contains("invalid option")
-    return assert_true(ok, "invalid option not reported")
-}
+    let out = run_cat(["--badopt"]) or else { return fail("invalid option command failed");};
+    let ok = out.exit_code <> 0 and out.stderr.contains("invalid option");
+    return assert_true(ok, "invalid option not reported");
+};
 
 let test_missing_file() TestResult = {
-    let out = run_cat(["no_such_file_12345.txt"]) or else { return fail("missing file command failed") }
-    let ok = out.exit_code <> 0 and out.stderr.contains("no_such_file_12345.txt")
-    return assert_true(ok, "missing file not reported")
-}
+    let out = run_cat(["no_such_file_12345.txt"]) or else { return fail("missing file command failed");};
+    let ok = out.exit_code <> 0 and out.stderr.contains("no_such_file_12345.txt");
+    return assert_true(ok, "missing file not reported");
+};
 
 let test_help_and_version() TestResult = {
-    let help = run_cat(["--help"]) or else { return fail("help command failed") }
-    let ver = run_cat(["--version"]) or else { return fail("version command failed") }
+    let help = run_cat(["--help"]) or else { return fail("help command failed");};
+    let ver = run_cat(["--version"]) or else { return fail("version command failed");};
 
-    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains("koral-cat")
-    return assert_true(ok, "help/version output mismatch")
-}
+    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains("koral-cat");
+    return assert_true(ok, "help/version output mismatch");
+};
 
 let property_multifile_roundtrip() TestResult = {
     for i in 0..<20 then {
-        let mutable paths = List[String].new()
-        defer cleanup_temp_files(paths)
-        let mutable expected = String.new()
+        let mutable paths = List[String].new();
+        defer cleanup_temp_files(paths);
+        let mutable expected = String.new();
 
         for j in 0..<3 then {
-            let mutable content = String.new()
-            content.push_string("F")
-            content.push_string(i.to_string())
-            content.push_string("_")
-            content.push_string(j.to_string())
-            content.push_string("\n")
+            let mutable content = String.new();
+            content.push_string("F");
+            content.push_string(i.to_string());
+            content.push_string("_");
+            content.push_string(j.to_string());
+            content.push_string("\n");
 
-            let mutable name = String.new()
-            name.push_string("tmp_cat_prop_")
-            name.push_string(i.to_string())
-            name.push_string("_")
-            name.push_string(j.to_string())
-            name.push_string(".txt")
+            let mutable name = String.new();
+            name.push_string("tmp_cat_prop_");
+            name.push_string(i.to_string());
+            name.push_string("_");
+            name.push_string(j.to_string());
+            name.push_string(".txt");
 
             let path = create_temp_text_file(name, content) or else {
-                return fail("property setup failed")
-            }
+                return fail("property setup failed");
+            };
 
-            expected.push_string(content)
-            paths.push(path)
-        }
+            expected.push_string(content);
+            paths.push(path);
+        };
 
         let out = run_cat(paths) or else {
-            return fail("property execution failed")
-        }
+            return fail("property execution failed");
+        };
 
         if out.exit_code <> 0 or normalize_newlines(out.stdout) <> normalize_newlines(expected) then {
-            return fail("property multifile roundtrip failed")
-        }
-    }
+            return fail("property multifile roundtrip failed");
+        };
+    };
 
-    return pass()
-}
+    return pass();
+};
 
 let run_case(name String, r TestResult) TestCase = {
-    print("- ")
-    print(name)
-    print(" ... ")
+    print("- ");
+    print(name);
+    print(" ... ");
     when r in {
         .Pass() then println("PASS"),
         .Fail(msg) then {
-            println("FAIL")
-            let mutable m = String.new()
-            m.push_string("  reason: ")
-            m.push_string(msg)
-            println(m)
+            println("FAIL");
+            let mutable m = String.new();
+            m.push_string("  reason: ");
+            m.push_string(msg);
+            println(m);
         },
-    }
-    return TestCase(name, r)
-}
+    };
+    return TestCase(name, r);
+};
 
 public let main() Int = {
-    println("========================================")
-    println("koral-cat merged test suite")
-    println("========================================")
+    println("========================================");
+    println("koral-cat merged test suite");
+    println("========================================");
 
-    let mutable tests = List[TestCase].new()
-    tests.push(run_case("unit: single file", test_single_file()))
-    tests.push(run_case("unit: multiple files", test_multiple_files()))
-    tests.push(run_case("unit: -n", test_number_all_lines()))
-    tests.push(run_case("unit: -b", test_number_nonblank()))
-    tests.push(run_case("unit: -s", test_squeeze_blank()))
-    tests.push(run_case("unit: -E/-T/-A", test_show_ends_tabs_all()))
-    tests.push(run_case("unit: invalid option", test_invalid_option()))
-    tests.push(run_case("unit: missing file", test_missing_file()))
-    tests.push(run_case("unit: help/version", test_help_and_version()))
-    tests.push(run_case("property: multifile roundtrip", property_multifile_roundtrip()))
+    let mutable tests = List[TestCase].new();
+    tests.push(run_case("unit: single file", test_single_file()));
+    tests.push(run_case("unit: multiple files", test_multiple_files()));
+    tests.push(run_case("unit: -n", test_number_all_lines()));
+    tests.push(run_case("unit: -b", test_number_nonblank()));
+    tests.push(run_case("unit: -s", test_squeeze_blank()));
+    tests.push(run_case("unit: -E/-T/-A", test_show_ends_tabs_all()));
+    tests.push(run_case("unit: invalid option", test_invalid_option()));
+    tests.push(run_case("unit: missing file", test_missing_file()));
+    tests.push(run_case("unit: help/version", test_help_and_version()));
+    tests.push(run_case("property: multifile roundtrip", property_multifile_roundtrip()));
 
-    let mutable passed UInt = 0
-    let mutable failed UInt = 0
+    let mutable passed UInt = 0;
+    let mutable failed UInt = 0;
     for test in tests then {
         when test.result in {
             .Pass() then {
-                passed += 1
+                passed += 1;
             },
             .Fail(_) then {
-                failed += 1
+                failed += 1;
             },
-        }
-    }
+        };
+    };
 
-    println("----------------------------------------")
-    let mutable summary = String.new()
-    summary.push_string("Total: ")
-    summary.push_string((passed + failed).to_string())
-    summary.push_string(", Passed: ")
-    summary.push_string(passed.to_string())
-    summary.push_string(", Failed: ")
-    summary.push_string(failed.to_string())
-    println(summary)
-    println("========================================")
+    println("----------------------------------------");
+    let mutable summary = String.new();
+    summary.push_string("Total: ");
+    summary.push_string((passed + failed).to_string());
+    summary.push_string(", Passed: ");
+    summary.push_string(passed.to_string());
+    summary.push_string(", Failed: ");
+    summary.push_string(failed.to_string());
+    println(summary);
+    println("========================================");
 
-    return if failed == 0 then 0 else 1
-}
+    return if failed == 0 then 0 else 1;
+};

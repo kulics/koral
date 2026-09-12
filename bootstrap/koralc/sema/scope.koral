@@ -9,9 +9,9 @@ module_private type ScopeStorage(
     mutable type_entries Dict[String, Type],
     mutable generic_params Set[String],
     parent Option[Scope],
-)
+);
 
-public type Scope(module_private mutable storage *mutable ScopeStorage)
+public type Scope(module_private mutable storage *mutable ScopeStorage);
 
 given Scope {
     public new_root() Scope = {
@@ -22,9 +22,9 @@ given Scope {
             Dict[String, Type].new(),
             Set[String].new(),
             Option[Scope].None()
-        ))
-        return Scope(s)
-    }
+        ));
+        return Scope(s);
+    };
 
     public new_child(parent Scope) Scope = {
         let s = box(ScopeStorage(
@@ -34,150 +34,150 @@ given Scope {
             Dict[String, Type].new(),
             Set[String].new(),
             Option[Scope].Some(parent)
-        ))
-        return Scope(s)
-    }
+        ));
+        return Scope(s);
+    };
 
     // Create a child scope with generic parameters and optional Self binding.
     // Mirrors Swift's pattern: withNewScope { defineGenericParameter(...); defineType("Self", ...) }
     public new_generic_child(parent Scope, generic_param_names List[String], self_type Option[Type]) Scope = {
-        let child = Scope.new_child(parent)
+        let child = Scope.new_child(parent);
         for name in generic_param_names then {
-            child.define_generic_param(name)
-        }
+            child.define_generic_param(name);
+        };
         when self_type in {
             .Some(t) then child.define_type("Self", t),
             .None() then {},
-        }
-        return child
-    }
+        };
+        return child;
+    };
 
     // storage ref 模式：self 值传递，mutations 通过 storage ref 自动传播
     public define(self, context CompilerContext, symbol Symbol) Void = {
-        let name = context.symbol_name(symbol)
-        self.storage.entries.insert(name, symbol)
-    }
+        let name = context.symbol_name(symbol);
+        self.storage.entries.insert(name, symbol);
+    };
 
     public define_type(self, name String, t Type) Void = {
-        self.storage.type_entries.insert(name, t)
-    }
+        self.storage.type_entries.insert(name, t);
+    };
 
     public lookup(self, name String) Option[Symbol] = {
-        let mutable current_opt = Option[Scope].Some(self)
-        let mutable traversed UInt = 0
+        let mutable current_opt = Option[Scope].Some(self);
+        let mutable traversed UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
                 .Some(scope) then scope,
                 .None() then self,
-            }
+            };
 
             when current.storage.entries.get(name) in {
-                .Some(symbol) then { return .Some(symbol) },
+                .Some(symbol) then { return .Some(symbol);},
                 .None() then {},
-            }
+            };
 
-            traversed += 1
+            traversed += 1;
             if traversed > 4096(UInt) then {
-                return .None()
-            }
+                return .None();
+            };
 
-            current_opt = current.storage.parent
-        }
+            current_opt = current.storage.parent;
+        };
 
-        return .None()
-    }
+        return .None();
+    };
 
     public lookup_type(self, name String) Option[Type] = {
-        let mutable current_opt = Option[Scope].Some(self)
-        let mutable traversed UInt = 0
+        let mutable current_opt = Option[Scope].Some(self);
+        let mutable traversed UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
                 .Some(scope) then scope,
                 .None() then self,
-            }
+            };
 
             // Generic params have highest priority (matches Swift's genericParameters check)
             if current.storage.generic_params.contains(name) then {
                 when current.storage.type_entries.get(name) in {
-                    .Some(t) then { return .Some(t) },
+                    .Some(t) then { return .Some(t);},
                     .None() then {},
-                }
-            }
+                };
+            };
 
             when current.storage.type_entries.get(name) in {
-                .Some(t) then { return .Some(t) },
+                .Some(t) then { return .Some(t);},
                 .None() then {},
-            }
+            };
 
-            traversed += 1
+            traversed += 1;
             if traversed > 4096(UInt) then {
-                return .None()
-            }
+                return .None();
+            };
 
-            current_opt = current.storage.parent
-        }
+            current_opt = current.storage.parent;
+        };
 
-        return .None()
-    }
+        return .None();
+    };
 
     // 只查当前层，不递归父链（用于重复定义检查）
     public lookup_local(self, name String) Option[Symbol] = {
-        return self.storage.entries.get(name)
-    }
+        return self.storage.entries.get(name);
+    };
 
     public lookup_local_type(self, name String) Option[Type] = {
-        return self.storage.type_entries.get(name)
-    }
+        return self.storage.type_entries.get(name);
+    };
 
     public parent_scope(self) Option[Scope] = {
-        return self.storage.parent
-    }
+        return self.storage.parent;
+    };
 
     // 注册泛型参数：同时写入 type_entries 并记录到 generic_params 集合
     public define_generic_param(self, name String) Void = {
-        self.define_type(name, Type.GenericParameter(name))
-        self.storage.generic_params.insert(name)
-    }
+        self.define_type(name, Type.GenericParameter(name));
+        self.storage.generic_params.insert(name);
+    };
 
     // 判断名称是否通过 define_generic_param 注册（普通 define_type 不算）
     public is_generic_param(self, name String) Bool = {
-        return self.storage.generic_params.contains(name)
-    }
+        return self.storage.generic_params.contains(name);
+    };
 
     public is_local_type_binding(self, name String) Bool = {
         if self.storage.parent is .None() then {
-            return false
-        }
-        return self.storage.type_entries.get(name) is .Some(_)
-    }
+            return false;
+        };
+        return self.storage.type_entries.get(name) is .Some(_);
+    };
 
     // 返回当前层的所有类型条目（不递归父链）。
     public all_types(self) Dict[String, Type] = {
-        return self.storage.type_entries
-    }
+        return self.storage.type_entries;
+    };
 
     // 返回当前层注册的泛型参数集合（不递归父链）。
     public all_generic_params(self) Set[String] = {
-        return self.storage.generic_params
-    }
+        return self.storage.generic_params;
+    };
 
     public entry_count(self) UInt = {
-        return self.storage.entries.count()
-    }
+        return self.storage.entries.count();
+    };
 
     public local_entry_count(self) UInt = {
-        return self.storage.local_entry_list.count()
-    }
+        return self.storage.local_entry_list.count();
+    };
 
     public type_entry_count(self) UInt = {
-        return self.storage.type_entries.count()
-    }
+        return self.storage.type_entries.count();
+    };
 
     public generic_param_count(self) UInt = {
-        return self.storage.generic_params.count()
-    }
+        return self.storage.generic_params.count();
+    };
 
 
-}
+};

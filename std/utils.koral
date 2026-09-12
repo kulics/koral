@@ -9,82 +9,80 @@
 // ============================================================================
 
 // Pair - generic tuple-like utility type
-public type Pair[T Any, U Any](first T, second U)
+public type Pair[T Any, U Any](first T, second U);
 
 given[T Eq, U Eq] Pair[T, U] as Eq {
 
     public equals(self, other Pair[T, U]) Bool =
-        self.first == other.first and self.second == other.second
-}
+        self.first == other.first and self.second == other.second;
+};
 
 given[T Hash, U Hash] Pair[T, U] as Hash {
 
     public hash(self) UInt =
-        self.first.hash().combine_hash(self.second.hash())
-}
+        self.first.hash().combine_hash(self.second.hash());
+};
 
 given[T Ord, U Ord] Pair[T, U] as Ord {
 
     public compare(self, other Pair[T, U]) Int = {
-        let c = self.first.compare(other.first)
+        let c = self.first.compare(other.first);
         if c <> 0 then {
-            return c
-        }
-        return self.second.compare(other.second)
-    }
-}
+            return c;
+        };
+        return self.second.compare(other.second);
+    };
+};
 
-public let max[T Ord](a T, b T) T = if a > b then a else b
-public let min[T Ord](a T, b T) T = if a < b then a else b
+public let max[T Ord](a T, b T) T = if a > b then a else b;
+public let min[T Ord](a T, b T) T = if a < b then a else b;
 
 given Ord {
 
     /// Clamps self into the inclusive range [min, max].
     public clamp(self, min Self, max Self) Self =
-        if self < min then min
-        else if self > max then max
-        else self
-}
+        if self < min then min else if self > max then max else self;
+};
 
 // ============================================================================
 // Runtime / Process FFI (migrated from std/io.koral)
 // ============================================================================
 
-foreign type CFile {}
+foreign type CFile {};
 
-foreign let fwrite(buf *unsafe UInt8, size UInt, count UInt, file *unsafe CFile) UInt
-foreign let fflush(file *unsafe CFile) Void
-foreign let fgetc(file *unsafe CFile) Int
-foreign let __koral_stdin() *unsafe CFile
-foreign let __koral_stdout() *unsafe CFile
-foreign let __koral_stderr() *unsafe CFile
+foreign let fwrite(buf *unsafe UInt8, size UInt, count UInt, file *unsafe CFile) UInt;
+foreign let fflush(file *unsafe CFile) Void;
+foreign let fgetc(file *unsafe CFile) Int;
+foreign let __koral_stdin() *unsafe CFile;
+foreign let __koral_stdout() *unsafe CFile;
+foreign let __koral_stderr() *unsafe CFile;
 
-public foreign let exit(code Int) Never
-public foreign let abort() Never
+public foreign let exit(code Int) Never;
+public foreign let abort() Never;
 
-file_private foreign let __koral_set_args(argc Int32, argv *unsafe *unsafe UInt8) Void
-file_private foreign let __koral_argc() Int32
-file_private foreign let __koral_argv() *unsafe *unsafe UInt8
+file_private foreign let __koral_set_args(argc Int32, argv *unsafe *unsafe UInt8) Void;
+file_private foreign let __koral_argc() Int32;
+file_private foreign let __koral_argv() *unsafe *unsafe UInt8;
 
-foreign let __koral_errno_ptr() *unsafe Int32
-foreign let __koral_strerror(errnum Int32) *unsafe UInt8
+foreign let __koral_errno_ptr() *unsafe Int32;
+foreign let __koral_strerror(errnum Int32) *unsafe UInt8;
 
 /// Get the last OS error (errno) as a human-readable String.
 public let last_error_message() String = {
-    let err = *__koral_errno_ptr()
-    let msg = __koral_strerror(err)
-    return String.from_cstring_unchecked(msg)
-}
+    let err = *__koral_errno_ptr();
+    let msg = __koral_strerror(err);
+    return String.from_cstring_unchecked(msg);
+};
 
 public let args() List[String] = {
-    let mutable result List[String] = []
-    let count = __koral_argc()(UInt)
+    let mutable result List[String] = [];
+    let count = __koral_argc()(UInt);
     for i in 0..<count then {
-        let arg_ptr = __koral_argv()[i]
-        result.push(String.from_cstring_unchecked(arg_ptr))
-    }
-    return result
-}
+        let arg_ptr = __koral_argv()[i];
+        result.push(String.from_cstring_unchecked(arg_ptr));
+    };
+    return result;
+};
 
 // ============================================================================
 // Panic and Assertion
@@ -92,74 +90,74 @@ public let args() List[String] = {
 
 // High-level panic function (uses String)
 public let panic(message String) Never = {
-    let prefix = "Panic: "
+    let prefix = "Panic: ";
     fwrite(prefix.storage.data, 1, prefix.storage.len, __koral_stderr());
     fwrite(message.storage.data, 1, message.storage.len, __koral_stderr());
-    let newline = "\n"
+    let newline = "\n";
     fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
     fflush(__koral_stderr());
-    abort()
-}
+    abort();
+};
 
 public let assert(condition Bool, message String) Void = {
     if not condition then {
-        panic(message)
-    }
-}
+        panic(message);
+    };
+};
 
 // ============================================================================
 // Standard IO Functions
 // ============================================================================
 
 public let print[T ToString](value T) Void = {
-    let s = value.to_string()
+    let s = value.to_string();
     fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
-    fflush(__koral_stdout())
-}
+    fflush(__koral_stdout());
+};
 
 public let println[T ToString](value T) Void = {
-    let s = value.to_string()
+    let s = value.to_string();
     fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
-    let newline = "\n"
+    let newline = "\n";
     fwrite(newline.storage.data, 1, newline.storage.len, __koral_stdout());
-    fflush(__koral_stdout())
-}
+    fflush(__koral_stdout());
+};
 
 public let eprint[T ToString](value T) Void = {
-    let s = value.to_string()
+    let s = value.to_string();
     fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
-    fflush(__koral_stderr())
-}
+    fflush(__koral_stderr());
+};
 
 public let eprintln[T ToString](value T) Void = {
-    let s = value.to_string()
+    let s = value.to_string();
     fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
-    let newline = "\n"
+    let newline = "\n";
     fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
-    fflush(__koral_stderr())
-}
+    fflush(__koral_stderr());
+};
 
 public let scanln() Option[String] = {
-    let mutable result = String.new()
+    let mutable result = String.new();
 
     while true then {
-        let ch = fgetc(__koral_stdin())
+        let ch = fgetc(__koral_stdin());
 
         if ch is < 0 then {
             if result.is_empty() then {
-                return Option[String].None()
-            }
-            break
-        }
+                return Option[String].None();
+            };
+            break;
+        };
 
         if ch == 10 then {
-            break
-        }
+            break;
+        };
 
         if ch <> 13 then {
-            result.push_byte(ch(UInt8))
-        }
-    }
+            result.push_byte(ch(UInt8));
+        };
+    };
 
-    return Option[String].Some(result)
-}
+    return Option[String].Some(result);
+};

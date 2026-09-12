@@ -1,9 +1,9 @@
-using std { .. }
-using std::os { .. }
-using std::proc { .. }
-using std::time { .. }
-using std::async { .. }
-using std::sync { .. }
+using std { .. };
+using std::os { .. };
+using std::proc { .. };
+using std::time { .. };
+using std::async { .. };
+using std::sync { .. };
 
 file_private let failure_result(
     info CaseInfo,
@@ -21,8 +21,8 @@ file_private let failure_result(
         message,
         exit_code,
         duration_ms,
-    )
-}
+    );
+};
 
 file_private let pass_result(
     info CaseInfo,
@@ -37,8 +37,8 @@ file_private let pass_result(
         "",
         exit_code,
         duration_ms,
-    )
-}
+    );
+};
 
 file_private let infer_exit_code(status ExitStatus) Int = {
     return when status.code() in {
@@ -47,11 +47,11 @@ file_private let infer_exit_code(status ExitStatus) Int = {
             .Some(sig) then 0 - sig,
             .None then -1,
         },
-    }
-}
+    };
+};
 
 file_private let is_windows_host() Bool =
-    if env("OS") is .Some(os) then os.contains("Windows") else false
+    if env("OS") is .Some(os) then os.contains("Windows") else false;
 
 file_private type CommandExecution {
     Finished(output CommandOutput),
@@ -59,10 +59,10 @@ file_private type CommandExecution {
     Aborted(exit_code Int),
     MemoryExceeded(exit_code Int, peak_bytes UInt),
     InfrastructureError(message String),
-}
+};
 
 file_private let timeout_case_result(config RunnerConfig, info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
-    let duration_ms = start.elapsed().as_milliseconds()
+    let duration_ms = start.elapsed().as_milliseconds();
     return failure_result(
         info,
         "timed_out",
@@ -70,12 +70,12 @@ file_private let timeout_case_result(config RunnerConfig, info CaseInfo, start M
         "case timed out after \(config.timeout_secs) seconds",
         exit_code,
         duration_ms,
-    )
-}
+    );
+};
 
 file_private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
-    return "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)"
-}
+    return "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)";
+};
 
 file_private let memory_exceeded_case_result(
     config RunnerConfig,
@@ -84,7 +84,7 @@ file_private let memory_exceeded_case_result(
     exit_code Int,
     peak_bytes UInt,
 ) CaseResult = {
-    let duration_ms = start.elapsed().as_milliseconds()
+    let duration_ms = start.elapsed().as_milliseconds();
     return failure_result(
         info,
         "memory_exceeded",
@@ -92,11 +92,11 @@ file_private let memory_exceeded_case_result(
         memory_limit_failure_message(config, peak_bytes),
         exit_code,
         duration_ms,
-    )
-}
+    );
+};
 
 file_private let aborted_case_result(info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
-    let duration_ms = start.elapsed().as_milliseconds()
+    let duration_ms = start.elapsed().as_milliseconds();
     return failure_result(
         info,
         "aborted",
@@ -104,203 +104,203 @@ file_private let aborted_case_result(info CaseInfo, start MonoTime, exit_code In
         "case aborted after another test exceeded the memory limit",
         exit_code,
         duration_ms,
-    )
-}
+    );
+};
 
 file_private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
-    let mutable args = ["build"]
+    let mutable args = ["build"];
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
-            args.push("--package-config")
-            args.push(manifest_path.to_string())
+            args.push("--package-config");
+            args.push(manifest_path.to_string());
             when find_case_requires_root(manifest_path) in {
                 .Some(requires_root) then {
-                    args.push("--requires-root")
-                    args.push(requires_root.to_string())
+                    args.push("--requires-root");
+                    args.push(requires_root.to_string());
                 },
                 .None() then {},
-            }
+            };
         },
         .None() then {
-            args.push(info.absolute_path.to_string())
+            args.push(info.absolute_path.to_string());
         },
-    }
-    args.push("-o")
-    args.push(output_dir.to_string())
-    return Result[List[String]].Ok(args)
-}
+    };
+    args.push("-o");
+    args.push(output_dir.to_string());
+    return Result[List[String]].Ok(args);
+};
 
 file_private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
-    let mutable args = ["check"]
+    let mutable args = ["check"];
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
-            args.push("--package-config")
-            args.push(manifest_path.to_string())
+            args.push("--package-config");
+            args.push(manifest_path.to_string());
             when find_case_requires_root(manifest_path) in {
                 .Some(requires_root) then {
-                    args.push("--requires-root")
-                    args.push(requires_root.to_string())
+                    args.push("--requires-root");
+                    args.push(requires_root.to_string());
                 },
                 .None() then {},
-            }
+            };
         },
         .None() then {
-            args.push(info.absolute_path.to_string())
+            args.push(info.absolute_path.to_string());
         },
-    }
-    let _ = output_dir
-    return Result[List[String]].Ok(args)
-}
+    };
+    let _ = output_dir;
+    return Result[List[String]].Ok(args);
+};
 
 file_private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
-    let base = info.absolute_path.base_name()
-    let ext = info.absolute_path.ext_name()
-    let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
-    let exe_name = if is_windows_host() then stem + ".exe" else stem
-    return output_dir.join(exe_name)
-}
+    let base = info.absolute_path.base_name();
+    let ext = info.absolute_path.ext_name();
+    let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()));
+    let exe_name = if is_windows_host() then stem + ".exe" else stem;
+    return output_dir.join(exe_name);
+};
 
 file_private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
-    let cases_root = config.cases_root.normalize()
-    let mutable current = info.absolute_path.dir_name().normalize()
+    let cases_root = config.cases_root.normalize();
+    let mutable current = info.absolute_path.dir_name().normalize();
     while true then {
-        let candidate = current.join("koral.json")
+        let candidate = current.join("koral.json");
         if path_exist(candidate) then {
-            return Option[Path].Some(candidate)
-        }
+            return Option[Path].Some(candidate);
+        };
         if current == cases_root then {
-            return Option[Path].None()
-        }
-        let parent = current.dir_name().normalize()
+            return Option[Path].None();
+        };
+        let parent = current.dir_name().normalize();
         if parent == current then {
-            return Option[Path].None()
-        }
-        current = parent
-    }
-    return Option[Path].None()
-}
+            return Option[Path].None();
+        };
+        current = parent;
+    };
+    return Option[Path].None();
+};
 
 file_private let find_case_requires_root(manifest_path Path) Option[Path] = {
-    let requires_root = manifest_path.dir_name().join("requires").normalize()
+    let requires_root = manifest_path.dir_name().join("requires").normalize();
     if path_exist(requires_root) then {
-        return Option[Path].Some(requires_root)
-    }
-    return Option[Path].None()
-}
+        return Option[Path].Some(requires_root);
+    };
+    return Option[Path].None();
+};
 
 file_private let find_built_executable(output_dir Path) Result[Path] = {
-    let is_windows = is_windows_host()
+    let is_windows = is_windows_host();
     let mutable iter = read_dir(output_dir) or else {
-        return Result[Path].Error(it)
-    }
+        return Result[Path].Error(it);
+    };
 
-    let mutable found = List[Path].new()
+    let mutable found = List[Path].new();
     while iter.next() is .Some(entry) then {
         if not entry.is_file() then {
-            continue
-        }
-        let name = entry.name()
+            continue;
+        };
+        let name = entry.name();
         if name.ends_with(".txt") or name.ends_with(".c") then {
-            continue
-        }
+            continue;
+        };
         if is_windows then {
             if name.ends_with(".exe") then {
-                found.push(entry.path())
-            }
+                found.push(entry.path());
+            };
         } else {
-            found.push(entry.path())
-        }
-    }
+            found.push(entry.path());
+        };
+    };
 
     if found.count() == 1 then {
-        return Result[Path].Ok(found[0].normalize())
-    }
+        return Result[Path].Ok(found[0].normalize());
+    };
     if found.count() == 0 then {
-        return Result[Path].Error(box("no executable produced"))
-    }
-    return Result[Path].Error(box("multiple executable candidates produced"))
-}
+        return Result[Path].Error(box("no executable produced"));
+    };
+    return Result[Path].Error(box("multiple executable candidates produced"));
+};
 
 file_private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_attempt UInt) Result[Path] = {
     let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
         true then executable_path_for_case(info, output_dir),
         false then find_built_executable(output_dir) or return,
-    }
+    };
     if not is_windows_host() then {
-        return Result[Path].Ok(exe_path)
-    }
+        return Result[Path].Ok(exe_path);
+    };
 
     // Windows can apply elevation / compatibility heuristics based on the
     // executable basename. Test names such as "...dispatch..." contain
     // "patch", which can make the exact same binary fail to launch normally.
     // Run through a fresh neutral filename on each attempt to avoid transient
     // Windows file-visibility and file-lock races immediately after build.
-    let mutable copy_attempt = launch_attempt
+    let mutable copy_attempt = launch_attempt;
     while copy_attempt < launch_attempt + 16 then {
-        let launch_path = output_dir.join("run-" + copy_attempt.to_string() + ".exe")
+        let launch_path = output_dir.join("run-" + copy_attempt.to_string() + ".exe");
         if path_exist(launch_path) then {
-            copy_attempt += 1
-            continue
-        }
+            copy_attempt += 1;
+            continue;
+        };
         when copy_file(exe_path, launch_path) in {
             .Ok(_) then {
-                sleep(100ms)
-                return Result[Path].Ok(launch_path)
+                sleep(100ms);
+                return Result[Path].Ok(launch_path);
             },
             .Error(e) then {
                 if path_exist(launch_path) then {
-                    copy_attempt += 1
-                    continue
-                }
-                return Result[Path].Error(e)
+                    copy_attempt += 1;
+                    continue;
+                };
+                return Result[Path].Error(e);
             },
-        }
-    }
+        };
+    };
 
-    return Result[Path].Error(box("failed to create launch executable copy"))
-}
+    return Result[Path].Error(box("failed to create launch executable copy"));
+};
 
-file_private let run_command_args_for_case() List[String] = List[String].new()
+file_private let run_command_args_for_case() List[String] = List[String].new();
 
 file_private let read_text_file_or_empty(path Path) String = {
     return when read_text_file(path) in {
         .Ok(content) then content,
         .Error(_) then String.new(),
-    }
-}
+    };
+};
 
 file_private let has_runtime_expect_error(expect_error List[String]) Bool = {
     for line in expect_error then {
         if line.trim_ascii().starts_with("Panic:") then {
-            return true
-        }
-    }
-    return false
-}
+            return true;
+        };
+    };
+    return false;
+};
 
 file_private let non_empty_lines(lines List[String]) List[String] = {
-    let mutable out = List[String].new()
+    let mutable out = List[String].new();
     for line in lines then {
         if not line.is_empty() then {
-            out.push(line)
-        }
-    }
-    return out
-}
+            out.push(line);
+        };
+    };
+    return out;
+};
 
 file_private let match_exact_lines(actual List[String], expected List[String]) Pair[Bool, String] = {
     if actual.count() <> expected.count() then {
-        return Pair[Bool, String](false, "line count mismatch: expected " + expected.count().to_string() + ", got " + actual.count().to_string())
-    }
+        return Pair[Bool, String](false, "line count mismatch: expected " + expected.count().to_string() + ", got " + actual.count().to_string());
+    };
 
     for i in 0..<expected.count() then {
         if actual[i] <> expected[i] then {
-            return Pair[Bool, String](false, "line " + i.to_string() + " mismatch: expected '" + expected[i] + "', got '" + actual[i] + "'")
-        }
-    }
+            return Pair[Bool, String](false, "line " + i.to_string() + " mismatch: expected '" + expected[i] + "', got '" + actual[i] + "'");
+        };
+    };
 
-    return Pair[Bool, String](true, "")
-}
+    return Pair[Bool, String](true, "");
+};
 
 file_private let build_captured_command(
     config RunnerConfig,
@@ -309,19 +309,16 @@ file_private let build_captured_command(
     capture_root Path,
     capture_prefix String,
 ) Result[Command] = {
-    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
-    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
+    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt");
+    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt");
     let stdout_file = open_file(stdout_path, OpenMode.Write()) or else {
-        return Result[Command].Error(box("failed to open stdout capture file: " + it.message()))
-    }
+        return Result[Command].Error(box("failed to open stdout capture file: " + it.message()));
+    };
     let stderr_file = open_file(stderr_path, OpenMode.Write()) or else {
-        return Result[Command].Error(box("failed to open stderr capture file: " + it.message()))
-    }
-    return Result[Command].Ok(Command.new(program)
-        .args(args)
-        .set_stdout(IoRedirect.File(stdout_file))
-        .set_stderr(IoRedirect.File(stderr_file)))
-}
+        return Result[Command].Error(box("failed to open stderr capture file: " + it.message()));
+    };
+    return Result[Command].Ok(Command.new(program) .args(args) .set_stdout(IoRedirect.File(stdout_file)) .set_stderr(IoRedirect.File(stderr_file)));
+};
 
 file_private let execute_command_with_timeout(
     config RunnerConfig,
@@ -333,107 +330,107 @@ file_private let execute_command_with_timeout(
     spawn_error_prefix String,
     stop_requested AtomicInt,
 ) CommandExecution = {
-    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
-    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
+    let stdout_path = capture_root.join(capture_prefix + "_stdout.txt");
+    let stderr_path = capture_root.join(capture_prefix + "_stderr.txt");
     let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else {
-            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message())
-        }
+            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message());
+        };
     let proc = cmd.spawn() or else {
-            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message())
-        }
+            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message());
+        };
 
-    let pid = proc.pid()
-    let command_start = MonoTime.now()
-    let poll_sleep = Duration.new(0, 50_000_000).unwrap()
+    let pid = proc.pid();
+    let command_start = MonoTime.now();
+    let poll_sleep = Duration.new(0, 50_000_000).unwrap();
 
-    let mutable aborted = false
-    let mutable timed_out = false
-    let mutable memory_exceeded = false
-    let mutable peak_memory UInt = 0
-    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt)
-    let mutable exit_status = Option[ExitStatus].None()
+    let mutable aborted = false;
+    let mutable timed_out = false;
+    let mutable memory_exceeded = false;
+    let mutable peak_memory UInt = 0;
+    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt);
+    let mutable exit_status = Option[ExitStatus].None();
 
     while exit_status is .None() then {
         when proc.try_wait() in {
             .Ok(status_opt) then when status_opt in {
                 .Some(status) then {
-                    exit_status = Option[ExitStatus].Some(status)
+                    exit_status = Option[ExitStatus].Some(status);
                 },
                 .None() then {},
             },
             .Error(message) then {
                 if memory_exceeded then {
-                    return CommandExecution.MemoryExceeded(-1, peak_memory)
-                }
+                    return CommandExecution.MemoryExceeded(-1, peak_memory);
+                };
                 if timed_out then {
-                    return CommandExecution.TimedOut(-1)
-                }
+                    return CommandExecution.TimedOut(-1);
+                };
                 if aborted then {
-                    return CommandExecution.Aborted(-1)
-                }
-                return CommandExecution.InfrastructureError("failed to wait process: " + message.message())
+                    return CommandExecution.Aborted(-1);
+                };
+                return CommandExecution.InfrastructureError("failed to wait process: " + message.message());
             },
-        }
+        };
 
         if exit_status is .Some(_) then {
-            break
-        }
+            break;
+        };
 
         if not aborted and stop_requested.load() <> 0 then {
-            aborted = true
-            let _ = kill_process_tree(pid)
-        }
+            aborted = true;
+            let _ = kill_process_tree(pid);
+        };
 
         if not timed_out and command_start.elapsed().as_seconds() >= timeout_secs then {
-            timed_out = true
-            let _ = kill_process_tree(pid)
-        }
+            timed_out = true;
+            let _ = kill_process_tree(pid);
+        };
 
-        let current_mem_raw = process_tree_working_set_bytes(pid)
-        let current_mem = current_mem_raw(UInt)
+        let current_mem_raw = process_tree_working_set_bytes(pid);
+        let current_mem = current_mem_raw(UInt);
         if current_mem > 0(UInt) then {
             if current_mem > peak_memory then {
-                peak_memory = current_mem
-            }
+                peak_memory = current_mem;
+            };
             if not memory_exceeded and memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
-                memory_exceeded = true
-                let _ = kill_process_tree(pid)
-            }
-        }
+                memory_exceeded = true;
+                let _ = kill_process_tree(pid);
+            };
+        };
 
-        sleep(poll_sleep)
-    }
+        sleep(poll_sleep);
+    };
 
-    let stdout_content = read_text_file_or_empty(stdout_path)
-    let stderr_content = read_text_file_or_empty(stderr_path)
+    let stdout_content = read_text_file_or_empty(stdout_path);
+    let stderr_content = read_text_file_or_empty(stderr_path);
 
     when exit_status in {
         .Some(status) then {
             if memory_exceeded then {
-                return CommandExecution.MemoryExceeded(infer_exit_code(status), peak_memory)
-            }
+                return CommandExecution.MemoryExceeded(infer_exit_code(status), peak_memory);
+            };
             if timed_out then {
-                return CommandExecution.TimedOut(infer_exit_code(status))
-            }
+                return CommandExecution.TimedOut(infer_exit_code(status));
+            };
             if aborted then {
-                return CommandExecution.Aborted(infer_exit_code(status))
-            }
-            return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content))
+                return CommandExecution.Aborted(infer_exit_code(status));
+            };
+            return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content));
         },
         .None() then {
             if memory_exceeded then {
-                return CommandExecution.MemoryExceeded(-1, peak_memory)
-            }
+                return CommandExecution.MemoryExceeded(-1, peak_memory);
+            };
             if timed_out then {
-                return CommandExecution.TimedOut(-1)
-            }
+                return CommandExecution.TimedOut(-1);
+            };
             if aborted then {
-                return CommandExecution.Aborted(-1)
-            }
-            return CommandExecution.InfrastructureError("failed to wait process: no exit status")
+                return CommandExecution.Aborted(-1);
+            };
+            return CommandExecution.InfrastructureError("failed to wait process: no exit status");
         },
-    }
-}
+    };
+};
 
 file_private let execute_built_executable_with_retry(
     config RunnerConfig,
@@ -444,8 +441,8 @@ file_private let execute_built_executable_with_retry(
     stop_requested AtomicInt,
 ) CommandExecution = {
     let first_program = prepared_run_executable_path(info, output_dir, 0(UInt)) or else {
-        return CommandExecution.InfrastructureError("failed to prepare built executable: " + it.message())
-    }
+        return CommandExecution.InfrastructureError("failed to prepare built executable: " + it.message());
+    };
     let first = execute_command_with_timeout(
         config,
         first_program.to_string(),
@@ -455,13 +452,13 @@ file_private let execute_built_executable_with_retry(
         timeout_secs,
         "failed to spawn built executable",
         stop_requested,
-    )
+    );
     return when first in {
         .InfrastructureError(_) then {
-            sleep(100ms)
+            sleep(100ms);
             let second_program = prepared_run_executable_path(info, output_dir, 1(UInt)) or else {
-                return .InfrastructureError("failed to prepare built executable: " + it.message())
-            }
+                return .InfrastructureError("failed to prepare built executable: " + it.message());
+            };
             let second = execute_command_with_timeout(
                 config,
                 second_program.to_string(),
@@ -471,13 +468,13 @@ file_private let execute_built_executable_with_retry(
                 timeout_secs,
                 "failed to spawn built executable",
                 stop_requested,
-            )
+            );
             yield when second in {
                 .InfrastructureError(_) then {
-                    sleep(150ms)
+                    sleep(150ms);
                     let third_program = prepared_run_executable_path(info, output_dir, 2(UInt)) or else {
-                        return .InfrastructureError("failed to prepare built executable: " + it.message())
-                    }
+                        return .InfrastructureError("failed to prepare built executable: " + it.message());
+                    };
                     yield execute_command_with_timeout(
                         config,
                         third_program.to_string(),
@@ -487,62 +484,59 @@ file_private let execute_built_executable_with_retry(
                         timeout_secs,
                         "failed to spawn built executable",
                         stop_requested,
-                    )
+                    );
                 },
                 _ then second,
-            }
+            };
         },
         _ then first,
-    }
-}
+    };
+};
 
 file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
-    let root = config.output_root
+    let root = config.output_root;
     when create_dir_all(root) in {
         .Ok(_) then {},
         .Error(e) then {
-            return Result[Path].Error(e)
+            return Result[Path].Error(e);
         },
-    }
+    };
 
-    let case_stem = info.relative_path
-        .replace_all("\\", "/")
-        .replace_all("/", "__")
-        .replace_all(".koral", "")
-    let case_root = root.join(case_stem)
+    let case_stem = info.relative_path .replace_all("\\", "/") .replace_all("/", "__") .replace_all(".koral", "");
+    let case_root = root.join(case_stem);
     when create_dir_all(case_root) in {
         .Ok(_) then {},
         .Error(e) then {
-            return Result[Path].Error(e)
+            return Result[Path].Error(e);
         },
-    }
+    };
 
-    let mutable attempt UInt = 0
+    let mutable attempt UInt = 0;
     while attempt < 4096 then {
-        let candidate = case_root.join(attempt.to_string())
+        let candidate = case_root.join(attempt.to_string());
         when create_dir(candidate) in {
             .Ok(_) then {
-                return Result[Path].Ok(candidate)
+                return Result[Path].Ok(candidate);
             },
             .Error(e) then {
                 if path_exist(candidate) then {
-                    attempt += 1
+                    attempt += 1;
                 } else {
-                    return Result[Path].Error(e)
-                }
+                    return Result[Path].Error(e);
+                };
             },
-        }
-    }
+        };
+    };
 
-    return Result[Path].Error(box("failed to create unique temp output dir"))
-}
+    return Result[Path].Error(box("failed to create unique temp output dir"));
+};
 
 public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested AtomicInt) CaseResult = {
-    let start = MonoTime.now()
-    let timeout_secs = config.timeout_secs(Int64)
+    let start = MonoTime.now();
+    let timeout_secs = config.timeout_secs(Int64);
 
     let expectations = parse_expectations(info.absolute_path) or else {
-        let duration_ms = start.elapsed().as_milliseconds()
+        let duration_ms = start.elapsed().as_milliseconds();
         return failure_result(
             info,
             "failed",
@@ -550,11 +544,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "failed to parse expectations: \(it.message())",
             -1,
             duration_ms,
-        )
-    }
+        );
+    };
 
     let temp_output_dir = create_case_output_dir(config, info) or else {
-        let duration_ms = start.elapsed().as_milliseconds()
+        let duration_ms = start.elapsed().as_milliseconds();
         return failure_result(
             info,
             "failed",
@@ -562,22 +556,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "failed to create temp output dir: \(it.message())",
             -1,
             duration_ms,
-        )
-    }
+        );
+    };
 
-    let mutable active_output_dir = temp_output_dir
+    let mutable active_output_dir = temp_output_dir;
 
-    let check_only_expect_error = expectations.expect_error.count() > 0
-        and expectations.expect_output.is_empty()
-        and expectations.expect_exact_output.is_empty()
-        and not has_runtime_expect_error(expectations.expect_error)
+    let check_only_expect_error = expectations.expect_error.count() > 0 and expectations.expect_output.is_empty() and expectations.expect_exact_output.is_empty() and not has_runtime_expect_error(expectations.expect_error);
 
-    let mutable build_args = when if check_only_expect_error
-        then check_command_args_for_case(config, info, active_output_dir)
-        else build_command_args_for_case(config, info, active_output_dir) in {
+    let mutable build_args = when if check_only_expect_error then check_command_args_for_case(config, info, active_output_dir) else build_command_args_for_case(config, info, active_output_dir) in {
         .Ok(args) then args,
         .Error(err) then {
-            let duration_ms = start.elapsed().as_milliseconds()
+            let duration_ms = start.elapsed().as_milliseconds();
             return failure_result(
                 info,
                 "failed",
@@ -585,15 +574,15 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 "failed to prepare compiler arguments: \(err.message())",
                 -1,
                 duration_ms,
-            )
+            );
         },
-    }
-    let mutable compile_command_name = if check_only_expect_error then "check" else "build"
+    };
+    let mutable compile_command_name = if check_only_expect_error then "check" else "build";
 
     if config.verbose then {
-        println("RUN \(info.relative_path)")
-        println("  cmd: \(config.compiler_bin.to_string()) \(build_args.join_to_string(" "))")
-    }
+        println("RUN \(info.relative_path)");
+        println("  cmd: \(config.compiler_bin.to_string()) \(build_args.join_to_string(" "))");
+    };
 
     let mutable build_output = when execute_command_with_timeout(
         config,
@@ -607,16 +596,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
     ) in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
-            return timeout_case_result(config, info, start, exit_code)
+            return timeout_case_result(config, info, start, exit_code);
         },
         .Aborted(exit_code) then {
-            return aborted_case_result(info, start, exit_code)
+            return aborted_case_result(info, start, exit_code);
         },
         .MemoryExceeded(exit_code, peak_bytes) then {
-            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
         },
         .InfrastructureError(message) then {
-            let duration_ms = start.elapsed().as_milliseconds()
+            let duration_ms = start.elapsed().as_milliseconds();
             return failure_result(
                 info,
                 "failed",
@@ -624,14 +613,14 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 message,
                 -1,
                 duration_ms,
-            )
+            );
         },
-    }
+    };
 
-    let mutable build_combined = normalize_output(build_output.stdout + build_output.stderr)
-    let mutable build_lines = output_lines_trimmed(build_combined)
-    let mutable build_exit_code = infer_exit_code(build_output.status)
-    let duration_ms = start.elapsed().as_milliseconds()
+    let mutable build_combined = normalize_output(build_output.stdout + build_output.stderr);
+    let mutable build_lines = output_lines_trimmed(build_combined);
+    let mutable build_exit_code = infer_exit_code(build_output.status);
+    let duration_ms = start.elapsed().as_milliseconds();
 
     if expectations.expect_error.is_empty() and build_exit_code <> 0 and build_combined.is_empty() then {
         let retry_output_dir = create_case_output_dir(config, info) or else {
@@ -642,12 +631,12 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 "failed to create retry temp output dir: \(it.message())",
                 build_exit_code,
                 duration_ms,
-            )
-        }
+            );
+        };
 
-        active_output_dir = retry_output_dir
+        active_output_dir = retry_output_dir;
         build_args = build_command_args_for_case(config, info, active_output_dir) or else {
-            let duration_ms = start.elapsed().as_milliseconds()
+            let duration_ms = start.elapsed().as_milliseconds();
             return failure_result(
                 info,
                 "failed",
@@ -655,9 +644,9 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 "failed to prepare retry compiler arguments: \(it.message())",
                 build_exit_code,
                 duration_ms,
-            )
-        }
-        compile_command_name = "build"
+            );
+        };
+        compile_command_name = "build";
 
         build_output = when execute_command_with_timeout(
             config,
@@ -671,16 +660,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
         ) in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
-                return timeout_case_result(config, info, start, exit_code)
+                return timeout_case_result(config, info, start, exit_code);
             },
             .Aborted(exit_code) then {
-                return aborted_case_result(info, start, exit_code)
+                return aborted_case_result(info, start, exit_code);
             },
             .MemoryExceeded(exit_code, peak_bytes) then {
-                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
             },
             .InfrastructureError(message) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
+                let current_duration_ms = start.elapsed().as_milliseconds();
                 return failure_result(
                     info,
                     "failed",
@@ -688,14 +677,14 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     message,
                     build_exit_code,
                     current_duration_ms,
-                )
+                );
             },
-        }
+        };
 
-        build_combined = normalize_output(build_output.stdout + build_output.stderr)
-        build_lines = output_lines_trimmed(build_combined)
-        build_exit_code = infer_exit_code(build_output.status)
-    }
+        build_combined = normalize_output(build_output.stdout + build_output.stderr);
+        build_lines = output_lines_trimmed(build_combined);
+        build_exit_code = infer_exit_code(build_output.status);
+    };
 
     if expectations.expect_error.count() > 0 then {
         if build_exit_code <> 0 then {
@@ -707,10 +696,10 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     "expected exit code \(expected_exit), got \(build_exit_code)",
                     build_exit_code,
                     duration_ms,
-                )
-            }
+                );
+            };
 
-            let match_result = match_expectations_in_order(build_lines, expectations.expect_error)
+            let match_result = match_expectations_in_order(build_lines, expectations.expect_error);
             if not match_result.first then {
                 return failure_result(
                     info,
@@ -719,11 +708,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     "missing expected error: \(match_result.second)",
                     build_exit_code,
                     duration_ms,
-                )
-            }
+                );
+            };
 
-            return pass_result(info, duration_ms, build_exit_code)
-        }
+            return pass_result(info, duration_ms, build_exit_code);
+        };
 
         let run_output = when execute_built_executable_with_retry(
             config,
@@ -735,13 +724,13 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
         ) in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
-                return timeout_case_result(config, info, start, exit_code)
+                return timeout_case_result(config, info, start, exit_code);
             },
             .Aborted(exit_code) then {
-                return aborted_case_result(info, start, exit_code)
+                return aborted_case_result(info, start, exit_code);
             },
             .MemoryExceeded(exit_code, peak_bytes) then {
-                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
             },
             .InfrastructureError(message) then {
                 yield when execute_built_executable_with_retry(
@@ -754,16 +743,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 ) in {
                     .Finished(output) then output,
                     .TimedOut(exit_code) then {
-                        return timeout_case_result(config, info, start, exit_code)
+                        return timeout_case_result(config, info, start, exit_code);
                     },
                     .Aborted(exit_code) then {
-                        return aborted_case_result(info, start, exit_code)
+                        return aborted_case_result(info, start, exit_code);
                     },
                     .MemoryExceeded(exit_code, peak_bytes) then {
-                        return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+                        return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
                     },
                     .InfrastructureError(_) then {
-                        let current_duration_ms = start.elapsed().as_milliseconds()
+                        let current_duration_ms = start.elapsed().as_milliseconds();
                         return failure_result(
                             info,
                             "failed",
@@ -771,16 +760,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                             message,
                             build_exit_code,
                             current_duration_ms,
-                        )
+                        );
                     },
-                }
+                };
             },
-        }
+        };
 
-        let run_combined = normalize_output(run_output.stdout + run_output.stderr)
-        let run_lines = output_lines_trimmed(run_combined)
-        let run_exit_code = infer_exit_code(run_output.status)
-        let total_duration_ms = start.elapsed().as_milliseconds()
+        let run_combined = normalize_output(run_output.stdout + run_output.stderr);
+        let run_lines = output_lines_trimmed(run_combined);
+        let run_exit_code = infer_exit_code(run_output.status);
+        let total_duration_ms = start.elapsed().as_milliseconds();
 
         if expectations.expected_exit is .Some(expected_exit) then {
             if run_exit_code <> expected_exit then {
@@ -791,8 +780,8 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     "expected exit code \(expected_exit), got \(run_exit_code)",
                     run_exit_code,
                     total_duration_ms,
-                )
-            }
+                );
+            };
         } else {
             if run_exit_code == 0 then {
                 return failure_result(
@@ -802,11 +791,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     "expected non-zero exit code for EXPECT-ERROR case",
                     run_exit_code,
                     total_duration_ms,
-                )
-            }
-        }
+                );
+            };
+        };
 
-        let match_result = match_expectations_in_order(run_lines, expectations.expect_error)
+        let match_result = match_expectations_in_order(run_lines, expectations.expect_error);
         if not match_result.first then {
             return failure_result(
                 info,
@@ -815,11 +804,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 "missing expected error: \(match_result.second)",
                 run_exit_code,
                 total_duration_ms,
-            )
-        }
+            );
+        };
 
-        return pass_result(info, total_duration_ms, run_exit_code)
-    }
+        return pass_result(info, total_duration_ms, run_exit_code);
+    };
 
     if build_exit_code <> 0 then {
         return failure_result(
@@ -829,12 +818,12 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "compiler build exited with non-zero status",
             build_exit_code,
             duration_ms,
-        )
-    }
+        );
+    };
 
     if expectations.expect_output.is_empty() and expectations.expect_exact_output.is_empty() and expectations.expected_exit is .None() then {
-        return pass_result(info, duration_ms, build_exit_code)
-    }
+        return pass_result(info, duration_ms, build_exit_code);
+    };
 
     let run_output = when execute_built_executable_with_retry(
         config,
@@ -846,13 +835,13 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
     ) in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
-            return timeout_case_result(config, info, start, exit_code)
+            return timeout_case_result(config, info, start, exit_code);
         },
         .Aborted(exit_code) then {
-            return aborted_case_result(info, start, exit_code)
+            return aborted_case_result(info, start, exit_code);
         },
         .MemoryExceeded(exit_code, peak_bytes) then {
-            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
         },
         .InfrastructureError(message) then {
             yield when execute_built_executable_with_retry(
@@ -865,16 +854,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             ) in {
                 .Finished(output) then output,
                 .TimedOut(exit_code) then {
-                    return timeout_case_result(config, info, start, exit_code)
+                    return timeout_case_result(config, info, start, exit_code);
                 },
                 .Aborted(exit_code) then {
-                    return aborted_case_result(info, start, exit_code)
+                    return aborted_case_result(info, start, exit_code);
                 },
                 .MemoryExceeded(exit_code, peak_bytes) then {
-                    return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
+                    return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
                 },
                 .InfrastructureError(_) then {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
+                    let current_duration_ms = start.elapsed().as_milliseconds();
                     return failure_result(
                         info,
                         "failed",
@@ -882,16 +871,16 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                         message,
                         build_exit_code,
                         current_duration_ms,
-                    )
+                    );
                 },
-            }
+            };
         },
-    }
+    };
 
-    let run_combined = normalize_output(run_output.stdout + run_output.stderr)
-    let run_lines = output_lines_trimmed(run_combined)
-    let run_exit_code = infer_exit_code(run_output.status)
-    let total_duration_ms = start.elapsed().as_milliseconds()
+    let run_combined = normalize_output(run_output.stdout + run_output.stderr);
+    let run_lines = output_lines_trimmed(run_combined);
+    let run_exit_code = infer_exit_code(run_output.status);
+    let total_duration_ms = start.elapsed().as_milliseconds();
 
     if expectations.expected_exit is .Some(expected_exit) and run_exit_code <> expected_exit then {
         return failure_result(
@@ -901,8 +890,8 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "expected exit code \(expected_exit), got \(run_exit_code)",
             run_exit_code,
             total_duration_ms,
-        )
-    }
+        );
+    };
 
     if expectations.expected_exit is .None() and run_exit_code <> 0 then {
         return failure_result(
@@ -912,11 +901,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "expected exit code 0, got \(run_exit_code)",
             run_exit_code,
             total_duration_ms,
-        )
-    }
+        );
+    };
 
     if expectations.expect_exact_output.count() > 0 then {
-        let exact_match = match_exact_lines(non_empty_lines(run_lines), expectations.expect_exact_output)
+        let exact_match = match_exact_lines(non_empty_lines(run_lines), expectations.expect_exact_output);
         if not exact_match.first then {
             return failure_result(
                 info,
@@ -925,11 +914,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 exact_match.second,
                 run_exit_code,
                 total_duration_ms,
-            )
-        }
-    }
+            );
+        };
+    };
 
-    let match_result = match_expectations_in_order(run_lines, expectations.expect_output)
+    let match_result = match_expectations_in_order(run_lines, expectations.expect_output);
     if not match_result.first then {
         return failure_result(
             info,
@@ -938,8 +927,8 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "missing expected output: \(match_result.second)",
             run_exit_code,
             total_duration_ms,
-        )
-    }
+        );
+    };
 
-    return pass_result(info, total_duration_ms, run_exit_code)
-}
+    return pass_result(info, total_duration_ms, run_exit_code);
+};

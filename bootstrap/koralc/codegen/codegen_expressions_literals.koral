@@ -1,73 +1,73 @@
 // codegen_expressions_literals.koral - MIR literal and operator helpers
 
 let format_hex_byte(b UInt8) String = {
-    let hex_chars = "0123456789ABCDEF"
-    let hi = (b >> 4)(UInt)
-    let lo = (b & 0x0F(UInt8))(UInt)
-    let hi_char = hex_chars[hi]
-    let lo_char = hex_chars[lo]
-    let mutable result = "0x"
-    result.push_byte(hi_char)
-    result.push_byte(lo_char)
-    return result
-}
+    let hex_chars = "0123456789ABCDEF";
+    let hi = (b >> 4)(UInt);
+    let lo = (b & 0x0F(UInt8))(UInt);
+    let hi_char = hex_chars[hi];
+    let lo_char = hex_chars[lo];
+    let mutable result = "0x";
+    result.push_byte(hi_char);
+    result.push_byte(lo_char);
+    return result;
+};
 
 given CodeGen {
     generate_string_literal(*mutable self, value String, str_type Type) String = {
-        let bytes_var = self.next_temp()
-        let bytes_var_name = "\(bytes_var)_bytes"
-        let storage_var_name = "\(bytes_var)_storage"
-        let utf8_bytes = value.to_bytes()
-        let mutable byte_literals = String.new()
-        let mutable i UInt = 0
+        let bytes_var = self.next_temp();
+        let bytes_var_name = "\(bytes_var)_bytes";
+        let storage_var_name = "\(bytes_var)_storage";
+        let utf8_bytes = value.to_bytes();
+        let mutable byte_literals = String.new();
+        let mutable i UInt = 0;
         while i < utf8_bytes.count() then {
-            if i > 0 then { byte_literals.push_string(", ") }
-            byte_literals.push_string(format_hex_byte(utf8_bytes[i]))
-            i += 1
-        }
-        if not byte_literals.is_empty() then { byte_literals.push_string(", ") }
-        byte_literals.push_string("0x00")
+            if i > 0 then { byte_literals.push_string(", ");};
+            byte_literals.push_string(format_hex_byte(utf8_bytes[i]));
+            i += 1;
+        };
+        if not byte_literals.is_empty() then { byte_literals.push_string(", ");};
+        byte_literals.push_string("0x00");
 
-        self.add_indent()
-        self.buffer.push_string("static const uint8_t \(bytes_var_name)[] = { \(byte_literals) };\n")
+        self.add_indent();
+        self.buffer.push_string("static const uint8_t \(bytes_var_name)[] = { \(byte_literals) };\n");
 
         let storage_c_type = when str_type in {
             .StructureType(def_id) then {
                 yield when self.context.get_struct_fields(def_id) in {
                     .Some(fields) then {
-                        let mutable found_type = "struct Std_StringStorage"
+                        let mutable found_type = "struct Std_StringStorage";
                         for field in fields then {
                             if field.name == "storage" then {
                                 found_type = when field.field_type in {
                                     .ReferenceType(inner_ref) then self.c_type_name(*inner_ref),
                                     .MutableReferenceType(inner_ref) then self.c_type_name(*inner_ref),
                                     _ then self.c_type_name(field.field_type),
-                                }
-                            }
-                        }
-                        yield found_type
+                                };
+                            };
+                        };
+                        yield found_type;
                     },
                     .None() then "struct Std_StringStorage",
-                }
+                };
             },
             _ then "struct Std_StringStorage",
-        }
+        };
 
-        let byte_count = utf8_bytes.count()
-        self.add_indent()
-        self.buffer.push_string("static const \(storage_c_type) \(storage_var_name) = { (uint8_t*)\(bytes_var_name), \(byte_count), \(byte_count + 1) };\n")
+        let byte_count = utf8_bytes.count();
+        self.add_indent();
+        self.buffer.push_string("static const \(storage_c_type) \(storage_var_name) = { (uint8_t*)\(bytes_var_name), \(byte_count), \(byte_count + 1) };\n");
 
-        let c_type = self.c_type_name(str_type)
-        return self.next_temp_with_init(c_type, "(\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var_name), NULL } }")
-    }
+        let c_type = self.c_type_name(str_type);
+        return self.next_temp_with_init(c_type, "(\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var_name), NULL } }");
+    };
 
     sanitize_c_numeric_literal(*self, value String) String = {
-        let cleaned = value.replace_all("_", "")
+        let cleaned = value.replace_all("_", "");
         if cleaned.starts_with("0o") or cleaned.starts_with("0O") then {
-            return "0" + cleaned.substring(2..)
-        }
-        return cleaned
-    }
+            return "0" + cleaned.substring(2..);
+        };
+        return cleaned;
+    };
 
     arithmetic_op_to_c(*self, op ArithmeticOperator) String = {
         return when op in {
@@ -76,8 +76,8 @@ given CodeGen {
             .Multiply() then "*",
             .Divide() then "/",
             .Remainder() then "%",
-        }
-    }
+        };
+    };
 
     comparison_op_to_c(*self, op ComparisonOperator) String = {
         return when op in {
@@ -87,8 +87,8 @@ given CodeGen {
             .Less() then "<",
             .GreaterEqual() then ">=",
             .LessEqual() then "<=",
-        }
-    }
+        };
+    };
 
     bitwise_op_to_c(*self, op BitwiseOperator) String = {
         return when op in {
@@ -97,8 +97,8 @@ given CodeGen {
             .BitXor() then "^",
             .LeftShift() then "<<",
             .RightShift() then ">>",
-        }
-    }
+        };
+    };
 
     checked_arithmetic_func_name(*self, op ArithmeticOperator, t Type) String = {
         let op_name = when op in {
@@ -107,18 +107,18 @@ given CodeGen {
             .Multiply() then "mul",
             .Divide() then "div",
             .Remainder() then "mod",
-        }
-        return "koral_checked_\(op_name)_\(self.type_suffix(t))"
-    }
+        };
+        return "koral_checked_\(op_name)_\(self.type_suffix(t))";
+    };
 
     checked_shift_func_name(*self, op BitwiseOperator, t Type) String = {
         let op_name = when op in {
             .LeftShift() then "shl",
             .RightShift() then "shr",
             _ then "shl",
-        }
-        return "koral_checked_\(op_name)_\(self.type_suffix(t))"
-    }
+        };
+        return "koral_checked_\(op_name)_\(self.type_suffix(t))";
+    };
 
     type_suffix(*self, t Type) String = {
         return when t in {
@@ -133,8 +133,8 @@ given CodeGen {
             .UInt32Type() then "u32",
             .UInt64Type() then "u64",
             _ then "isize",
-        }
-    }
+        };
+    };
 
     is_integer_type(*self, t Type) Bool = {
         return when t in {
@@ -149,14 +149,14 @@ given CodeGen {
             .UInt32Type() then true,
             .UInt64Type() then true,
             _ then false,
-        }
-    }
+        };
+    };
 
     is_float_type(*self, t Type) Bool = {
         return when t in {
             .Float32Type() then true,
             .Float64Type() then true,
             _ then false,
-        }
-    }
-}
+        };
+    };
+};

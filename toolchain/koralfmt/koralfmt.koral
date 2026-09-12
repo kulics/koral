@@ -1,157 +1,157 @@
-// ============================================================================
+﻿// ============================================================================
 // Koral Formatter - CLI Entry Point
 // ============================================================================
 // Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]
 // ============================================================================
 
-using "tokenizer"
-using "parser"
-using "printer"
+using "tokenizer";
+using "parser";
+using "printer";
 
-using std::os { .. }
+using std::os { .. };
 
 // ============================================================================
 // CLI Entry Point
 // ============================================================================
 
 let main() Void = {
-    let arguments = args()
+    let arguments = args();
 
     if arguments.count() <= 1 then {
-        print_usage()
-        exit(1)
-    }
+        print_usage();
+        exit(1);
+    };
 
-    let mutable check_mode = false
-    let mutable files = List[String].new()
+    let mutable check_mode = false;
+    let mutable files = List[String].new();
     for i in 1..<arguments.count() then {
-        let arg = arguments[i]
+        let arg = arguments[i];
         if arg == "--check" then {
-            check_mode = true
+            check_mode = true;
         } else if arg == "--help" or arg == "-h" then {
-            print_usage()
-            exit(0)
+            print_usage();
+            exit(0);
         } else {
-            files.push(arg)
-        }
-    }
+            files.push(arg);
+        };
+    };
 
     if files.is_empty() then {
-        eprintln("Error: no input files specified")
-        print_usage()
-        exit(1)
-    }
+        eprintln("Error: no input files specified");
+        print_usage();
+        exit(1);
+    };
 
-    let mutable had_error = false
+    let mutable had_error = false;
 
     for path in files then {
         if check_mode then {
             when check_file(path) in {
                 .Ok(is_formatted) then {
                     if not is_formatted then {
-                        eprintln("\(path): not formatted")
-                        had_error = true
-                    }
+                        eprintln("\(path): not formatted");
+                        had_error = true;
+                    };
                 },
                 .Error(e) then {
-                    eprintln("Error: \(path): \(e.message())")
-                    had_error = true
+                    eprintln("Error: \(path): \(e.message())");
+                    had_error = true;
                 },
-            }
+            };
         } else {
             when format_file(path) in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    eprintln("Error: \(path): \(e.message())")
-                    had_error = true
+                    eprintln("Error: \(path): \(e.message())");
+                    had_error = true;
                 },
-            }
-        }
-    }
+            };
+        };
+    };
 
-    if had_error then { exit(1) }
-}
+    if had_error then { exit(1);};
+};
 
 // ============================================================================
 // File Operations
 // ============================================================================
 
 let format_file(path String) Result[Void] = {
-    let file_path = path.into_path()
-    let source = read_text_file(file_path) or return
-    let normalized = normalize_newlines(source)
-    let formatted = safe_format_source(normalized) or return
+    let file_path = path.into_path();
+    let source = read_text_file(file_path) or return;
+    let normalized = normalize_newlines(source);
+    let formatted = safe_format_source(normalized) or return;
 
-    if formatted == source then { return .Ok({}) }
-    return write_text_file(file_path, formatted)
-}
+    if formatted == source then { return .Ok({});};
+    return write_text_file(file_path, formatted);
+};
 
 let check_file(path String) Result[Bool] = {
-    let source = read_text_file(path.into_path()) or return
-    let normalized = normalize_newlines(source)
-    let formatted = safe_format_source(normalized) or return
-    return .Ok(formatted == normalized)
-}
+    let source = read_text_file(path.into_path()) or return;
+    let normalized = normalize_newlines(source);
+    let formatted = safe_format_source(normalized) or return;
+    return .Ok(formatted == normalized);
+};
 
 let safe_format_source(source String) Result[String] = {
-    let first_pass = format_source(source) or return
-    let before_sig = comment_signature(source) or return
-    let after_sig = comment_signature(first_pass) or return
+    let first_pass = format_source(source) or return;
+    let before_sig = comment_signature(source) or return;
+    let after_sig = comment_signature(first_pass) or return;
 
-    if before_sig <> after_sig then { return .Error(box("Formatter internal error: comment signature changed after formatting")) }
+    if before_sig <> after_sig then { return .Error(box("Formatter internal error: comment signature changed after formatting"));};
 
-    let second_pass = format_source(first_pass) or return
-    if first_pass == second_pass then { return .Ok(first_pass) }
-    return .Error(box("Formatter internal error: formatting is not idempotent"))
-}
+    let second_pass = format_source(first_pass) or return;
+    if first_pass == second_pass then { return .Ok(first_pass);};
+    return .Error(box("Formatter internal error: formatting is not idempotent"));
+};
 
 let normalize_newlines(source String) String = {
     if not source.contains("\r") then {
-        return source
-    }
+        return source;
+    };
 
-    let runes = source.to_runes()
-    let mutable out = String.new()
-    let mutable i UInt = 0
+    let runes = source.to_runes();
+    let mutable out = String.new();
+    let mutable i UInt = 0;
 
     while i < runes.count() then {
-        let r = runes[i]
+        let r = runes[i];
         if r == '\r' then {
-            out.push_byte('\n')
+            out.push_byte('\n');
             if i + 1 < runes.count() and runes[i + 1] == '\n' then {
-                i += 2
+                i += 2;
             } else {
-                i += 1
-            }
-            continue
-        }
+                i += 1;
+            };
+            continue;
+        };
 
-        out.push_string(r.to_string())
-        i += 1
-    }
+        out.push_string(r.to_string());
+        i += 1;
+    };
 
-    return out
-}
+    return out;
+};
 
 let comment_signature(source String) Result[String] = {
-    let mutable tokenizer = Tokenizer.new(source)
-    let tokens = tokenizer.tokenize() or return
-    let mutable out = String.new()
+    let mutable tokenizer = Tokenizer.new(source);
+    let tokens = tokenizer.tokenize() or return;
+    let mutable out = String.new();
     for token in tokens then {
         when token in {
             .LineComment(text) then {
-                out.push_string(text)
-                out.push_string("\n@@\n")
+                out.push_string(text);
+                out.push_string("\n@@\n");
             },
             .BlockComment(text) then {
-                out.push_string(text)
-                out.push_string("\n@@\n")
+                out.push_string(text);
+                out.push_string("\n@@\n");
             },
             _ then {},
-        }
-    }
-    return .Ok(out)
-}
+        };
+    };
+    return .Ok(out);
+};
 
 // ============================================================================
 // Usage
@@ -164,4 +164,4 @@ let print_usage() Void =
         Options:
           --check    Check if files are formatted (exit 1 if not)
           --help     Show this help message
-        """)
+        """);

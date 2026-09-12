@@ -3,94 +3,93 @@
 public type Lexer(
     source String,
     mutable pos UInt,
-)
+);
 
 given Lexer {
-    public new(source String) Lexer = Lexer(source, 0)
+    public new(source String) Lexer = Lexer(source, 0);
 
-    file_private is_at_end(*self) Bool = self.pos >= self.source.count()
+    file_private is_at_end(*self) Bool = self.pos >= self.source.count();
 
     file_private peek_next(*self) Option[UInt8] = {
         if self.pos + 1 >= self.source.count() then {
-            return Option[UInt8].None()
-        }
-        return Option[UInt8].Some(self.source[self.pos + 1])
-    }
+            return Option[UInt8].None();
+        };
+        return Option[UInt8].Some(self.source[self.pos + 1]);
+    };
 
     file_private advance(*mutable self) UInt8 = {
-        let c = self.source[self.pos]
-        self.pos += 1
-        return c
-    }
+        let c = self.source[self.pos];
+        self.pos += 1;
+        return c;
+    };
 
     file_private skip_whitespace(*mutable self) Void = {
         while not self.is_at_end() then {
-            let c = self.source[self.pos]
-            if c == ' ' or c == '\t' or c == '\n' or c == '\r' then { self.pos += 1 }
-            else { break }
-        }
-    }
+            let c = self.source[self.pos];
+            if c == ' ' or c == '\t' or c == '\n' or c == '\r' then { self.pos += 1;} else { break;};
+        };
+    };
 
-    file_private is_digit(c UInt8) Bool = c >= '0' and c <= '9'
-    file_private is_alpha(c UInt8) Bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
-    file_private is_alphanumeric(c UInt8) Bool = Lexer.is_digit(c) or Lexer.is_alpha(c)
+    file_private is_digit(c UInt8) Bool = c >= '0' and c <= '9';
+    file_private is_alpha(c UInt8) Bool = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_';
+    file_private is_alphanumeric(c UInt8) Bool = Lexer.is_digit(c) or Lexer.is_alpha(c);
 
     file_private scan_number(*mutable self) Token = {
-        let start = self.pos
-        let mutable has_dot = false
+        let start = self.pos;
+        let mutable has_dot = false;
 
         while not self.is_at_end() and Lexer.is_digit(self.source[self.pos]) then {
-            self.pos += 1
-        }
+            self.pos += 1;
+        };
 
         if (not self.is_at_end()) and self.source[self.pos] == '.' then {
             when self.peek_next() in {
                 .Some(next) then {
                     if Lexer.is_digit(next) then {
-                        has_dot = true
-                        self.pos += 1
+                        has_dot = true;
+                        self.pos += 1;
                         while not self.is_at_end() and Lexer.is_digit(self.source[self.pos]) then {
-                            self.pos += 1
-                        }
-                    }
+                            self.pos += 1;
+                        };
+                    };
                 },
                 .None then {},
-            }
-        }
+            };
+        };
 
-        let num_str = self.source.substring(start..<self.pos)
+        let num_str = self.source.substring(start..<self.pos);
         if has_dot then {
-            return Token.FloatLiteral(parse_float64_str(num_str))
-        }
-        return Token.IntLiteral(parse_int_str(num_str))
-    }
+            return Token.FloatLiteral(parse_float64_str(num_str));
+        };
+        return Token.IntLiteral(parse_int_str(num_str));
+    };
 
     file_private scan_identifier(*mutable self) Token = {
-        let start = self.pos
+        let start = self.pos;
         while not self.is_at_end() and Lexer.is_alphanumeric(self.source[self.pos]) then {
-            self.pos += 1
-        }
-        return Token.Identifier(self.source.substring(start..<self.pos))
-    }
+            self.pos += 1;
+        };
+        return Token.Identifier(self.source.substring(start..<self.pos));
+    };
 
     public next_token(*mutable self) Result[Token] = {
-        self.skip_whitespace()
+        self.skip_whitespace();
 
         if self.is_at_end() then {
-            return Result.Ok(Token.EOF())
-        }
+            return Result.Ok(Token.EOF());
+        };
 
-        let c = self.advance()
+        let c = self.advance();
 
         if Lexer.is_digit(c) then {
-            self.pos -= 1
-            return Result.Ok(self.scan_number())
-        }
+            self.pos -= 1;
+            return Result.Ok(self.scan_number());
+        };
 
         if Lexer.is_alpha(c) then {
-            self.pos -= 1
-            return Result.Ok(self.scan_identifier())
-        }
+            self.pos -= 1;
+            return Result.Ok(self.scan_identifier());
+        };
 
         return when c in {
             '+' then .Ok(Token.Plus()),
@@ -104,52 +103,52 @@ given Lexer {
             ')' then .Ok(Token.RightParen()),
             ',' then .Ok(Token.Comma()),
             _ then .Error(box("Lexer error at position \(self.pos(Int) - 1): unexpected character '\(c)'")),
-        }
-    }
+        };
+    };
 
     public tokenize(*mutable self) Result[List[Token]] = {
-        let mutable tokens = List[Token].new()
-        let mutable done = false
+        let mutable tokens = List[Token].new();
+        let mutable done = false;
         while not done then {
-            let token = self.next_token() or return
+            let token = self.next_token() or return;
             when token in {
                 .EOF then {
-                    tokens.push(token)
-                    done = true
+                    tokens.push(token);
+                    done = true;
                 },
                 _ then tokens.push(token),
-            }
-        }
-        return Result.Ok(tokens)
-    }
-}
+            };
+        };
+        return Result.Ok(tokens);
+    };
+};
 
 let parse_int_str(s String) Int = {
-    let mutable result = 0
+    let mutable result = 0;
     for i in 0..<s.count() then {
-        result = result * 10 + (s[i] - '0')(Int)
-    }
-    return result
-}
+        result = result * 10 + (s[i] - '0')(Int);
+    };
+    return result;
+};
 
 let parse_float64_str(s String) Float64 = {
-    let mutable result = 0.0
-    let mutable after_dot = false
-    let mutable decimal_place = 0.1
+    let mutable result = 0.0;
+    let mutable after_dot = false;
+    let mutable decimal_place = 0.1;
 
     for i in 0..<s.count() then {
-        let c = s[i]
+        let c = s[i];
         if c == '.' then {
-            after_dot = true
+            after_dot = true;
         } else {
-            let digit = (c - '0')(Int)(Float64)
+            let digit = (c - '0')(Int)(Float64);
             if after_dot then {
-                result = result + digit * decimal_place
-                decimal_place = decimal_place * 0.1
+                result = result + digit * decimal_place;
+                decimal_place = decimal_place * 0.1;
             } else {
-                result = result * 10.0 + digit
-            }
-        }
-    }
-    return result
-}
+                result = result * 10.0 + digit;
+            };
+        };
+    };
+    return result;
+};

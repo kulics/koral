@@ -1,121 +1,121 @@
-public type MIRLowerer(
+﻿public type MIRLowerer(
     program *mutable MonomorphizedProgram,
     context * CompilerContext,
     mutable pending_work_items List[* MIRFunctionWorkItem],
     mutable streaming_nodes_prepared Bool,
     mutable diagnostics DiagnosticCollector,
-)
+);
 
 given MIRLowerer {
     public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
-        MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false, DiagnosticCollector.new())
+        MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false, DiagnosticCollector.new());
 
     module_private unique_vtable_requests(self) List[VtableRequest] = {
-        let _ = self
-        let mutable seen = Set[String].new()
-        let mutable unique = List[VtableRequest].new()
+        let _ = self;
+        let mutable seen = Set[String].new();
+        let mutable unique = List[VtableRequest].new();
         for request in self.program.vtable_requests then {
-            let mutable key = stable_type_key(request.concrete_type)
-            key.push_string("|")
-            key.push_string(request.trait_name)
-            let mutable i UInt = 0
+            let mutable key = stable_type_key(request.concrete_type);
+            key.push_string("|");
+            key.push_string(request.trait_name);
+            let mutable i UInt = 0;
             while i < request.trait_type_args.count() then {
-                key.push_string("|")
-                key.push_string(stable_type_key(*request.trait_type_args[i]))
-                i += 1
-            }
+                key.push_string("|");
+                key.push_string(stable_type_key(*request.trait_type_args[i]));
+                i += 1;
+            };
             if seen.contains(key) then {
-                continue
-            }
-            seen.insert(key)
-            unique.push(request)
-        }
-        return unique
-    }
+                continue;
+            };
+            seen.insert(key);
+            unique.push(request);
+        };
+        return unique;
+    };
 
     public metadata_program(self) * MIRProgram = {
-        let mutable globals_reversed = List[MIRGlobal].new()
+        let mutable globals_reversed = List[MIRGlobal].new();
 
         for request in self.unique_vtable_requests() then {
-            globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
-        }
+            globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)));
+        };
 
         for node_ref in self.program.global_nodes then {
             when node_ref in {
                 .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.ForeignFunction(identifier, params, return_type))
+                    globals_reversed.push(MIRGlobal.ForeignFunction(identifier, params, return_type));
                 },
                 .ForeignLetDecl(_, _, is_mutable, decl_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type))
+                    globals_reversed.push(MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type));
                 },
                 .ForeignTypeDecl(_, _, fields, _, identifier) then {
                     when fields in {
                         .Some(f) then globals_reversed.push(MIRGlobal.ForeignStruct(identifier, f)),
                         .None() then globals_reversed.push(MIRGlobal.ForeignType(identifier)),
-                    }
+                    };
                 },
                 .LetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
-                    let init_function = self.make_global_initializer_symbol(identifier)
-                    globals_reversed.push(MIRGlobal.GlobalVariable(identifier, init_function, is_mutable, decl_type))
-                    let _ = initializer
+                    let init_function = self.make_global_initializer_symbol(identifier);
+                    globals_reversed.push(MIRGlobal.GlobalVariable(identifier, init_function, is_mutable, decl_type));
+                    let _ = initializer;
                 },
                 .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
-                    let kind = MIRFunctionKind.Global()
-                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, kind))
-                    let _ = body
+                    let kind = MIRFunctionKind.Global();
+                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, kind));
+                    let _ = body;
                 },
                 .IntrinsicFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()))
+                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()));
                 },
                 .TypeStructDecl(_, _, fields, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.StructDeclaration(identifier, fields))
+                    globals_reversed.push(MIRGlobal.StructDeclaration(identifier, fields));
                 },
                 .TypeEnumDecl(_, _, cases, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases))
+                    globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases));
                 },
                 .GivenDecl(target_type, members, _) then {
-                    let mutable method_symbols = List[* Symbol].new()
+                    let mutable method_symbols = List[* Symbol].new();
                     for member_ref in members then {
-                        let symbol = self.make_given_member_symbol(member_ref)
+                        let symbol = self.make_given_member_symbol(member_ref);
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
-                            method_symbols.push(symbol)
-                        }
-                    }
+                            method_symbols.push(symbol);
+                        };
+                    };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
-                    }
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols));
+                    };
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
-                    let mutable method_symbols = List[* Symbol].new()
+                    let mutable method_symbols = List[* Symbol].new();
                     for member_ref in members then {
-                        let symbol = self.make_given_member_symbol(member_ref)
+                        let symbol = self.make_given_member_symbol(member_ref);
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
-                            method_symbols.push(symbol)
-                        }
-                    }
+                            method_symbols.push(symbol);
+                        };
+                    };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
-                    }
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols));
+                    };
                 },
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
-                    let mutable copied_trait_args = List[Type].new()
-                    for arg in trait_args then { copied_trait_args.push(arg) }
-                    let mutable method_symbols = List[* Symbol].new()
+                    let mutable copied_trait_args = List[Type].new();
+                    for arg in trait_args then { copied_trait_args.push(arg);};
+                    let mutable method_symbols = List[* Symbol].new();
                     for member_ref in members then {
-                        let symbol = self.make_given_member_symbol(member_ref)
+                        let symbol = self.make_given_member_symbol(member_ref);
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
-                            method_symbols.push(symbol)
-                        }
-                    }
-                    let mutable trait_args_concrete = true
+                            method_symbols.push(symbol);
+                        };
+                    };
+                    let mutable trait_args_concrete = true;
                     for arg in copied_trait_args then {
                         if self.context.contains_generic_parameter(arg) then {
-                            trait_args_concrete = false
-                        }
-                    }
+                            trait_args_concrete = false;
+                        };
+                    };
                     if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
-                    }
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols));
+                    };
                 },
                 .GenericFunctionDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
                 .GenericTypeStructDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
@@ -124,13 +124,13 @@ given MIRLowerer {
                 .TypeAliasDecl(_, _, _, _) then {},
                 .IntrinsicTypeDecl(_, _, _) then {},
                 .UsingDecl(_, _, _) then {},
-            }
-        }
+            };
+        };
 
-        let mutable globals = List[MIRGlobal].new()
+        let mutable globals = List[MIRGlobal].new();
         while not globals_reversed.is_empty() then {
-            globals.push(globals_reversed.pop().unwrap())
-        }
+            globals.push(globals_reversed.pop().unwrap());
+        };
 
         let program = box(MIRProgram(
             globals,
@@ -140,53 +140,53 @@ given MIRLowerer {
             self.program.traits,
             self.program.receiver_method_dispatch,
             self.program.concrete_callables_by_def_id,
-        ))
-        return program
-    }
+        ));
+        return program;
+    };
 
     public lower_next_work_item(*mutable self) Option[* MIRFunction] = {
-        self.prepare_streaming_nodes()
+        self.prepare_streaming_nodes();
 
         while true then {
             when self.pending_work_items.pop() in {
                 .Some(item) then {
-                    return Option[* MIRFunction].Some(self.lower_work_item(item))
+                    return Option[* MIRFunction].Some(self.lower_work_item(item));
                 },
                 .None() then {},
-            }
+            };
 
-            let node_ref = self.program.global_nodes.pop() or else { return Option[* MIRFunction].None() }
-            self.enqueue_node_work_items(node_ref)
-        }
-        return Option[* MIRFunction].None()
-    }
+            let node_ref = self.program.global_nodes.pop() or else { return Option[* MIRFunction].None();};
+            self.enqueue_node_work_items(node_ref);
+        };
+        return Option[* MIRFunction].None();
+    };
 
     module_private prepare_streaming_nodes(*mutable self) Void = {
         if self.streaming_nodes_prepared then {
-            return
-        }
+            return;
+        };
 
-        let mutable reversed = List[* TypedDecl].new()
+        let mutable reversed = List[* TypedDecl].new();
         while not self.program.global_nodes.is_empty() then {
-            reversed.push(self.program.global_nodes.pop().unwrap())
-        }
-        self.program.global_nodes = reversed
-        self.streaming_nodes_prepared = true
-    }
+            reversed.push(self.program.global_nodes.pop().unwrap());
+        };
+        self.program.global_nodes = reversed;
+        self.streaming_nodes_prepared = true;
+    };
 
     module_private enqueue_node_work_items(*mutable self, node_ref * TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
-                let init_function = self.make_global_initializer_symbol(identifier)
-                let mutable context = self.context
-                let source_initializer = context.take_concrete_global_initializer(identifier.def_id) or else initializer
+                let init_function = self.make_global_initializer_symbol(identifier);
+                let mutable context = self.context;
+                let source_initializer = context.take_concrete_global_initializer(identifier.def_id) or else initializer;
                 self.pending_work_items.push(box(MIRFunctionWorkItem(
                     init_function,
                     List[TypedParam].new(),
                     identifier.symbol_type,
                     MIRFunctionKind.Global(),
                     source_initializer,
-                )))
+                )));
             },
             .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                 if self.should_lower_function(identifier) then {
@@ -196,168 +196,168 @@ given MIRLowerer {
                             .None() then MIRFunctionKind.Global(),
                         },
                         .None() then MIRFunctionKind.Global(),
-                    }
-                    let mutable context = self.context
+                    };
+                    let mutable context = self.context;
                     let source_body = when context.take_concrete_function_body(identifier.def_id) in {
                         .Some(existing_body) then existing_body,
                         .None() then when context.take_concrete_function_source(identifier.def_id) in {
                             .Some(source) then {
-                                let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
-                                let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file);
+                                let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
                                 yield if checker.has_errors() then {
-                                    self.diagnostics.merge(checker.storage.diagnostics)
-                                    yield body
+                                    self.diagnostics.merge(checker.storage.diagnostics);
+                                    yield body;
                                 } else {
-                                    yield Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
-                                }
+                                    yield Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked));
+                                };
                             },
                             .None() then body,
                         },
-                    }
+                    };
                     self.pending_work_items.push(box(MIRFunctionWorkItem(
                         identifier,
                         params,
                         return_type,
                         kind,
                         source_body,
-                    )))
-                }
+                    )));
+                };
             },
             .GivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new());
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new();
                 for member_ref in members then {
-                    let symbol = self.make_given_member_symbol(member_ref)
-                    let mutable context = self.context
+                    let symbol = self.make_given_member_symbol(member_ref);
+                    let mutable context = self.context;
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                            }
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                            };
                         },
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file);
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                        self.diagnostics.merge(checker.storage.diagnostics);
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
-                                    }
-                                }
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt));
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)));
+                                    };
+                                };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                                    }
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                                    };
                                 },
                                 .None() then {},
                             },
                         },
-                    }
-                }
+                    };
+                };
                 while not methods_reversed.is_empty() then {
-                    self.pending_work_items.push(methods_reversed.pop().unwrap())
-                }
+                    self.pending_work_items.push(methods_reversed.pop().unwrap());
+                };
             },
             .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
-                let mutable copied_trait_args = List[Type].new()
-                for arg in trait_args then { copied_trait_args.push(arg) }
-                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
-                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
+                let mutable copied_trait_args = List[Type].new();
+                for arg in trait_args then { copied_trait_args.push(arg);};
+                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args);
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new();
                 for member_ref in members then {
-                    let symbol = self.make_given_member_symbol(member_ref)
-                    let mutable context = self.context
+                    let symbol = self.make_given_member_symbol(member_ref);
+                    let mutable context = self.context;
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                            }
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                            };
                         },
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file);
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                        self.diagnostics.merge(checker.storage.diagnostics);
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
-                                    }
-                                }
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt));
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)));
+                                    };
+                                };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                                    }
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                                    };
                                 },
                                 .None() then {},
                             },
                         },
-                    }
-                }
+                    };
+                };
                 while not methods_reversed.is_empty() then {
-                    self.pending_work_items.push(methods_reversed.pop().unwrap())
-                }
+                    self.pending_work_items.push(methods_reversed.pop().unwrap());
+                };
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new());
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new();
                 for member_ref in members then {
-                    let symbol = self.make_given_member_symbol(member_ref)
-                    let mutable context = self.context
+                    let symbol = self.make_given_member_symbol(member_ref);
+                    let mutable context = self.context;
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                            }
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                            };
                         },
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file);
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                        self.diagnostics.merge(checker.storage.diagnostics);
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
-                                    }
-                                }
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt));
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)));
+                                    };
+                                };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
-                                    }
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)));
+                                    };
                                 },
                                 .None() then {},
                             },
                         },
-                    }
-                }
+                    };
+                };
                 while not methods_reversed.is_empty() then {
-                    self.pending_work_items.push(methods_reversed.pop().unwrap())
-                }
+                    self.pending_work_items.push(methods_reversed.pop().unwrap());
+                };
             },
             _ then {},
-        }
-    }
+        };
+    };
 
     public lower(*mutable self) * MIRProgram = {
-        let program = self.metadata_program()
-        let mutable functions = List[* MIRFunction].new()
+        let program = self.metadata_program();
+        let mutable functions = List[* MIRFunction].new();
         while true then {
             when self.lower_next_work_item() in {
                 .Some(function) then functions.push(function),
-                .None() then { break },
-            }
-        }
+                .None() then { break;},
+            };
+        };
         let lowered = box(MIRProgram(
             program.globals,
             functions,
@@ -366,14 +366,14 @@ given MIRLowerer {
             program.traits,
             program.receiver_method_dispatch,
             program.concrete_callables_by_def_id,
-        ))
-        let mutable promoter = MIRReferenceAllocationPromoter.new(lowered)
-        return promoter.promote()
-    }
+        ));
+        let mutable promoter = MIRReferenceAllocationPromoter.new(lowered);
+        return promoter.promote();
+    };
 
     public lower_work_item(*mutable self, item * MIRFunctionWorkItem) * MIRFunction = {
-        return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body)
-    }
+        return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body);
+    };
 
     module_private make_function(
         *mutable self,
@@ -392,22 +392,22 @@ given MIRLowerer {
             kind,
             body,
             self.context,
-        )
-        let function = (&mutable builder).lower()
+        );
+        let function = (&mutable builder).lower();
         if builder.emitted_diagnostics().has_errors() then {
-            self.diagnostics.merge(builder.emitted_diagnostics())
-        }
-        return function
-    }
+            self.diagnostics.merge(builder.emitted_diagnostics());
+        };
+        return function;
+    };
 
     module_private should_lower_function(self, identifier * Symbol) Bool = {
-        let _ = self
-        return not self.context.contains_generic_parameter(identifier.symbol_type)
-    }
+        let _ = self;
+        return not self.context.contains_generic_parameter(identifier.symbol_type);
+    };
 
     module_private make_global_initializer_symbol(self, identifier * Symbol) * Symbol = {
-        let function_type = Type.FunctionType(List[* FunctionParamEntry].new(), box(identifier.symbol_type))
-        let mutable context = *(self.context)
+        let function_type = Type.FunctionType(List[* FunctionParamEntry].new(), box(identifier.symbol_type));
+        let mutable context = *(self.context);
         return box(context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
             self.context.get_module_path(identifier.def_id) or else List[String].new(),
@@ -418,24 +418,21 @@ given MIRLowerer {
             AccessModifier.FilePrivate(),
             unknown_span(),
             false,
-        ))
-    }
+        ));
+    };
 
     module_private make_given_member_symbol(self, member * TypedGivenMember) * Symbol = {
-        let mutable rebuilt_param_types = List[* Type].new()
+        let mutable rebuilt_param_types = List[* Type].new();
         for param in member.params then {
-            rebuilt_param_types.push(box(param.param_type))
-        }
-        let rebuilt_function_type = Type.FunctionType(types_to_param_entries(rebuilt_param_types), box(member.return_type))
+            rebuilt_param_types.push(box(param.param_type));
+        };
+        let rebuilt_function_type = Type.FunctionType(types_to_param_entries(rebuilt_param_types), box(member.return_type));
         let function_type = when self.context.get_function_type(member.def_id) in {
-            .Some(t) then if self.context.contains_generic_parameter(t)
-                and not self.context.contains_generic_parameter(rebuilt_function_type)
-                then rebuilt_function_type
-                else t,
+            .Some(t) then if self.context.contains_generic_parameter(t) and not self.context.contains_generic_parameter(rebuilt_function_type) then rebuilt_function_type else t,
             .None() then rebuilt_function_type,
-        }
-        return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
-    }
+        };
+        return box(Symbol(member.def_id, function_type, SymbolKind.Function()));
+    };
 
     module_private make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
         return MIRTraitVTable(
@@ -443,28 +440,28 @@ given MIRLowerer {
             request.trait_name,
             self.copy_type_ref_list(request.trait_type_args),
             self.make_trait_vtable_methods(request),
-        )
-    }
+        );
+    };
 
     module_private copy_type_ref_list(self, values List[* Type]) List[Type] = {
-        let mutable out = List[Type].new()
-        for value in values then { out.push(*value) }
-        return out
-    }
+        let mutable out = List[Type].new();
+        for value in values then { out.push(*value);};
+        return out;
+    };
 
     module_private make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
-        let mutable ordered_members = List[TypedTraitMember].new()
-        let mutable visited_traits = Set[String].new()
-        let mutable seen_methods = Set[String].new()
-        let mutable methods = List[MIRTraitVTableMethod].new()
-        let bindings = self.trait_member_type_bindings(request)
-        let preferred_module_path = self.type_module_path(request.concrete_type)
-        self.collect_instantiated_trait_members(request.trait_name, preferred_module_path, request.concrete_type, bindings, &mutable visited_traits, &mutable seen_methods, &mutable ordered_members)
+        let mutable ordered_members = List[TypedTraitMember].new();
+        let mutable visited_traits = Set[String].new();
+        let mutable seen_methods = Set[String].new();
+        let mutable methods = List[MIRTraitVTableMethod].new();
+        let bindings = self.trait_member_type_bindings(request);
+        let preferred_module_path = self.type_module_path(request.concrete_type);
+        self.collect_instantiated_trait_members(request.trait_name, preferred_module_path, request.concrete_type, bindings, &mutable visited_traits, &mutable seen_methods, &mutable ordered_members);
         for member in ordered_members then {
-            methods.push(self.make_trait_vtable_method(member))
-        }
-        return methods
-    }
+            methods.push(self.make_trait_vtable_method(member));
+        };
+        return methods;
+    };
 
     module_private type_module_path(self, t Type) List[String] = {
         return when t in {
@@ -472,15 +469,15 @@ given MIRLowerer {
             .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
             .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
             _ then List[String].new(),
-        }
-    }
+        };
+    };
 
     module_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
-        }
-    }
+        };
+    };
 
     module_private collect_instantiated_trait_members(
         self,
@@ -492,64 +489,64 @@ given MIRLowerer {
         seen_methods *mutable Set[String],
         ordered_members *mutable List[TypedTraitMember],
     ) Void = {
-        let visit_key = self.trait_binding_visit_key(trait_name, preferred_module_path, bindings)
-        if visited_traits.contains(visit_key) then { return }
-        visited_traits.insert(visit_key)
+        let visit_key = self.trait_binding_visit_key(trait_name, preferred_module_path, bindings);
+        if visited_traits.contains(visit_key) then { return;};
+        visited_traits.insert(visit_key);
 
         when self.trait_info(trait_name, preferred_module_path) in {
             .Some(trait_info) then {
                 for parent in trait_info.parent_traits then {
-                    let parent_bindings = self.parent_trait_bindings(parent, trait_info.module_path, concrete_type, bindings)
-                    self.collect_instantiated_trait_members(parent.name, trait_info.module_path, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members)
-                }
+                    let parent_bindings = self.parent_trait_bindings(parent, trait_info.module_path, concrete_type, bindings);
+                    self.collect_instantiated_trait_members(parent.name, trait_info.module_path, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members);
+                };
                 for member in trait_info.members then {
                     if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
-                        seen_methods.insert(member.name)
-                        ordered_members.push(self.apply_type_bindings_to_trait_member(member, bindings))
-                    }
-                }
+                        seen_methods.insert(member.name);
+                        ordered_members.push(self.apply_type_bindings_to_trait_member(member, bindings));
+                    };
+                };
             },
             _ then {},
-        }
-    }
+        };
+    };
 
     module_private trait_binding_visit_key(self, trait_name String, preferred_module_path List[String], bindings Dict[String, Type]) String = {
-        let mutable key = qualified_trait_key(preferred_module_path, trait_name)
+        let mutable key = qualified_trait_key(preferred_module_path, trait_name);
         when self.trait_info(trait_name, preferred_module_path) in {
             .Some(trait_info) then {
                 for type_param in trait_info.type_params then {
-                    key.push_string("<")
+                    key.push_string("<");
                     when bindings.get(type_param.name) in {
                         .Some(bound) then key.push_string(stable_type_key(bound)),
                         .None() then key.push_string(type_param.name),
-                    }
-                    key.push_string(">")
-                }
+                    };
+                    key.push_string(">");
+                };
             },
             .None() then {},
-        }
-        return key
-    }
+        };
+        return key;
+    };
 
     module_private parent_trait_bindings(self, parent ParentTraitConstraint, preferred_module_path List[String], concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
-        let mutable result = Dict[String, Type].new()
+        let mutable result = Dict[String, Type].new();
         for entry in bindings then {
-            result.insert(entry.first, entry.second)
-        }
-        result.insert("Self", concrete_type)
+            result.insert(entry.first, entry.second);
+        };
+        result.insert("Self", concrete_type);
 
         when self.trait_info(parent.name, preferred_module_path) in {
             .Some(parent_info) then {
-                let mutable idx UInt = 0
+                let mutable idx UInt = 0;
                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
-                    result.insert(parent_info.type_params[idx].name, self.resolve_trait_type_node_with_bindings(parent.type_arg_nodes[idx], bindings))
-                    idx += 1
-                }
+                    result.insert(parent_info.type_params[idx].name, self.resolve_trait_type_node_with_bindings(parent.type_arg_nodes[idx], bindings));
+                    idx += 1;
+                };
             },
             .None() then {},
-        }
-        return result
-    }
+        };
+        return result;
+    };
 
     module_private resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
@@ -576,66 +573,66 @@ given MIRLowerer {
                 },
             },
             .Reference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
-                yield if is_mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings);
+                yield if is_mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner));
             },
             .BorrowedReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
-                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner))
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings);
+                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner));
             },
             .Pointer(inner, is_mutable) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
-                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings);
+                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner));
             },
             .WeakReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
-                yield if is_mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings);
+                yield if is_mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner));
             },
             .Generic(base, args) then {
-                let mutable resolved_args = List[* Type].new()
+                let mutable resolved_args = List[* Type].new();
                 for arg in args then {
-                    resolved_args.push(box(self.resolve_trait_type_node_with_bindings(*arg, bindings)))
-                }
-                yield Type.GenericStruct(base, resolved_args)
+                    resolved_args.push(box(self.resolve_trait_type_node_with_bindings(*arg, bindings)));
+                };
+                yield Type.GenericStruct(base, resolved_args);
             },
             .InferredSelf() then bindings.get("Self") or else Type.Unknown(),
             .FunctionType(param_types, return_type) then {
-                let mutable resolved_params = List[* Type].new()
+                let mutable resolved_params = List[* Type].new();
                 for param_type in param_types then {
-                    resolved_params.push(box(self.resolve_trait_type_node_with_bindings(*param_type, bindings)))
-                }
-                yield make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(*return_type, bindings))
+                    resolved_params.push(box(self.resolve_trait_type_node_with_bindings(*param_type, bindings)));
+                };
+                yield make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(*return_type, bindings));
             },
-        }
-    }
+        };
+    };
 
     module_private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
-        let _ = self
-        if member.params.is_empty() then { return false }
-        let first_param = member.params[0]
-        return first_param.name == "self"
-    }
+        let _ = self;
+        if member.params.is_empty() then { return false;};
+        let first_param = member.params[0];
+        return first_param.name == "self";
+    };
 
     module_private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
-        let mutable bindings = Dict[String, Type].new()
-        bindings.insert("Self", request.concrete_type)
-        let preferred_module_path = self.type_module_path(request.concrete_type)
+        let mutable bindings = Dict[String, Type].new();
+        bindings.insert("Self", request.concrete_type);
+        let preferred_module_path = self.type_module_path(request.concrete_type);
         when self.trait_info(request.trait_name, preferred_module_path) in {
             .Some(trait_info) then {
-                let mutable index UInt = 0
+                let mutable index UInt = 0;
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
-                    bindings.insert(trait_info.type_params[index].name, (*request.trait_type_args[index]))
-                    index += 1
-                }
+                    bindings.insert(trait_info.type_params[index].name, (*request.trait_type_args[index]));
+                    index += 1;
+                };
             },
             .None() then {},
-        }
-        return bindings
-    }
+        };
+        return bindings;
+    };
 
     module_private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
-        let _ = self
-        if bindings.is_empty() then { return t }
+        let _ = self;
+        if bindings.is_empty() then { return t;};
         return when t in {
             .GenericParameter(name) then when bindings.get(name) in { .Some(bound) then bound, .None() then t },
             .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(*inner, bindings))),
@@ -647,45 +644,45 @@ given MIRLowerer {
             .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
             .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
             .FunctionType(params, return_type) then {
-                let mutable bound_params = List[* Type].new()
+                let mutable bound_params = List[* Type].new();
                 for param in params then {
-                    bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)))
-                }
-                yield make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings))
+                    bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)));
+                };
+                yield make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings));
             },
             .GenericStruct(template, args) then {
-                let mutable bound_args = List[* Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                yield Type.GenericStruct(template, bound_args)
+                let mutable bound_args = List[* Type].new();
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings)));};
+                yield Type.GenericStruct(template, bound_args);
             },
             .GenericEnum(template, args) then {
-                let mutable bound_args = List[* Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                yield Type.GenericEnum(template, bound_args)
+                let mutable bound_args = List[* Type].new();
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings)));};
+                yield Type.GenericEnum(template, bound_args);
             },
             .TraitObject(trait_name, args) then {
-                let mutable bound_args = List[* Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                yield Type.TraitObject(trait_name, bound_args)
+                let mutable bound_args = List[* Type].new();
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings)));};
+                yield Type.TraitObject(trait_name, bound_args);
             },
             _ then t,
-        }
-    }
+        };
+    };
 
     module_private apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
-        let mutable params = List[TypedParam].new()
+        let mutable params = List[TypedParam].new();
         for param in member.params then {
-            params.push(TypedParam(param.name, param.is_mutable, self.apply_type_bindings(param.param_type, bindings), param.named))
-        }
-        return TypedTraitMember(member.name, params, self.apply_type_bindings(member.return_type, bindings))
-    }
+            params.push(TypedParam(param.name, param.is_mutable, self.apply_type_bindings(param.param_type, bindings), param.named));
+        };
+        return TypedTraitMember(member.name, params, self.apply_type_bindings(member.return_type, bindings));
+    };
 
     module_private make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
-        let mutable params = List[MIRTraitVTableParameter].new()
-        let mutable first = true
-        let mutable self_by_value = false
+        let mutable params = List[MIRTraitVTableParameter].new();
+        let mutable first = true;
+        let mutable self_by_value = false;
         for param in member.params then {
-            let is_self = param.name == "self"
+            let is_self = param.name == "self";
             if first and is_self then {
                 self_by_value = when param.param_type in {
                     .ReferenceType(_) then false,
@@ -697,18 +694,18 @@ given MIRLowerer {
                     .PointerType(_) then false,
                     .MutablePointerType(_) then false,
                     _ then true,
-                }
-            }
-            params.push(MIRTraitVTableParameter(param.name, Option[Type].Some(param.param_type), is_self))
-            first = false
-        }
-        return MIRTraitVTableMethod(member.name, Option[Type].Some(member.return_type), params, self_by_value)
-    }
-}
+                };
+            };
+            params.push(MIRTraitVTableParameter(param.name, Option[Type].Some(param.param_type), is_self));
+            first = false;
+        };
+        return MIRTraitVTableMethod(member.name, Option[Type].Some(member.return_type), params, self_by_value);
+    };
+};
 
 type MIRReferenceAllocationPromoter(
     program * MIRProgram,
-)
+);
 
 type MIRReferenceAllocationFunctionPromoter(
     function * MIRFunction,
@@ -724,12 +721,12 @@ type MIRReferenceAllocationFunctionPromoter(
     temporary_local_ids Set[UInt],
     temporary_value_sources_by_id Dict[UInt, MIRValue],
     escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
-)
+);
 
 type MIREscapeSummary(
     returning_parameter_indices Set[UInt],
     direct_reference_escaping_parameter_indices Set[UInt],
-)
+);
 
 file_private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
     return when place in {
@@ -745,27 +742,27 @@ file_private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
             .Operand(.Local(local_id)) then Option[UInt].Some(local_id.raw_value),
             _ then Option[UInt].None(),
         },
-    }
-}
+    };
+};
 
 file_private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void = {
     when value in {
-        .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value) },
+        .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value);},
         .PlaceRead(place, _) then {
             when base_local_id_of_place(place) in {
-                .Some(id) then { escaping.insert(id) },
+                .Some(id) then { escaping.insert(id);},
                 .None() then {},
-            }
+            };
         },
         .Ref(place, _, _) then {
             when base_local_id_of_place(place) in {
-                .Some(id) then { escaping.insert(id) },
+                .Some(id) then { escaping.insert(id);},
                 .None() then {},
-            }
+            };
         },
         _ then {},
-    }
-}
+    };
+};
 
 file_private let visit_local_escape_value(
     value MIRValue,
@@ -776,84 +773,84 @@ file_private let visit_local_escape_value(
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
-                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                    let mutable ai = 0(UInt)
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                    let mutable ai = 0(UInt);
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
-                            mark_local_escape(*arg, escaping)
-                        }
-                        ai += 1
-                    }
+                            mark_local_escape(*arg, escaping);
+                        };
+                        ai += 1;
+                    };
                 },
                 _ then {
                     for arg in call.arguments then {
-                        mark_local_escape(*arg, escaping)
-                    }
+                        mark_local_escape(*arg, escaping);
+                    };
                 },
-            }
+            };
             for arg in call.arguments then {
-                visit_local_escape_value(*arg, summaries, escaping)
-            }
+                visit_local_escape_value(*arg, summaries, escaping);
+            };
         },
         .TraitMethodCall(call) then {
-            mark_local_escape(*call.receiver, escaping)
-            visit_local_escape_value(*call.receiver, summaries, escaping)
+            mark_local_escape(*call.receiver, escaping);
+            visit_local_escape_value(*call.receiver, summaries, escaping);
             for arg in call.arguments then {
-                mark_local_escape(*arg, escaping)
-                visit_local_escape_value(*arg, summaries, escaping)
-            }
+                mark_local_escape(*arg, escaping);
+                visit_local_escape_value(*arg, summaries, escaping);
+            };
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                mark_local_escape(*field, escaping)
-                visit_local_escape_value(*field, summaries, escaping)
-            }
+                mark_local_escape(*field, escaping);
+                visit_local_escape_value(*field, summaries, escaping);
+            };
         },
         .EnumCase(construction) then {
             for arg in construction.arguments then {
-                mark_local_escape(*arg, escaping)
-                visit_local_escape_value(*arg, summaries, escaping)
-            }
+                mark_local_escape(*arg, escaping);
+                visit_local_escape_value(*arg, summaries, escaping);
+            };
         },
         .TraitObjectConversion(conversion) then {
-            mark_local_escape(*conversion.inner, escaping)
-            visit_local_escape_value(*conversion.inner, summaries, escaping)
+            mark_local_escape(*conversion.inner, escaping);
+            visit_local_escape_value(*conversion.inner, summaries, escaping);
         },
         .EnumTag(tag) then visit_local_escape_value(*tag.subject, summaries, escaping),
         .Intrinsic(node) then {
             when node in {
-                .MakeRef(_, owner, _) then { mark_local_escape(*owner, escaping) visit_local_escape_value(*owner, summaries, escaping) },
-                .MakeMutRef(_, owner, _) then { mark_local_escape(*owner, escaping) visit_local_escape_value(*owner, summaries, escaping) },
+                .MakeRef(_, owner, _) then { mark_local_escape(*owner, escaping); visit_local_escape_value(*owner, summaries, escaping);},
+                .MakeMutRef(_, owner, _) then { mark_local_escape(*owner, escaping); visit_local_escape_value(*owner, summaries, escaping);},
                 .DowngradeRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
                 .DowngradeMutRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
                 .UpgradeRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
                 .UpgradeMutRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
                 .IsUniqueMutable(v) then visit_local_escape_value(*v, summaries, escaping),
                 .RefCount(v) then visit_local_escape_value(*v, summaries, escaping),
-                .CopyMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) visit_local_escape_value(*c, summaries, escaping) },
-                .MoveMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) visit_local_escape_value(*c, summaries, escaping) },
-                .InitMemory(p, v) then { visit_local_escape_value(*p, summaries, escaping) mark_local_escape(*v, escaping) visit_local_escape_value(*v, summaries, escaping) },
+                .CopyMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping); visit_local_escape_value(*s, summaries, escaping); visit_local_escape_value(*c, summaries, escaping);},
+                .MoveMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping); visit_local_escape_value(*s, summaries, escaping); visit_local_escape_value(*c, summaries, escaping);},
+                .InitMemory(p, v) then { visit_local_escape_value(*p, summaries, escaping); mark_local_escape(*v, escaping); visit_local_escape_value(*v, summaries, escaping);},
                 .DeallocMemory(p) then visit_local_escape_value(*p, summaries, escaping),
                 .DeinitMemory(p) then visit_local_escape_value(*p, summaries, escaping),
                 .TakeMemory(p, _) then visit_local_escape_value(*p, summaries, escaping),
-                .SpawnThread(h, t, c, s) then { visit_local_escape_value(*h, summaries, escaping) visit_local_escape_value(*t, summaries, escaping) mark_local_escape(*c, escaping) visit_local_escape_value(*c, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) },
+                .SpawnThread(h, t, c, s) then { visit_local_escape_value(*h, summaries, escaping); visit_local_escape_value(*t, summaries, escaping); mark_local_escape(*c, escaping); visit_local_escape_value(*c, summaries, escaping); visit_local_escape_value(*s, summaries, escaping);},
                 _ then {},
-            }
+            };
         },
         .Lambda(lambda) then {
             for source in lambda.capture_sources then {
                 when source in {
-                    .Local(local_id) then { escaping.insert(local_id.raw_value) },
+                    .Local(local_id) then { escaping.insert(local_id.raw_value);},
                     _ then {},
-                }
-            }
+                };
+            };
         },
         _ then {},
-    }
-}
+    };
+};
 
 file_private let compute_escaping_locals_for_function(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) Set[UInt] = {
-    let mutable escaping = Set[UInt].new()
+    let mutable escaping = Set[UInt].new();
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
@@ -863,16 +860,16 @@ file_private let compute_escaping_locals_for_function(function * MIRFunction, su
                 .Retain(value) then visit_local_escape_value(value, summaries, &mutable escaping),
                 .Release(value) then visit_local_escape_value(value, summaries, &mutable escaping),
                 _ then {},
-            }
-        }
+            };
+        };
         when block.terminator in {
-            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value) },
+            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value);},
             _ then {},
-        }
-    }
-    let mutable changed = true
+        };
+    };
+    let mutable changed = true;
     while changed then {
-        changed = false
+        changed = false;
         for block in function.blocks then {
             for statement in block.statements then {
                 when statement in {
@@ -883,43 +880,43 @@ file_private let compute_escaping_locals_for_function(function * MIRFunction, su
                                     when value in {
                                         .Operand(.Local(src_id)) then {
                                             if not escaping.contains(src_id.raw_value) then {
-                                                escaping.insert(src_id.raw_value)
-                                                changed = true
-                                            }
+                                                escaping.insert(src_id.raw_value);
+                                                changed = true;
+                                            };
                                         },
                                         .PlaceRead(.Local(src_id), _) then {
                                             if not escaping.contains(src_id.raw_value) then {
-                                                escaping.insert(src_id.raw_value)
-                                                changed = true
-                                            }
+                                                escaping.insert(src_id.raw_value);
+                                                changed = true;
+                                            };
                                         },
                                         _ then {},
-                                    }
-                                }
+                                    };
+                                };
                             },
                             _ then {},
-                        }
+                        };
                     },
                     _ then {},
-                }
-            }
-        }
-    }
-    return escaping
-}
+                };
+            };
+        };
+    };
+    return escaping;
+};
 
 file_private let compute_escaping_value_locals_for_function(function * MIRFunction) Set[UInt] = {
-    let mutable escaping = Set[UInt].new()
+    let mutable escaping = Set[UInt].new();
     for block in function.blocks then {
         when block.terminator in {
-            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value) },
+            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value);},
             _ then {},
-        }
-    }
+        };
+    };
 
-    let mutable changed = true
+    let mutable changed = true;
     while changed then {
-        changed = false
+        changed = false;
         for block in function.blocks then {
             for statement in block.statements then {
                 when statement in {
@@ -930,44 +927,44 @@ file_private let compute_escaping_value_locals_for_function(function * MIRFuncti
                                     when value in {
                                         .Operand(.Local(src_id)) then {
                                             if not escaping.contains(src_id.raw_value) then {
-                                                escaping.insert(src_id.raw_value)
-                                                changed = true
-                                            }
+                                                escaping.insert(src_id.raw_value);
+                                                changed = true;
+                                            };
                                         },
                                         .PlaceRead(.Local(src_id), _) then {
                                             if not escaping.contains(src_id.raw_value) then {
-                                                escaping.insert(src_id.raw_value)
-                                                changed = true
-                                            }
+                                                escaping.insert(src_id.raw_value);
+                                                changed = true;
+                                            };
                                         },
                                         _ then {},
-                                    }
-                                }
+                                    };
+                                };
                             },
                             _ then {},
-                        }
+                        };
                     },
                     _ then {},
-                }
-            }
-        }
-    }
-    return escaping
-}
+                };
+            };
+        };
+    };
+    return escaping;
+};
 
 file_private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
-    let mutable temps = Set[UInt].new()
+    let mutable temps = Set[UInt].new();
     for local in function.locals then {
         if local.storage is .Temporary() then {
-            temps.insert(local.id.raw_value)
-        }
-    }
-    return temps
-}
+            temps.insert(local.id.raw_value);
+        };
+    };
+    return temps;
+};
 
 file_private let build_temporary_value_sources(function * MIRFunction, temporary_local_ids Set[UInt]) Dict[UInt, MIRValue] = {
-    let mutable sources = Dict[UInt, MIRValue].new()
-    let mutable ambiguous = Set[UInt].new()
+    let mutable sources = Dict[UInt, MIRValue].new();
+    let mutable ambiguous = Set[UInt].new();
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
@@ -975,50 +972,50 @@ file_private let build_temporary_value_sources(function * MIRFunction, temporary
                     when place in {
                         .Local(local_id) then {
                             if not temporary_local_ids.contains(local_id.raw_value) then {
-                                continue
-                            }
+                                continue;
+                            };
                             if ambiguous.contains(local_id.raw_value) then {
-                                continue
-                            }
+                                continue;
+                            };
                             when sources.get(local_id.raw_value) in {
                                 .Some(_) then {
-                                    let _ = sources.remove(local_id.raw_value)
-                                    ambiguous.insert(local_id.raw_value)
+                                    let _ = sources.remove(local_id.raw_value);
+                                    ambiguous.insert(local_id.raw_value);
                                 },
                                 .None() then {
-                                    sources.insert(local_id.raw_value, value)
+                                    sources.insert(local_id.raw_value, value);
                                 },
-                            }
+                            };
                         },
                         _ then {},
-                    }
+                    };
                 },
                 _ then {},
-            }
-        }
-    }
-    return sources
-}
+            };
+        };
+    };
+    return sources;
+};
 
 file_private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
-    let mutable param_local_ids = List[UInt].new()
+    let mutable param_local_ids = List[UInt].new();
     for local in function.locals then {
         if local.storage is .Parameter() then {
-            param_local_ids.push(local.id.raw_value)
-        }
-    }
-    let mutable local_to_param = Dict[UInt, UInt].new()
-    let mutable idx = 0(UInt)
+            param_local_ids.push(local.id.raw_value);
+        };
+    };
+    let mutable local_to_param = Dict[UInt, UInt].new();
+    let mutable idx = 0(UInt);
     while idx < param_local_ids.count() and idx < function.params.count() then {
-        local_to_param.insert(param_local_ids[idx], idx)
-        idx += 1
-    }
-    return local_to_param
-}
+        local_to_param.insert(param_local_ids[idx], idx);
+        idx += 1;
+    };
+    return local_to_param;
+};
 
 file_private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mutable Set[UInt]) Void = {
-    collect_parameter_sources(value, param_map, local_sources, escaping)
-}
+    collect_parameter_sources(value, param_map, local_sources, escaping);
+};
 
 file_private let collect_parameter_sources(
     value MIRValue,
@@ -1026,26 +1023,26 @@ file_private let collect_parameter_sources(
     local_sources Dict[UInt, Set[UInt]],
     out *mutable Set[UInt]
 ) Void = {
-    let mutable maybe_id = Option[UInt].None()
+    let mutable maybe_id = Option[UInt].None();
     when value in {
-        .Operand(.Local(local_id)) then { maybe_id = Option[UInt].Some(local_id.raw_value) },
-        .PlaceRead(place, _) then { maybe_id = base_local_id_of_place(place) },
-        .Ref(place, _, _) then { maybe_id = base_local_id_of_place(place) },
+        .Operand(.Local(local_id)) then { maybe_id = Option[UInt].Some(local_id.raw_value);},
+        .PlaceRead(place, _) then { maybe_id = base_local_id_of_place(place);},
+        .Ref(place, _, _) then { maybe_id = base_local_id_of_place(place);},
         _ then {},
-    }
+    };
     when maybe_id in {
         .Some(local_id) then {
             when param_map.get(local_id) in {
-                .Some(pi) then { out.insert(pi) },
+                .Some(pi) then { out.insert(pi);},
                 .None() then {
-                    let local_params = local_sources.get(local_id) or else Set[UInt].new()
-                    for pi in local_params then { out.insert(pi) }
+                    let local_params = local_sources.get(local_id) or else Set[UInt].new();
+                    for pi in local_params then { out.insert(pi);};
                 },
-            }
+            };
         },
         .None() then {},
-    }
-}
+    };
+};
 
 file_private let merge_value_parameter_sources(
     target_local UInt,
@@ -1053,21 +1050,21 @@ file_private let merge_value_parameter_sources(
     param_map Dict[UInt, UInt],
     local_sources *mutable Dict[UInt, Set[UInt]]
 ) Bool = {
-    let mutable collected = Set[UInt].new()
-    collect_parameter_sources(value, param_map, *local_sources, &mutable collected)
-    let mutable merged = local_sources.get(target_local) or else Set[UInt].new()
-    let mutable changed = false
+    let mutable collected = Set[UInt].new();
+    collect_parameter_sources(value, param_map, *local_sources, &mutable collected);
+    let mutable merged = local_sources.get(target_local) or else Set[UInt].new();
+    let mutable changed = false;
     for pi in collected then {
         if not merged.contains(pi) then {
-            merged.insert(pi)
-            changed = true
-        }
-    }
+            merged.insert(pi);
+            changed = true;
+        };
+    };
     if changed then {
-        local_sources.insert(target_local, merged)
-    }
-    return changed
-}
+        local_sources.insert(target_local, merged);
+    };
+    return changed;
+};
 
 file_private let mark_returning_from_value(
     value MIRValue,
@@ -1075,8 +1072,8 @@ file_private let mark_returning_from_value(
     local_sources Dict[UInt, Set[UInt]],
     returning *mutable Set[UInt]
 ) Void = {
-    collect_parameter_sources(value, param_map, local_sources, returning)
-}
+    collect_parameter_sources(value, param_map, local_sources, returning);
+};
 
 file_private let visit_escape_value(
     value MIRValue,
@@ -1090,90 +1087,90 @@ file_private let visit_escape_value(
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
-                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                    let mutable ai = 0(UInt)
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                    let mutable ai = 0(UInt);
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
-                            escape_mark(*arg, param_map, local_sources, direct_escaping)
-                        }
+                            escape_mark(*arg, param_map, local_sources, direct_escaping);
+                        };
                         if callee_summary.returning_parameter_indices.contains(ai) then {
-                            mark_returning_from_value(*arg, param_map, local_sources, returning)
-                        }
-                        ai += 1
-                    }
+                            mark_returning_from_value(*arg, param_map, local_sources, returning);
+                        };
+                        ai += 1;
+                    };
                 },
                 _ then {
                     for arg in call.arguments then {
-                        escape_mark(*arg, param_map, local_sources, direct_escaping)
-                    }
+                        escape_mark(*arg, param_map, local_sources, direct_escaping);
+                    };
                 },
-            }
+            };
             for arg in call.arguments then {
-                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
-            }
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping);
+            };
         },
         .TraitMethodCall(call) then {
-            visit_escape_value(*call.receiver, param_map, local_sources, summaries, returning, direct_escaping)
+            visit_escape_value(*call.receiver, param_map, local_sources, summaries, returning, direct_escaping);
             for arg in call.arguments then {
-                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
-            }
-            escape_mark(*call.receiver, param_map, local_sources, direct_escaping)
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping);
+            };
+            escape_mark(*call.receiver, param_map, local_sources, direct_escaping);
             for arg in call.arguments then {
-                escape_mark(*arg, param_map, local_sources, direct_escaping)
-            }
+                escape_mark(*arg, param_map, local_sources, direct_escaping);
+            };
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                escape_mark(*field, param_map, local_sources, direct_escaping)
-                visit_escape_value(*field, param_map, local_sources, summaries, returning, direct_escaping)
-            }
+                escape_mark(*field, param_map, local_sources, direct_escaping);
+                visit_escape_value(*field, param_map, local_sources, summaries, returning, direct_escaping);
+            };
         },
         .EnumCase(construction) then {
             for arg in construction.arguments then {
-                escape_mark(*arg, param_map, local_sources, direct_escaping)
-                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
-            }
+                escape_mark(*arg, param_map, local_sources, direct_escaping);
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping);
+            };
         },
         .TraitObjectConversion(conversion) then {
-            escape_mark(*conversion.inner, param_map, local_sources, direct_escaping)
-            visit_escape_value(*conversion.inner, param_map, local_sources, summaries, returning, direct_escaping)
+            escape_mark(*conversion.inner, param_map, local_sources, direct_escaping);
+            visit_escape_value(*conversion.inner, param_map, local_sources, summaries, returning, direct_escaping);
         },
         .EnumTag(tag) then {
-            visit_escape_value(*tag.subject, param_map, local_sources, summaries, returning, direct_escaping)
+            visit_escape_value(*tag.subject, param_map, local_sources, summaries, returning, direct_escaping);
         },
         .Intrinsic(node) then {
             when node in {
-                .MakeRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping) visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping) },
-                .MakeMutRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping) visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping) },
+                .MakeRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping); visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping);},
+                .MakeMutRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping); visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping);},
                 .DowngradeRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
                 .DowngradeMutRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
                 .UpgradeRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
                 .UpgradeMutRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
                 .IsUniqueMutable(v) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
                 .RefCount(v) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
-                .CopyMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) },
-                .MoveMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) },
-                .InitMemory(p, v) then { visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping) },
+                .CopyMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping);},
+                .MoveMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping);},
+                .InitMemory(p, v) then { visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping);},
                 .DeallocMemory(p) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
                 .DeinitMemory(p) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
                 .TakeMemory(p, _) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
-                .SpawnThread(h, t, c, s) then { visit_escape_value(*h, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*t, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) },
+                .SpawnThread(h, t, c, s) then { visit_escape_value(*h, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*t, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping); visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping);},
                 _ then {},
-            }
+            };
         },
         .Lambda(lambda) then {
             for source in lambda.capture_sources then {
                 when source in {
                     .Local(local_id) then {
-                        when param_map.get(local_id.raw_value) in { .Some(pi) then { direct_escaping.insert(pi) }, .None() then {} }
-                    },
+                        when param_map.get(local_id.raw_value) in { .Some(pi) then { direct_escaping.insert(pi);}, .None() then {} }
+                    ;},
                     _ then {},
-                }
-            }
+                };
+            };
         },
         _ then {},
-    }
-}
+    };
+};
 
 file_private let visit_escape_statement(
     value MIRValue,
@@ -1183,73 +1180,73 @@ file_private let visit_escape_statement(
     returning *mutable Set[UInt],
     direct_escaping *mutable Set[UInt]
 ) Void = {
-    visit_escape_value(value, param_map, local_sources, summaries, returning, direct_escaping)
-}
+    visit_escape_value(value, param_map, local_sources, summaries, returning, direct_escaping);
+};
 
 file_private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
-    let mutable param_maps = Dict[UInt, Dict[UInt, UInt]].new()
+    let mutable param_maps = Dict[UInt, Dict[UInt, UInt]].new();
     for function_ref in program.functions then {
-        param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref))
-    }
-    let mutable summaries = Dict[UInt, MIREscapeSummary].new()
+        param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref));
+    };
+    let mutable summaries = Dict[UInt, MIREscapeSummary].new();
     for function_ref in program.functions then {
-        summaries.insert(function_ref.identifier.def_id.id, MIREscapeSummary(Set[UInt].new(), Set[UInt].new()))
-    }
-    let mutable changed = true
+        summaries.insert(function_ref.identifier.def_id.id, MIREscapeSummary(Set[UInt].new(), Set[UInt].new()));
+    };
+    let mutable changed = true;
     while changed then {
-        changed = false
+        changed = false;
         for function_ref in program.functions then {
-            let func_id = function_ref.identifier.def_id.id
-            let param_map = param_maps.get(func_id) or else Dict[UInt, UInt].new()
-            let mutable returning = Set[UInt].new()
-            let mutable direct_escaping = Set[UInt].new()
-            let mutable local_sources = Dict[UInt, Set[UInt]].new()
+            let func_id = function_ref.identifier.def_id.id;
+            let param_map = param_maps.get(func_id) or else Dict[UInt, UInt].new();
+            let mutable returning = Set[UInt].new();
+            let mutable direct_escaping = Set[UInt].new();
+            let mutable local_sources = Dict[UInt, Set[UInt]].new();
             for block in function_ref.blocks then {
                 for statement in block.statements then {
                     when statement in {
                         .Assign(place, value) then {
-                            visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping)
+                            visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping);
                             when place in {
-                                .Local(local_id) then { let _ = merge_value_parameter_sources(local_id.raw_value, value, param_map, &mutable local_sources) },
+                                .Local(local_id) then { let _ = merge_value_parameter_sources(local_id.raw_value, value, param_map, &mutable local_sources);},
                                 _ then {},
-                            }
+                            };
                         },
                         .CompoundAssign(assignment) then visit_escape_statement(assignment.value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
                         .Evaluate(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
                         .Retain(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
                         .Release(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
                         _ then {},
-                    }
-                }
+                    };
+                };
                 when block.terminator in {
                     .ReturnValue(.Some(.Local(local_id))) then {
-                        let mutable returned_params = Set[UInt].new()
-                        collect_parameter_sources(MIRValue.Operand(MIROperand.Local(local_id)), param_map, local_sources, &mutable returned_params)
-                        for pi in returned_params then { returning.insert(pi) }
+                        let mutable returned_params = Set[UInt].new();
+                        collect_parameter_sources(MIRValue.Operand(MIROperand.Local(local_id)), param_map, local_sources, &mutable returned_params);
+                        for pi in returned_params then { returning.insert(pi);};
                     },
                     _ then {},
-                }
-            }
-            let next = MIREscapeSummary(returning, direct_escaping)
-            let current = summaries.get(func_id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+                };
+            };
+            let next = MIREscapeSummary(returning, direct_escaping);
+            let current = summaries.get(func_id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
             if not (sets_equal(current.returning_parameter_indices, next.returning_parameter_indices) and sets_equal(current.direct_reference_escaping_parameter_indices, next.direct_reference_escaping_parameter_indices)) then {
-                summaries.insert(func_id, next)
-                changed = true
-            }
-        }
-    }
-    return summaries
-}
+                summaries.insert(func_id, next);
+                changed = true;
+            };
+        };
+    };
+    return summaries;
+};
 
 file_private let sets_equal(a Set[UInt], b Set[UInt]) Bool = {
     for item in a then {
-        if not b.contains(item) then { return false }
-    }
+        if not b.contains(item) then { return false;};
+    };
     for item in b then {
-        if not a.contains(item) then { return false }
-    }
-    return true
-}
+        if not a.contains(item) then { return false;};
+    };
+    return true;
+};
 
 
 file_private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
@@ -1258,45 +1255,45 @@ file_private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
         .Call(call) then {
             for argument in call.arguments then {
                 if mir_value_contains_stack_borrow_ref(*argument) then {
-                    return true
-                }
-            }
-            yield false
+                    return true;
+                };
+            };
+            yield false;
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
                 if mir_value_contains_stack_borrow_ref(*field) then {
-                    return true
-                }
-            }
-            yield false
+                    return true;
+                };
+            };
+            yield false;
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
                 if mir_value_contains_stack_borrow_ref(*argument) then {
-                    return true
-                }
-            }
-            yield false
+                    return true;
+                };
+            };
+            yield false;
         },
         .TraitObjectConversion(conversion) then mir_value_contains_stack_borrow_ref(*(conversion.inner)),
         .TraitMethodCall(call) then {
             if mir_value_contains_stack_borrow_ref(*(call.receiver)) then {
-                return true
-            }
+                return true;
+            };
             for argument in call.arguments then {
                 if mir_value_contains_stack_borrow_ref(*argument) then {
-                    return true
-                }
-            }
-            yield false
+                    return true;
+                };
+            };
+            yield false;
         },
         .EnumTag(tag) then mir_value_contains_stack_borrow_ref(*(tag.subject)),
         .Lambda(lambda) then {
             if not lambda.capture_sources.is_empty() then {
-                return true
-            }
-            yield false
+                return true;
+            };
+            yield false;
         },
         .Intrinsic(node) then when node in {
             .InitMemory(_, value) then mir_value_contains_stack_borrow_ref(*value),
@@ -1304,8 +1301,8 @@ file_private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
             _ then false,
         },
         _ then false,
-    }
-}
+    };
+};
 
 file_private let is_member_path_place(place MIRPlace) Bool = {
     return when place in {
@@ -1315,8 +1312,8 @@ file_private let is_member_path_place(place MIRPlace) Bool = {
         .EnumPayload(_, _, _, _, _) then true,
         .Deref(_, _) then true,
         .PointerElement(_, _) then true,
-    }
-}
+    };
+};
 
 file_private let mir_statement_needs_reference_allocation_promotion(statement MIRStatement) Bool = {
     return when statement in {
@@ -1324,45 +1321,45 @@ file_private let mir_statement_needs_reference_allocation_promotion(statement MI
         .CompoundAssign(assignment) then mir_value_contains_stack_borrow_ref(assignment.value),
         .Evaluate(value) then mir_value_contains_stack_borrow_ref(value),
         _ then false,
-    }
-}
+    };
+};
 
 file_private let mir_function_needs_reference_allocation_promotion(function * MIRFunction) Bool = {
     for block in function.blocks then {
         for statement in block.statements then {
             if mir_statement_needs_reference_allocation_promotion(*statement) then {
-                return true
-            }
-        }
-    }
-    return false
-}
+                return true;
+            };
+        };
+    };
+    return false;
+};
 
 given MIRReferenceAllocationPromoter {
     public new(program * MIRProgram) MIRReferenceAllocationPromoter = {
-        return MIRReferenceAllocationPromoter(program)
-    }
+        return MIRReferenceAllocationPromoter(program);
+    };
 
     public promote(*mutable self) * MIRProgram = {
-        let mutable needs_promotion = false
+        let mutable needs_promotion = false;
         for function_ref in self.program.functions then {
             if mir_function_needs_reference_allocation_promotion(function_ref) then {
-                needs_promotion = true
-                break
-            }
-        }
+                needs_promotion = true;
+                break;
+            };
+        };
         if not needs_promotion then {
-            return self.program
-        }
+            return self.program;
+        };
 
-        let parameter_types_by_def_id = self.build_parameter_types_by_def_id()
-        let parameter_types_by_name = self.build_parameter_types_by_name()
-        let escape_summaries = compute_escape_summaries(self.program)
+        let parameter_types_by_def_id = self.build_parameter_types_by_def_id();
+        let parameter_types_by_name = self.build_parameter_types_by_name();
+        let escape_summaries = compute_escape_summaries(self.program);
 
-        let mutable functions = List[* MIRFunction].new()
+        let mutable functions = List[* MIRFunction].new();
         for function_ref in self.program.functions then {
-            let escaping_locals = compute_escaping_locals_for_function(function_ref, escape_summaries)
-            let temporary_ids = compute_temporary_local_ids(function_ref)
+            let escaping_locals = compute_escaping_locals_for_function(function_ref, escape_summaries);
+            let temporary_ids = compute_temporary_local_ids(function_ref);
             let mutable promoter = MIRReferenceAllocationFunctionPromoter.new(
                 function_ref,
                 parameter_types_by_def_id,
@@ -1373,9 +1370,9 @@ given MIRReferenceAllocationPromoter {
                 escaping_locals,
                 temporary_ids,
                 escape_summaries,
-            )
-            functions.push(promoter.promote())
-        }
+            );
+            functions.push(promoter.promote());
+        };
 
         return box(MIRProgram(
             self.program.globals,
@@ -1385,82 +1382,82 @@ given MIRReferenceAllocationPromoter {
             self.program.traits,
             self.program.receiver_method_dispatch,
             self.program.concrete_callables_by_def_id,
-        ))
-    }
+        ));
+    };
 
     module_private build_parameter_types_by_def_id(self) Dict[UInt, List[* FunctionParamEntry]] = {
-        let mutable map = Dict[UInt, List[* FunctionParamEntry]].new()
+        let mutable map = Dict[UInt, List[* FunctionParamEntry]].new();
         for function_ref in self.program.functions then {
-            map.insert(function_ref.identifier.def_id.id, self.function_param_entries(function_ref))
-        }
-        return map
-    }
+            map.insert(function_ref.identifier.def_id.id, self.function_param_entries(function_ref));
+        };
+        return map;
+    };
 
     module_private build_parameter_types_by_name(self) Dict[String, List[* FunctionParamEntry]] = {
-        let mutable map = Dict[String, List[* FunctionParamEntry]].new()
+        let mutable map = Dict[String, List[* FunctionParamEntry]].new();
         for function_ref in self.program.functions then {
-            let param_types = self.function_param_entries(function_ref)
+            let param_types = self.function_param_entries(function_ref);
             for name in self.callable_name_aliases(function_ref.identifier) then {
                 when map.get(name) in {
                     .Some(_) then {},
-                    .None() then { map.insert(name, param_types) },
-                }
-            }
-        }
-        return map
-    }
+                    .None() then { map.insert(name, param_types);},
+                };
+            };
+        };
+        return map;
+    };
 
     module_private callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.program.receiver_method_dispatch.get(symbol.def_id) in {
-                .Some(info) then { return info.method_name },
+                .Some(info) then { return info.method_name;},
                 .None() then {},
-            }
+            };
             when self.program.concrete_callables_by_def_id.get(symbol.def_id) in {
-                .Some(info) then { return info.logical_name },
+                .Some(info) then { return info.logical_name;},
                 .None() then {},
-            }
+            };
             when self.program.context.get_name(symbol.def_id) in {
-                .Some(name) then { return name },
+                .Some(name) then { return name;},
                 .None() then {},
-            }
-        }
-        return self.program.context.symbol_name(*symbol)
-    }
+            };
+        };
+        return self.program.context.symbol_name(*symbol);
+    };
 
     module_private callable_name_aliases(self, symbol * Symbol) List[String] = {
-        let mutable names = List[String].new()
-        let logical = self.callable_logical_name(symbol)
+        let mutable names = List[String].new();
+        let logical = self.callable_logical_name(symbol);
         if not logical.is_empty() then {
-            names.push(logical)
-        }
-        let symbol_name = self.program.context.symbol_name(*symbol)
+            names.push(logical);
+        };
+        let symbol_name = self.program.context.symbol_name(*symbol);
         if not symbol_name.is_empty() and not names.contains(symbol_name) then {
-            names.push(symbol_name)
-        }
+            names.push(symbol_name);
+        };
         if symbol.def_id.id > 0 then {
             when self.program.context.get_name(symbol.def_id) in {
                 .Some(name) then if not name.is_empty() and not names.contains(name) then {
-                    names.push(name)
+                    names.push(name);
                 },
                 .None() then {},
-            }
-        }
-        return names
-    }
+            };
+        };
+        return names;
+    };
 
     module_private function_param_entries(self, function * MIRFunction) List[* FunctionParamEntry] = {
         when function.identifier.symbol_type in {
-            .FunctionType(params, _) then { return params },
+            .FunctionType(params, _) then { return params;},
             _ then {},
-        }
-        let mutable params = List[* FunctionParamEntry].new()
+        };
+        let mutable params = List[* FunctionParamEntry].new();
         for param in function.params then {
-            params.push(box(make_function_param_entry(param.param_type)))
-        }
-        return params
-    }
-}
+            params.push(box(make_function_param_entry(param.param_type)));
+        };
+        return params;
+    };
+};
 
 given MIRReferenceAllocationFunctionPromoter {
     public new(
@@ -1474,14 +1471,14 @@ given MIRReferenceAllocationFunctionPromoter {
         temporary_local_ids Set[UInt],
         escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
     ) MIRReferenceAllocationFunctionPromoter = {
-        let mutable local_types_by_id = Dict[UInt, Type].new()
-        let mutable local_storages_by_id = Dict[UInt, MIRStorage].new()
-        let escaping_value_locals = compute_escaping_value_locals_for_function(function)
+        let mutable local_types_by_id = Dict[UInt, Type].new();
+        let mutable local_storages_by_id = Dict[UInt, MIRStorage].new();
+        let escaping_value_locals = compute_escaping_value_locals_for_function(function);
         for local in function.locals then {
-            local_types_by_id.insert(local.id.raw_value, local.local_type)
-            local_storages_by_id.insert(local.id.raw_value, local.storage)
-        }
-        let temporary_value_sources_by_id = build_temporary_value_sources(function, temporary_local_ids)
+            local_types_by_id.insert(local.id.raw_value, local.local_type);
+            local_storages_by_id.insert(local.id.raw_value, local.storage);
+        };
+        let temporary_value_sources_by_id = build_temporary_value_sources(function, temporary_local_ids);
         return MIRReferenceAllocationFunctionPromoter(
             function,
             parameter_types_by_def_id,
@@ -1496,21 +1493,21 @@ given MIRReferenceAllocationFunctionPromoter {
             temporary_local_ids,
             temporary_value_sources_by_id,
             escape_summaries_by_def_id,
-        )
-    }
+        );
+    };
     public promote(*mutable self) * MIRFunction = {
         if not mir_function_needs_reference_allocation_promotion(self.function) then {
-            return self.function
-        }
+            return self.function;
+        };
 
-        let mutable blocks = List[* MIRBasicBlock].new()
+        let mutable blocks = List[* MIRBasicBlock].new();
         for block in self.function.blocks then {
-            let mutable statements = List[* MIRStatement].new()
+            let mutable statements = List[* MIRStatement].new();
             for statement in block.statements then {
-                statements.push(box(self.promote_statement(*statement)))
-            }
-            blocks.push(box(MIRBasicBlock(block.id, statements, block.terminator)))
-        }
+                statements.push(box(self.promote_statement(*statement)));
+            };
+            blocks.push(box(MIRBasicBlock(block.id, statements, block.terminator)));
+        };
         return box(MIRFunction(
             self.function.identifier,
             self.function.params,
@@ -1520,25 +1517,25 @@ given MIRReferenceAllocationFunctionPromoter {
             self.function.locals,
             blocks,
             self.function.temporary_value_sources_by_local,
-        ))
-    }
+        ));
+    };
 
     module_private promote_statement(*mutable self, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
-                let destination_type = self.destination_type_for_place(place)
-                yield MIRStatement.Assign(place, self.promote_value_with_place(value, destination_type, Option[MIRPlace].Some(place)))
+                let destination_type = self.destination_type_for_place(place);
+                yield MIRStatement.Assign(place, self.promote_value_with_place(value, destination_type, Option[MIRPlace].Some(place)));
             },
             .CompoundAssign(assignment) then {
-                let destination_type = self.destination_type_for_place(assignment.target)
-                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)))
+                let destination_type = self.destination_type_for_place(assignment.target);
+                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)));
             },
             .Evaluate(value) then MIRStatement.Evaluate(self.promote_value(value, Option[Type].None())),
             .Retain(value) then MIRStatement.Retain(self.promote_value(value, Option[Type].None())),
             .Release(value) then MIRStatement.Release(self.promote_value(value, Option[Type].None())),
             _ then statement,
-        }
-    }
+        };
+    };
 
     module_private destination_type_for_place(*self, place MIRPlace) Option[Type] = {
         return when place in {
@@ -1547,12 +1544,12 @@ given MIRReferenceAllocationFunctionPromoter {
             .Field(_, field) then Option[Type].Some(field.symbol_type),
             .EnumPayload(_, _, _, _, field_type) then Option[Type].Some(field_type),
             _ then Option[Type].None(),
-        }
-    }
+        };
+    };
 
     module_private promote_value(*mutable self, value MIRValue, destination_type Option[Type]) MIRValue = {
-        return self.promote_value_with_place(value, destination_type, Option[MIRPlace].None())
-    }
+        return self.promote_value_with_place(value, destination_type, Option[MIRPlace].None());
+    };
 
     module_private promote_value_with_place(*mutable self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
         let promoted = when value in {
@@ -1564,143 +1561,141 @@ given MIRReferenceAllocationFunctionPromoter {
             )),
             .Intrinsic(node) then MIRValue.Intrinsic(self.promote_intrinsic(node)),
             .Aggregate(aggregate) then {
-                let mutable fields = List[* MIRValue].new()
+                let mutable fields = List[* MIRValue].new();
                 for field in aggregate.fields then {
-                    fields.push(box(self.promote_value(*field, Option[Type].None())))
-                }
-                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+                    fields.push(box(self.promote_value(*field, Option[Type].None())));
+                };
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships));
             },
             .EnumCase(construction) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for arg in construction.arguments then {
-                    args.push(box(self.promote_value(*arg, Option[Type].None())))
-                }
-                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+                    args.push(box(self.promote_value(*arg, Option[Type].None())));
+                };
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args));
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(*(conversion.inner), Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for arg in call.arguments then {
-                    args.push(box(self.promote_value(*arg, Option[Type].None())))
-                }
-                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                    args.push(box(self.promote_value(*arg, Option[Type].None())));
+                };
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type));
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(*(tag.subject), Option[Type].None())), tag.enum_type)),
             .Lambda(lambda) then {
-                let mutable escaping_lambda = false
+                let mutable escaping_lambda = false;
                 when destination_place in {
                     .Some(dp) then when dp in {
                         .Local(local_id) then {
                             if self.escaping_value_locals.contains(local_id.raw_value) then {
-                                escaping_lambda = true
-                            }
+                                escaping_lambda = true;
+                            };
                         },
                         _ then {},
                     },
                     .None() then {},
-                }
-                yield if escaping_lambda then MIRValue.Lambda(self.rewrite_escaping_mutable_lambda(lambda)) else value
+                };
+                yield if escaping_lambda then MIRValue.Lambda(self.rewrite_escaping_mutable_lambda(lambda)) else value;
             },
             .Ref(place, kind, .StackBorrow()) then {
                 if is_member_path_place(place) then {
-                    return value
-                }
+                    return value;
+                };
                 let keep_stack_borrow = when destination_place in {
                     .Some(dp) then when dp in {
                         .Local(local_id) then not self.escaping_locals.contains(local_id.raw_value),
                         _ then false,
                     },
                     _ then false,
-                }
+                };
                 if keep_stack_borrow then {
-                    return value
-                }
-                yield value
+                    return value;
+                };
+                yield value;
             },
             _ then value,
-        }
+        };
         if destination_type is .Some(dt) then {
             if self.type_requires_owned_reference_storage(dt) then {
                 when destination_place in {
                     .Some(dp) then when dp in {
                         .Local(local_id) then {
                             if not self.escaping_locals.contains(local_id.raw_value) then {
-                                return promoted
-                            }
+                                return promoted;
+                            };
                         },
                         _ then {},
                     },
                     _ then {},
-                }
-                return self.promote_direct_references(promoted)
-            }
-        }
-        return promoted
-    }
+                };
+                return self.promote_direct_references(promoted);
+            };
+        };
+        return promoted;
+    };
 
     module_private rewrite_escaping_mutable_lambda(*mutable self, lambda MIRLambda) MIRLambda = {
-        let mutable rewritten_capture_symbols = Dict[UInt, Symbol].new()
-        let mutable rewritten_captures = List[* Symbol].new()
-        let mutable index UInt = 0
+        let mutable rewritten_capture_symbols = Dict[UInt, Symbol].new();
+        let mutable rewritten_captures = List[* Symbol].new();
+        let mutable index UInt = 0;
         while index < lambda.captures.count() then {
-            let capture = lambda.captures[index]
-            let source = lambda.capture_sources[index]
-            let rewritten = self.rewrite_escaping_mutable_capture_symbol(capture, source)
+            let capture = lambda.captures[index];
+            let source = lambda.capture_sources[index];
+            let rewritten = self.rewrite_escaping_mutable_capture_symbol(capture, source);
             if rewritten.symbol_type <> capture.symbol_type then {
-                rewritten_capture_symbols.insert(capture.def_id.id, rewritten)
-            }
-            rewritten_captures.push(box(rewritten))
-            index += 1
-        }
-        let rewritten_function = self.rewrite_lambda_capture_function(lambda.function, rewritten_capture_symbols)
-        return MIRLambda(lambda.params, rewritten_captures, lambda.capture_sources, rewritten_function, lambda.lambda_type)
-    }
+                rewritten_capture_symbols.insert(capture.def_id.id, rewritten);
+            };
+            rewritten_captures.push(box(rewritten));
+            index += 1;
+        };
+        let rewritten_function = self.rewrite_lambda_capture_function(lambda.function, rewritten_capture_symbols);
+        return MIRLambda(lambda.params, rewritten_captures, lambda.capture_sources, rewritten_function, lambda.lambda_type);
+    };
 
     module_private rewrite_escaping_mutable_capture_symbol(*self, capture * Symbol, source MIRPlace) Symbol = {
         return when capture.kind in {
             .Variable(variable_kind) then when variable_kind in {
                 .MutableReference() then when capture.symbol_type in {
                     .MutableReferenceType(inner) then {
-                        let source_type = self.type_of_place(source)
-                        yield if source_type == *inner
-                            then Symbol(capture.def_id, source_type, SymbolKind.Variable(VariableKind.MutableValue()))
-                            else *capture
+                        let source_type = self.type_of_place(source);
+                        yield if source_type == *inner then Symbol(capture.def_id, source_type, SymbolKind.Variable(VariableKind.MutableValue())) else *capture;
                     },
                     _ then *capture,
                 },
                 _ then *capture,
             },
             _ then *capture,
-        }
-    }
+        };
+    };
 
     module_private rewrite_lambda_capture_function(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) * MIRFunction = {
-        let rewritten_local_ids = self.rewritten_capture_local_ids(function, rewritten_capture_symbols)
-        let mutable locals = List[* MIRLocal].new()
+        let rewritten_local_ids = self.rewritten_capture_local_ids(function, rewritten_capture_symbols);
+        let mutable locals = List[* MIRLocal].new();
         for local in function.locals then {
             let updated_local = when local.symbol in {
                 .Some(symbol) then when rewritten_capture_symbols.get(symbol.def_id.id) in {
                     .Some(rewritten_symbol) then {
-                        let local_mutability = if rewritten_symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable()
+                        let local_mutability = if rewritten_symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable();
                         if local.storage is .Capture() then {
-                            yield MIRLocal(local.id, local.name, rewritten_symbol.symbol_type, local_mutability, local.storage, Option[* Symbol].Some(box(rewritten_symbol)))
-                        }
-                        yield *local
+                            yield MIRLocal(local.id, local.name, rewritten_symbol.symbol_type, local_mutability, local.storage, Option[* Symbol].Some(box(rewritten_symbol)));
+                        };
+                        yield *local;
                     },
                     .None() then *local,
                 },
                 .None() then *local,
-            }
-            locals.push(box(updated_local))
-        }
-        let mutable blocks = List[* MIRBasicBlock].new()
+            };
+            locals.push(box(updated_local));
+        };
+        let mutable blocks = List[* MIRBasicBlock].new();
         for block in function.blocks then {
-            let mutable statements = List[* MIRStatement].new()
+            let mutable statements = List[* MIRStatement].new();
             for statement in block.statements then {
-                statements.push(box(self.rewrite_capture_statement(*statement, rewritten_local_ids)))
-            }
-            blocks.push(box(MIRBasicBlock(block.id, statements, self.rewrite_capture_terminator(block.terminator, rewritten_local_ids))))
-        }
+                statements.push(box(self.rewrite_capture_statement(*statement, rewritten_local_ids)));
+            };
+            blocks.push(box(MIRBasicBlock(block.id, statements, self.rewrite_capture_terminator(block.terminator, rewritten_local_ids))));
+        };
         return box(MIRFunction(
             function.identifier,
             function.params,
@@ -1710,22 +1705,22 @@ given MIRReferenceAllocationFunctionPromoter {
             locals,
             blocks,
             function.temporary_value_sources_by_local,
-        ))
-    }
+        ));
+    };
 
     module_private rewritten_capture_local_ids(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) Set[UInt] = {
-        let _ = self
-        let mutable ids = Set[UInt].new()
+        let _ = self;
+        let mutable ids = Set[UInt].new();
         for local in function.locals then {
             when local.symbol in {
                 .Some(symbol) then if rewritten_capture_symbols.get(symbol.def_id.id) is .Some(_) and local.storage is .Capture() then {
-                    ids.insert(local.id.raw_value)
+                    ids.insert(local.id.raw_value);
                 },
                 .None() then {},
-            }
-        }
-        return ids
-    }
+            };
+        };
+        return ids;
+    };
 
     module_private rewrite_capture_statement(*self, statement MIRStatement, rewritten_local_ids Set[UInt]) MIRStatement = {
         return when statement in {
@@ -1736,119 +1731,112 @@ given MIRReferenceAllocationFunctionPromoter {
             .Release(value) then MIRStatement.Release(self.rewrite_capture_value(value, rewritten_local_ids)),
             .Evaluate(value) then MIRStatement.Evaluate(self.rewrite_capture_value(value, rewritten_local_ids)),
             _ then statement,
-        }
-    }
+        };
+    };
 
     module_private rewrite_capture_terminator(*self, terminator MIRTerminator, rewritten_local_ids Set[UInt]) MIRTerminator = {
-        let _ = self
-        let _ = rewritten_local_ids
-        return terminator
-    }
+        let _ = self;
+        let _ = rewritten_local_ids;
+        return terminator;
+    };
 
     module_private rewrite_capture_place(*self, place MIRPlace, rewritten_local_ids Set[UInt]) MIRPlace = {
         return when place in {
             .Field(base, field) then MIRPlace.Field(box(self.rewrite_capture_place(*base, rewritten_local_ids)), field),
             .EnumPayload(base, case_name, field_name, field_index, field_type) then {
-                yield MIRPlace.EnumPayload(box(self.rewrite_capture_place(*base, rewritten_local_ids)), case_name, field_name, field_index, field_type)
+                yield MIRPlace.EnumPayload(box(self.rewrite_capture_place(*base, rewritten_local_ids)), case_name, field_name, field_index, field_type);
             },
             .Deref(base, pointee) then {
-                let rewritten_base = self.rewrite_capture_value(*base, rewritten_local_ids)
+                let rewritten_base = self.rewrite_capture_value(*base, rewritten_local_ids);
                 yield when rewritten_base in {
                     .PlaceRead(inner_place, _) then when inner_place in {
-                        .Local(local_id) then if rewritten_local_ids.contains(local_id.raw_value)
-                            then MIRPlace.Local(local_id)
-                            else MIRPlace.Deref(box(rewritten_base), pointee),
+                        .Local(local_id) then if rewritten_local_ids.contains(local_id.raw_value) then MIRPlace.Local(local_id) else MIRPlace.Deref(box(rewritten_base), pointee),
                         _ then MIRPlace.Deref(box(rewritten_base), pointee),
                     },
-                    .Operand(.Local(local_id)) then if rewritten_local_ids.contains(local_id.raw_value)
-                        then MIRPlace.Local(local_id)
-                        else MIRPlace.Deref(box(rewritten_base), pointee),
+                    .Operand(.Local(local_id)) then if rewritten_local_ids.contains(local_id.raw_value) then MIRPlace.Local(local_id) else MIRPlace.Deref(box(rewritten_base), pointee),
                     _ then MIRPlace.Deref(box(rewritten_base), pointee),
-                }
+                };
             },
             .PointerElement(base, element) then MIRPlace.PointerElement(box(self.rewrite_capture_value(*base, rewritten_local_ids)), element),
             _ then place,
-        }
-    }
+        };
+    };
 
     module_private rewrite_capture_value(*self, value MIRValue, rewritten_local_ids Set[UInt]) MIRValue = {
         return when value in {
             .PlaceRead(place, ownership) then MIRValue.PlaceRead(self.rewrite_capture_place(place, rewritten_local_ids), ownership),
             .Call(call) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for argument in call.arguments then {
-                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
-                }
-                yield MIRValue.Call(MIRCall(call.callee, args, call.argument_ownerships, call.result_type))
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)));
+                };
+                yield MIRValue.Call(MIRCall(call.callee, args, call.argument_ownerships, call.result_type));
             },
             .Aggregate(aggregate) then {
-                let mutable fields = List[* MIRValue].new()
+                let mutable fields = List[* MIRValue].new();
                 for field in aggregate.fields then {
-                    fields.push(box(self.rewrite_capture_value(*field, rewritten_local_ids)))
-                }
-                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+                    fields.push(box(self.rewrite_capture_value(*field, rewritten_local_ids)));
+                };
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships));
             },
             .EnumCase(construction) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for argument in construction.arguments then {
-                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
-                }
-                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)));
+                };
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args));
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.rewrite_capture_value(*tag.subject, rewritten_local_ids)), tag.enum_type)),
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.rewrite_capture_value(*conversion.inner, rewritten_local_ids)), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for argument in call.arguments then {
-                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
-                }
-                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.rewrite_capture_value(*call.receiver, rewritten_local_ids)), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)));
+                };
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.rewrite_capture_value(*call.receiver, rewritten_local_ids)), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type));
             },
             .Ref(place, kind, allocation) then MIRValue.Ref(self.rewrite_capture_place(place, rewritten_local_ids), kind, allocation),
             .Pointer(place) then MIRValue.Pointer(self.rewrite_capture_place(place, rewritten_local_ids)),
             _ then value,
-        }
-    }
+        };
+    };
 
     module_private promote_call_arguments(*mutable self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
         let params = when callee in {
             .Function(symbol) then self.parameters_for_call(symbol),
             _ then List[* FunctionParamEntry].new(),
-        }
+        };
         if params.is_empty() then {
-            return arguments
-        }
+            return arguments;
+        };
         let direct_ref_escaping = when callee in {
             .Function(symbol) then {
-                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                yield summary.direct_reference_escaping_parameter_indices
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                yield summary.direct_reference_escaping_parameter_indices;
             },
             _ then {
-                let mutable all_indices = Set[UInt].new()
-                let mutable i = 0(UInt)
+                let mutable all_indices = Set[UInt].new();
+                let mutable i = 0(UInt);
                 while i < arguments.count() then {
-                    all_indices.insert(i)
-                    i += 1
-                }
-                yield all_indices
+                    all_indices.insert(i);
+                    i += 1;
+                };
+                yield all_indices;
             },
-        }
+        };
         let returning_params = when callee in {
             .Function(symbol) then {
-                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                yield summary.returning_parameter_indices
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                yield summary.returning_parameter_indices;
             },
             _ then Set[UInt].new(),
-        }
-        let mutable promoted = List[* MIRValue].new()
-        let mutable index = 0(UInt)
+        };
+        let mutable promoted = List[* MIRValue].new();
+        let mutable index = 0(UInt);
         while index < arguments.count() then {
-            let argument = (*arguments[index])
-            let mutable param_type = if index < params.count()
-                then Option[Type].Some(self.promotion_destination_type_for_param(*params[index]))
-                else Option[Type].None()
-            let preserve_returned_stack_borrow = if returning_params.contains(index) and not direct_ref_escaping.contains(index)
-                then when self.resolve_temporary_ref_source(argument) in {
+            let argument = (*arguments[index]);
+            let mutable param_type = if index < params.count() then Option[Type].Some(self.promotion_destination_type_for_param(*params[index])) else Option[Type].None();
+            let preserve_returned_stack_borrow = if returning_params.contains(index) and not direct_ref_escaping.contains(index) then when self.resolve_temporary_ref_source(argument) in {
                     .Ref(_, _, allocation) then when allocation in {
                         .StackBorrow() then when param_type in {
                             .Some(dt) then self.type_requires_owned_reference_storage(dt),
@@ -1857,23 +1845,22 @@ given MIRReferenceAllocationFunctionPromoter {
                         .HeapOwned() then false,
                     },
                     _ then false,
-                }
-                else false
+                } else false;
             if preserve_returned_stack_borrow then {
-                param_type = Option[Type].None()
-            }
-            let mutable arg_promoted = self.promote_value(argument, param_type)
+                param_type = Option[Type].None();
+            };
+            let mutable arg_promoted = self.promote_value(argument, param_type);
             if direct_ref_escaping.contains(index) then {
-                arg_promoted = self.promote_direct_references(arg_promoted)
-            }
-            promoted.push(box(arg_promoted))
-            index += 1
-        }
-        return promoted
-    }
+                arg_promoted = self.promote_direct_references(arg_promoted);
+            };
+            promoted.push(box(arg_promoted));
+            index += 1;
+        };
+        return promoted;
+    };
 
     module_private promotion_destination_type_for_param(*self, param FunctionParamEntry) Type = {
-        let _ = self
+        let _ = self;
         return when param.pass_kind in {
             .ByReference() then when param.param_type in {
                 .ReferenceType(inner) then Type.BorrowedReferenceType(inner),
@@ -1886,37 +1873,37 @@ given MIRReferenceAllocationFunctionPromoter {
                 _ then Type.MutableBorrowedReferenceType(box(param.param_type)),
             },
             .ByValue() then param.param_type,
-        }
-    }
+        };
+    };
 
     module_private parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
         when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
             .Some(types) then {
-                let mutable params = List[* FunctionParamEntry].new()
-                for t in types then { params.push(box(*t)) }
-                return params
+                let mutable params = List[* FunctionParamEntry].new();
+                for t in types then { params.push(box(*t));};
+                return params;
             },
             .None() then {},
-        }
+        };
         for name in self.callable_name_aliases(symbol) then {
             when self.parameter_types_by_name.get(name) in {
                 .Some(types) then {
-                    let mutable params = List[* FunctionParamEntry].new()
-                    for t in types then { params.push(box(*t)) }
-                    return params
+                    let mutable params = List[* FunctionParamEntry].new();
+                    for t in types then { params.push(box(*t));};
+                    return params;
                 },
                 .None() then {},
-            }
-        }
-        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
+            };
+        };
+        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type;
         when function_type in {
             .FunctionType(params, _) then {
-                return params
+                return params;
             },
             _ then {},
-        }
-        return List[* FunctionParamEntry].new()
-    }
+        };
+        return List[* FunctionParamEntry].new();
+    };
 
     module_private promote_intrinsic(*mutable self, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
@@ -1939,8 +1926,8 @@ given MIRReferenceAllocationFunctionPromoter {
             .TakeMemory(pointer, result_type) then MIRIntrinsic.TakeMemory(box(self.promote_value(*pointer, Option[Type].None())), result_type),
             .NullPtr(result_type) then MIRIntrinsic.NullPtr(result_type),
             .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(box(self.promote_value(*out_handle, Option[Type].None())), box(self.promote_value(*out_tid, Option[Type].None())), box(self.promote_value(*closure, Option[Type].Some(self.type_of_value(*closure)))), box(self.promote_value(*stack_size, Option[Type].None()))),
-        }
-    }
+        };
+    };
 
     module_private type_requires_owned_reference_storage(*self, t Type) Bool = {
         return when t in {
@@ -1955,9 +1942,9 @@ given MIRReferenceAllocationFunctionPromoter {
             .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
                 .Some(fields) then {
                     for field in fields then {
-                        if self.type_requires_owned_reference_storage(field.field_type) then { return true }
-                    }
-                    yield false
+                        if self.type_requires_owned_reference_storage(field.field_type) then { return true;};
+                    };
+                    yield false;
                 },
                 .None() then false,
             },
@@ -1965,51 +1952,51 @@ given MIRReferenceAllocationFunctionPromoter {
                 .Some(cases) then {
                     for case_info in cases then {
                         for param in case_info.params then {
-                            if self.type_requires_owned_reference_storage(param.param_type) then { return true }
-                        }
-                    }
-                    yield false
+                            if self.type_requires_owned_reference_storage(param.param_type) then { return true;};
+                        };
+                    };
+                    yield false;
                 },
                 .None() then false,
             },
             .GenericStruct(_, args) then {
                 for arg in args then {
-                    if self.type_requires_owned_reference_storage(*arg) then { return true }
-                }
-                yield false
+                    if self.type_requires_owned_reference_storage(*arg) then { return true;};
+                };
+                yield false;
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
-                    if self.type_requires_owned_reference_storage(*arg) then { return true }
-                }
-                yield false
+                    if self.type_requires_owned_reference_storage(*arg) then { return true;};
+                };
+                yield false;
             },
             _ then false,
-        }
-    }
+        };
+    };
 
     module_private resolve_temporary_ref_source(*self, value MIRValue) MIRValue = {
-        let mutable seen = Set[UInt].new()
-        return self.resolve_temporary_ref_source_with_seen(value, &mutable seen)
-    }
+        let mutable seen = Set[UInt].new();
+        return self.resolve_temporary_ref_source_with_seen(value, &mutable seen);
+    };
 
     module_private resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mutable Set[UInt]) MIRValue = {
         if seen.contains(local_id) then {
-            return original
-        }
+            return original;
+        };
         when self.temporary_value_sources_by_id.get(local_id) in {
             .Some(source) then {
-                seen.insert(local_id)
-                let resolved = self.resolve_temporary_ref_source_with_seen(source, seen)
-                let _ = seen.remove(local_id)
+                seen.insert(local_id);
+                let resolved = self.resolve_temporary_ref_source_with_seen(source, seen);
+                let _ = seen.remove(local_id);
                 return when resolved in {
                     .Ref(_, _, _) then resolved,
                     _ then original,
-                }
+                };
             },
-            .None() then { return original },
-        }
-    }
+            .None() then { return original;},
+        };
+    };
 
     module_private resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mutable Set[UInt]) MIRValue = {
         return when value in {
@@ -2017,81 +2004,81 @@ given MIRReferenceAllocationFunctionPromoter {
             .Operand(.Local(local_id)) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
             .PlaceRead(.Local(local_id), _) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
             _ then value,
-        }
-    }
+        };
+    };
 
     module_private promote_direct_references(*mutable self, value MIRValue) MIRValue = {
-        let resolved = self.resolve_temporary_ref_source(value)
+        let resolved = self.resolve_temporary_ref_source(value);
         return when resolved in {
             .Ref(place, kind, allocation) then when allocation in {
                 .StackBorrow() then MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()),
                 .HeapOwned() then resolved,
             },
             .Aggregate(aggregate) then {
-                let mutable fields = List[* MIRValue].new()
+                let mutable fields = List[* MIRValue].new();
                 for field in aggregate.fields then {
-                    fields.push(box(self.promote_direct_references(*field)))
-                }
-                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+                    fields.push(box(self.promote_direct_references(*field)));
+                };
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships));
             },
             .EnumCase(construction) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for arg in construction.arguments then {
-                    args.push(box(self.promote_direct_references(*arg)))
-                }
-                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+                    args.push(box(self.promote_direct_references(*arg)));
+                };
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args));
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(*(conversion.inner))), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mutable args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new();
                 for arg in call.arguments then {
-                    args.push(box(self.promote_direct_references(*arg)))
-                }
-                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                    args.push(box(self.promote_direct_references(*arg)));
+                };
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type));
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(*(tag.subject))), tag.enum_type)),
             _ then resolved,
-        }
-    }
+        };
+    };
 
     module_private callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.receiver_method_dispatch.get(symbol.def_id) in {
-                .Some(info) then { return info.method_name },
+                .Some(info) then { return info.method_name;},
                 .None() then {},
-            }
+            };
             when self.concrete_callables_by_def_id.get(symbol.def_id) in {
-                .Some(info) then { return info.logical_name },
+                .Some(info) then { return info.logical_name;},
                 .None() then {},
-            }
+            };
             when self.context.get_name(symbol.def_id) in {
-                .Some(name) then { return name },
+                .Some(name) then { return name;},
                 .None() then {},
-            }
-        }
-        return self.context.symbol_name(*symbol)
-    }
+            };
+        };
+        return self.context.symbol_name(*symbol);
+    };
 
     module_private callable_name_aliases(self, symbol * Symbol) List[String] = {
-        let mutable names = List[String].new()
-        let logical = self.callable_logical_name(symbol)
+        let mutable names = List[String].new();
+        let logical = self.callable_logical_name(symbol);
         if not logical.is_empty() then {
-            names.push(logical)
-        }
-        let symbol_name = self.context.symbol_name(*symbol)
+            names.push(logical);
+        };
+        let symbol_name = self.context.symbol_name(*symbol);
         if not symbol_name.is_empty() and not names.contains(symbol_name) then {
-            names.push(symbol_name)
-        }
+            names.push(symbol_name);
+        };
         if symbol.def_id.id > 0 then {
             when self.context.get_name(symbol.def_id) in {
                 .Some(name) then if not name.is_empty() and not names.contains(name) then {
-                    names.push(name)
+                    names.push(name);
                 },
                 .None() then {},
-            }
-        }
-        return names
-    }
+            };
+        };
+        return names;
+    };
 
     module_private type_of_value(*self, value MIRValue) Type = {
         return when value in {
@@ -2124,8 +2111,8 @@ given MIRReferenceAllocationFunctionPromoter {
                 _ then Type.VoidType(),
             },
             .Lambda(lambda) then lambda.lambda_type,
-        }
-    }
+        };
+    };
 
     module_private type_of_place(*self, place MIRPlace) Type = {
         return when place in {
@@ -2135,8 +2122,8 @@ given MIRReferenceAllocationFunctionPromoter {
             .EnumPayload(_, _, _, _, field_type) then field_type,
             .Deref(_, pointee) then pointee,
             .PointerElement(_, element) then element,
-        }
-    }
+        };
+    };
 
     module_private type_of_operand(*self, operand MIROperand) Type = {
         return when operand in {
@@ -2149,26 +2136,26 @@ given MIRReferenceAllocationFunctionPromoter {
                 .Boolean(_) then Type.BoolType(),
                 .Void() then Type.VoidType(),
             },
-        }
-    }
+        };
+    };
 
     module_private type_of_ref(*self, place MIRPlace, kind MIRReferenceKind) Type = {
-        let inner = self.type_of_place(place)
+        let inner = self.type_of_place(place);
         return when kind in {
             .Mutable() then Type.MutableReferenceType(box(inner)),
             .Weak() then Type.WeakReferenceType(box(inner)),
             .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
             .Shared() then Type.ReferenceType(box(inner)),
-        }
-    }
+        };
+    };
 
     module_private local_type(*self, local MIRLocalID) Type = {
-        return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
-    }
+        return self.local_types_by_id.get(local.raw_value) or else Type.Unknown();
+    };
 
     module_private local_storage(*self, local MIRLocalID) MIRStorage = {
-        return self.local_storages_by_id.get(local.raw_value) or else MIRStorage.Local()
-    }
+        return self.local_storages_by_id.get(local.raw_value) or else MIRStorage.Local();
+    };
 
-}
+};
 

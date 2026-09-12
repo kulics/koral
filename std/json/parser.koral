@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.json - JSON Parser (Deserialization)
 // ============================================================================
@@ -7,7 +7,7 @@ using std { .. }
 // Internal JsonParser type is not public.
 // ============================================================================
 
-using std::text { Parseable }
+using std::text { Parseable };
 
 // ============================================================================
 // Internal Parser State
@@ -16,7 +16,7 @@ type JsonParser(
     input String,
     mutable pos UInt,
     len UInt,
-)
+);
 
 // ============================================================================
 // JsonParser Helper Methods
@@ -25,473 +25,471 @@ given JsonParser {
 
     // --- Construction ---
 
-    new(input String) JsonParser = JsonParser(input, 0, input.count())
+    new(input String) JsonParser = JsonParser(input, 0, input.count());
 
     // --- Error construction ---
 
     make_error(*self, msg String) Result[JsonValue] =
-        Result[JsonValue].Error(box(JsonError(msg, self.pos)))
+        Result[JsonValue].Error(box(JsonError(msg, self.pos)));
 
     // --- Whitespace handling ---
 
     skip_whitespace(*mutable self) Void = {
         while self.pos < self.len then {
-            let b = self.input[self.pos]
+            let b = self.input[self.pos];
             if b == ' ' or b == '\t' or b == '\n' or b == '\r' then {
-                self.pos += 1
+                self.pos += 1;
             } else {
-                break
-            }
-        }
-    }
+                break;
+            };
+        };
+    };
 
     // --- Byte-level access ---
 
     peek(*self) Option[UInt8] = {
-        return if self.pos < self.len
-            then .Some(self.input[self.pos])
-            else .None()
-    }
+        return if self.pos < self.len then .Some(self.input[self.pos]) else .None();
+    };
 
     advance(*mutable self) UInt8 = {
-        let b = self.input[self.pos]
-        self.pos += 1
-        return b
-    }
+        let b = self.input[self.pos];
+        self.pos += 1;
+        return b;
+    };
 
     expect_char(*mutable self, expected UInt8) Result[JsonValue] = {
-        if self.pos >= self.len then { return self.make_error("unexpected end of input") }
-        let b = self.input[self.pos]
+        if self.pos >= self.len then { return self.make_error("unexpected end of input");};
+        let b = self.input[self.pos];
         if b == expected then {
-            self.pos += 1
-            return .Ok(JsonValue.Null())
-        }
-        let mutable msg = String.new()
-        msg.push_string("expected '")
-        msg.push_byte(expected)
-        msg.push_string("', found '")
-        msg.push_byte(b)
-        msg.push_byte('\'')
-        return self.make_error(msg)
-    }
+            self.pos += 1;
+            return .Ok(JsonValue.Null());
+        };
+        let mutable msg = String.new();
+        msg.push_string("expected '");
+        msg.push_byte(expected);
+        msg.push_string("', found '");
+        msg.push_byte(b);
+        msg.push_byte('\'');
+        return self.make_error(msg);
+    };
 
     // --- Literal parsing ---
 
     parse_null(*mutable self) Result[JsonValue] = {
         if self.pos + 4 > self.len then {
-            return self.make_error("unexpected end of input")
-        }
+            return self.make_error("unexpected end of input");
+        };
         if self.input[self.pos] == 'n' and self.input[self.pos + 1] == 'u' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 'l' then {
-            self.pos += 4
-            return .Ok(JsonValue.Null())
-        }
-        return self.make_error("expected 'null'")
-    }
+            self.pos += 4;
+            return .Ok(JsonValue.Null());
+        };
+        return self.make_error("expected 'null'");
+    };
 
     parse_true(*mutable self) Result[JsonValue] = {
         if self.pos + 4 > self.len then {
-            return self.make_error("unexpected end of input")
-        }
+            return self.make_error("unexpected end of input");
+        };
         if self.input[self.pos] == 't' and self.input[self.pos + 1] == 'r' and self.input[self.pos + 2] == 'u' and self.input[self.pos + 3] == 'e' then {
-            self.pos += 4
-            return .Ok(JsonValue.Bool(true))
-        }
-        return self.make_error("expected 'true'")
-    }
+            self.pos += 4;
+            return .Ok(JsonValue.Bool(true));
+        };
+        return self.make_error("expected 'true'");
+    };
 
     parse_false(*mutable self) Result[JsonValue] = {
         if self.pos + 5 > self.len then {
-            return self.make_error("unexpected end of input")
-        }
+            return self.make_error("unexpected end of input");
+        };
         if self.input[self.pos] == 'f' and self.input[self.pos + 1] == 'a' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 's' and self.input[self.pos + 4] == 'e' then {
-            self.pos += 5
-            return .Ok(JsonValue.Bool(false))
-        }
-        return self.make_error("expected 'false'")
-    }
+            self.pos += 5;
+            return .Ok(JsonValue.Bool(false));
+        };
+        return self.make_error("expected 'false'");
+    };
 
     // --- String error construction ---
 
     make_string_error(*self, msg String) Result[String] =
-        Result[String].Error(box(JsonError(msg, self.pos)))
+        Result[String].Error(box(JsonError(msg, self.pos)));
 
     // --- Hex digit parsing ---
 
     parse_hex4(*mutable self) Result[UInt] = {
-        let mutable value UInt = 0
+        let mutable value UInt = 0;
         for _ in 0..<4 then {
             if self.pos >= self.len then {
-                return .Error(box(JsonError("invalid unicode escape", self.pos)))
-            }
-            let b = self.input[self.pos]
+                return .Error(box(JsonError("invalid unicode escape", self.pos)));
+            };
+            let b = self.input[self.pos];
             let digit = if b >= '0' and b <= '9' then {
-                yield (b - '0')(UInt)
+                yield (b - '0')(UInt);
             } else if b >= 'a' and b <= 'f' then {
-                yield (b - 'a')(UInt) + 10
+                yield (b - 'a')(UInt) + 10;
             } else if b >= 'A' and b <= 'F' then {
-                yield (b - 'A')(UInt) + 10
+                yield (b - 'A')(UInt) + 10;
             } else {
-                return .Error(box(JsonError("invalid unicode escape", self.pos)))
-            }
-            value = value * 16 + digit
-            self.pos += 1
-        }
-        return .Ok(value)
-    }
+                return .Error(box(JsonError("invalid unicode escape", self.pos)));
+            };
+            value = value * 16 + digit;
+            self.pos += 1;
+        };
+        return .Ok(value);
+    };
 
     // --- UTF-8 encoding helper ---
 
     encode_utf8(*self, cp UInt, result *mutable String) Void = {
         if cp < 128 then {
-            result.push_byte(cp(UInt8))
+            result.push_byte(cp(UInt8));
         } else if cp < 2048 then {
-            result.push_byte((cp >> 6)(UInt8) | 192(UInt8))
-            result.push_byte((cp & 63)(UInt8) | 128(UInt8))
+            result.push_byte((cp >> 6)(UInt8) | 192(UInt8));
+            result.push_byte((cp & 63)(UInt8) | 128(UInt8));
         } else if cp < 65536 then {
-            result.push_byte((cp >> 12)(UInt8) | 224(UInt8))
-            result.push_byte(((cp >> 6) & 63)(UInt8) | 128(UInt8))
-            result.push_byte((cp & 63)(UInt8) | 128(UInt8))
+            result.push_byte((cp >> 12)(UInt8) | 224(UInt8));
+            result.push_byte(((cp >> 6) & 63)(UInt8) | 128(UInt8));
+            result.push_byte((cp & 63)(UInt8) | 128(UInt8));
         } else {
-            result.push_byte((cp >> 18)(UInt8) | 240(UInt8))
-            result.push_byte(((cp >> 12) & 63)(UInt8) | 128(UInt8))
-            result.push_byte(((cp >> 6) & 63)(UInt8) | 128(UInt8))
-            result.push_byte((cp & 63)(UInt8) | 128(UInt8))
-        }
-    }
+            result.push_byte((cp >> 18)(UInt8) | 240(UInt8));
+            result.push_byte(((cp >> 12) & 63)(UInt8) | 128(UInt8));
+            result.push_byte(((cp >> 6) & 63)(UInt8) | 128(UInt8));
+            result.push_byte((cp & 63)(UInt8) | 128(UInt8));
+        };
+    };
 
     // --- String parsing ---
 
     parse_string_raw(*mutable self) Result[String] = {
         // Expect opening quote
         if self.pos >= self.len then {
-            return self.make_string_error("unexpected end of input")
-        }
+            return self.make_string_error("unexpected end of input");
+        };
         if self.input[self.pos] <> '"' then {
-            let mutable msg = String.new()
-            msg.push_string("expected '\"', found '")
-            msg.push_byte(self.input[self.pos])
-            msg.push_byte('\'')
-            return self.make_string_error(msg)
-        }
-        self.pos += 1
+            let mutable msg = String.new();
+            msg.push_string("expected '\"', found '");
+            msg.push_byte(self.input[self.pos]);
+            msg.push_byte('\'');
+            return self.make_string_error(msg);
+        };
+        self.pos += 1;
 
-        let mutable result = String.new()
+        let mutable result = String.new();
 
         while self.pos < self.len then {
-            let b = self.input[self.pos]
+            let b = self.input[self.pos];
 
             // Closing quote
             if b == '"' then {
-                self.pos += 1
-                return .Ok(result)
-            }
+                self.pos += 1;
+                return .Ok(result);
+            };
 
             // Escape sequence
             if b == '\\' then {
-                let escape_pos = self.pos
-                self.pos += 1
+                let escape_pos = self.pos;
+                self.pos += 1;
                 if self.pos >= self.len then {
-                    return self.make_string_error("unexpected end of input")
-                }
-                let esc = self.input[self.pos]
-                self.pos += 1
+                    return self.make_string_error("unexpected end of input");
+                };
+                let esc = self.input[self.pos];
+                self.pos += 1;
                 if esc == '"' then {
-                    result.push_byte('"')
+                    result.push_byte('"');
                 } else if esc == '\\' then {
-                    result.push_byte('\\')
+                    result.push_byte('\\');
                 } else if esc == '/' then {
-                    result.push_byte('/')
+                    result.push_byte('/');
                 } else if esc == 'b' then {
-                    result.push_byte(8(UInt8))
+                    result.push_byte(8(UInt8));
                 } else if esc == 'f' then {
-                    result.push_byte(12(UInt8))
+                    result.push_byte(12(UInt8));
                 } else if esc == 'n' then {
-                    result.push_byte(10(UInt8))
+                    result.push_byte(10(UInt8));
                 } else if esc == 'r' then {
-                    result.push_byte(13(UInt8))
+                    result.push_byte(13(UInt8));
                 } else if esc == 't' then {
-                    result.push_byte(9(UInt8))
+                    result.push_byte(9(UInt8));
                 } else if esc == 'u' then {
-                    let hex_result = self.parse_hex4()
+                    let hex_result = self.parse_hex4();
                     let cp = when hex_result in {
                         .Ok(v) then v,
-                        .Error(e) then { return .Error(e) },
-                    }
+                        .Error(e) then { return .Error(e);},
+                    };
                     // Check for UTF-16 surrogate pair
                     if cp >= 55296 and cp <= 56319 then {
                         // High surrogate (0xD800-0xDBFF) — expect \uXXXX low surrogate
                         if self.pos + 1 >= self.len or self.input[self.pos] <> '\\' or self.input[self.pos + 1] <> 'u' then {
-                            self.pos = escape_pos
-                            return self.make_string_error("invalid unicode escape")
-                        }
-                        self.pos += 2
-                        let low_result = self.parse_hex4()
+                            self.pos = escape_pos;
+                            return self.make_string_error("invalid unicode escape");
+                        };
+                        self.pos += 2;
+                        let low_result = self.parse_hex4();
                         let low = when low_result in {
                             .Ok(v) then v,
-                            .Error(e) then { return .Error(e) },
-                        }
+                            .Error(e) then { return .Error(e);},
+                        };
                         if low < 56320 or low > 57343 then {
                             // Not a valid low surrogate (0xDC00-0xDFFF)
-                            self.pos = escape_pos
-                            return self.make_string_error("invalid unicode escape")
-                        }
+                            self.pos = escape_pos;
+                            return self.make_string_error("invalid unicode escape");
+                        };
                         // Combine surrogate pair: (high - 0xD800) * 0x400 + (low - 0xDC00) + 0x10000
-                        let combined = (cp - 55296) * 1024 + (low - 56320) + 65536
-                        self.encode_utf8(combined, &mutable result)
+                        let combined = (cp - 55296) * 1024 + (low - 56320) + 65536;
+                        self.encode_utf8(combined, &mutable result);
                     } else if cp >= 56320 and cp <= 57343 then {
                         // Lone low surrogate — invalid
-                        self.pos = escape_pos
-                        return self.make_string_error("invalid unicode escape")
+                        self.pos = escape_pos;
+                        return self.make_string_error("invalid unicode escape");
                     } else {
-                        self.encode_utf8(cp, &mutable result)
-                    }
+                        self.encode_utf8(cp, &mutable result);
+                    };
                 } else {
-                    self.pos = escape_pos
-                    let mutable msg = String.new()
-                    msg.push_string("invalid escape sequence '\\")
-                    msg.push_byte(esc)
-                    msg.push_byte('\'')
-                    return self.make_string_error(msg)
-                }
+                    self.pos = escape_pos;
+                    let mutable msg = String.new();
+                    msg.push_string("invalid escape sequence '\\");
+                    msg.push_byte(esc);
+                    msg.push_byte('\'');
+                    return self.make_string_error(msg);
+                };
             } else if b < 32(UInt8) then {
                 // Control characters are not allowed unescaped
-                return self.make_string_error("unexpected character")
+                return self.make_string_error("unexpected character");
             } else {
                 // Regular character — push directly
-                result.push_byte(b)
-                self.pos += 1
-            }
-        }
+                result.push_byte(b);
+                self.pos += 1;
+            };
+        };
 
         // Reached end of input without closing quote
-        return self.make_string_error("unexpected end of input")
-    }
+        return self.make_string_error("unexpected end of input");
+    };
 
     parse_string(*mutable self) Result[JsonValue] = {
-        return .Ok(JsonValue.String(self.parse_string_raw() or return))
-    }
+        return .Ok(JsonValue.String(self.parse_string_raw() or return));
+    };
 
     // --- Array parsing ---
 
     parse_array(*mutable self) Result[JsonValue] = {
         // Expect opening '['
         if self.pos >= self.len or self.input[self.pos] <> '[' then {
-            return self.make_error("expected '['")
-        }
-        self.pos += 1
+            return self.make_error("expected '['");
+        };
+        self.pos += 1;
 
-        self.skip_whitespace()
+        self.skip_whitespace();
 
         // Empty array
         if self.pos < self.len and self.input[self.pos] == ']' then {
-            self.pos += 1
-            let empty List[* JsonValue] = []
-            return .Ok(JsonValue.Array(empty))
-        }
+            self.pos += 1;
+            let empty List[* JsonValue] = [];
+            return .Ok(JsonValue.Array(empty));
+        };
 
-        let mutable elements List[* JsonValue] = []
+        let mutable elements List[* JsonValue] = [];
 
         while true then {
             // Parse element
-            let value = self.parse_value() or return
-            elements.push(box(value))
+            let value = self.parse_value() or return;
+            elements.push(box(value));
 
-            self.skip_whitespace()
+            self.skip_whitespace();
 
             if self.pos >= self.len then {
-                return self.make_error("unexpected end of input")
-            }
+                return self.make_error("unexpected end of input");
+            };
 
-            let b = self.input[self.pos]
+            let b = self.input[self.pos];
             if b == ',' then {
-                self.pos += 1
-                self.skip_whitespace()
+                self.pos += 1;
+                self.skip_whitespace();
             } else if b == ']' then {
-                self.pos += 1
-                break
+                self.pos += 1;
+                break;
             } else {
-                return self.make_error("expected ',' or ']'")
-            }
-        }
+                return self.make_error("expected ',' or ']'");
+            };
+        };
 
-        return .Ok(JsonValue.Array(elements))
-    }
+        return .Ok(JsonValue.Array(elements));
+    };
 
     // --- Object parsing ---
 
     parse_object(*mutable self) Result[JsonValue] = {
         // Expect opening '{'
         if self.pos >= self.len or self.input[self.pos] <> '{' then {
-            return self.make_error("expected '{'")
-        }
-        self.pos += 1
+            return self.make_error("expected '{'");
+        };
+        self.pos += 1;
 
-        self.skip_whitespace()
+        self.skip_whitespace();
 
         // Empty object
         if self.pos < self.len and self.input[self.pos] == '}' then {
-            self.pos += 1
-            let empty Dict[String, * JsonValue] = []
-            return .Ok(JsonValue.Object(empty))
-        }
+            self.pos += 1;
+            let empty Dict[String, * JsonValue] = [];
+            return .Ok(JsonValue.Object(empty));
+        };
 
-        let mutable entries Dict[String, * JsonValue] = []
+        let mutable entries Dict[String, * JsonValue] = [];
 
         while true then {
             // Parse key (must be a string)
-            let key = self.parse_string_raw() or return
+            let key = self.parse_string_raw() or return;
 
-            self.skip_whitespace()
+            self.skip_whitespace();
 
             // Expect ':'
             if self.pos >= self.len then {
-                return self.make_error("unexpected end of input")
-            }
+                return self.make_error("unexpected end of input");
+            };
             if self.input[self.pos] <> ':' then {
-                return self.make_error("expected ':'")
-            }
-            self.pos += 1
+                return self.make_error("expected ':'");
+            };
+            self.pos += 1;
 
-            self.skip_whitespace()
+            self.skip_whitespace();
 
             // Parse value
-            let value = self.parse_value() or return
+            let value = self.parse_value() or return;
 
             // Insert key-value pair (duplicate keys: later value overwrites)
-            entries.insert(key, box(value))
+            entries.insert(key, box(value));
 
-            self.skip_whitespace()
+            self.skip_whitespace();
 
             if self.pos >= self.len then {
-                return self.make_error("unexpected end of input")
-            }
+                return self.make_error("unexpected end of input");
+            };
 
-            let b = self.input[self.pos]
+            let b = self.input[self.pos];
             if b == ',' then {
-                self.pos += 1
-                self.skip_whitespace()
+                self.pos += 1;
+                self.skip_whitespace();
             } else if b == '}' then {
-                self.pos += 1
-                break
+                self.pos += 1;
+                break;
             } else {
-                return self.make_error("expected ',' or '}'")
-            }
-        }
+                return self.make_error("expected ',' or '}'");
+            };
+        };
 
-        return .Ok(JsonValue.Object(entries))
-    }
+        return .Ok(JsonValue.Object(entries));
+    };
 
     // --- Number parsing ---
 
     parse_number(*mutable self) Result[JsonValue] = {
-        let start = self.pos
+        let start = self.pos;
 
         // Optional leading minus
-        let is_negative = self.pos < self.len and self.input[self.pos] == '-'
+        let is_negative = self.pos < self.len and self.input[self.pos] == '-';
         if is_negative then {
-            self.pos += 1
-        }
+            self.pos += 1;
+        };
 
         // Integer part (required)
         if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
-            self.pos = start
-            return self.make_error("invalid number")
-        }
+            self.pos = start;
+            return self.make_error("invalid number");
+        };
 
-        let mutable int_part Float64 = 0.0
+        let mutable int_part Float64 = 0.0;
         if self.input[self.pos] == '0' then {
             // Leading zero: only '0' is allowed, no '01', '02', etc.
-            self.pos += 1
+            self.pos += 1;
         } else {
             // digit1-9 followed by *digit
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
-                int_part = int_part * 10.0 + (self.input[self.pos] - '0')(Float64)
-                self.pos += 1
-            }
-        }
+                int_part = int_part * 10.0 + (self.input[self.pos] - '0')(Float64);
+                self.pos += 1;
+            };
+        };
 
         // Optional fractional part
-        let mutable frac_part Float64 = 0.0
+        let mutable frac_part Float64 = 0.0;
         if self.pos < self.len and self.input[self.pos] == '.' then {
-            self.pos += 1
+            self.pos += 1;
             // Must have at least one digit after '.'
             if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
-                self.pos = start
-                return self.make_error("invalid number")
-            }
-            let mutable scale Float64 = 0.1
+                self.pos = start;
+                return self.make_error("invalid number");
+            };
+            let mutable scale Float64 = 0.1;
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
-                frac_part = frac_part + (self.input[self.pos] - '0')(Float64) * scale
-                scale = scale * 0.1
-                self.pos += 1
-            }
-        }
+                frac_part = frac_part + (self.input[self.pos] - '0')(Float64) * scale;
+                scale = scale * 0.1;
+                self.pos += 1;
+            };
+        };
 
-        let mutable result = int_part + frac_part
+        let mutable result = int_part + frac_part;
 
         // Optional exponent part
         if self.pos < self.len and (self.input[self.pos] == 'e' or self.input[self.pos] == 'E') then {
-            self.pos += 1
-            let exp_negative = self.pos < self.len and self.input[self.pos] == '-'
+            self.pos += 1;
+            let exp_negative = self.pos < self.len and self.input[self.pos] == '-';
             if self.pos < self.len and (self.input[self.pos] == '+' or self.input[self.pos] == '-') then {
-                self.pos += 1
-            }
+                self.pos += 1;
+            };
             // Must have at least one digit after 'e'/'E'
             if self.pos >= self.len or self.input[self.pos] < '0' or self.input[self.pos] > '9' then {
-                self.pos = start
-                return self.make_error("invalid number")
-            }
-            let mutable exp Int = 0
+                self.pos = start;
+                return self.make_error("invalid number");
+            };
+            let mutable exp Int = 0;
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '9' then {
-                exp = exp * 10 + (self.input[self.pos] - '0')(Int)
-                self.pos += 1
-            }
-            let mutable power Float64 = 1.0
-            let mutable e = exp
+                exp = exp * 10 + (self.input[self.pos] - '0')(Int);
+                self.pos += 1;
+            };
+            let mutable power Float64 = 1.0;
+            let mutable e = exp;
             while e > 0 then {
-                power = power * 10.0
-                e -= 1
-            }
+                power = power * 10.0;
+                e -= 1;
+            };
             if exp_negative then {
-                result = result / power
+                result = result / power;
             } else {
-                result = result * power
-            }
-        }
+                result = result * power;
+            };
+        };
 
         // Apply sign
         if is_negative then {
-            result = 0.0 - result
-        }
+            result = 0.0 - result;
+        };
 
-        return .Ok(JsonValue.Number(result))
-    }
+        return .Ok(JsonValue.Number(result));
+    };
 
     // --- Top-level value dispatch ---
 
     parse_value(*mutable self) Result[JsonValue] = {
-        self.skip_whitespace()
+        self.skip_whitespace();
         when self.peek() in {
-            .None then { return self.make_error("unexpected end of input") },
+            .None then { return self.make_error("unexpected end of input");},
             .Some(b) then {
-                if b == 'n' then { return self.parse_null() }
-                if b == 't' then { return self.parse_true() }
-                if b == 'f' then { return self.parse_false() }
-                if b == '"' then { return self.parse_string() }
-                if b == '[' then { return self.parse_array() }
-                if b == '{' then { return self.parse_object() }
+                if b == 'n' then { return self.parse_null();};
+                if b == 't' then { return self.parse_true();};
+                if b == 'f' then { return self.parse_false();};
+                if b == '"' then { return self.parse_string();};
+                if b == '[' then { return self.parse_array();};
+                if b == '{' then { return self.parse_object();};
                 if b == '-' or (b >= '0' and b <= '9') then {
-                    return self.parse_number()
-                }
-                let mutable msg = String.new()
-                msg.push_string("unexpected character '")
-                msg.push_byte(b)
-                msg.push_byte('\'')
-                return self.make_error(msg)
+                    return self.parse_number();
+                };
+                let mutable msg = String.new();
+                msg.push_string("unexpected character '");
+                msg.push_byte(b);
+                msg.push_byte('\'');
+                return self.make_error(msg);
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // ============================================================================
 // JsonValue Parseable Implementation
@@ -499,14 +497,14 @@ given JsonParser {
 given JsonValue as Parseable {
 
     public parse(s String) Result[Self] = {
-        let mutable parser = JsonParser.new(s)
+        let mutable parser = JsonParser.new(s);
         let value = parser.parse_value() or else {
-            return .Error(it)
-        }
-        parser.skip_whitespace()
+            return .Error(it);
+        };
+        parser.skip_whitespace();
         if parser.pos < parser.len then {
-            return .Error(box(JsonError("trailing characters after JSON value", parser.pos)))
-        }
-        return .Ok(value)
-    }
-}
+            return .Error(box(JsonError("trailing characters after JSON value", parser.pos)));
+        };
+        return .Ok(value);
+    };
+};

@@ -6,13 +6,13 @@
 
 // Generic Iterator trait for for-loop support
 public trait Iterator[T Any] {
-    next(*mutable self) Option[T]
-}
+    next(*mutable self) Option[T];
+};
 
 // Iterable trait - types that can produce an iterator
 public trait Iterable[T Any, R Iterator[T]] {
-    iterator(*self) R
-}
+    iterator(*self) R;
+};
 
 // ============================================================================
 // Intermediate Iterator Types
@@ -22,33 +22,33 @@ public trait Iterable[T Any, R Iterator[T]] {
 public type FilterIterator[T Any, R Iterator[T]](
     module_private mutable iter R,
     module_private predicate Func(T) Bool,
-)
+);
 
 given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         while self.iter.next() is .Some(v) then {
             if self.predicate(v) then {
-                return Option[T].Some(v)
-            }
-        }
-        return Option[T].None()
-    }
-}
+                return Option[T].Some(v);
+            };
+        };
+        return Option[T].None();
+    };
+};
 
 // MapIterator - transforms elements using mapper function
-public type MapIterator[T Any, U Any, R Iterator[T]](module_private mutable iter R, module_private mapper Func(T) U)
+public type MapIterator[T Any, U Any, R Iterator[T]](module_private mutable iter R, module_private mapper Func(T) U);
 
 given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
 
-    public next(*mutable self) Option[U] = self.iter.next() and then self.mapper(it)
-}
+    public next(*mutable self) Option[U] = self.iter.next() and then self.mapper(it);
+};
 
 // FilterMapIterator - filters and transforms in one operation
 public type FilterMapIterator[T Any, U Any, R Iterator[T]](
     module_private mutable iter R,
     module_private mapper Func(T) Option[U],
-)
+);
 
 given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
 
@@ -56,97 +56,97 @@ given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
         while self.iter.next() is .Some(v) then {
             when self.mapper(v) in {
                 .Some(u) then {
-                    return Option[U].Some(u)
+                    return Option[U].Some(u);
                 },
                 .None then {},
-            }
-        }
-        return Option[U].None()
-    }
-}
+            };
+        };
+        return Option[U].None();
+    };
+};
 
 // TakeIterator - takes first n elements
-public type TakeIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable remaining UInt)
+public type TakeIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable remaining UInt);
 
 given[T Any, R Iterator[T]] TakeIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if self.remaining == 0 then {
-            return Option[T].None()
-        }
-        self.remaining -= 1
-        return self.iter.next()
-    }
-}
+            return Option[T].None();
+        };
+        self.remaining -= 1;
+        return self.iter.next();
+    };
+};
 
 // SkipIterator - skips first n elements
-public type SkipIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable to_skip UInt)
+public type SkipIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable to_skip UInt);
 
 given[T Any, R Iterator[T]] SkipIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         while self.to_skip > 0 then {
             self.iter.next() or else {
-                return Option[T].None()
-            }
-            self.to_skip -= 1
-        }
-        return self.iter.next()
-    }
-}
+                return Option[T].None();
+            };
+            self.to_skip -= 1;
+        };
+        return self.iter.next();
+    };
+};
 
 // StepIterator - takes every nth element
 public type StepIterator[T Any, R Iterator[T]](
     module_private mutable iter R,
     module_private step_size UInt,
     module_private mutable first Bool,
-)
+);
 
 given[T Any, R Iterator[T]] StepIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if self.first then {
-            self.first = false
-            return self.iter.next()
-        }
+            self.first = false;
+            return self.iter.next();
+        };
         // Skip step_size - 1 elements
-        let mutable i UInt = 1
+        let mutable i UInt = 1;
         while i < self.step_size then {
             self.iter.next() or else {
-                return Option[T].None()
-            }
-            i += 1
-        }
-        return self.iter.next()
-    }
-}
+                return Option[T].None();
+            };
+            i += 1;
+        };
+        return self.iter.next();
+    };
+};
 
 // EnumerateIterator - pairs each element with its index
-public type EnumerateIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable index UInt)
+public type EnumerateIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private mutable index UInt);
 
 given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
 
     public next(*mutable self) Option[Pair[UInt, T]] = {
         return self.iter.next() and then {
-            let idx = self.index
-            self.index += 1
-            yield Pair[UInt, T](idx, it)
-        }
-    }
-}
+            let idx = self.index;
+            self.index += 1;
+            yield Pair[UInt, T](idx, it);
+        };
+    };
+};
 
 // InspectIterator - executes side effect without modifying elements
-public type InspectIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private action Func(T) Void)
+public type InspectIterator[T Any, R Iterator[T]](module_private mutable iter R, module_private action Func(T) Void);
 
 given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         return self.iter.next() and then {
             self.action(it);
-            yield it
-        }
-    }
-}
+            yield it;
+        };
+    };
+};
 
 // IntersperseIterator - inserts separator between elements
 public type IntersperseIterator[T Any, R Iterator[T]](
@@ -154,7 +154,7 @@ public type IntersperseIterator[T Any, R Iterator[T]](
     module_private separator T,
     module_private mutable next_is_separator Bool,
     module_private mutable pending Option[T],
-)
+);
 
 given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
 
@@ -163,25 +163,25 @@ given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
         if self.next_is_separator then {
             when self.pending in {
                 .Some(_) then {
-                    self.next_is_separator = false
-                    return Option[T].Some(self.separator)
+                    self.next_is_separator = false;
+                    return Option[T].Some(self.separator);
                 },
                 .None then {},
-            }
-        }
+            };
+        };
         // Return pending value
         when self.pending in {
             .Some(v) then {
-                self.pending = Option[T].None()
+                self.pending = Option[T].None();
                 // Prefetch next element
                 when self.iter.next() in {
                     .Some(next_v) then {
-                        self.pending = Option[T].Some(next_v)
-                        self.next_is_separator = true
+                        self.pending = Option[T].Some(next_v);
+                        self.next_is_separator = true;
                     },
                     .None then {},
-                }
-                return Option[T].Some(v)
+                };
+                return Option[T].Some(v);
             },
             .None then {
                 // First call, get first element
@@ -190,80 +190,80 @@ given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
                         // Prefetch next
                         when self.iter.next() in {
                             .Some(next_v) then {
-                                self.pending = Option[T].Some(next_v)
-                                self.next_is_separator = true
+                                self.pending = Option[T].Some(next_v);
+                                self.next_is_separator = true;
                             },
                             .None then {},
-                        }
-                        return Option[T].Some(v)
+                        };
+                        return Option[T].Some(v);
                     },
                     .None then {
-                        return Option[T].None()
+                        return Option[T].None();
                     },
-                }
+                };
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // TakeWhileIterator - takes elements while predicate is true
 public type TakeWhileIterator[T Any, R Iterator[T]](
     module_private mutable iter R,
     module_private predicate Func(T) Bool,
     module_private mutable done Bool,
-)
+);
 
 given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if self.done then {
-            return Option[T].None()
-        }
+            return Option[T].None();
+        };
         when self.iter.next() in {
             .Some(v) then {
                 if self.predicate(v) then {
-                    return Option[T].Some(v)
+                    return Option[T].Some(v);
                 } else {
-                    self.done = true
-                    return Option[T].None()
-                }
+                    self.done = true;
+                    return Option[T].None();
+                };
             },
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // SkipWhileIterator - skips elements while predicate is true
 public type SkipWhileIterator[T Any, R Iterator[T]](
     module_private mutable iter R,
     module_private predicate Func(T) Bool,
     module_private mutable skipping Bool,
-)
+);
 
 given[T Any, R Iterator[T]] SkipWhileIterator[T, R] as Iterator[T] {
 
     public next(*mutable self) Option[T] = {
         if not self.skipping then {
-            return self.iter.next()
-        }
+            return self.iter.next();
+        };
         while self.iter.next() is .Some(v) then {
             if not self.predicate(v) then {
-                self.skipping = false
-                return Option[T].Some(v)
-            }
-        }
-        return Option[T].None()
-    }
-}
+                self.skipping = false;
+                return Option[T].Some(v);
+            };
+        };
+        return Option[T].None();
+    };
+};
 
 // ChainIterator - chains two iterators of the same element type
 public type ChainIterator[T Any, R1 Iterator[T], R2 Iterator[T]](
     module_private mutable first R1,
     module_private mutable second R2,
     module_private mutable use_second Bool,
-)
+);
 
 given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterator[T] {
 
@@ -271,39 +271,39 @@ given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterato
         if not self.use_second then {
             when self.first.next() in {
                 .Some(v) then {
-                    return Option[T].Some(v)
+                    return Option[T].Some(v);
                 },
                 .None then {
-                    self.use_second = true
+                    self.use_second = true;
                 },
-            }
-        }
-        return self.second.next()
-    }
-}
+            };
+        };
+        return self.second.next();
+    };
+};
 
 // ZipIterator - zips two iterators into pairs
 public type ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]](
     module_private mutable first R1,
     module_private mutable second R2,
-)
+);
 
 given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as Iterator[Pair[A, B]] {
 
     public next(*mutable self) Option[Pair[A, B]] = {
         return self.first.next() and then {
-            let a = it
-            yield self.second.next() and then Pair[A, B](a, it)
-        }
-    }
-}
+            let a = it;
+            yield self.second.next() and then Pair[A, B](a, it);
+        };
+    };
+};
 
 // FlatMapIterator - flattens nested iterators (fully lazy)
 public type FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]](
     module_private mutable outer R,
     module_private mapper Func(T) InnerR,
     module_private mutable current_inner Option[InnerR],
-)
+);
 
 given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, InnerR] as Iterator[U] {
 
@@ -312,35 +312,35 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
             when self.current_inner in {
                 .Some(inner) then {
                     // Copy out the inner iterator
-                    let mutable inner_copy = inner
+                    let mutable inner_copy = inner;
                     when inner_copy.next() in {
                         .Some(v) then {
                             // Write modified iterator back
-                            self.current_inner = Option[InnerR].Some(inner_copy)
-                            return Option[U].Some(v)
+                            self.current_inner = Option[InnerR].Some(inner_copy);
+                            return Option[U].Some(v);
                         },
                         .None then {
                             // Inner exhausted, clear it
-                            self.current_inner = Option[InnerR].None()
+                            self.current_inner = Option[InnerR].None();
                         },
-                    }
+                    };
                 },
                 .None then {
                     // Get next from outer iterator
                     when self.outer.next() in {
                         .None then {
-                            return Option[U].None()
+                            return Option[U].None();
                         },
                         .Some(outer_val) then {
-                            self.current_inner = Option[InnerR].Some(self.mapper(outer_val))
+                            self.current_inner = Option[InnerR].Some(self.mapper(outer_val));
                         },
-                    }
+                    };
                 },
-            }
-        }
-        return Option[U].None()
-    }
-}
+            };
+        };
+        return Option[U].None();
+    };
+};
 
 // ============================================================================
 // Iterator Intermediate Operations
@@ -349,64 +349,64 @@ given[T Any] Iterator[T] {
 
     // Filter - returns iterator with elements matching predicate
     public filter(self, fn Func(T) Bool) FilterIterator[T, Self] =
-        FilterIterator[T, Self](self, fn)
+        FilterIterator[T, Self](self, fn);
 
     // Map - transforms each element
     public map[U Any](self, fn Func(T) U) MapIterator[T, U, Self] =
-        MapIterator[T, U, Self](self, fn)
+        MapIterator[T, U, Self](self, fn);
 
     // FilterMap - filter and transform in one operation
     public filter_map[U Any](self, fn Func(T) Option[U]) FilterMapIterator[T, U, Self] =
-        FilterMapIterator[T, U, Self](self, fn)
+        FilterMapIterator[T, U, Self](self, fn);
 
     // Take - take first n elements
     public take(self, n UInt) TakeIterator[T, Self] =
-        TakeIterator[T, Self](self, n)
+        TakeIterator[T, Self](self, n);
 
     // Skip - skip first n elements
     public skip(self, n UInt) SkipIterator[T, Self] =
-        SkipIterator[T, Self](self, n)
+        SkipIterator[T, Self](self, n);
 
     // StepBy - take every nth element
     public step_by(self, n UInt) StepIterator[T, Self] = {
         if n < 1 then {
             panic("step size must be at least 1");
-        }
-        return StepIterator[T, Self](self, n, true)
-    }
+        };
+        return StepIterator[T, Self](self, n, true);
+    };
 
     // Enumerate - pair each element with its index
     public enumerate(self) EnumerateIterator[T, Self] =
-        EnumerateIterator[T, Self](self, 0)
+        EnumerateIterator[T, Self](self, 0);
 
     // Inspect - execute side effect without modifying elements
     public inspect(self, fn Func(T) Void) InspectIterator[T, Self] =
-        InspectIterator[T, Self](self, fn)
+        InspectIterator[T, Self](self, fn);
 
     // Intersperse - insert separator between elements
     public intersperse(self, v T) IntersperseIterator[T, Self] =
-        IntersperseIterator[T, Self](self, v, false, Option[T].None())
+        IntersperseIterator[T, Self](self, v, false, Option[T].None());
 
     // TakeWhile - take elements while predicate is true
     public take_while(self, fn Func(T) Bool) TakeWhileIterator[T, Self] =
-        TakeWhileIterator[T, Self](self, fn, false)
+        TakeWhileIterator[T, Self](self, fn, false);
 
     // SkipWhile - skip elements while predicate is true
     public skip_while(self, fn Func(T) Bool) SkipWhileIterator[T, Self] =
-        SkipWhileIterator[T, Self](self, fn, true)
+        SkipWhileIterator[T, Self](self, fn, true);
 
     // Chain - chain with another iterator of the same element type
     public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2] =
-        ChainIterator[T, Self, R2](self, other, false)
+        ChainIterator[T, Self, R2](self, other, false);
 
     // Zip - zip with another iterator into pairs
     public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2] =
-        ZipIterator[T, U, Self, R2](self, other)
+        ZipIterator[T, U, Self, R2](self, other);
 
     // FlatMap - map each element to an iterator and flatten results
     public flat_map[U Any, InnerR Iterator[U]](self, fn Func(T) InnerR) FlatMapIterator[T, U, Self, InnerR] =
-        FlatMapIterator[T, U, Self, InnerR](self, fn, Option[InnerR].None())
-}
+        FlatMapIterator[T, U, Self, InnerR](self, fn, Option[InnerR].None());
+};
 
 // ============================================================================
 // Iterator Terminal Operations
@@ -415,198 +415,198 @@ given[T Any] Iterator[T] {
 
     // Fold - reduce with initial value
     public fold[U Any](self, initial U, fn Func(U, T) U) U = {
-        let mutable acc = initial
-        let mutable iter = self
+        let mutable acc = initial;
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            acc = fn(acc, v)
-        }
-        return acc
-    }
+            acc = fn(acc, v);
+        };
+        return acc;
+    };
 
     // Reduce - reduce without initial value
     public reduce(self, fn Func(T, T) T) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         when iter.next() in {
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
             .Some(first) then {
-                let mutable acc = first
+                let mutable acc = first;
                 while iter.next() is .Some(v) then {
-                    acc = fn(acc, v)
-                }
-                return Option[T].Some(acc)
+                    acc = fn(acc, v);
+                };
+                return Option[T].Some(acc);
             },
-        }
-    }
+        };
+    };
 
     // ToList - collect into List
     public into_list(self) List[T] = {
-        let mutable result List[T] = []
-        let mutable iter = self
+        let mutable result List[T] = [];
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            result.push(v)
-        }
-        return result
-    }
+            result.push(v);
+        };
+        return result;
+    };
 
     // ForEach - execute side effect for each element
     public for_each(self, fn Func(T) Void) Void = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             fn(v);
-        }
-    }
+        };
+    };
 
     // Count - count elements
     public count(self) UInt = {
-        let mutable n UInt = 0
-        let mutable iter = self
+        let mutable n UInt = 0;
+        let mutable iter = self;
         while iter.next() is .Some(_) then {
-            n += 1
-        }
-        return n
-    }
+            n += 1;
+        };
+        return n;
+    };
 
     // First - get first element
     public first(self) Option[T] = {
-        let mutable iter = self
-        return iter.next()
-    }
+        let mutable iter = self;
+        return iter.next();
+    };
 
     // Last - get last element
     public last(self) Option[T] = {
-        let mutable result = Option[T].None()
-        let mutable iter = self
+        let mutable result = Option[T].None();
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            result = Option[T].Some(v)
-        }
-        return result
-    }
+            result = Option[T].Some(v);
+        };
+        return result;
+    };
 
     // Nth - get element at index
     public nth(self, n UInt) Option[T] = {
-        let mutable iter = self
-        let mutable i UInt = 0
+        let mutable iter = self;
+        let mutable i UInt = 0;
         while iter.next() is .Some(v) then {
             if i == n then {
-                return Option[T].Some(v)
-            }
-            i += 1
-        }
-        return Option[T].None()
-    }
+                return Option[T].Some(v);
+            };
+            i += 1;
+        };
+        return Option[T].None();
+    };
 
     // Position - find index of first element matching predicate
     public position(self, fn Func(T) Bool) Option[UInt] = {
-        let mutable iter = self
-        let mutable i UInt = 0
+        let mutable iter = self;
+        let mutable i UInt = 0;
         while iter.next() is .Some(v) then {
             if fn(v) then {
-                return Option[UInt].Some(i)
-            }
-            i += 1
-        }
-        return Option[UInt].None()
-    }
+                return Option[UInt].Some(i);
+            };
+            i += 1;
+        };
+        return Option[UInt].None();
+    };
 
     // Find - find first element matching predicate
     public find(self, fn Func(T) Bool) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             if fn(v) then {
-                return Option[T].Some(v)
-            }
-        }
-        return Option[T].None()
-    }
+                return Option[T].Some(v);
+            };
+        };
+        return Option[T].None();
+    };
 
     // FindMap - find first element that maps to Some
     public find_map[U Any](self, fn Func(T) Option[U]) Option[U] = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             when fn(v) in {
                 .Some(u) then {
-                    return Option[U].Some(u)
+                    return Option[U].Some(u);
                 },
                 .None then {},
-            }
-        }
-        return Option[U].None()
-    }
+            };
+        };
+        return Option[U].None();
+    };
 
     // Any - check if any element matches predicate
     public any(self, fn Func(T) Bool) Bool = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             if fn(v) then {
-                return true
-            }
-        }
-        return false
-    }
+                return true;
+            };
+        };
+        return false;
+    };
 
     // All - check if all elements match predicate
     public all(self, fn Func(T) Bool) Bool = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             if not fn(v) then {
-                return false
-            }
-        }
-        return true
-    }
+                return false;
+            };
+        };
+        return true;
+    };
 
     // IsEmpty - check if iterator has no elements
     public is_empty(self) Bool = {
-        let mutable iter = self
-        return iter.next().is_none()
-    }
+        let mutable iter = self;
+        return iter.next().is_none();
+    };
 
     // MaxBy - find element with maximum key
     public max_by[K Ord](self, fn Func(T) K) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         when iter.next() in {
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
             .Some(first) then {
-                let mutable result = first
-                let mutable result_key = fn(first)
+                let mutable result = first;
+                let mutable result_key = fn(first);
                 while iter.next() is .Some(v) then {
-                    let key = fn(v)
+                    let key = fn(v);
                     if key > result_key then {
-                        result = v
-                        result_key = key
-                    }
-                }
-                return Option[T].Some(result)
+                        result = v;
+                        result_key = key;
+                    };
+                };
+                return Option[T].Some(result);
             },
-        }
-    }
+        };
+    };
 
     // MinBy - find element with minimum key
     public min_by[K Ord](self, fn Func(T) K) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         when iter.next() in {
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
             .Some(first) then {
-                let mutable result = first
-                let mutable result_key = fn(first)
+                let mutable result = first;
+                let mutable result_key = fn(first);
                 while iter.next() is .Some(v) then {
-                    let key = fn(v)
+                    let key = fn(v);
                     if key < result_key then {
-                        result = v
-                        result_key = key
-                    }
-                }
-                return Option[T].Some(result)
+                        result = v;
+                        result_key = key;
+                    };
+                };
+                return Option[T].Some(result);
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // ============================================================================
 // Iterator Terminal Operations with Eq constraint
@@ -615,15 +615,15 @@ given[T Eq] Iterator[T] {
 
     // Contains - check if iterator contains a value
     public contains(self, value T) Bool = {
-        let mutable iter = self
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             if v == value then {
-                return true
-            }
-        }
-        return false
-    }
-}
+                return true;
+            };
+        };
+        return false;
+    };
+};
 
 // ============================================================================
 // Iterator Terminal Operations with Ord constraint
@@ -632,42 +632,42 @@ given[T Ord] Iterator[T] {
 
     // Max - find maximum element
     public max(self) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         when iter.next() in {
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
             .Some(first) then {
-                let mutable result = first
+                let mutable result = first;
                 while iter.next() is .Some(v) then {
                     if v > result then {
-                        result = v
-                    }
-                }
-                return Option[T].Some(result)
+                        result = v;
+                    };
+                };
+                return Option[T].Some(result);
             },
-        }
-    }
+        };
+    };
 
     // Min - find minimum element
     public min(self) Option[T] = {
-        let mutable iter = self
+        let mutable iter = self;
         when iter.next() in {
             .None then {
-                return Option[T].None()
+                return Option[T].None();
             },
             .Some(first) then {
-                let mutable result = first
+                let mutable result = first;
                 while iter.next() is .Some(v) then {
                     if v < result then {
-                        result = v
-                    }
-                }
-                return Option[T].Some(result)
+                        result = v;
+                    };
+                };
+                return Option[T].Some(result);
             },
-        }
-    }
-}
+        };
+    };
+};
 
 // ============================================================================
 // Iterator Terminal Operations with Hash constraint
@@ -676,14 +676,14 @@ given[T Hash] Iterator[T] {
 
     // ToSet - collect into Set
     public into_set(self) Set[T] = {
-        let mutable result = Set[T].new()
-        let mutable iter = self
+        let mutable result = Set[T].new();
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
             result.insert(v);
-        }
-        return result
-    }
-}
+        };
+        return result;
+    };
+};
 
 // ============================================================================
 // Iterator Numeric Aggregations
@@ -692,42 +692,41 @@ given[T Add[T] and Zero] Iterator[T] {
 
     // Sum - sums elements using Zero.zero/Add.add
     public sum(self) T = {
-        let mutable acc = T.zero()
-        let mutable iter = self
+        let mutable acc = T.zero();
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            acc = acc.add(v)
-        }
-        return acc
-    }
-}
+            acc = acc.add(v);
+        };
+        return acc;
+    };
+};
 
 given[T Mul[T] and One] Iterator[T] {
 
     // Product - multiplies elements using One.one/Mul.mul
     public product(self) T = {
-        let mutable acc = T.one()
-        let mutable iter = self
+        let mutable acc = T.one();
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            acc = acc.mul(v)
-        }
-        return acc
-    }
-}
+            acc = acc.mul(v);
+        };
+        return acc;
+    };
+};
 
 given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
 
     // Average - returns None for empty iterators to avoid division by zero.
     public average(self) Option[T] = {
-        let mutable acc = T.zero()
-        let mutable count = 0
-        let mutable count_t = T.zero()
-        let mutable iter = self
+        let mutable acc = T.zero();
+        let mutable count = 0;
+        let mutable count_t = T.zero();
+        let mutable iter = self;
         while iter.next() is .Some(v) then {
-            acc = acc.add(v)
-            count += 1
-            count_t = count_t.add(T.one())
-        }
-        return if count == 0 then Option[T].None()
-        else Option[T].Some(acc.div(count_t))
-    }
-}
+            acc = acc.add(v);
+            count += 1;
+            count_t = count_t.add(T.one());
+        };
+        return if count == 0 then Option[T].None() else Option[T].Some(acc.div(count_t));
+    };
+};

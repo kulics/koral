@@ -24,18 +24,18 @@ Because Koral compiles to C, stack allocations become standard C local variables
 ```koral
 // The compiler sees this doesn't escape. 
 // It's allocated on the stack. No ARC overhead.
-let local_point = Point(1, 2)
+let local_point = Point(1, 2);
 
 // box(...) creates an owned escaping mutable reference.
-let heap_point = box(Point(3, 4))
+let heap_point = box(Point(3, 4));
 
 // The '&' operator borrows from an existing lvalue.
 // Result mutability depends on the source: let mutable → &mutable, let → &.
-let mutable local_point2 = Point(3, 4)
-let heap_point_ref = &mutable local_point2  // &mutable (from let mutable)
+let mutable local_point2 = Point(3, 4);
+let heap_point_ref = &mutable local_point2;  // &mutable (from let mutable)
 
 // Bumping the refcount, no deep copy
-let shared_point = heap_point 
+let shared_point = heap_point;
 ```
 
 ## Language Highlights
@@ -51,7 +51,7 @@ let shared_point = heap_point
 ### Expression-oriented core control flow
 
 ```koral
-let sign = if x > 0 then 1 else if x < 0 then -1 else 0
+let sign = if x > 0 then 1 else if x < 0 then -1 else 0;
 
 let label = when status in {
     .Active then "running",
@@ -65,11 +65,11 @@ Blocks are also expressions, so branch bodies can stay local instead of forcing 
 ```koral
 let label = if score >= 90 then {
     if score == 100 then {
-        yield "perfect"
+        yield "perfect";
     }
-    yield "A"
+    yield "A";
 } else {
-    yield "other"
+    yield "other";
 }
 ```
 
@@ -84,18 +84,18 @@ Rules:
 - Condition chains evaluate left-to-right with normal short-circuit behavior.
 
 ```koral
-if config.get("port") is .Some(v) then start_server(v)
+if config.get("port") is .Some(v) then start_server(v);
 
-while iter.next() is .Some(item) then process(item)
+while iter.next() is .Some(item) then process(item);
 ```
 
 You can chain multiple condition clauses with `and`.
 Each clause runs only if previous clauses succeed, and bindings from earlier `is` clauses are visible to later clauses.
 
 ```koral
-if load() is .Some(a) and parse(a) is .Ok(b) and b.is_valid() then use(b)
+if load() is .Some(a) and parse(a) is .Ok(b) and b.is_valid() then use(b);
 
-while source.next() is .Some(raw) and decode(raw) is .Ok(msg) then handle(msg)
+while source.next() is .Some(raw) and decode(raw) is .Ok(msg) then handle(msg);
 ```
 
 ### Pattern combinators: `or`, `and`, `not`
@@ -111,39 +111,39 @@ when temperature in {
 ### `or else` / `and then` / `or return` — Error flow as keywords
 
 ```koral
-let port = config.get("port") or else 8080
+let port = config.get("port") or else 8080;
 
-let name = (user and then it.profile and then it.display_name) or else "anonymous"
+let name = (user and then it.profile and then it.display_name) or else "anonymous";
 
 let read_config(path String) Result[Config] = {
-    let text = read_text_file(path) or return
-    let parsed = parse_json(text) or return
-    return .Ok(parsed)
+    let text = read_text_file(path) or return;
+    let parsed = parse_json(text) or return;
+    return .Ok(parsed);
 }
 ```
 
 ### Generics
 
 ```koral
-let nums = List[Int].new()
-let scores = Dict[String, Int].new()
-let max[T Ord](a T, b T) T = if a > b then a else b
+let nums = List[Int].new();
+let scores = Dict[String, Int].new();
+let max[T Ord](a T, b T) T = if a > b then a else b;
 ```
 
 ### Traits and `given` blocks
 
 ```koral
 trait Greet {
-    greet(*self) String
+    greet(*self) String;
 }
 
-type Bot(name String)
+type Bot(name String);
 
 given Bot as Greet {
-    greet(*self) String = "beep boop, I'm " + self.name
+    greet(*self) String = "beep boop, I'm " + self.name;
 }
 
-let g *Greet = box(Bot("K-9"))  // trait object
+let g *Greet = box(Bot("K-9"));  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -161,17 +161,17 @@ type Result[T Any] {
 }
 
 let parse_int(s String) Result[Int] =
-    if s == "42" then .Ok(42) else .Error(box("bad input"))
+    if s == "42" then .Ok(42) else .Error(box("bad input"));
 ```
 
 ### Lazy streams
 
 ```koral
-let result = list.iterator()
-    .filter((x) -> x > 0)
-    .map((x) -> x * 2)
-    .take(10)
-    .fold(0, (acc, x) -> acc + x)
+let result = list.iterator();
+    .filter((x) -> x > 0);
+    .map((x) -> x * 2);
+    .take(10);
+    .fold(0, (acc, x) -> acc + x);
 ```
 
 ## Language Capabilities
@@ -258,8 +258,8 @@ Weak reference rules:
 - `?*mutable T` implicitly converts to `?*T` (widening).
 
 ```koral
-let strong *mutable Int = box(42)
-let weak ?*mutable Int = downgrade_mutable(strong)   // *mutable → ?*mutable
+let strong *mutable Int = box(42);
+let weak ?*mutable Int = downgrade_mutable(strong);   // *mutable → ?*mutable
 
 when upgrade_mutable(weak) in {
     .Some(r) then println(*r),
@@ -309,19 +309,19 @@ Commonly used pieces:
 Minimal examples:
 
 ```koral
-let nums List[Int] = [1, 2, 3]
-let scores Dict[String, Int] = ["alice": 10, "bob": 8]
+let nums List[Int] = [1, 2, 3];
+let scores Dict[String, Int] = ["alice": 10, "bob": 8];
 
-let port = Option[Int].Some(8080) or else 80
-let doubled = Option[Int].Some(21) and then it * 2
+let port = Option[Int].Some(8080) or else 80;
+let doubled = Option[Int].Some(21) and then it * 2;
 
 let parse_port(text String) Result[Int] = {
-    let port = parse_int(text) or return
-    return .Ok(port)
+    let port = parse_int(text) or return;
+    return .Ok(port);
 }
 
-let ok = Result[Int].Ok(42)
-let err = Result[Int].Error(box("failed"))
+let ok = Result[Int].Ok(42);
+let err = Result[Int].Error(box("failed"));
 ```
 
 ## Documentation

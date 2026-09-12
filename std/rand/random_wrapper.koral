@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.rand - Random Wrapper Type and Convenience Functions
 // ============================================================================
@@ -13,163 +13,163 @@ using std { .. }
 // ============================================================================
 
 let mul128(a UInt64, b UInt64) Pair[UInt64, UInt64] = {
-    let a_lo = a & 4294967295(UInt64)
-    let a_hi = a >> 32
-    let b_lo = b & 4294967295(UInt64)
-    let b_hi = b >> 32
+    let a_lo = a & 4294967295(UInt64);
+    let a_hi = a >> 32;
+    let b_lo = b & 4294967295(UInt64);
+    let b_hi = b >> 32;
 
-    let lo_lo = a_lo.wrapping_mul(b_lo)
-    let hi_lo = a_hi.wrapping_mul(b_lo)
-    let lo_hi = a_lo.wrapping_mul(b_hi)
-    let hi_hi = a_hi.wrapping_mul(b_hi)
+    let lo_lo = a_lo.wrapping_mul(b_lo);
+    let hi_lo = a_hi.wrapping_mul(b_lo);
+    let lo_hi = a_lo.wrapping_mul(b_hi);
+    let hi_hi = a_hi.wrapping_mul(b_hi);
 
-    let cross = (lo_lo >> 32).wrapping_add(hi_lo & 4294967295(UInt64)).wrapping_add(lo_hi)
-    let high = hi_hi.wrapping_add(hi_lo >> 32).wrapping_add(cross >> 32)
-    let low = (cross << 32) | (lo_lo & 4294967295(UInt64))
-    return Pair[UInt64, UInt64](high, low)
-}
+    let cross = (lo_lo >> 32).wrapping_add(hi_lo & 4294967295(UInt64)).wrapping_add(lo_hi);
+    let high = hi_hi.wrapping_add(hi_lo >> 32).wrapping_add(cross >> 32);
+    let low = (cross << 32) | (lo_lo & 4294967295(UInt64));
+    return Pair[UInt64, UInt64](high, low);
+};
 
 // Lemire bounded random: maps a uniform UInt64 to [0, range) without bias.
 let lemire_bounded[R RandomSource](source R, range UInt64) UInt64 = {
-    let x = source.generate()
-    let m = mul128(x, range)
-    let mutable hi = m.first
-    let mutable lo = m.second
+    let x = source.generate();
+    let m = mul128(x, range);
+    let mutable hi = m.first;
+    let mutable lo = m.second;
     if lo < range then {
-        let threshold = 0(UInt64).wrapping_sub(range) % range
+        let threshold = 0(UInt64).wrapping_sub(range) % range;
         while lo < threshold then {
-            let x2 = source.generate()
-            let m2 = mul128(x2, range)
-            hi = m2.first
-            lo = m2.second
-        }
-    }
-    return hi
-}
+            let x2 = source.generate();
+            let m2 = mul128(x2, range);
+            hi = m2.first;
+            lo = m2.second;
+        };
+    };
+    return hi;
+};
 
 // ============================================================================
 // Random wrapper type
 // ============================================================================
 
-public type Random[R RandomSource](file_private rng R)
+public type Random[R RandomSource](file_private rng R);
 
 given[R RandomSource] Random[R] {
     // Construct from a RandomSource instance.
-    public new(rng R) Random[R] = Random[R](rng)
+    public new(rng R) Random[R] = Random[R](rng);
 
     // Generate a random value of any Randomizable type.
-    public next[T Randomizable](*self) T = T.random(self.rng)
+    public next[T Randomizable](*self) T = T.random(self.rng);
 
     // Generate a random Int within the given range (Lemire algorithm).
     public next_int(*self, range Range[Int]) Int = {
-        let mutable low Int = 0
-        let mutable high Int = 0
+        let mutable low Int = 0;
+        let mutable high Int = 0;
         when range in {
-            .Closed(a, b) then { low = a; high = b },
+            .Closed(a, b) then { low = a; high = b;},
             .ClosedOpen(a, b) then {
-                if a >= b then { panic("next_int: empty range") }
-                low = a; high = b - 1
+                if a >= b then { panic("next_int: empty range");};
+                low = a; high = b - 1;
             },
             .OpenClosed(a, b) then {
-                if a >= b then { panic("next_int: empty range") }
-                low = a + 1; high = b
+                if a >= b then { panic("next_int: empty range");};
+                low = a + 1; high = b;
             },
             .Open(a, b) then {
-                if a + 1 >= b then { panic("next_int: empty range") }
-                low = a + 1; high = b - 1
+                if a + 1 >= b then { panic("next_int: empty range");};
+                low = a + 1; high = b - 1;
             },
-            .From(a) then { low = a; high = Int.max_value() },
+            .From(a) then { low = a; high = Int.max_value();},
             .After(a) then {
-                if a == Int.max_value() then { panic("next_int: empty range") }
-                low = a + 1; high = Int.max_value()
+                if a == Int.max_value() then { panic("next_int: empty range");};
+                low = a + 1; high = Int.max_value();
             },
-            .To(b) then { low = Int.min_value(); high = b },
+            .To(b) then { low = Int.min_value(); high = b;},
             .Until(b) then {
-                if b == Int.min_value() then { panic("next_int: empty range") }
-                low = Int.min_value(); high = b - 1
+                if b == Int.min_value() then { panic("next_int: empty range");};
+                low = Int.min_value(); high = b - 1;
             },
-            .Full then { low = Int.min_value(); high = Int.max_value() },
-        }
-        if low > high then { panic("next_int: empty range") }
-        if low == high then { return low }
+            .Full then { low = Int.min_value(); high = Int.max_value();},
+        };
+        if low > high then { panic("next_int: empty range");};
+        if low == high then { return low;};
         if low == Int.min_value() and high == Int.max_value() then {
-            return self.rng.generate()(Int)
-        }
+            return self.rng.generate()(Int);
+        };
         // Map signed [low, high] to unsigned [0, range_size) via XOR with min
-        let u_low = low(UInt64) ^ Int.min_value()(UInt64)
-        let u_high = high(UInt64) ^ Int.min_value()(UInt64)
-        let range_size = u_high - u_low + 1
-        let u_result = u_low + lemire_bounded(self.rng, range_size)
-        return (u_result ^ Int.min_value()(UInt64))(Int)
-    }
+        let u_low = low(UInt64) ^ Int.min_value()(UInt64);
+        let u_high = high(UInt64) ^ Int.min_value()(UInt64);
+        let range_size = u_high - u_low + 1;
+        let u_result = u_low + lemire_bounded(self.rng, range_size);
+        return (u_result ^ Int.min_value()(UInt64))(Int);
+    };
 
     // Generate a random UInt within the given range (Lemire algorithm).
     public next_uint(*self, range Range[UInt]) UInt = {
-        let mutable low UInt = 0
-        let mutable high UInt = 0
+        let mutable low UInt = 0;
+        let mutable high UInt = 0;
         when range in {
-            .Closed(a, b) then { low = a; high = b },
+            .Closed(a, b) then { low = a; high = b;},
             .ClosedOpen(a, b) then {
-                if a >= b then { panic("next_uint: empty range") }
-                low = a; high = b - 1
+                if a >= b then { panic("next_uint: empty range");};
+                low = a; high = b - 1;
             },
             .OpenClosed(a, b) then {
-                if a >= b then { panic("next_uint: empty range") }
-                low = a + 1; high = b
+                if a >= b then { panic("next_uint: empty range");};
+                low = a + 1; high = b;
             },
             .Open(a, b) then {
-                if a + 1 >= b then { panic("next_uint: empty range") }
-                low = a + 1; high = b - 1
+                if a + 1 >= b then { panic("next_uint: empty range");};
+                low = a + 1; high = b - 1;
             },
-            .From(a) then { low = a; high = UInt.max_value() },
+            .From(a) then { low = a; high = UInt.max_value();},
             .After(a) then {
-                if a == UInt.max_value() then { panic("next_uint: empty range") }
-                low = a + 1; high = UInt.max_value()
+                if a == UInt.max_value() then { panic("next_uint: empty range");};
+                low = a + 1; high = UInt.max_value();
             },
-            .To(b) then { low = 0; high = b },
+            .To(b) then { low = 0; high = b;},
             .Until(b) then {
-                if b == 0 then { panic("next_uint: empty range") }
-                low = 0; high = b - 1
+                if b == 0 then { panic("next_uint: empty range");};
+                low = 0; high = b - 1;
             },
-            .Full then { low = 0; high = UInt.max_value() },
-        }
-        if low > high then { panic("next_uint: empty range") }
-        if low == high then { return low }
+            .Full then { low = 0; high = UInt.max_value();},
+        };
+        if low > high then { panic("next_uint: empty range");};
+        if low == high then { return low;};
         if low == 0 and high == UInt.max_value() then {
-            return self.rng.generate()(UInt)
-        }
-        let range_size = (high - low + 1)(UInt64)
-        return (low + lemire_bounded(self.rng, range_size)(UInt))(UInt)
-    }
+            return self.rng.generate()(UInt);
+        };
+        let range_size = (high - low + 1)(UInt64);
+        return (low + lemire_bounded(self.rng, range_size)(UInt))(UInt);
+    };
 
     // Randomly shuffle a list in-place using Fisher-Yates algorithm.
     public shuffle[T Deref](*self, list *mutable List[T]) Void = {
-        let len = list.count()
-        if len <= 1 then { return }
-        let mutable i = len - 1
+        let len = list.count();
+        if len <= 1 then { return;};
+        let mutable i = len - 1;
         while i > 0 then {
             // Pick a random index in [0, i]
-            let j = lemire_bounded(self.rng, (i + 1)(UInt64))(UInt)
+            let j = lemire_bounded(self.rng, (i + 1)(UInt64))(UInt);
             if i <> j then {
-                let tmp = list[i]
-                list[i] = list[j]
-                list[j] = tmp
-            }
-            i = i - 1
-        }
-    }
+                let tmp = list[i];
+                list[i] = list[j];
+                list[j] = tmp;
+            };
+            i = i - 1;
+        };
+    };
 
     // Pick a random element from a list. Returns None if the list is empty.
     public choose[T Deref](*self, list List[T]) Option[T] = {
-        let len = list.count()
-        if len == 0 then { return Option[T].None() }
-        let idx = lemire_bounded(self.rng, len(UInt64))(UInt)
-        return Option[T].Some(list[idx])
-    }
-}
+        let len = list.count();
+        if len == 0 then { return Option[T].None();};
+        let idx = lemire_bounded(self.rng, len(UInt64))(UInt);
+        return Option[T].Some(list[idx]);
+    };
+};
 
 // Create a Random instance backed by a system-entropy-seeded DefaultRandomSource.
 public let default_random() Random[DefaultRandomSource] = {
-    let rng = DefaultRandomSource.new()
-    return Random[DefaultRandomSource].new(rng)
-}
+    let rng = DefaultRandomSource.new();
+    return Random[DefaultRandomSource].new(rng);
+};

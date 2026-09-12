@@ -6,7 +6,7 @@ public type UnionFind(
     mutable parent Dict[UInt, UInt],
     mutable rank Dict[UInt, UInt],
     mutable bindings Dict[UInt, Type],
-)
+);
 
 given UnionFind {
     public new() UnionFind = {
@@ -14,109 +14,109 @@ given UnionFind {
             Dict[UInt, UInt].new(),
             Dict[UInt, UInt].new(),
             Dict[UInt, Type].new()
-        )
-    }
+        );
+    };
 
     // 查找代表元（路径压缩）。
     // 若 id 不在 parent 中，则它自身就是根节点。
     public find(*mutable self, id UInt) UInt = {
         when self.parent.get(id) in {
-            .None() then { return id },
+            .None() then { return id;},
             .Some(p) then {
                 if p == id then {
-                    return id
-                }
-                let r = self.find(p)
+                    return id;
+                };
+                let r = self.find(p);
                 // 路径压缩：将 id 直接指向根
-                self.parent.insert(id, r)
-                return r
+                self.parent.insert(id, r);
+                return r;
             },
-        }
-    }
+        };
+    };
 
     // 合并两个等价类（按秩合并）。
     // 返回合并后的代表元。
     public union(*mutable self, x UInt, y UInt) UInt = {
-        let rx = self.find(x)
-        let ry = self.find(y)
+        let rx = self.find(x);
+        let ry = self.find(y);
         if rx == ry then {
-            return rx
-        }
-        let rank_x = self.rank.get(rx) or else 0(UInt)
-        let rank_y = self.rank.get(ry) or else 0(UInt)
+            return rx;
+        };
+        let rank_x = self.rank.get(rx) or else 0(UInt);
+        let rank_y = self.rank.get(ry) or else 0(UInt);
         if rank_x < rank_y then {
             // rx 挂到 ry 下
-            self.parent.insert(rx, ry)
-            return ry
+            self.parent.insert(rx, ry);
+            return ry;
         } else if rank_x > rank_y then {
             // ry 挂到 rx 下
-            self.parent.insert(ry, rx)
-            return rx
+            self.parent.insert(ry, rx);
+            return rx;
         } else {
             // rank 相等：ry 挂到 rx 下，rx 的 rank 加一
-            self.parent.insert(ry, rx)
-            self.rank.get_or_insert(rx, 0(UInt))
-            self.rank[rx] += 1(UInt)
-            return rx
-        }
-    }
+            self.parent.insert(ry, rx);
+            self.rank.get_or_insert(rx, 0(UInt));
+            self.rank[rx] += 1(UInt);
+            return rx;
+        };
+    };
 
     // 绑定类型变量到具体类型。
     // tv_id 是 TypeVariable.id，t 是要绑定的具体类型。
     public bind(*mutable self, tv_id UInt, t Type) Void = {
-        let root = self.find(tv_id)
-        self.bindings.insert(root, t)
-    }
+        let root = self.find(tv_id);
+        self.bindings.insert(root, t);
+    };
 
     // 解析类型变量：递归解析直到非类型变量。
     // 若 tv_id 未绑定，返回 TypeVar 本身（包装为 Unknown）。
     public resolve_tv(*mutable self, tv_id UInt) Type = {
-        let root = self.find(tv_id)
+        let root = self.find(tv_id);
         when self.bindings.get(root) in {
             .None() then {
-                return Type.Unknown()
+                return Type.Unknown();
             },
             .Some(t) then {
                 // 若绑定的类型仍是 TypeVar，继续递归解析
                 when t in {
                     .TypeVar(tv_ref) then {
-                        let inner_id = (*tv_ref).id
+                        let inner_id = (*tv_ref).id;
                         if inner_id == root then {
                             // 避免自引用死循环
-                            return t
-                        }
-                        return self.resolve_tv(inner_id)
+                            return t;
+                        };
+                        return self.resolve_tv(inner_id);
                     },
                     _ then {
-                        return t
+                        return t;
                     },
-                }
+                };
             },
-        }
-    }
+        };
+    };
 
     // 检查类型变量是否已绑定。
     public is_bound(self, tv_id UInt) Bool = {
         let root = when self.parent.get(tv_id) in {
-            .None() then { yield tv_id },
+            .None() then { yield tv_id;},
             .Some(p) then {
                 // 非 ref self，无法做路径压缩，只做简单查找
-                yield self.find_root(tv_id)
+                yield self.find_root(tv_id);
             },
-        }
-        return self.bindings.contains_key(root)
-    }
+        };
+        return self.bindings.contains_key(root);
+    };
 
     // 辅助：不修改 parent 的只读根查找（用于 is_bound）。
     file_private find_root(self, id UInt) UInt = {
         when self.parent.get(id) in {
-            .None() then { return id },
+            .None() then { return id;},
             .Some(p) then {
                 if p == id then {
-                    return id
-                }
-                return self.find_root(p)
+                    return id;
+                };
+                return self.find_root(p);
             },
-        }
-    }
-}
+        };
+    };
+};

@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.json - JsonValue Type
 // ============================================================================
@@ -16,172 +16,172 @@ public type JsonValue {
     String(value String),
     Array(elements List[* JsonValue]),
     Object(entries Dict[String, * JsonValue]),
-}
+};
 
 // ============================================================================
 // JSON string/number formatting and pretty-print helpers
 // ============================================================================
 file_private let hex_char(nibble UInt) UInt8 = {
     if nibble < 10 then {
-        return nibble(UInt8) + '0'
-    }
-    return (nibble - 10)(UInt8) + 'a'
-}
+        return nibble(UInt8) + '0';
+    };
+    return (nibble - 10)(UInt8) + 'a';
+};
 
 let escape_json_string(s String) String = {
-    let mutable result = String.with_capacity(s.count() + 2)
-    result.push_byte('"')
+    let mutable result = String.with_capacity(s.count() + 2);
+    result.push_byte('"');
     for i in 0..<s.count() then {
-        let b = s[i]
+        let b = s[i];
         if b == '"' then {
-            result.push_byte('\\')
-            result.push_byte('"')
+            result.push_byte('\\');
+            result.push_byte('"');
         } else if b == '\\' then {
-            result.push_byte('\\')
-            result.push_byte('\\')
+            result.push_byte('\\');
+            result.push_byte('\\');
         } else if b == '/' then {
-            result.push_byte('\\')
-            result.push_byte('/')
+            result.push_byte('\\');
+            result.push_byte('/');
         } else if b == 8(UInt8) then {
-            result.push_byte('\\')
-            result.push_byte('b')
+            result.push_byte('\\');
+            result.push_byte('b');
         } else if b == 12(UInt8) then {
-            result.push_byte('\\')
-            result.push_byte('f')
+            result.push_byte('\\');
+            result.push_byte('f');
         } else if b == '\n' then {
-            result.push_byte('\\')
-            result.push_byte('n')
+            result.push_byte('\\');
+            result.push_byte('n');
         } else if b == '\r' then {
-            result.push_byte('\\')
-            result.push_byte('r')
+            result.push_byte('\\');
+            result.push_byte('r');
         } else if b == '\t' then {
-            result.push_byte('\\')
-            result.push_byte('t')
+            result.push_byte('\\');
+            result.push_byte('t');
         } else if b < 32(UInt8) then {
-            result.push_byte('\\')
-            result.push_byte('u')
-            result.push_byte('0')
-            result.push_byte('0')
-            let hi = (b >> 4)(UInt)
-            let lo = (b & 0x0F(UInt8))(UInt)
-            result.push_byte(hex_char(hi))
-            result.push_byte(hex_char(lo))
+            result.push_byte('\\');
+            result.push_byte('u');
+            result.push_byte('0');
+            result.push_byte('0');
+            let hi = (b >> 4)(UInt);
+            let lo = (b & 0x0F(UInt8))(UInt);
+            result.push_byte(hex_char(hi));
+            result.push_byte(hex_char(lo));
         } else {
-            result.push_byte(b)
-        }
-    }
-    result.push_byte('"')
-    return result
-}
+            result.push_byte(b);
+        };
+    };
+    result.push_byte('"');
+    return result;
+};
 
 let format_json_number(f Float64) String = {
     if f.is_nan() then {
-        return "null"
-    }
+        return "null";
+    };
     if f.is_inf() then {
-        return "null"
-    }
+        return "null";
+    };
 
-    let is_negative = f.is_sign_negative() and f <> 0.0
-    let abs_val = if is_negative then 0.0 - f else f
+    let is_negative = f.is_sign_negative() and f <> 0.0;
+    let abs_val = if is_negative then 0.0 - f else f;
 
-    let truncated = abs_val.trunc()
+    let truncated = abs_val.trunc();
     if abs_val == truncated then {
-        let int_val = abs_val(Int)
-        let mutable result = String.new()
+        let int_val = abs_val(Int);
+        let mutable result = String.new();
         if is_negative then {
-            result.push_byte('-')
-        }
-        result.push_string(int_val.to_string())
-        return result
-    }
+            result.push_byte('-');
+        };
+        result.push_string(int_val.to_string());
+        return result;
+    };
 
-    let mutable result = String.new()
+    let mutable result = String.new();
     if is_negative then {
-        result.push_byte('-')
-    }
+        result.push_byte('-');
+    };
 
-    let int_part = truncated(Int)
-    result.push_string(int_part.to_string())
-    result.push_byte('.')
+    let int_part = truncated(Int);
+    result.push_string(int_part.to_string());
+    result.push_byte('.');
 
-    let frac_part = abs_val - truncated
-    let mutable frac = frac_part
-    let mutable digits List[UInt8] = []
-    let max_digits UInt = 15
+    let frac_part = abs_val - truncated;
+    let mutable frac = frac_part;
+    let mutable digits List[UInt8] = [];
+    let max_digits UInt = 15;
     for _ in 0..<max_digits then {
-        frac = frac * 10.0
-        let digit = frac(Int)
-        digits.push(digit(UInt8) + '0')
-        frac = frac - digit(Float64)
-    }
+        frac = frac * 10.0;
+        let digit = frac(Int);
+        digits.push(digit(UInt8) + '0');
+        frac = frac - digit(Float64);
+    };
 
-    let mutable end = digits.count()
+    let mutable end = digits.count();
     while end > 1 and digits[end - 1] == '0' then {
-        end -= 1
-    }
+        end -= 1;
+    };
 
     for j in 0..<end then {
-        result.push_byte(digits[j])
-    }
+        result.push_byte(digits[j]);
+    };
 
-    return result
-}
+    return result;
+};
 
 file_private let make_indent(level UInt) String = {
-    let mutable out = String.new()
+    let mutable out = String.new();
     for _ in 0..<level then {
-        out.push_string("  ")
-    }
-    return out
-}
+        out.push_string("  ");
+    };
+    return out;
+};
 
 file_private let to_string_pretty_array(elements List[* JsonValue], level UInt) String = {
-    let count = elements.count()
+    let count = elements.count();
     if count == 0 then {
-        return "[]"
-    }
+        return "[]";
+    };
 
-    let mutable result = String.new()
-    result.push_string("[\n")
-    let child_indent = make_indent(level + 1)
+    let mutable result = String.new();
+    result.push_string("[\n");
+    let child_indent = make_indent(level + 1);
     for i in 0..<count then {
         if i > 0 then {
-            result.push_string(",\n")
-        }
-        result.push_string(child_indent)
-        result.push_string(to_string_pretty_impl(*elements[i], level + 1))
-    }
-    result.push_byte('\n')
-    result.push_string(make_indent(level))
-    result.push_byte(']')
-    return result
-}
+            result.push_string(",\n");
+        };
+        result.push_string(child_indent);
+        result.push_string(to_string_pretty_impl(*elements[i], level + 1));
+    };
+    result.push_byte('\n');
+    result.push_string(make_indent(level));
+    result.push_byte(']');
+    return result;
+};
 
 file_private let to_string_pretty_object(entries Dict[String, * JsonValue], level UInt) String = {
     if entries.count() == 0 then {
-        return "{}"
-    }
+        return "{}";
+    };
 
-    let mutable result = String.new()
-    result.push_string("{\n")
-    let child_indent = make_indent(level + 1)
-    let mutable first = true
+    let mutable result = String.new();
+    result.push_string("{\n");
+    let child_indent = make_indent(level + 1);
+    let mutable first = true;
     for entry in entries then {
         if not first then {
-            result.push_string(",\n")
-        }
-        first = false
-        result.push_string(child_indent)
-        result.push_string(escape_json_string(entry.first))
-        result.push_string(": ")
-        result.push_string(to_string_pretty_impl(*entry.second, level + 1))
-    }
-    result.push_byte('\n')
-    result.push_string(make_indent(level))
-    result.push_byte('}')
-    return result
-}
+            result.push_string(",\n");
+        };
+        first = false;
+        result.push_string(child_indent);
+        result.push_string(escape_json_string(entry.first));
+        result.push_string(": ");
+        result.push_string(to_string_pretty_impl(*entry.second, level + 1));
+    };
+    result.push_byte('\n');
+    result.push_string(make_indent(level));
+    result.push_byte('}');
+    return result;
+};
 
 file_private let to_string_pretty_impl(value JsonValue, level UInt) String = {
     return when value in {
@@ -191,8 +191,8 @@ file_private let to_string_pretty_impl(value JsonValue, level UInt) String = {
         .String(v) then escape_json_string(v),
         .Array(elements) then to_string_pretty_array(elements, level),
         .Object(entries) then to_string_pretty_object(entries, level),
-    }
-}
+    };
+};
 
 // ============================================================================
 // JsonValue Methods
@@ -201,59 +201,59 @@ given JsonValue {
 
     // --- Type checking methods ---
 
-    public is_null(*self) Bool = self is .Null
+    public is_null(*self) Bool = self is .Null;
 
-    public is_bool(*self) Bool = self is .Bool(_)
+    public is_bool(*self) Bool = self is .Bool(_);
 
-    public is_number(*self) Bool = self is .Number(_)
+    public is_number(*self) Bool = self is .Number(_);
 
-    public is_string(*self) Bool = self is .String(_)
+    public is_string(*self) Bool = self is .String(_);
 
-    public is_array(*self) Bool = self is .Array(_)
+    public is_array(*self) Bool = self is .Array(_);
 
-    public is_object(*self) Bool = self is .Object(_)
+    public is_object(*self) Bool = self is .Object(_);
 
     // --- Value extraction methods ---
 
     public as_bool(*self) Option[Bool] = when self in {
         .Bool(v) then Option[Bool].Some(v),
         _ then Option[Bool].None(),
-    }
+    };
 
     public as_number(*self) Option[Float64] = when self in {
         .Number(v) then Option[Float64].Some(v),
         _ then Option[Float64].None(),
-    }
+    };
 
     public as_string(*self) Option[String] = when self in {
         .String(v) then Option[String].Some(v),
         _ then Option[String].None(),
-    }
+    };
 
     public as_array(*self) Option[List[* JsonValue]] = when self in {
         .Array(v) then Option[List[* JsonValue]].Some(v),
         _ then Option[List[* JsonValue]].None(),
-    }
+    };
 
     public as_object(*self) Option[Dict[String, * JsonValue]] = when self in {
         .Object(v) then Option[Dict[String, * JsonValue]].Some(v),
         _ then Option[Dict[String, * JsonValue]].None(),
-    }
+    };
 
     // --- Indexed access methods ---
 
     public get_field(*self, key String) Option[* JsonValue] = when self in {
         .Object(entries) then entries.get(key),
         _ then Option[* JsonValue].None(),
-    }
+    };
 
     public get_element(*self, index UInt) Option[* JsonValue] = when self in {
         .Array(elements) then elements.get(index),
         _ then Option[* JsonValue].None(),
-    }
+    };
 
-    public to_string_pretty(*self) String = to_string_pretty_impl(*self, 0)
-}
+    public to_string_pretty(*self) String = to_string_pretty_impl(*self, 0);
+};
 
 // ============================================================================
 // JsonValue Eq Implementation
@@ -280,35 +280,35 @@ given JsonValue as Eq {
         .Array(a) then when other in {
             .Array(b) then {
                 if a.count() <> b.count() then {
-                    return false
-                }
+                    return false;
+                };
                 for i in 0..<a.count() then {
                     if *a[i] <> *b[i] then {
-                        return false
-                    }
-                }
-                return true
+                        return false;
+                    };
+                };
+                return true;
             },
             _ then false,
         },
         .Object(a) then when other in {
             .Object(b) then {
                 if a.count() <> b.count() then {
-                    return false
-                }
+                    return false;
+                };
                 for entry in a then {
                     when b.get(entry.first) in {
-                        .None then { return false },
+                        .None then { return false;},
                         .Some(bval) then {
                             if *entry.second <> *bval then {
-                                return false
-                            }
+                                return false;
+                            };
                         },
-                    }
-                }
-                return true
+                    };
+                };
+                return true;
             },
             _ then false,
         },
-    }
-}
+    };
+};

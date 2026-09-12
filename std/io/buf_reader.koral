@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.io - BufReader Type
 // ============================================================================
@@ -12,54 +12,54 @@ file_private type BufReaderStorage[R Reader](
     cap UInt,
     mutable start UInt,
     mutable end UInt,
-)
+);
 
-public type BufReader[R Reader](file_private storage *mutable BufReaderStorage[R])
+public type BufReader[R Reader](file_private storage *mutable BufReaderStorage[R]);
 
 given[R Reader] BufReader[R] {
 
     public new(r R) BufReader[R] = {
-        let cap UInt = 4096
-        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0))
-        return BufReader[R](storage)
-    }
+        let cap UInt = 4096;
+        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0));
+        return BufReader[R](storage);
+    };
 
     public with_capacity(cap UInt, r R) BufReader[R] = {
         if cap == 0 then {
-            panic("BufReader.with_capacity: zero capacity")
-        }
-        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0))
-        return BufReader[R](storage)
-    }
+            panic("BufReader.with_capacity: zero capacity");
+        };
+        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0));
+        return BufReader[R](storage);
+    };
 
     file_private fill_buf(*self) Result[UInt] = {
         if self.storage.start < self.storage.end then {
-            return Result[UInt].Ok(self.storage.end - self.storage.start)
-        }
-        self.storage.start = 0
-        self.storage.end = 0
+            return Result[UInt].Ok(self.storage.end - self.storage.start);
+        };
+        self.storage.start = 0;
+        self.storage.end = 0;
         return when self.storage.inner.read(&mutable self.storage.buf, 0..<self.storage.cap) in {
             .Ok(n) then {
-                self.storage.end = n
-                yield Result[UInt].Ok(n)
+                self.storage.end = n;
+                yield Result[UInt].Ok(n);
             },
             .Error(e) then Result[UInt].Error(e),
-        }
-    }
+        };
+    };
 
     public read_byte(*self) Result[Option[UInt8]] = {
         return when self.fill_buf() in {
             .Ok(n) then {
                 if n == 0 then {
-                    return Result[Option[UInt8]].Ok(Option[UInt8].None())
-                }
-                let b = self.storage.buf[self.storage.start]
-                self.storage.start += 1
-                return Result[Option[UInt8]].Ok(Option[UInt8].Some(b))
+                    return Result[Option[UInt8]].Ok(Option[UInt8].None());
+                };
+                let b = self.storage.buf[self.storage.start];
+                self.storage.start += 1;
+                return Result[Option[UInt8]].Ok(Option[UInt8].Some(b));
             },
             .Error(e) then Result[Option[UInt8]].Error(e),
-        }
-    }
+        };
+    };
 
     public read_rune(*self) Result[Option[Rune]] = {
         return when self.read_byte() in {
@@ -69,218 +69,218 @@ given[R Reader] BufReader[R] {
                     .None then Result[Option[Rune]].Ok(Option[Rune].None()),
                     .Some(first) then {
                         if first < 128(UInt8) then {
-                            return Result[Option[Rune]].Ok(Option[Rune].Some(Rune.from_uint32_unchecked(first(UInt32))))
-                        }
+                            return Result[Option[Rune]].Ok(Option[Rune].Some(Rune.from_uint32_unchecked(first(UInt32))));
+                        };
 
-                        let mutable needed UInt = 0
-                        let mutable code UInt32 = 0
+                        let mutable needed UInt = 0;
+                        let mutable code UInt32 = 0;
 
                         if first >= 194(UInt8) and first <= 223(UInt8) then {
-                            needed = 1
-                            code = (first & 31(UInt8))(UInt32)
+                            needed = 1;
+                            code = (first & 31(UInt8))(UInt32);
                         } else if first >= 224(UInt8) and first <= 239(UInt8) then {
-                            needed = 2
-                            code = (first & 15(UInt8))(UInt32)
+                            needed = 2;
+                            code = (first & 15(UInt8))(UInt32);
                         } else if first >= 240(UInt8) and first <= 244(UInt8) then {
-                            needed = 3
-                            code = (first & 7(UInt8))(UInt32)
+                            needed = 3;
+                            code = (first & 7(UInt8))(UInt32);
                         } else {
-                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
-                        }
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
+                        };
 
-                        let mutable i UInt = 0
+                        let mutable i UInt = 0;
                         while i < needed then {
                             when self.read_byte() in {
                                 .Error(e) then {
-                                    return Result[Option[Rune]].Error(e)
+                                    return Result[Option[Rune]].Error(e);
                                 },
                                 .Ok(next_opt) then {
                                     when next_opt in {
                                         .None then {
-                                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
+                                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
                                         },
                                         .Some(next_byte) then {
                                             if next_byte < 128(UInt8) or next_byte > 191(UInt8) then {
-                                                return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
-                                            }
-                                            code = (code << 6) | ((next_byte & 63(UInt8))(UInt32))
+                                                return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
+                                            };
+                                            code = (code << 6) | ((next_byte & 63(UInt8))(UInt32));
                                         },
-                                    }
+                                    };
                                 },
-                            }
-                            i += 1
-                        }
+                            };
+                            i += 1;
+                        };
 
                         if needed == 1 and code < 128(UInt32) then {
-                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
-                        }
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
+                        };
                         if needed == 2 and code < 2048(UInt32) then {
-                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
-                        }
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
+                        };
                         if needed == 3 and code < 65536(UInt32) then {
-                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
-                        }
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"));
+                        };
 
                         return when Rune.from_uint32(code) in {
                             .Ok(r) then Result[Option[Rune]].Ok(Option[Rune].Some(r)),
                             .Error(_) then Result[Option[Rune]].Error(box("invalid UTF-8 sequence")),
-                        }
+                        };
                     },
-                }
+                };
             },
-        }
-    }
+        };
+    };
 
     public read_until(*self, delim UInt8, into *mutable List[UInt8], range Range[UInt]) Result[UInt] = {
-        let span = into.slice_spec(range)
-        let base = span.start()
-        let mutable out_pos = base
-        let out_end = span.end()
+        let span = into.slice_spec(range);
+        let base = span.start();
+        let mutable out_pos = base;
+        let out_end = span.end();
         if out_end <= out_pos then {
-            return Result[UInt].Ok(0)
-        }
+            return Result[UInt].Ok(0);
+        };
 
-        let dst_ptr = into.borrow_mut_ptr()
+        let dst_ptr = into.borrow_mut_ptr();
 
         while out_pos < out_end then {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return Result[UInt].Ok(out_pos - base)
-                    }
+                        return Result[UInt].Ok(out_pos - base);
+                    };
 
-                    let src_ptr = self.storage.buf.borrow_ptr()
+                    let src_ptr = self.storage.buf.borrow_ptr();
 
-                    let mutable i UInt = 0
-                    let mutable found = false
-                    let mutable take UInt = avail
+                    let mutable i UInt = 0;
+                    let mutable found = false;
+                    let mutable take UInt = avail;
                     while i < avail then {
-                        let b = src_ptr[self.storage.start + i]
+                        let b = src_ptr[self.storage.start + i];
                         if b == delim then {
-                            found = true
-                            take = i + 1
-                            break
-                        }
-                        i += 1
-                    }
+                            found = true;
+                            take = i + 1;
+                            break;
+                        };
+                        i += 1;
+                    };
 
-                    let remain_out = out_end - out_pos
+                    let remain_out = out_end - out_pos;
                     if take > remain_out then {
-                        take = remain_out
-                    }
+                        take = remain_out;
+                    };
 
-                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take)
-                    self.storage.start += take
-                    out_pos += take
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take);
+                    self.storage.start += take;
+                    out_pos += take;
 
                     if found then {
-                        return Result[UInt].Ok(out_pos - base)
-                    }
+                        return Result[UInt].Ok(out_pos - base);
+                    };
                 },
                 .Error(e) then {
-                    return Result[UInt].Error(e)
+                    return Result[UInt].Error(e);
                 },
-            }
-        }
+            };
+        };
 
-        return Result[UInt].Ok(out_pos - base)
-    }
+        return Result[UInt].Ok(out_pos - base);
+    };
 
     public read_line(*self) Result[Option[String]] = {
-        let mutable tmp = make_bytes(4096)
+        let mutable tmp = make_bytes(4096);
         when self.read_until(10(UInt8), &mutable tmp, ..) in {
             .Ok(n) then {
                 if n == 0 then {
-                    return Result[Option[String]].Ok(Option[String].None())
-                }
-                let p = tmp.borrow_ptr()
+                    return Result[Option[String]].Ok(Option[String].None());
+                };
+                let p = tmp.borrow_ptr();
                 return when String.from_utf8_ptr(p, n) in {
                     .Ok(line) then Result[Option[String]].Ok(Option[String].Some(line)),
                     .Error(e) then Result[Option[String]].Error(e),
-                }
+                };
             },
             .Error(e) then {
-                return Result[Option[String]].Error(e)
+                return Result[Option[String]].Error(e);
             },
-        }
-    }
+        };
+    };
 
     public skip(*self, n UInt) Result[UInt] = {
-        let mutable remaining = n
+        let mutable remaining = n;
         while remaining > 0 then {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return Result[UInt].Ok(n - remaining)
-                    }
-                    let to_skip = if remaining < avail then remaining else avail
-                    self.storage.start += to_skip
-                    remaining -= to_skip
+                        return Result[UInt].Ok(n - remaining);
+                    };
+                    let to_skip = if remaining < avail then remaining else avail;
+                    self.storage.start += to_skip;
+                    remaining -= to_skip;
                 },
                 .Error(e) then {
-                    return Result[UInt].Error(e)
+                    return Result[UInt].Error(e);
                 },
-            }
-        }
-        return Result[UInt].Ok(n)
-    }
-}
+            };
+        };
+        return Result[UInt].Ok(n);
+    };
+};
 
 given[R Reader] BufReader[R] as Reader {
 
     public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt] = {
-        let span = into.slice_spec(range)
-        let base = span.start()
-        let mutable out_pos = base
-        let out_end = span.end()
+        let span = into.slice_spec(range);
+        let base = span.start();
+        let mutable out_pos = base;
+        let out_end = span.end();
         if out_end <= out_pos then {
-            return Result[UInt].Ok(0)
-        }
+            return Result[UInt].Ok(0);
+        };
 
-        let dst_ptr = into.borrow_mut_ptr()
+        let dst_ptr = into.borrow_mut_ptr();
 
         while out_pos < out_end then {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return Result[UInt].Ok(out_pos - base)
-                    }
-                    let src_ptr = self.storage.buf.borrow_ptr()
-                    let remain_out = out_end - out_pos
-                    let take = if avail < remain_out then avail else remain_out
-                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take)
-                    self.storage.start += take
-                    out_pos += take
+                        return Result[UInt].Ok(out_pos - base);
+                    };
+                    let src_ptr = self.storage.buf.borrow_ptr();
+                    let remain_out = out_end - out_pos;
+                    let take = if avail < remain_out then avail else remain_out;
+                    copy_memory(dst_ptr + out_pos, src_ptr + self.storage.start, take);
+                    self.storage.start += take;
+                    out_pos += take;
                 },
                 .Error(e) then {
-                    return Result[UInt].Error(e)
+                    return Result[UInt].Error(e);
                 },
-            }
-        }
+            };
+        };
 
-        return Result[UInt].Ok(out_pos - base)
-    }
-}
+        return Result[UInt].Ok(out_pos - base);
+    };
+};
 
 given[R Reader and Seeker] BufReader[R] as Seeker {
 
     public seek(*self, pos SeekOrigin) Result[UInt64] = {
-        let unread = self.storage.end - self.storage.start
+        let unread = self.storage.end - self.storage.start;
         let adjusted = when pos in {
             .Start(offset) then SeekOrigin.Start(offset),
             .Current(offset) then SeekOrigin.Current(offset - unread(Int64)),
             .End(offset) then SeekOrigin.End(offset),
-        }
+        };
 
         when self.storage.inner.seek(adjusted) in {
             .Ok(new_pos) then {
-                self.storage.start = 0
-                self.storage.end = 0
-                return Result[UInt64].Ok(new_pos)
+                self.storage.start = 0;
+                self.storage.end = 0;
+                return Result[UInt64].Ok(new_pos);
             },
             .Error(e) then {
-                return Result[UInt64].Error(e)
+                return Result[UInt64].Error(e);
             },
-        }
-    }
-}
+        };
+    };
+};

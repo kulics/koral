@@ -1,4 +1,4 @@
-using std { .. }
+using std { .. };
 // ============================================================================
 // std.os - Path Operations
 // ============================================================================
@@ -10,270 +10,266 @@ using std { .. }
 // FFI Declarations
 // ============================================================================
 
-foreign let __koral_normalize_path(path *unsafe UInt8, buf *unsafe UInt8, size UInt) Int
-foreign let __koral_path_separator() UInt8
-foreign let __koral_path_list_separator() UInt8
+foreign let __koral_normalize_path(path *unsafe UInt8, buf *unsafe UInt8, size UInt) Int;
+foreign let __koral_path_separator() UInt8;
+foreign let __koral_path_list_separator() UInt8;
 
 // ============================================================================
 // Path Type
 // ============================================================================
 
 public trait IntoPath {
-    into_path(self) Path
-}
+    into_path(self) Path;
+};
 
 given String as IntoPath {
 
-    public into_path(self) Path = Path(self)
-}
+    public into_path(self) Path = Path(self);
+};
 
 given Path as IntoPath {
 
-    public into_path(self) Path = self
-}
+    public into_path(self) Path = self;
+};
 
-public type Path(file_private _path String)
+public type Path(file_private _path String);
 
 given Path {
 
     /// 判断路径是否为空
-    public is_empty(*self) Bool = self._path.is_empty()
+    public is_empty(*self) Bool = self._path.is_empty();
 
     /// 判断是否为绝对路径
     public is_absolute(*self) Bool = {
         if self._path.is_empty() then {
-            return false
-        }
+            return false;
+        };
         if self._path.starts_with("/") or self._path.starts_with("\\") then {
-            return true
-        }
+            return true;
+        };
         if self._path.count() >= 3 then {
-            let c0 = self._path[0]
-            let c1 = self._path[1]
-            let c2 = self._path[2]
-            let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122)
+            let c0 = self._path[0];
+            let c1 = self._path[1];
+            let c2 = self._path[2];
+            let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
             if is_letter and c1 == ':' and (c2 == '/' or c2 == '\\') then {
-                return true
-            }
-        }
-        return false
-    }
+                return true;
+            };
+        };
+        return false;
+    };
 
     /// 拼接路径组件，返回新 Path
     public join[T IntoPath](*self, path T) Path = {
-        let p = path.into_path()
+        let p = path.into_path();
         if self._path.is_empty() then {
-            return p
-        }
+            return p;
+        };
         if p._path.is_empty() then {
-            return *self
-        }
+            return *self;
+        };
         if p.is_absolute() then {
-            return p
-        }
-        let mutable result = String.new()
-        result.push_string(self._path)
-        let sep = path_separator()
+            return p;
+        };
+        let mutable result = String.new();
+        result.push_string(self._path);
+        let sep = path_separator();
         if not self._path.ends_with("/") and not self._path.ends_with("\\") then {
-            result.push_string(sep)
-        }
-        result.push_string(p._path)
-        return Path(result)
-    }
+            result.push_string(sep);
+        };
+        result.push_string(p._path);
+        return Path(result);
+    };
 
     /// 返回父目录路径
     public dir_name(*self) Path = {
         if self._path.is_empty() then {
-            return Path(".")
-        }
-        let mutable p = self._path.replace_all("\\", "/")
+            return Path(".");
+        };
+        let mutable p = self._path.replace_all("\\", "/");
         if is_all_separators(p) then {
-            return Path("/")
-        }
+            return Path("/");
+        };
         while p.ends_with("/") and p.count() > 1 then {
-            p = p.substring(0..<(p.count() - 1))
-        }
+            p = p.substring(0..<(p.count() - 1));
+        };
         when p.find_last("/") in {
             .Some(idx) then {
                 if idx == 0 then {
-                    return Path("/")
-                }
+                    return Path("/");
+                };
                 if idx == 2 and p.count() >= 2 and p[1] == ':' then {
-                    return Path(p.substring(0..<(idx + 1)))
-                }
-                return Path(p.substring(0..<idx))
+                    return Path(p.substring(0..<(idx + 1)));
+                };
+                return Path(p.substring(0..<idx));
             },
             .None then {
-                return Path(".")
+                return Path(".");
             },
-        }
-    }
+        };
+    };
 
     /// 返回最后一个路径组件名称
     public base_name(*self) String = {
         if self._path.is_empty() then {
-            return "."
-        }
-        let mutable p = self._path.replace_all("\\", "/")
+            return ".";
+        };
+        let mutable p = self._path.replace_all("\\", "/");
         if is_all_separators(p) then {
-            return "/"
-        }
+            return "/";
+        };
         while p.ends_with("/") and p.count() > 1 then {
-            p = p.substring(0..<(p.count() - 1))
-        }
+            p = p.substring(0..<(p.count() - 1));
+        };
         when p.find_last("/") in {
             .Some(idx) then {
                 if idx + 1 >= p.count() then {
-                    return "/"
-                }
-                return p.substring((idx + 1)..)
+                    return "/";
+                };
+                return p.substring((idx + 1)..);
             },
             .None then {
-                return p
+                return p;
             },
-        }
-    }
+        };
+    };
 
     /// 返回文件扩展名（包含点号，如 ".txt"；无扩展名返回空字符串）
     public ext_name(*self) String = {
-        let name = self.base_name()
+        let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
-            return ""
-        }
+            return "";
+        };
         when name.find_last(".") in {
             .Some(idx) then {
                 if idx == 0 then {
-                    return ""
-                }
-                return name.substring(idx..)
+                    return "";
+                };
+                return name.substring(idx..);
             },
             .None then {
-                return ""
+                return "";
             },
-        }
-    }
+        };
+    };
 
     /// 返回文件名去掉扩展名后的部分（如 "file.txt" → "file"，"archive.tar.gz" → "archive.tar"）
     public stem_name(*self) String = {
-        let name = self.base_name()
+        let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
-            return name
-        }
-        let ext = self.ext_name()
+            return name;
+        };
+        let ext = self.ext_name();
         if ext.is_empty() then {
-            return name
-        }
-        return name.substring(0..<(name.count() - ext.count()))
-    }
+            return name;
+        };
+        return name.substring(0..<(name.count() - ext.count()));
+    };
 
     /// 返回替换了扩展名的新 Path
     public with_ext_name(*self, ext String) Path = {
-        let bname = self.base_name()
-        let old_ext = self.ext_name()
-        let stem = if old_ext.is_empty() then bname
-            else bname.substring(0..<(bname.count() - old_ext.count()))
-        let normalized_ext = if ext.is_empty() then ""
-            else if ext.starts_with(".") then ext
-            else "." + ext
-        return self.with_base_name(stem + normalized_ext)
-    }
+        let bname = self.base_name();
+        let old_ext = self.ext_name();
+        let stem = if old_ext.is_empty() then bname else bname.substring(0..<(bname.count() - old_ext.count()));
+        let normalized_ext = if ext.is_empty() then "" else if ext.starts_with(".") then ext else "." + ext;
+        return self.with_base_name(stem + normalized_ext);
+    };
 
     /// 返回替换了最后一个组件名称的新 Path
     public with_base_name(*self, name String) Path =
-        if self.dir_name().to_string() == "." then Path(name)
-        else self.dir_name().join(name)
+        if self.dir_name().to_string() == "." then Path(name) else self.dir_name().join(name);
 
     /// 规范化路径（解析 . 和 .. 组件）
     public normalize(*self) Path = {
-        let buf_size = self._path.count() + 1
-        let buf = alloc_memory[UInt8](buf_size)
-        defer dealloc_memory(buf)
-        let len = __koral_normalize_path(self._path.storage.data, buf, buf_size)
-        let result = String.from_utf8_ptr_unchecked(buf, len(UInt))
-        return Path(result)
-    }
+        let buf_size = self._path.count() + 1;
+        let buf = alloc_memory[UInt8](buf_size);
+        defer dealloc_memory(buf);
+        let len = __koral_normalize_path(self._path.storage.data, buf, buf_size);
+        let result = String.from_utf8_ptr_unchecked(buf, len(UInt));
+        return Path(result);
+    };
 
     /// 将路径拆分为组件列表
-    public components(*self) List[String] = split_path_components(self._path)
+    public components(*self) List[String] = split_path_components(self._path);
 
     /// 判断路径是否以指定前缀开头（按组件匹配）
     public starts_with(*self, prefix Path) Bool = {
-        let self_parts = self.components()
-        let prefix_parts = prefix.components()
+        let self_parts = self.components();
+        let prefix_parts = prefix.components();
         if prefix_parts.count() > self_parts.count() then {
-            return false
-        }
+            return false;
+        };
         for i in 0..<prefix_parts.count() then {
             if self_parts[i] <> prefix_parts[i] then {
-                return false
-            }
-        }
-        return true
-    }
+                return false;
+            };
+        };
+        return true;
+    };
 
     /// 判断路径是否以指定后缀结尾（按组件匹配）
     public ends_with(*self, suffix Path) Bool = {
-        let self_parts = self.components()
-        let suffix_parts = suffix.components()
+        let self_parts = self.components();
+        let suffix_parts = suffix.components();
         if suffix_parts.count() > self_parts.count() then {
-            return false
-        }
-        let offset = self_parts.count() - suffix_parts.count()
+            return false;
+        };
+        let offset = self_parts.count() - suffix_parts.count();
         for i in 0..<suffix_parts.count() then {
             if self_parts[offset + i] <> suffix_parts[i] then {
-                return false
-            }
-        }
-        return true
-    }
+                return false;
+            };
+        };
+        return true;
+    };
 
     /// 计算相对于 base 的相对路径
     public relative_to[T IntoPath](*self, base T) Result[Path] = {
-        let b = base.into_path()
+        let b = base.into_path();
         if self._path.is_empty() then {
-            return Result[Path].Error(box("target path is empty"))
-        }
+            return Result[Path].Error(box("target path is empty"));
+        };
         if b._path.is_empty() then {
-            return Result[Path].Error(box("base path is empty"))
-        }
+            return Result[Path].Error(box("base path is empty"));
+        };
 
-        let norm_self = self.normalize()
-        let norm_base = b.normalize()
+        let norm_self = self.normalize();
+        let norm_base = b.normalize();
 
         if norm_self._path == norm_base._path then {
-            return Result[Path].Ok(Path("."))
-        }
+            return Result[Path].Ok(Path("."));
+        };
 
-        let self_parts = norm_self.components()
-        let base_parts = norm_base.components()
+        let self_parts = norm_self.components();
+        let base_parts = norm_base.components();
 
-        let mutable common UInt = 0
-        let self_len = self_parts.count()
-        let base_len = base_parts.count()
-        let min_len = if self_len < base_len then self_len else base_len
+        let mutable common UInt = 0;
+        let self_len = self_parts.count();
+        let base_len = base_parts.count();
+        let min_len = if self_len < base_len then self_len else base_len;
 
         while common < min_len and self_parts[common] == base_parts[common] then {
-            common += 1
-        }
+            common += 1;
+        };
 
-        let mutable result = String.new()
+        let mutable result = String.new();
         for i in common..<base_len then {
             if not result.is_empty() then {
-                result.push_byte('/')
-            }
-            result.push_string("..")
-        }
+                result.push_byte('/');
+            };
+            result.push_string("..");
+        };
 
         for j in common..<self_len then {
             if not result.is_empty() then {
-                result.push_byte('/')
-            }
-            result.push_string(self_parts[j])
-        }
+                result.push_byte('/');
+            };
+            result.push_string(self_parts[j]);
+        };
 
-        return if result.is_empty() then .Ok(Path(".")) else .Ok(Path(result))
-    }
-}
+        return if result.is_empty() then .Ok(Path(".")) else .Ok(Path(result));
+    };
+};
 
 // ============================================================================
 // Module-Level Functions
@@ -281,19 +277,19 @@ given Path {
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator() String = {
-    let sep = __koral_path_separator()
-    let mutable s = String.new()
-    s.push_byte(sep)
-    return s
-}
+    let sep = __koral_path_separator();
+    let mutable s = String.new();
+    s.push_byte(sep);
+    return s;
+};
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator() String = {
-    let sep = __koral_path_list_separator()
-    let mutable s = String.new()
-    s.push_byte(sep)
-    return s
-}
+    let sep = __koral_path_list_separator();
+    let mutable s = String.new();
+    s.push_byte(sep);
+    return s;
+};
 
 
 // ============================================================================
@@ -303,40 +299,40 @@ public let path_list_separator() String = {
 /// Split a normalized path (using "/" separator) into a list of components.
 /// Filters out empty parts from consecutive separators.
 file_private let split_path_components(path String) List[String] = {
-    let mutable parts List[String] = []
-    let normalized = path.replace_all("\\", "/")
+    let mutable parts List[String] = [];
+    let normalized = path.replace_all("\\", "/");
     for part in normalized.split("/") then {
         if not part.is_empty() then {
-            parts.push(part)
-        }
-    }
-    return parts
-}
+            parts.push(part);
+        };
+    };
+    return parts;
+};
 
 file_private let is_all_separators(path String) Bool = {
     if path.is_empty() then {
-        return false
-    }
+        return false;
+    };
     for i in 0..<path.count() then {
-        let c = path[i]
+        let c = path[i];
         if c <> '/' and c <> '\\' then {
-            return false
-        }
-    }
-    return true
-}
+            return false;
+        };
+    };
+    return true;
+};
 
 given Path as Eq {
 
-    public equals(self, other Path) Bool = self._path == other._path
-}
+    public equals(self, other Path) Bool = self._path == other._path;
+};
 
 given Path as Hash {
 
-    public hash(self) UInt = self._path.hash()
-}
+    public hash(self) UInt = self._path.hash();
+};
 
 given Path as ToString {
 
-    public to_string(*self) String = self._path
-}
+    public to_string(*self) String = self._path;
+};
