@@ -457,11 +457,11 @@ s.trim_ascii();               // Trim leading/trailing whitespace
 s.substring(0..<5);           // "Hello" - slicing
 s.find("World");              // Some(7)
 s.replace_all("World", "Koral"); // "Hello, Koral!"
-s.split(",")                 // Split by separator
+s.split(",");                 // Split by separator
 s.lines();                    // Split by lines
 
 // Join a list of strings
-list.join_to_string(", ")   // Join List[String] with separator
+list.join_to_string(", ");   // Join List[String] with separator
 ```
 
 ### Rune Literals
