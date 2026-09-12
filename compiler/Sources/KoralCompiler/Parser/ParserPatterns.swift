@@ -249,17 +249,14 @@ extension Parser {
       }
       try match(.identifier(name))
       var args: [PatternArg] = []
-      if currentToken === .leftParen {
-        try match(.leftParen)
-        while currentToken !== .rightParen {
-          args.append(try parsePatternArgument())
-          if currentToken === .comma { try match(.comma) }
-        }
-        try match(.rightParen)
+      try match(.leftParen)
+      while currentToken !== .rightParen {
+        args.append(try parsePatternArgument())
+        if currentToken === .comma { try match(.comma) }
       }
+      try match(.rightParen)
       return .enumCase(caseName: name, elements: args, span: startSpan)
     }
-    
     // Parenthesized pattern for grouping
     if currentToken === .leftParen {
       try match(.leftParen)

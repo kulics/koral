@@ -1,4 +1,4 @@
-﻿# The Koral Programming Language
+# The Koral Programming Language
 
 Koral is an open-source programming language focused on performance, readability, and practical cross-platform development.
 
@@ -1495,7 +1495,7 @@ Design note:
 
 - Enum cases remain data constructors semantically, but Koral gives implicit member expressions a uniform explicit construction or call surface.
 - In expression position, zero-field enum cases therefore still use `.Name()` rather than bare `.Name()` omission.
-- Pattern syntax is separate from construction syntax, so zero-field enum case patterns may still be written as `.Name`.
+- Pattern syntax now also requires parentheses; zero-field enum case patterns must be written as `.Name()`.
 
 ```koral
 // Enum construction — omit the Option[Int] prefix
