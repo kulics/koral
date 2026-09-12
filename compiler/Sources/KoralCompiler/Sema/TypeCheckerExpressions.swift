@@ -3709,6 +3709,61 @@ extension TypeChecker {
       }
     }
 
+    // Check if callee is a generic enum constructor with type inference from expected type
+    // e.g., Option.Some(42) when expected type is Option[Int]
+    if case .memberPath(let baseExpr, let path) = callee,
+       case .identifier(let baseName) = baseExpr,
+       path.count == 1,
+       let template = currentScope.lookupGenericEnumTemplate(baseName) {
+      let memberName = path[0]
+
+      if let expectedType = expectedType,
+         case .genericEnum(let expectedTemplateName, let expectedTypeArgs) = expectedType,
+         expectedTemplateName == baseName {
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: expectedTypeArgs)
+        
+        if !expectedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .enumType(template: template, args: expectedTypeArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+
+        let type = Type.genericEnum(template: baseName, args: expectedTypeArgs)
+        var substitution: [String: Type] = [:]
+        for (i, param) in template.typeParameters.enumerated() {
+          substitution[param.name] = expectedTypeArgs[i]
+        }
+
+        if let c = template.cases.first(where: { $0.name == memberName }) {
+          let resolvedParams = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try c.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              return Parameter(type: paramType, kind: .byVal)
+            }
+          }
+
+          let plan = try planConstructorArguments(
+            callArgs,
+            fieldNames: c.parameters.map { $0.name },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+          let typedArgs = try typeCheckConstructorArguments(
+            plan: plan,
+            members: zip(c.parameters, resolvedParams).map { source, resolved in
+              (name: source.name, type: resolved.type)
+            },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+
+          return .enumConstruction(type: type, caseName: memberName, arguments: typedArgs)
+        }
+      }
+    }
     // Resolve Callee (Check Enum Constructor)
     var preResolvedCallee: TypedExpressionNode? = nil
     do {
@@ -5116,8 +5171,7 @@ extension TypeChecker {
         let memberName = path[0]
         if case .`enum`(let defId) = type {
           if let c = context.getEnumCases(defId)?.first(where: { $0.name == memberName }) {
-            let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-            return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: paramTypes)
+            throw SemanticError(.generic("Enum constructor '\(name).\(memberName)' cannot be used as a function value"), span: currentSpan)
           }
         }
       }
@@ -5168,7 +5222,7 @@ extension TypeChecker {
             }
           }
 
-          return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: resolvedParams)
+          throw SemanticError(.generic("Enum constructor '\(type).\(memberName)' cannot be used as a function value"), span: currentSpan)
         }
       }
     }
@@ -5524,7 +5578,7 @@ extension TypeChecker {
             }
           }
 
-          return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: resolvedParams)
+          throw SemanticError(.generic("Enum constructor '\(type).\(memberName)' cannot be used as a function value"), span: currentSpan)
         }
       }
     }

@@ -57,8 +57,9 @@ void __koral_release(void* raw_control) {
         // Merged layout: control block and payload are in the same allocation.
         // Don't free(control->ptr) — the payload is freed together with the
         // control block when the last weak reference is released.
-        int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
-        if (weak_prev == 1) {
+        // If no explicit weak references exist (weak_count == 0), free now.
+        // Otherwise, __koral_weak_release will free when the last weak ref dies.
+        if (atomic_load(&control->weak_count) == 0) {
             free(control);
         }
     }
@@ -75,7 +76,10 @@ void __koral_weak_release(void* raw_control) {
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     int prev = atomic_fetch_sub(&control->weak_count, 1);
     if (prev == 1) {
-        free(control);
+        // Last weak reference released. Free only if strong refs are also gone.
+        if (atomic_load(&control->strong_count) == 0) {
+            free(control);
+        }
     }
 }
 

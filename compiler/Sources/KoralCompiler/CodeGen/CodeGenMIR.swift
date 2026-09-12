@@ -1871,7 +1871,7 @@ final class MIRFunctionCodeEmitter {
     codeGen.addIndent()
     codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
     codeGen.addIndent()
-    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
+    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->weak_count = 0;\n")
     codeGen.addIndent()
     codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
     let shouldTransferOwnership = allocation == .heapOwnedMove

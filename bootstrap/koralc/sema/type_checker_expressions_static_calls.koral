@@ -1183,6 +1183,68 @@ given TypeChecker {
             _ then {},
         };
 
+        // Handle enum constructor calls directly (e.g., MyEnum.Case(42) or [T]Result.Ok(42))
+        when callee in {
+            .MemberPath(base_expr, path, _) then {
+                if path.count() == 1(UInt) then {
+                    let member_name = path[0(UInt)];
+                    when base_expr in {
+                        .Identifier(base_name, _) then {
+                            let resolved_type_opt = self.try_resolve_named_type_in_scope_without_diag(base_name, scope);
+                            when resolved_type_opt in {
+                                .Some(resolved_type) then {
+                                    let canonical = self.canonicalize_alias_type(resolved_type);
+                                    if self.static_member_is_enum_case(canonical, member_name) then {
+                                        let field_types = self.get_enum_case_field_types(canonical, member_name);
+                                        let param_specs = self.get_enum_case_param_specs(canonical, member_name);
+                                        call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)") or else {
+                                            return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown());
+                                        };
+                                        let typed_args = self.check_implicit_member_args(&mutable call_args, field_types, scope);
+                                        return self.lower_enum_constructor_expr(canonical, member_name, typed_args);
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        },
+                        .GenericInstantiation(base_name, type_args, _) then {
+                            let resolved_base = self.try_resolve_named_type_in_scope_without_diag(base_name, scope);
+                            when resolved_base in {
+                                .Some(base_type) then {
+                                    let mutable resolved_args = List[* Type].new();
+                                    for type_arg in type_args then {
+                                        resolved_args.push(box(self.resolve_type_in_scope(*type_arg, scope)));
+                                    };
+                                    let enum_type = when base_type in {
+                                        .EnumType(def_id) then {
+                                            let template_name = self.context().get_template_name(def_id) or else base_name;
+                                            yield Type.GenericEnum(template_name, resolved_args);
+                                        },
+                                        .GenericEnum(template_name, _) then Type.GenericEnum(template_name, resolved_args),
+                                        _ then Type.Unknown(),
+                                    };
+                                    if not (enum_type is .Unknown()) then {
+                                        if self.static_member_is_enum_case(enum_type, member_name) then {
+                                            let field_types = self.get_enum_case_field_types(enum_type, member_name);
+                                            let param_specs = self.get_enum_case_param_specs(enum_type, member_name);
+                                            call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)") or else {
+                                                return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown());
+                                            };
+                                            let typed_args = self.check_implicit_member_args(&mutable call_args, field_types, scope);
+                                            return self.lower_enum_constructor_expr(enum_type, member_name, typed_args);
+                                        };
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        },
+                        _ then {},
+                    };
+                };
+            },
+            _ then {},
+        };
+
         if self.check_intrinsic_call_ref(callee, &mutable call_args, expected, scope) is .Some(intrinsic_expr) then {
             return intrinsic_expr;
         };

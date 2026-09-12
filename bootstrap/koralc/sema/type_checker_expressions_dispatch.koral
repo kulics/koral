@@ -1039,7 +1039,14 @@ given TypeChecker {
             let typed_params = self.typed_params_for_callable_value(field_types, param_specs);
             let typed_args = self.callable_value_arg_exprs(typed_params);
             let body = self.lower_enum_constructor_expr(canonical, member_name, typed_args);
-            return Option[TypedExpr].Some(self.make_callable_value_lambda(typed_params, body));
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Enum constructor cannot be used as a function value"
+                )
+            );
+            return Option[TypedExpr].None();
         };
         return when self.static_receiver_info_for_type(canonical) in {
             .Some(receiver_info) then {
@@ -1062,6 +1069,26 @@ given TypeChecker {
     };
 
     module_private check_member_dispatch_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
+        when expr in {
+            .MemberPath(base, path, _) then {
+                when base in {
+                    .Identifier(base_name, _) then {
+                        if not path.is_empty() and self.is_upper_first_char(base_name) and scope.lookup_type(base_name) is .None() and scope.lookup(base_name) is .None() then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"
+                                )
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
+                    },
+                    _ then {},
+                };
+            },
+            _ then {},
+        };
         return when expr in {
             .MemberPath(base, path, _) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope);
