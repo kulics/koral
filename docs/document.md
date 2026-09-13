@@ -1238,12 +1238,69 @@ let b = f2(1);
 
 ### Parameters
 
-Parameters are data that the function can receive during execution. Use `ParameterName Type` to declare parameters.
+Parameters are data that the function can receive during execution. Koral supports two kinds of parameters: positional and named.
+
+#### Positional Parameters
+
+Declared as `name Type` (no colon). Called without labels.
 
 ```koral
 let add(x Int, y Int) Int = x + y;
 let a = add(1, 2); // a == 3
 ```
+
+#### Named Parameters
+
+Declared as `name: Type` (with colon). Must be called with labels.
+
+```koral
+let connect(host String, port: Int) Void = {};
+connect("localhost", port: 8080);
+```
+
+#### Mixing Rules
+
+Positional parameters must come before named parameters in the declaration. At the call site, positional arguments are matched by position first, then named arguments are matched by label.
+
+```koral
+type Window(title String, width: Int, height: Int);
+
+// Positional fills 'title', named fills 'width' and 'height'
+let w = Window("hello", width: 900, height: 600);
+```
+
+If a parameter is declared as named, it **must** be called with its label. Positional parameters must never be called with labels.
+
+#### Default Values
+
+Only named parameters can have default values. A default value is specified as a literal after `=`:
+
+```koral
+type Config(
+    count: Int = 42,
+    name: String = "hello",
+    enabled: Bool = true,
+    ratio: Float64 = 3.14,
+    ch: Rune = 'A',
+    items: List[Int] = [],
+    flags: Dict[String, Int] = [],
+    span: Range[Int] = ..,
+);
+```
+
+Supported default value literals:
+
+| Kind | Examples |
+|------|----------|
+| Integer | `0`, `42`, `-1` |
+| Float | `3.14`, `0.0` |
+| Bool | `true`, `false` |
+| String | `"hello"` |
+| Rune | `'A'` |
+| Empty collection | `[]` (List, Set, or Dict, inferred from type context) |
+| Empty range | `..` (resolves to `Range[T].Full()`) |
+
+The default value type must match the parameter type. For example, `name: String = 42` is an error.
 
 Mutable parameters use the `mutable` keyword:
 
@@ -1253,31 +1310,9 @@ let increment(mutable x Int) Int = { x += 1; return x };
 
 For ordinary parameters, `mutable` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the function type, and is ignored when checking trait/given method compatibility.
 
-#### Constructor Labels and Default Fill
+#### Constructor Calls
 
-Ordinary functions and methods use positional parameters only.
-
-```koral
-let connect(host String, port Int) Void = {};
-connect("localhost", 8080);
-```
-
-Labels are reserved for nominal construction and destructuring.
-
-```koral
-type Button(width Int, height Int, label String);
-
-let a = Button(100, 50, "OK");
-let b = Button(label: "OK", height: 50, width: 100);
-```
-
-Constructor labels follow these rules:
-
-- They are valid only on struct and enum constructors.
-- They are not valid on ordinary static method calls such as `Type.make(...)`.
-- Labeled constructor arguments match by field name, not by position.
-- Reordering is allowed.
-- Positional and labeled constructor arguments may not be mixed.
+Struct, enum, and function calls all follow the same positional/named rules:
 
 ```koral
 type Shape {
@@ -1285,26 +1320,14 @@ type Shape {
     Line(start Point, end Point),
 }
 
-let s = Shape.Line(end: Point(1, 1), start: Point(0, 0));
-// Date.new(year: 2024, month: 1, day: 1)    // invalid: static methods remain positional-only
+// Positional
+let s1 = Shape.Line(Point(0, 0), Point(1, 1));
+
+// Named (reordering allowed)
+let s2 = Shape.Line(end: Point(1, 1), start: Point(0, 0));
 ```
 
-When omitted fields have obvious defaults, constructors may end with trailing `...`.
-
-```koral
-trait Default {
-    default() Self;
-}
-
-type Window(title String, width Int, height Int);
-
-let w1 = Window(...);
-let w2 = Window(title: "Koral", ...);
-```
-
-`...` fills each omitted field by calling `Default.default()` on the omitted field type. It is constructor-only, may appear at most once, and must be the final argument.
-
-In pattern matching, labeled nominal destructuring remains available and also matches by field name:
+In pattern matching, named destructuring follows the same label rules:
 
 ```koral
 when s in {
@@ -1418,12 +1441,33 @@ type Empty();
 type Point(x Int, y Int);
 ```
 
+Struct fields can be positional or named. Named fields use colon syntax and can have default values:
+
+```koral
+type Config(
+    name String,               // positional field
+    width: Int,                // named field (no default)
+    height: Int = 600,         // named field with default
+    title: String = "Untitled" // named field with default
+);
+```
+
+Rules:
+- Positional fields must come before named fields.
+- Only named fields can have default values.
+- Default values must be literals: integer, float, bool, string, rune, `[]` (empty collection), or `..` (empty range).
+
 #### Construction
 
 Use `()` syntax to call the constructor:
 
 ```koral
 let a Point = Point(0, 0);
+
+// Named fields are called with labels; positional fields are not
+let c1 Config = Config("main", width: 800);
+let c2 Config = Config("main", width: 800, height: 900, title: "App");
+// height and title use their defaults: 600 and "Untitled"
 ```
 
 #### Using Member Variables
@@ -1617,6 +1661,31 @@ given Point as Ord {
 Notes:
 - `given Type as Trait` is the explicit conformance entry point.
 - Parent/child traits are implemented level-by-level: implementing `Ord` does not implicitly implement `Eq`.
+
+#### Named Parameters in Trait and Given
+
+Trait methods support named parameters. Implementations must match the trait's parameter classification:
+
+- If a trait method parameter is named (`name: Type`), the implementation must also declare it as named.
+- If a trait method parameter is positional (`name Type`), the implementation must also declare it as positional.
+
+Default value rules for trait and given:
+
+- If the trait declares a default value for a named parameter, the given implementation **must not** redeclare it. The trait is the single source of defaults.
+- If the trait declares no default value, the given implementation **cannot** add one.
+
+```koral
+trait Drawable {
+    draw(self, color: String, thickness: Int) String;
+}
+
+type Circle(radius Int);
+
+given Circle as Drawable {
+    // 'color' and 'thickness' are named, matching the trait
+    draw(self, color: String, thickness: Int) String = color + thickness.to_string();
+};
+```
 
 ### Trait Tool Methods (`given Trait`)
 
@@ -2141,7 +2210,7 @@ The compiler adds linker flags from the resolved manifest graph. `libc` is impli
 
 ### Foreign Functions
 
-Declare external C functions:
+Declare external C functions. Foreign functions use positional parameters only; named parameters (colon syntax) are not supported.
 
 ```koral
 foreign let sin(x Float64) Float64;

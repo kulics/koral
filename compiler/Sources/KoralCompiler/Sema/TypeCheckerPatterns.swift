@@ -224,6 +224,7 @@ extension TypeChecker {
       let orderedPatternArgs = try reorderPatternArguments(
         subPatternArgs,
         fieldNames: caseDef.parameters.map { $0.name },
+        fieldIsNamed: caseDef.parameters.map { $0.named },
         patternDescription: ".\(caseName)"
       )
       let subPatterns = orderedPatternArgs.map { $0.pattern }
@@ -390,6 +391,7 @@ extension TypeChecker {
       let orderedPatternArgs = try reorderPatternArguments(
         subPatternArgs,
         fieldNames: members.map { $0.name },
+        fieldIsNamed: members.map { $0.named },
         patternDescription: typeName
       )
       let subPatterns = orderedPatternArgs.map { $0.pattern }

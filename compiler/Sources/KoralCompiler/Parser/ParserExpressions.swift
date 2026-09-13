@@ -61,16 +61,10 @@ extension Parser {
     if arguments.contains(where: { $0.isDefaultFill }) {
       throw ParserError.unexpectedToken(
         span: span,
-        got: "Default-fill '...' is only valid in constructor calls"
+        got: "Default-fill '...' is not supported; use named parameter defaults instead"
       )
     }
-
-    if arguments.contains(where: { $0.label != nil }) {
-      throw ParserError.unexpectedToken(
-        span: span,
-        got: "Named labels are only allowed on struct and enum constructors; use positional arguments"
-      )
-    }
+    // Named labels are now allowed for all calls (functions, methods, constructors)
   }
 
   private func tryParseMethodTypeArguments() throws -> [TypeNode]? {

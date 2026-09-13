@@ -209,147 +209,210 @@ given TypeChecker {
         };
     };
 
-    module_private normalize_constructor_call_args(self, args List[* Expr], param_specs List[FunctionParamSpec], field_types List[Type], constructor_description String) Option[List[* Expr]] = {
-        let mutable has_named = false;
-        let mutable has_positional = false;
-        let mutable saw_default_fill = false;
-        let mutable arg_index UInt = 0;
+        // Parse a stored default value string into an Expr node based purely on syntax
+        module_private make_default_value_expr(*self, val String, sp SourceSpan) * Expr = {
+            if val == "[]" or val == ".." then {
+                return box(Expr.EmptyLiteral(sp));
+            } else if val == "true" then {
+                return box(Expr.BoolLiteral(true, sp));
+            } else if val == "false" then {
+                return box(Expr.BoolLiteral(false, sp));
+            } else if val.count() > 2 and val[0] == 39 and val[val.count() - 1] == 39 then {
+                // Single-quoted rune literal (ASCII 39 = ')
+                let inner = val.substring(1..<val.count() - 1);
+                return box(Expr.RuneLiteral(inner, sp));
+            } else if val.count() >= 2 and val[0] == 34 and val[val.count() - 1] == 34 then {
+                // Double-quoted string literal (ASCII 34 = ") - strip surrounding quotes
+                let inner = val.substring(1..<val.count() - 1);
+                return box(Expr.StringLiteral(inner, sp));
+            } else if val.find(".") is .Some(_) then {
+                return box(Expr.FloatLiteral(val, sp));
+            } else {
+                return box(Expr.IntegerLiteral(val, sp));
+            };
+        };
+
+        // Check whether a default value literal is type-compatible with the expected field type.
+        // Returns true if compatible, false if there is a type mismatch.
+        module_private validate_default_value_type(*self, val String, expected_type Type) Bool = {
+            if expected_type is .Unknown() then { return true; };
+            if val == "[]" then {
+                return self.extract_collection_element_type(expected_type) is .Some(_)
+                    or self.extract_dict_kv_types(expected_type).first is .Some(_);
+            };
+            if val == ".." then {
+                return self.extract_range_element_type(expected_type) is .Some(_);
+            };
+            if val == "true" or val == "false" then {
+                return expected_type is .BoolType();
+            };
+            if val.count() > 2 and val[0] == 39 and val[val.count() - 1] == 39 then {
+                return self.is_rune_type(expected_type);
+            };
+            if val.count() >= 2 and val[0] == 34 and val[val.count() - 1] == 34 then {
+                return self.is_string_type(expected_type);
+            };
+            if val.find(".") is .Some(_) then {
+                return self.is_float_type(expected_type) or self.is_numeric_type(expected_type);
+            };
+            // Integer literal
+            return self.is_integer_type(expected_type) or self.is_numeric_type(expected_type);
+        };
+
+        module_private normalize_constructor_call_args(self, args List[* Expr], param_specs List[FunctionParamSpec], field_types List[Type], constructor_description String, parent_name_override String) Option[List[* Expr]] = {
+        let effective_parent = if parent_name_override.is_empty() then constructor_description else parent_name_override;
         let first_arg_span = when args.get(0(UInt)) in {
             .Some(arg_ref) then expr_span(arg_ref),
             .None() then unknown_span(),
         };
-        let last_arg_span = if args.is_empty() then unknown_span() else when args.get(args.count() - 1(UInt)) in {
-            .Some(arg_ref) then expr_span(arg_ref),
-            .None() then unknown_span(),
-        };
+
+        // Validate argument order: positional must come before named
+        let mutable seen_named = false;
         for arg in args then {
             when arg in {
-                .NamedArgument(label, _, _) then {
-                    if label == "..." then {
-                        if saw_default_fill then {
-                            self.push_diagnostic_at_span("Default-fill '...' may appear at most once in constructor call '\(constructor_description)'", expr_span(arg));
-                            return Option[List[* Expr]].None();
-                        };
-                        if arg_index + 1(UInt) <> args.count() then {
-                            self.push_diagnostic_at_span("Default-fill '...' must be the last constructor argument", expr_span(arg));
-                            return Option[List[* Expr]].None();
-                        };
-                        saw_default_fill = true;
-                    } else {
-                        has_named = true;
+                .NamedArgument(_, _, _) then { seen_named = true; },
+                _ then {
+                    if seen_named then {
+                        self.push_diagnostic_at_span("Positional arguments are not allowed after named arguments", expr_span(arg));
+                        return Option[List[* Expr]].None();
                     };
                 },
-                _ then {
-                    has_positional = true;
-                },
             };
-            arg_index += 1;
         };
 
-        if has_named and has_positional then {
-            self.push_diagnostic_at_span("Constructor call cannot mix positional and labeled arguments", first_arg_span);
+        // Separate positional and named field indices
+        let mutable positional_indices = List[UInt].new();
+        let mutable named_indices = List[UInt].new();
+        let mutable si UInt = 0;
+        while si < param_specs.count() then {
+            if param_specs[si].named then { named_indices.push(si); } else { positional_indices.push(si); };
+            si += 1;
+        };
+
+        // Count positional args
+        let mutable positional_arg_count UInt = 0;
+        for arg in args then {
+            when arg in { .NamedArgument(_, _, _) then {}, _ then { positional_arg_count += 1; } };
+        };
+
+        // Validate: positional args <= positional fields
+        if positional_arg_count > positional_indices.count() then {
+            self.push_diagnostic_at_span("Too many positional arguments for '\(constructor_description)'; expected at most \(positional_indices.count()) positional argument(s)", first_arg_span);
             return Option[List[* Expr]].None();
         };
 
-        if not has_named then {
-            if saw_default_fill then {
-                if args.count() <> 1(UInt) then {
-                    self.push_diagnostic_at_span("Default-fill '...' requires labeled constructor arguments or no preceding arguments", first_arg_span);
-                    return Option[List[* Expr]].None();
-                };
-                let mutable filled = List[* Expr].new();
-                let mutable idx UInt = 0;
-                while idx < param_specs.count() and idx < field_types.count() then {
-                    when self.default_fill_expr_for_type(field_types[idx]) in {
-                        .Some(default_expr) then filled.push(default_expr),
-                        .None() then {
-                            self.push_diagnostic_at_span(
-                                "Field '\(param_specs[idx].name)' omitted by '...', but type '\(self.context().type_display_name(field_types[idx]))' does not implement Default",
-                                first_arg_span
-                            );
-                            return Option[List[* Expr]].None();
-                        },
-                    };
-                    idx += 1;
-                };
-                return Option[List[* Expr]].Some(filled);
-            };
-            return Option[List[* Expr]].Some(args);
-        };
-
+        // Validate named args target named fields
         let mutable valid_names = Set[String].new();
-        for spec in param_specs then {
-            valid_names.insert(spec.name);
-        };
+        for spec in param_specs then { valid_names.insert(spec.name); };
+        let mutable named_set = Set[String].new();
+        for ni in named_indices then { named_set.insert(param_specs[ni].name); };
+        let mutable pos_set = Set[String].new();
+        for pi in positional_indices then { pos_set.insert(param_specs[pi].name); };
+
         let mutable seen_names = Set[String].new();
         for arg in args then {
             when arg in {
                 .NamedArgument(label, _, _) then {
-                    if label == "..." then {
-                    } else if not valid_names.contains(label) then {
-                        self.push_diagnostic_at_span("Unknown constructor label '\(label)' for type '\(constructor_description)'", expr_span(arg));
+                    if not valid_names.contains(label) then {
+                        self.push_diagnostic_at_span("Unknown named argument '\(label)' for '\(constructor_description)'", expr_span(arg));
+                        return Option[List[* Expr]].None();
+                    } else if pos_set.contains(label) then {
+                        self.push_diagnostic_at_span("Positional argument provided for named field '\(label)'", expr_span(arg));
                         return Option[List[* Expr]].None();
                     } else if seen_names.contains(label) then {
                         self.push_diagnostic_at_span("Duplicate constructor label '\(label)'", expr_span(arg));
                         return Option[List[* Expr]].None();
-                    } else {
-                        seen_names.insert(label);
-                    };
+                    } else { seen_names.insert(label); };
                 },
                 _ then {},
             };
         };
 
+        // Build ordered result
         let mutable ordered = List[* Expr].new();
-        let mutable missing_count UInt = 0;
-        let mutable idx UInt = 0;
-        while idx < param_specs.count() and idx < field_types.count() then {
-            let spec = param_specs[idx];
-            let mutable matched = Option[* Expr].None();
-            for arg in args then {
-                when arg in {
-                    .NamedArgument(label, inner, _) then {
-                        if label == spec.name then {
-                            matched = Option[* Expr].Some(inner);
-                            break;
-                        };
-                    },
-                    _ then {},
+        let mutable pos_arg_cursor UInt = 0;
+        let mutable fi UInt = 0;
+        while fi < param_specs.count() then {
+            let spec = param_specs[fi];
+            if spec.named then {
+                // Named field: find matching named arg
+                let mutable matched = Option[* Expr].None();
+                for arg in args then {
+                    when arg in {
+                        .NamedArgument(label, inner, _) then {
+                            if label == spec.name then { matched = Option[* Expr].Some(inner); break; };
+                        },
+                        _ then {},
+                    };
                 };
-            };
-            when matched in {
-                .Some(inner) then ordered.push(inner),
-                .None() then {
-                    if saw_default_fill then {
-                        when self.default_fill_expr_for_type(field_types[idx]) in {
-                            .Some(default_expr) then {
-                                ordered.push(default_expr);
-                                missing_count += 1(UInt);
+                when matched in {
+                    .Some(inner) then ordered.push(inner),
+                    .None() then {
+                        let default_key = "\(effective_parent).\(spec.name)";
+                        let mutable dv = self.context().parsed_default_values.get(default_key);
+                        when dv in { .None() then { dv = self.context().parsed_default_values.get(spec.name); }, _ then {}, };
+                        when dv in {
+                            .Some(val) then {
+                                let sp = unknown_span();
+                                if fi < field_types.count() and not self.validate_default_value_type(val, field_types[fi]) then {
+                                    self.push_diagnostic_at_span("Type mismatch: default value for '\(spec.name)' does not match expected type \(self.display_type_name(field_types[fi]))", sp);
+                                    return Option[List[* Expr]].None();
+                                };
+                                let dv_expr = self.make_default_value_expr(val, sp);
+                                ordered.push(dv_expr);
                             },
                             .None() then {
-                                self.push_diagnostic_at_span(
-                                    "Field '\(spec.name)' omitted by '...', but type '\(self.context().type_display_name(field_types[idx]))' does not implement Default",
-                                    first_arg_span
-                                );
-                                return Option[List[* Expr]].None();
+                                if spec.has_default then {
+                                    ordered.push(box(Expr.IntegerLiteral("0", unknown_span())));
+                                } else {
+                                    self.push_diagnostic_at_span("Missing named argument '\(spec.name)' for '\(constructor_description)'; provide '\(spec.name):' or declare a default value", first_arg_span);
+                                    return Option[List[* Expr]].None();
+                                };
                             },
                         };
-                    } else {
-                        self.push_diagnostic_at_span("Missing constructor field '\(spec.name)'; provide '\(spec.name):' or use '...'", first_arg_span);
-                        return Option[List[* Expr]].None();
+                    },
+                };
+            } else {
+                // Positional field: take next positional arg
+                let mutable pj UInt = 0;
+                let mutable found = false;
+                for arg in args then {
+                    when arg in {
+                        .NamedArgument(_, _, _) then {},
+                        _ then {
+                            if pj == pos_arg_cursor then { ordered.push(arg); pos_arg_cursor += 1; found = true; break; };
+                            pj += 1;
+                        },
                     };
-                },
+                };
+                if not found then {
+                    let default_key = "\(effective_parent).\(spec.name)";
+                    let mutable dv = self.context().parsed_default_values.get(default_key);
+                    when dv in { .None() then { dv = self.context().parsed_default_values.get(spec.name); }, _ then {}, };
+                    when dv in {
+                        .Some(val) then {
+                            let sp = unknown_span();
+                            let dv_expr = self.make_default_value_expr(val, sp);
+                            ordered.push(dv_expr);
+                        },
+                        .None() then {
+                            if spec.has_default then {
+                                ordered.push(box(Expr.IntegerLiteral("0", unknown_span())));
+                            } else {
+                                self.push_diagnostic_at_span("Missing positional argument '\(spec.name)' for '\(constructor_description)'", first_arg_span);
+                                return Option[List[* Expr]].None();
+                            };
+                        },
+                    };
+                };
             };
-            idx += 1;
-        };
-
-        if saw_default_fill and missing_count == 0(UInt) and not args.is_empty() then {
-            self.push_diagnostic_at_span("Trailing '...' is redundant because all constructor fields are already provided", last_arg_span);
-            return Option[List[* Expr]].None();
+            fi += 1;
         };
 
         return Option[List[* Expr]].Some(ordered);
     };
+
+    
 
     module_private should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
         let _ = self;
@@ -809,7 +872,7 @@ given TypeChecker {
             .Some(enum_type) then {
                 let param_specs = self.get_enum_case_param_specs(enum_type, method_name);
                 let field_types = self.get_enum_case_field_types(enum_type, method_name);
-                call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(effective_type_name).\(method_name)") or else {
+                call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(effective_type_name).\(method_name)", method_name) or else {
                     return self.empty_typed_block(Type.Unknown());
                 };
             },
@@ -1158,12 +1221,14 @@ given TypeChecker {
         };
 
         let constructor_type_probe = self.resolved_constructor_type_or_unknown(callee, scope);
+        let mutable constructor_already_normalized = false;
         if constructor_type_probe is .StructureType(_) or constructor_type_probe is .GenericStruct(_, _) then {
             let constructor_param_specs = self.struct_constructor_param_specs(constructor_type_probe);
             let constructor_field_types = self.type_construction_arg_types(constructor_type_probe);
-            call_args = self.normalize_constructor_call_args(call_args, constructor_param_specs, constructor_field_types, self.context().type_display_name(constructor_type_probe)) or else {
+            call_args = self.normalize_constructor_call_args(call_args, constructor_param_specs, constructor_field_types, self.context().type_display_name(constructor_type_probe), "") or else {
                 return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown());
             };
+            constructor_already_normalized = true;
         };
 
         when callee in {
@@ -1197,7 +1262,7 @@ given TypeChecker {
                                     if self.static_member_is_enum_case(canonical, member_name) then {
                                         let field_types = self.get_enum_case_field_types(canonical, member_name);
                                         let param_specs = self.get_enum_case_param_specs(canonical, member_name);
-                                        call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)") or else {
+                                        call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)", member_name) or else {
                                             return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown());
                                         };
                                         let typed_args = self.check_implicit_member_args(&mutable call_args, field_types, scope);
@@ -1227,7 +1292,7 @@ given TypeChecker {
                                         if self.static_member_is_enum_case(enum_type, member_name) then {
                                             let field_types = self.get_enum_case_field_types(enum_type, member_name);
                                             let param_specs = self.get_enum_case_param_specs(enum_type, member_name);
-                                            call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)") or else {
+                                            call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(base_name).\(member_name)", member_name) or else {
                                                 return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown());
                                             };
                                             let typed_args = self.check_implicit_member_args(&mutable call_args, field_types, scope);
@@ -1388,6 +1453,12 @@ given TypeChecker {
             .Identifier(_, _) then self.resolve_call_param_specs(callee, typed_callee_ref, scope),
             _ then List[FunctionParamSpec].new(),
         };
+
+        // Enforce named/positional param label rules for function calls
+        if not constructor_already_normalized and not callee_param_specs.is_empty() and not self.validate_named_param_call_labels(call_args, callee_param_specs) then {
+            return make_typed_expr(TypedExprKind.Call(typed_callee_ref, List[* TypedExpr].new()), Type.Unknown());
+        };
+
         let generic_function_template_opt = self.generic_function_template_for_callee(typed_callee_ref);
         let mutable generic_function_bindings = Dict[String, Type].new();
         let mutable has_generic_function_bindings = false;
@@ -1650,15 +1721,15 @@ given TypeChecker {
         when callee in {
             .Identifier(_, _) then when typed_callee.expr_kind in {
                 .Variable(sym) then {
-                    if sym.kind is not .TypeSymbol() and not self.reject_non_constructor_named_arguments(call_args) then {
+                    if sym.kind is not .TypeSymbol() and not self.validate_call_argument_order(call_args) then {
                         return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown());
                     };
                 },
-                _ then if not self.reject_non_constructor_named_arguments(call_args) then {
+                _ then if not self.validate_call_argument_order(call_args) then {
                     return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown());
                 },
             },
-            _ then if not self.reject_non_constructor_named_arguments(call_args) then {
+            _ then if not self.validate_call_argument_order(call_args) then {
                 return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown());
             },
         };
@@ -1791,7 +1862,7 @@ given TypeChecker {
                     let identifier = self.type_construction_symbol_for_type(base_type, ret_type);
                     let param_specs = self.struct_constructor_param_specs(ret_type);
                     let field_types = self.type_construction_arg_types(ret_type);
-                    let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().type_display_name(ret_type)) or else {
+                    let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().type_display_name(ret_type), "") or else {
                         return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown());
                     };
                     let constructor_args = self.recheck_type_construction_args(normalized_args, ret_type, scope);
@@ -1804,7 +1875,7 @@ given TypeChecker {
                         let identifier = box(Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol()));
                         let param_specs = self.struct_constructor_param_specs(ret_type);
                         let field_types = self.type_construction_arg_types(ret_type);
-                        let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().symbol_name(*sym)) or else {
+                        let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().symbol_name(*sym), "") or else {
                             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown());
                         };
                         let constructor_args = self.recheck_type_construction_args(normalized_args, ret_type, scope);

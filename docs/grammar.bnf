@@ -60,18 +60,25 @@
 // 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）
 
 <foreign-let-decl> ::= "let" "mutable"? <identifier> <type-annotation> ";"
-                     | "let" <identifier> "(" <func-param-list>? ")" <type-annotation> ";"
+                     | "let" <identifier> "(" <positional-param-list>? ")" <type-annotation> ";"
+<positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
+<positional-param> ::= "mutable"? <identifier> <type-annotation>
 // 说明：
 // 1) foreign 变量声明必须有类型（支持 mutable）
 // 2) foreign 函数不允许函数体，不支持泛型
+// 3) foreign 函数不支持命名参数，所有参数必须是位置参数（无冒号）
 
 <function-signature> ::= "(" <func-param-list>? ")" <type-annotation>
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
-<func-param> ::= "mutable"? <identifier> <type-annotation>
-// Function and method parameters are positional-only.
-// Labels are reserved for constructor calls and labeled nominal patterns.
+<func-param> ::= "mutable"? <identifier> <type-annotation>                  // positional param
+               | "mutable"? <identifier> ":" <type-annotation>               // named param
+               | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named param with default
+// Positional params must come before named params.
+// Named params must be called with labels: name(value) or name: value.
+// Only named params (with colon) can have default values.
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
+// After the first receiver param, remaining params follow the same positional/named rules as func-param.
 <method-first-param> ::= "self"                                          // bare self
                        | "*self"                                          // managed receiver sugar
                        | "*mutable self"                                      // mutable managed receiver sugar
@@ -104,12 +111,16 @@
 // 3) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
 
 <field-list> ::= <field> ("," <field>)* ","?
-<field> ::= <access-modifier>? "mutable"? <identifier> <type-annotation>
+<field> ::= <access-modifier>? "mutable"? <identifier> <type-annotation>                    // positional field
+          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation>                 // named field
+          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named field with default
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
 <variant> ::= <type-identifier> "(" <variant-field-list>? ")"
 <variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
-<variant-field> ::= <identifier> <type-annotation>
+<variant-field> ::= <identifier> <type-annotation>                    // positional
+                  | <identifier> ":" <type-annotation>                 // named
+                  | <identifier> ":" <type-annotation> "=" <default-value-literal>  // named with default
 
 // ============================================================================
 // Trait Declarations
@@ -118,6 +129,9 @@
 <trait-decl> ::= "trait" <type-identifier> <generic-params>? <trait-parents>? "{" <trait-member>* "}" ";"
 <trait-parents> ::= <type> ("and" <type>)*
 <trait-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"
+// Trait method params follow the same positional/named rules as func-param.
+// Named params in trait declarations must be matched by implementations.
+// Default values declared in trait are the only source; implementations must not re-declare defaults.
 // 说明：trait method 支持泛型参数，但不支持方法体
 
 // ============================================================================
@@ -127,6 +141,9 @@
 <given-decl> ::= "given" <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}" ";"
 <given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> "=" <expression> ";"
                  | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // intrinsic given method
+// Given implementations must match the trait's named/positional parameter classification.
+// If the trait declares defaults, the given implementation must NOT redeclare them.
+// If the trait declares no defaults, the given implementation cannot add them.
 // 说明：
 // 1) `given Type { ... }` 为类型固有实现
 // 2) `given Type as Trait { ... }` 为 trait 实现
@@ -539,6 +556,22 @@
 // \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid Unicode scalar)
 
 <bool-literal> ::= "true" | "false"
+
+// ============================================================================
+// Default Value Literals (for named parameter defaults)
+// ============================================================================
+
+<default-value-literal> ::= <integer-literal>
+                          | <float-literal>
+                          | <bool-literal>
+                          | <string-literal>
+                          | <rune-literal>
+                          | "[" "]"                    // empty collection (List, Set, or Dict, inferred from type)
+                          | ".."                       // empty range (Range[T].Full)
+// Default values are only allowed on named parameters (name: Type = value).
+// The empty collection literal [] is resolved by type context:
+//   List[T] -> List.new(), Set[T] -> Set.new(), Dict[K,V] -> Dict.new()
+// The range literal .. resolves to Range[T].Full()
 
 <identifier> ::= "_"* [a-z] [a-zA-Z0-9_]*
              | "_"+

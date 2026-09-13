@@ -385,6 +385,11 @@ public class ModuleResolver {
             throw ModuleError.parseError(file: file, underlying: error)
         }
         
+        // Accumulate parsed parameter defaults from this file
+        for (key, value) in parser.parsedParameterDefaults {
+            Parser.allParsedParameterDefaults[key] = value
+        }
+
         guard case .program(let globalNodes) = ast else {
             throw ModuleError.invalidModulePath(file)
         }

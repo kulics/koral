@@ -3,6 +3,13 @@ public class Parser {
   let lexer: Lexer
   var currentToken: Token
 
+  /// Default values for named parameters collected during parsing.
+  /// Key format: "ParentName.paramName" (e.g., "Window.width", "connect.port")
+  public var parsedParameterDefaults: [String: ExpressionNode] = [:]
+
+  /// Accumulated defaults from ALL parsed files (static, used by TypeChecker)
+  nonisolated(unsafe) public static var allParsedParameterDefaults: [String: ExpressionNode] = [:]
+
   public init(lexer: Lexer) {
     self.lexer = lexer
     self.currentToken = .bof
@@ -313,6 +320,47 @@ public class Parser {
     return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
   }
 
+
+  // MARK: - Default Value Parsing
+
+  /// Parse a default value literal for a named parameter.
+  /// Supported literals: integer, float, bool, string, rune, empty collection ([]), full-range (..)
+  func parseDefaultValueLiteral() throws -> ExpressionNode {
+    switch currentToken {
+    case .integer(let value):
+      try match(.integer(value))
+      return .integerLiteral(value)
+    case .float(let value):
+      try match(.float(value))
+      return .floatLiteral(value)
+    case .string(let value):
+      try match(.string(value))
+      return .stringLiteral(value)
+    case .rune(let value):
+      try match(.rune(value))
+      return .runeLiteral(value)
+    case .bool(true):
+      try match(.bool(true))
+      return .booleanLiteral(true)
+    case .bool(false):
+      try match(.bool(false))
+      return .booleanLiteral(false)
+    case .leftBracket:
+      let span = currentSpan
+      try match(.leftBracket)
+      if currentToken === .rightBracket {
+        try match(.rightBracket)
+        return .emptyLiteral(span: span)
+      }
+      throw ParserError.unexpectedToken(span: span, got: currentToken.description, expected: "empty default value '[]'")
+    case .range:
+      let span = currentSpan
+      try match(.range)
+      return .emptyLiteral(span: span)
+    default:
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "a literal default value (number, bool, string, rune, [], or range)")
+    }
+  }
 
   // MARK: - Utility Methods
 

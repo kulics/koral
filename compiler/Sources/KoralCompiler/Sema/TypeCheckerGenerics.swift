@@ -260,7 +260,9 @@ extension TypeChecker {
     let plan = try planConstructorArguments(
       callArgs,
       fieldNames: template.parameters.map { $0.name },
-      constructorDescription: name
+      fieldIsNamed: template.parameters.map { $0.named },
+      constructorDescription: name,
+      parentName: name
     )
     
     var typedArguments: [TypedExpressionNode] = []
@@ -353,7 +355,7 @@ extension TypeChecker {
     // Build resolved type arguments
     let resolvedArgs = try template.typeParameters.map { param -> Type in
       guard let type = inferred[param.name] else {
-        if plan.usesDefaultFill {
+        if false {
           throw SemanticError(.generic(
             "Cannot infer type parameter '\(param.name)' from default-filled constructor fields; specify type arguments or an expected type"
           ), span: currentSpan)
@@ -394,7 +396,7 @@ extension TypeChecker {
     
     let finalTypedArguments = try typeCheckConstructorArguments(
       plan: plan,
-      members: memberTypes.map { (name: $0.name, type: $0.type) },
+      members: memberTypes.map { (name: $0.name, type: $0.type, named: false) },
       constructorDescription: name
     )
     

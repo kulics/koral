@@ -333,6 +333,7 @@ file_private let make_prepared_compilation(
     linked_libraries List[String],
     default_output_dir Path,
     root_module_path String,
+    parsed_defaults Dict[String, String],
 ) PreparedCompilation = {
     let mutable all_pairs = List[Pair[LoadedNode, List[String]]].new();
     for pair in std_pairs then {
@@ -365,6 +366,7 @@ file_private let make_prepared_compilation(
         node_source_paths,
         collect_unique_module_paths_from_pairs(all_pairs),
         collect_unique_source_paths_from_pairs(all_pairs),
+        parsed_defaults,
     );
 
     return PreparedCompilation(graph, display_name, artifact_base_name, linked_libraries, default_output_dir);
@@ -383,6 +385,7 @@ file_private let load_manifest_modules_into_prepared(
     let mutable merged_graph = ImportGraph.new();
     let mutable linked_libraries = List[String].new();
     let mutable loaded_module_paths = List[List[String]].new();
+    let mutable all_parsed_defaults = Dict[String, String].new();
     let mutable root_module_path = "";
     let mutable display_name = manifest.manifest_path;
     let mutable artifact_base_name = "main";
@@ -416,6 +419,9 @@ file_private let load_manifest_modules_into_prepared(
             };
         };
         merged_graph.merge(unit.import_graph());
+        for kv in unit.collect_parsed_defaults().iterator() then {
+            all_parsed_defaults.insert(kv.first, kv.second);
+        };
         for pair in pairs then {
             if not contains_module_path(loaded_module_paths, pair.second) then {
                 loaded_module_paths.push(pair.second);
@@ -447,6 +453,7 @@ file_private let load_manifest_modules_into_prepared(
         linked_libraries,
         default_output_dir,
         root_module_path,
+        all_parsed_defaults,
     ));
 };
 
@@ -476,6 +483,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
     let mutable merged_graph = ImportGraph.new();
     let mutable linked_libraries = List[String].new();
     let mutable loaded_module_paths = List[List[String]].new();
+    let mutable all_parsed_defaults = Dict[String, String].new();
 
     let mutable module_names_to_load = List[String].new();
     let mutable all_module_names = List[String].new();
@@ -527,6 +535,9 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
             };
         };
         merged_graph.merge(unit.import_graph());
+        for kv in unit.collect_parsed_defaults().iterator() then {
+            all_parsed_defaults.insert(kv.first, kv.second);
+        };
         for pair in pairs then {
             if not contains_module_path(loaded_module_paths, pair.second) then {
                 loaded_module_paths.push(pair.second);
@@ -548,6 +559,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
         linked_libraries,
         default_output_dir,
         target_spec.path_segments.join_to_string("."),
+        all_parsed_defaults,
     ));
 };
 
@@ -568,6 +580,8 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
             .None() then find_std_manifest_path(),
         };
 
+    let mutable all_parsed_defaults = user_unit.collect_parsed_defaults();
+
     when resolved_std_manifest_path in {
         .Some(std_manifest_path) then {
             let std_manifest = load_package_manifest(std_manifest_path) or return;
@@ -583,6 +597,9 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
             merged_graph.merge(std_prepared.graph.import_graph);
             for link in std_prepared.linked_libraries then {
                 linked_libraries.push(link);
+            };
+            for kv in std_prepared.graph.parsed_defaults.iterator() then {
+                all_parsed_defaults.insert(kv.first, kv.second);
             };
         },
         .None() then {},
@@ -600,6 +617,7 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
         linked_libraries,
         default_output_dir,
         user_unit.root_module().path_string(),
+        all_parsed_defaults,
     ));
 };
 

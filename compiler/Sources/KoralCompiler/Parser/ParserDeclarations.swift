@@ -235,6 +235,7 @@ extension Parser {
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var seenNamedParam = false
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
@@ -258,11 +259,25 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
+        var isNamed = false
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
+          isNamed = true
+          seenNamedParam = true
+          try match(.colon)
+        } else if seenNamedParam {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
+        // Parse optional default value for named parameters
+        if currentToken === .equal {
+          guard isNamed else {
+            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+          }
+          try match(.equal)
+          let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+        }
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -332,6 +347,7 @@ extension Parser {
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var seenNamedParam = false
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
@@ -355,11 +371,25 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
+        var isNamed = false
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
+          isNamed = true
+          seenNamedParam = true
+          try match(.colon)
+        } else if seenNamedParam {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
+        // Parse optional default value for named parameters
+        if currentToken === .equal {
+          guard isNamed else {
+            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+          }
+          try match(.equal)
+          let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+        }
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -432,6 +462,7 @@ extension Parser {
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var seenNamedParam = false
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
@@ -455,11 +486,25 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
+        var isNamed = false
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
+          isNamed = true
+          seenNamedParam = true
+          try match(.colon)
+        } else if seenNamedParam {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
+        // Parse optional default value for named parameters
+        if currentToken === .equal {
+          guard isNamed else {
+            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+          }
+          try match(.equal)
+          let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+        }
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -666,6 +711,7 @@ extension Parser {
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+    var seenNamedParam = false
     while currentToken !== .rightParen {
       // 仅支持可选的前缀 mutable；不再支持 own/ref
       var isMut = false
@@ -680,11 +726,25 @@ extension Parser {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
       try match(.identifier(pname))
+      var isNamed = false
       if currentToken === .colon {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
+        isNamed = true
+        seenNamedParam = true
+        try match(.colon)
+      } else if seenNamedParam {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
       }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
+      // Parse optional default value for named parameters
+      if currentToken === .equal {
+        guard isNamed else {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+        }
+        try match(.equal)
+        let defaultExpr = try parseDefaultValueLiteral()
+        parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+      }
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -731,6 +791,7 @@ extension Parser {
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+    var seenNamedParam = false
     while currentToken !== .rightParen {
       var isMut = false
       if currentToken === .mutableKeyword {
@@ -744,8 +805,16 @@ extension Parser {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
       try match(.identifier(pname))
+      var isNamed = false
       if currentToken === .colon {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
+        isNamed = true
+        seenNamedParam = true
+        try match(.colon)
+      } else if seenNamedParam {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+      }
+      if isNamed {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in foreign declarations")
       }
       let paramType = try parseType()
       parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
@@ -754,13 +823,6 @@ extension Parser {
       }
     }
     try match(.rightParen)
-
-    // Named parameters are not supported in foreign declarations
-    for param in parameters {
-      if param.named {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in foreign declarations")
-      }
-    }
 
     if currentToken === .semicolon {
       throw ParserError.missingReturnType(span: currentSpan)
@@ -850,6 +912,7 @@ extension Parser {
 
     try match(.leftParen)
     var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)] = []
+    var seenNamedField = false
 
     while currentToken !== .rightParen {
       let fieldAccess = try parseAccessModifier(default: .public)
@@ -868,13 +931,27 @@ extension Parser {
         throw ParserError.invalidFieldName(span: currentSpan, name: paramName)
       }
       try match(.identifier(paramName))
+      var isNamed = false
       if currentToken === .colon {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Constructor field declarations use 'name Type', not 'name: Type'")
+        isNamed = true
+        seenNamedField = true
+        try match(.colon)
+      } else if seenNamedField {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional field '\(paramName)' cannot appear after named fields")
       }
       let paramType = try parseType()
+      // Parse optional default value for named fields
+      if currentToken === .equal {
+        guard isNamed else {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Only named fields can have default values")
+        }
+        try match(.equal)
+        let defaultExpr = try parseDefaultValueLiteral()
+        parsedParameterDefaults["\(name).\(paramName)"] = defaultExpr
+      }
 
       parameters.append(
-        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: false))
+        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: isNamed))
 
       if currentToken === .comma {
         try match(.comma)
@@ -913,6 +990,7 @@ extension Parser {
       var parameters: [(name: String, type: TypeNode, named: Bool)] = []
       try match(.leftParen)
 
+      var seenNamedParam = false
       while currentToken !== .rightParen {
         guard case .identifier(let paramName) = currentToken else {
           throw ParserError.expectedIdentifier(
@@ -922,11 +1000,25 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
         }
         try match(.identifier(paramName))
+        var isNamed = false
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Enum payload field declarations use 'name Type', not 'name: Type'")
+          isNamed = true
+          seenNamedParam = true
+          try match(.colon)
+        } else if seenNamedParam {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional field '\(paramName)' cannot appear after named fields")
         }
         let paramType = try parseType()
-        parameters.append((name: paramName, type: paramType, named: false))
+        // Parse optional default value for named fields
+        if currentToken === .equal {
+          guard isNamed else {
+            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named fields can have default values")
+          }
+          try match(.equal)
+          let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(caseName).\(paramName)"] = defaultExpr
+        }
+        parameters.append((name: paramName, type: paramType, named: isNamed))
 
         if currentToken === .comma {
           try match(.comma)

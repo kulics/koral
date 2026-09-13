@@ -188,6 +188,10 @@ public class TypeChecker {
   // Used to validate named argument labels at call sites
   var functionNamedParams: [DefId: [(name: String, named: Bool)]] = [:]
   
+  // Parsed default values for named parameters (from parser)
+  // Key format: "ParentName.paramName" (e.g., "Window.width", "connect.port")
+  var parsedParameterDefaults: [String: ExpressionNode] = [:]
+  
   // Stack of generic types currently being resolved (for recursion detection)
   var resolvingGenericTypes: Set<String> = []
   
@@ -824,6 +828,7 @@ public class TypeChecker {
     self.userFileName = userFileName
     self.currentFileName = userFileName
     self.importGraph = importGraph
+    self.parsedParameterDefaults = Parser.allParsedParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context
@@ -851,6 +856,7 @@ public class TypeChecker {
     self.userFileName = userFileName
     self.currentFileName = userFileName
     self.importGraph = importGraph
+    self.parsedParameterDefaults = Parser.allParsedParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context

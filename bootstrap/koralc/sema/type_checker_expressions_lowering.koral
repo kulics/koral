@@ -645,9 +645,29 @@ given TypeChecker {
         return self.lower_dict_literal_from_typed(typed_entries, result_type);
     };
 
+    module_private extract_range_element_type(self, t Type) Option[Type] = {
+        when t in {
+            .GenericEnum(template, args) then {
+                if template == "Range" and args.count() > 0(UInt) then {
+                    return Option[Type].Some((*args[0(UInt)]));
+                };
+                return Option[Type].None();
+            },
+            _ then { return Option[Type].None(); },
+        };
+    };
+
     module_private lower_empty_literal_expr(self, expected Option[Type]) TypedExpr = {
         when expected in {
             .Some(et) then {
+                let range_elem = self.extract_range_element_type(et);
+                if range_elem is .Some(_) then {
+                    let element_type = range_elem.unwrap();
+                    let mutable range_args = List[* Type].new();
+                    range_args.push(box(element_type));
+                    let range_type = Type.GenericEnum("Range", range_args);
+                    return self.lower_enum_constructor_expr(range_type, "Full", List[* TypedExpr].new());
+                };
                 if self.extract_collection_element_type(et) is .Some(_) then {
                     return self.lower_collection_literal_from_typed(List[* TypedExpr].new(), et);
                 };

@@ -2404,6 +2404,7 @@ extension TypeChecker {
     case list(element: Type)
     case set(element: Type)
     case map(key: Type, value: Type)
+    case range(element: Type)
   }
 
   private func inferEmptyLiteral(span: SourceSpan, expectedType: Type?) throws -> TypedExpressionNode {
@@ -2418,6 +2419,10 @@ extension TypeChecker {
     switch target {
     case .list, .set, .map:
       return try buildWithCapacityCall(targetType: expectedType, count: 0)
+    case .range(let elementType):
+      // Generate Range[T].Full() enum construction
+      let rangeType = Type.genericEnum(template: "Range", args: [elementType])
+      return .enumConstruction(type: rangeType, caseName: "Full", arguments: [])
     }
   }
 
@@ -2463,6 +2468,11 @@ extension TypeChecker {
         .generic("Collection literal without ':' cannot be inferred as Dict"),
         span: span
       )
+    case .range:
+      throw SemanticError(
+        .generic("Range literal '..' cannot be used as a collection literal"),
+        span: span
+      )
     }
   }
 
@@ -2480,7 +2490,7 @@ extension TypeChecker {
       case .map(let k, let v):
         keyType = k
         valueType = v
-      case .list, .set:
+      case .list, .set, .range:
         throw SemanticError(
           .generic("Dict literal can only be assigned to [K, V]Dict"),
           span: span
@@ -2522,14 +2532,28 @@ extension TypeChecker {
         return .map(key: args[0], value: args[1])
       default:
         throw SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"),
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+          span: span
+        )
+      }
+
+    case .genericEnum(let template, let args):
+      switch template {
+      case "Range":
+        guard args.count == 1 else {
+          throw SemanticError(.generic("[T]Range requires exactly one type argument"), span: span)
+        }
+        return .range(element: args[0])
+      default:
+        throw SemanticError(
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
           span: span
         )
       }
 
     default:
       throw SemanticError(
-        .generic("Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"),
+        .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
         span: span
       )
     }
@@ -2906,12 +2930,15 @@ extension TypeChecker {
     let plan = try planConstructorArguments(
       callArgs,
       fieldNames: caseInfo.parameters.map { $0.name },
-      constructorDescription: ".\(memberName)"
+      fieldIsNamed: caseInfo.parameters.map { $0.named },
+      constructorDescription: ".\(memberName)",
+      parentName: ""
     )
     let typedArgs = try typeCheckConstructorArguments(
       plan: plan,
-      members: caseInfo.parameters.map { (name: $0.name, type: $0.type) },
-      constructorDescription: ".\(memberName)"
+      members: caseInfo.parameters.map { (name: $0.name, type: $0.type, named: $0.named) },
+      constructorDescription: ".\(memberName)",
+      parentName: ""
     )
     
     // Generate enum construction
@@ -3386,7 +3413,7 @@ extension TypeChecker {
                 got: arguments.count
               )
             }
-            try rejectNonConstructorCallArguments(callArgs)
+            try validateCallArgumentOrder(callArgs, functionName: methodName)
 
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
@@ -3581,14 +3608,17 @@ extension TypeChecker {
           let plan = try planConstructorArguments(
             callArgs,
             fieldNames: c.parameters.map { $0.name },
-            constructorDescription: "\(baseName).\(memberName)"
+            fieldIsNamed: c.parameters.map { $0.named },
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type)
+              (name: source.name, type: resolved.type, named: source.named)
             },
-            constructorDescription: "\(baseName).\(memberName)"
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
@@ -3661,14 +3691,17 @@ extension TypeChecker {
           let plan = try planConstructorArguments(
             callArgs,
             fieldNames: c.parameters.map { $0.name },
-            constructorDescription: "\(baseName).\(memberName)"
+            fieldIsNamed: c.parameters.map { $0.named },
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type)
+              (name: source.name, type: resolved.type, named: source.named)
             },
-            constructorDescription: "\(baseName).\(memberName)"
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
@@ -3693,14 +3726,17 @@ extension TypeChecker {
           let plan = try planConstructorArguments(
             callArgs,
             fieldNames: c.parameters.map { $0.name },
-            constructorDescription: "\(baseName).\(memberName)"
+            fieldIsNamed: c.parameters.map { $0.named },
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type)
+              (name: source.name, type: resolved.type, named: source.named)
             },
-            constructorDescription: "\(baseName).\(memberName)"
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
@@ -3750,14 +3786,17 @@ extension TypeChecker {
           let plan = try planConstructorArguments(
             callArgs,
             fieldNames: c.parameters.map { $0.name },
-            constructorDescription: "\(baseName).\(memberName)"
+            fieldIsNamed: c.parameters.map { $0.named },
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type)
+              (name: source.name, type: resolved.type, named: source.named)
             },
-            constructorDescription: "\(baseName).\(memberName)"
+            constructorDescription: "\(baseName).\(memberName)",
+            parentName: memberName
           )
 
           return .enumConstruction(type: type, caseName: memberName, arguments: typedArgs)
@@ -3792,17 +3831,23 @@ extension TypeChecker {
             let paramNames = try enumCaseFieldNames(enumType: returnType, caseName: caseName)
               ?? functionNamedParams[symbol.defId]?.map { $0.name }
               ?? params.enumerated().map { index, _ in "arg\(index)" }
+            let paramIsNamed2 = try enumCaseFieldIsNamed(enumType: returnType, caseName: caseName)
+              ?? functionNamedParams[symbol.defId]?.map { $0.named }
+              ?? params.enumerated().map { _, _ in false }
             let plan = try planConstructorArguments(
               callArgs,
               fieldNames: paramNames,
-              constructorDescription: symbolName
+              fieldIsNamed: paramIsNamed2,
+              constructorDescription: symbolName,
+              parentName: ""
             )
             let typedArgs = try typeCheckConstructorArguments(
               plan: plan,
               members: zip(paramNames, params).map { name, param in
-                (name: name, type: param.type)
+                (name: name, type: param.type, named: false)
               },
-              constructorDescription: symbolName
+              constructorDescription: symbolName,
+              parentName: ""
             )
 
             return .enumConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
@@ -3815,7 +3860,7 @@ extension TypeChecker {
     if case .identifier(let name) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
       if let template = visibleGenericFunctionTemplate(name) {
-        try rejectNonConstructorCallArguments(callArgs)
+        try validateCallArgumentOrder(callArgs, functionName: name)
         return try inferImplicitGenericFunctionCall(
           template: template,
           name: name,
@@ -3843,12 +3888,15 @@ extension TypeChecker {
         let plan = try planConstructorArguments(
           callArgs,
           fieldNames: parameters.map { $0.name },
-          constructorDescription: name
+          fieldIsNamed: parameters.map { $0.named },
+          constructorDescription: name,
+          parentName: name
         )
         let typedArguments = try typeCheckConstructorArguments(
           plan: plan,
-          members: parameters.map { (name: $0.name, type: $0.type) },
-          constructorDescription: name
+          members: parameters.map { (name: $0.name, type: $0.type, named: $0.named) },
+          constructorDescription: name,
+          parentName: name
         )
 
         return .typeConstruction(
@@ -3897,7 +3945,7 @@ extension TypeChecker {
           .generic("compiler protocol method drop cannot be called explicitly"),
           span: currentSpan)
       }
-      try rejectNonConstructorCallArguments(callArgs)
+      try validateCallArgumentOrder(callArgs, functionName: "")
       return try inferMethodCall(
         base: base,
         method: method,
@@ -3914,7 +3962,7 @@ extension TypeChecker {
       guard case .function(let params, let returns) = methodType else {
         throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
       }
-      try rejectNonConstructorCallArguments(callArgs)
+      try validateCallArgumentOrder(callArgs, functionName: methodName)
       
       // The first parameter is 'self' (the base), so we check remaining arguments
       let expectedArgCount = params.count - 1
@@ -3994,7 +4042,7 @@ extension TypeChecker {
           got: arguments.count
         )
       }
-      try rejectNonConstructorCallArguments(callArgs)
+      try validateCallArgumentOrder(callArgs, functionName: "")
 
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
@@ -4098,12 +4146,15 @@ extension TypeChecker {
       let plan = try planConstructorArguments(
         callArgs ?? arguments.map { CallArg(expression: $0) },
         fieldNames: template.parameters.map { $0.name },
-        constructorDescription: base
+        fieldIsNamed: template.parameters.map { $0.named },
+        constructorDescription: base,
+        parentName: base
       )
       let typedArguments = try typeCheckConstructorArguments(
         plan: plan,
-        members: memberTypes.map { (name: $0.name, type: $0.type) },
-        constructorDescription: base
+        members: memberTypes.map { (name: $0.name, type: $0.type, named: false) },
+        constructorDescription: base,
+        parentName: base
       )
       
       // Return parameterized type
@@ -4117,7 +4168,7 @@ extension TypeChecker {
       )
     } else if let template = visibleGenericFunctionTemplate(base) {
       if let callArgs {
-        try rejectNonConstructorCallArguments(callArgs)
+        try validateCallArgumentOrder(callArgs, functionName: "function call")
       }
       // Special handling for explicit intrinsic template calls (e.g. [Int]alloc_memory)
       if base == "alloc_memory" {
@@ -6626,7 +6677,7 @@ extension TypeChecker {
         type2: ""
       )
     }
-    try rejectNonConstructorCallArguments(callArgs)
+    try validateCallArgumentOrder(callArgs, functionName: "")
 
     return try inferMethodCall(
       base: base,
@@ -8538,4 +8589,5 @@ extension TypeChecker {
       )
     }
   }
+
 }

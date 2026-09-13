@@ -1280,12 +1280,69 @@ let b = f2(1);
 
 ### 参数
 
-参数是函数执行时能够接收的数据。使用 `参数名 类型` 声明参数。
+参数是函数执行时能够接收的数据。Koral 支持两种参数：位置参数和命名参数。
+
+#### 位置参数
+
+声明为 `参数名 类型`（无冒号），调用时不带标签。
 
 ```koral
 let add(x Int, y Int) Int = x + y;
 let a = add(1, 2); // a == 3
 ```
+
+#### 命名参数
+
+声明为 `参数名: 类型`（带冒号），调用时必须带标签。
+
+```koral
+let connect(host String, port: Int) Void = {};
+connect("localhost", port: 8080);
+```
+
+#### 混合规则
+
+声明中位置参数必须在命名参数之前。调用时先按位置匹配位置参数，再按标签匹配命名参数。
+
+```koral
+type Window(title String, width: Int, height: Int);
+
+// 位置参数匹配 'title'，命名参数匹配 'width' 和 'height'
+let w = Window("hello", width: 900, height: 600);
+```
+
+如果参数声明为命名参数，调用时**必须**带标签。位置参数调用时**不允许**带标签。
+
+#### 默认值
+
+只有命名参数可以使用字面量默认值，在 `=` 后面指定：
+
+```koral
+type Config(
+    count: Int = 42,
+    name: String = "hello",
+    enabled: Bool = true,
+    ratio: Float64 = 3.14,
+    ch: Rune = 'A',
+    items: List[Int] = [],
+    flags: Dict[String, Int] = [],
+    span: Range[Int] = ..,
+);
+```
+
+支持的默认值字面量：
+
+| 类别 | 示例 |
+|------|------|
+| 整数 | `0`, `42`, `-1` |
+| 浮点数 | `3.14`, `0.0` |
+| 布尔 | `true`, `false` |
+| 字符串 | `"hello"` |
+| 字符 | `'A'` |
+| 空集合 | `[]`（List、Set 或 Dict，由类型上下文推断） |
+| 空区间 | `..`（解析为 `Range[T].Full()`） |
+
+默认值类型必须与参数类型匹配。例如 `name: String = 42` 会报错。
 
 可变参数使用 `mutable` 关键字标记：
 
@@ -1295,31 +1352,9 @@ let increment(mutable x Int) Int = { x += 1; return x };
 
 对于普通参数，`mutable` 只表示函数体内部这个形参绑定可重新赋值。它不是函数签名的一部分，不会改变函数类型，也不会参与 trait/given 方法满足性的判断。
 
-#### 构造器标签与默认填充
+#### 构造器调用
 
-普通函数和方法一律使用位置参数：
-
-```koral
-let connect(host String, port Int) Void = {};
-connect("localhost", 8080);
-```
-
-标签保留给名义类型的构造与解构：
-
-```koral
-type Button(width Int, height Int, label String);
-
-let a = Button(100, 50, "OK");
-let b = Button(label: "OK", height: 50, width: 100);
-```
-
-构造器标签遵循这些规则：
-
-- 只允许用于 struct 和 enum 构造。
-- 不允许用于普通静态方法调用，例如 `Type.make(...)`。
-- 标签按字段名匹配，而不是按位置匹配。
-- 允许重排。
-- 不允许在同一次构造中混用位置参数和标签参数。
+结构体、枚举和函数调用都遵循相同的位置/命名规则：
 
 ```koral
 type Shape {
@@ -1327,26 +1362,14 @@ type Shape {
     Line(start Point, end Point),
 }
 
-let s = Shape.Line(end: Point(1, 1), start: Point(0, 0));
-// Date.new(year: 2024, month: 1, day: 1)    // 非法：静态方法仍然只接受位置参数
+// 位置参数
+let s1 = Shape.Line(Point(0, 0), Point(1, 1));
+
+// 命名参数（允许重排）
+let s2 = Shape.Line(end: Point(1, 1), start: Point(0, 0));
 ```
 
-当遗漏字段的类型提供明显默认值时，构造器可以在末尾使用 `...`：
-
-```koral
-trait Default {
-    default() Self;
-}
-
-type Window(title String, width Int, height Int);
-
-let w1 = Window(...);
-let w2 = Window(title: "Koral", ...);
-```
-
-`...` 会对每个遗漏字段调用其字段类型的 `Default.default()`。它只能用于构造器，最多出现一次，并且必须是最后一个参数。
-
-在模式匹配中，名义类型的带标签解构仍然可用，并且同样按字段名匹配：
+在模式匹配中，命名解构同样遵循标签规则：
 
 ```koral
 when s in {
@@ -1460,12 +1483,33 @@ type Empty();
 type Point(x Int, y Int);
 ```
 
+结构体字段可以是位置字段或命名字段。命名字段使用冒号语法，可以有默认值：
+
+```koral
+type Config(
+    name String,               // 位置字段
+    width: Int,                // 命名字段（无默认值）
+    height: Int = 600,         // 命名字段（有默认值）
+    title: String = "Untitled" // 命名字段（有默认值）
+);
+```
+
+规则：
+- 位置字段必须在命名字段之前。
+- 只有命名字段可以有默认值。
+- 默认值必须是字面量：整数、浮点数、布尔、字符串、字符、`[]`（空集合）或 `..`（空区间）。
+
 #### 构造
 
 使用 `()` 语法调用构造器：
 
 ```koral
 let a Point = Point(0, 0);
+
+// 命名字段调用时带标签；位置字段不带标签
+let c1 Config = Config("main", width: 800);
+let c2 Config = Config("main", width: 800, height: 900, title: "App");
+// height 和 title 使用默认值：600 和 "Untitled"
 ```
 
 #### 使用成员变量
@@ -1659,6 +1703,31 @@ given Point as Ord {
 说明：
 - `given Type as Trait` 是显式实现入口。
 - 父子 Trait 采用分级实现：实现 `Ord` 不会自动得到 `Eq`，需要分别写实现块。
+
+#### Trait 和 Given 中的命名参数
+
+Trait 方法支持命名参数。实现侧必须与 trait 的参数分类保持一致：
+
+- 如果 trait 方法参数是命名参数（`name: Type`），实现侧也必须声明为命名参数。
+- 如果 trait 方法参数是位置参数（`name Type`），实现侧也必须声明为位置参数。
+
+默认值规则：
+
+- 如果 trait 为命名参数声明了默认值，given 实现**不得**再声明默认值。trait 是默认值的唯一来源。
+- 如果 trait 未声明默认值，given 实现**不能**添加默认值。
+
+```koral
+trait Drawable {
+    draw(self, color: String, thickness: Int) String;
+}
+
+type Circle(radius Int);
+
+given Circle as Drawable {
+    // 'color' 和 'thickness' 是命名参数，与 trait 一致
+    draw(self, color: String, thickness: Int) String = color + thickness.to_string();
+};
+```
 
 ### Trait 工具方法（`given Trait`）
 
@@ -2182,7 +2251,7 @@ Koral 支持通过 `foreign` 关键字与 C 语言互操作。
 
 ### Foreign 函数
 
-声明外部 C 函数：
+声明外部 C 函数。Foreign 函数只支持位置参数，不支持命名参数（冒号语法）：
 
 ```koral
 foreign let sin(x Float64) Float64;

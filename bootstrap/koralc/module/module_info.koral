@@ -192,6 +192,7 @@ module_private type CompilationUnitStorage(
     mutable loaded_module_paths List[String],
     mutable loaded_modules List[ModuleInfo],
     mutable import_graph ImportGraph,
+    mutable parsed_defaults Dict[String, String],
 );
 
 public type CompilationUnit(module_private mutable storage *mutable CompilationUnitStorage);
@@ -202,7 +203,8 @@ given CompilationUnit {
             root_module,
             [root_module.path_string()],
             [root_module],
-            ImportGraph.new()
+            ImportGraph.new(),
+            Dict[String, String].new()
         ));
         return CompilationUnit(s);
     };
@@ -229,6 +231,18 @@ given CompilationUnit {
     // 合并另一个编译单元的导入图（用于标准库合并）
     public merge_import_graph(self, other CompilationUnit) Void = {
         self.storage.import_graph.merge(other.import_graph());
+    };
+
+    // Accumulate parsed parameter defaults from each file
+    public add_parsed_defaults(self, defaults Dict[String, String]) Void = {
+        for kv in defaults.iterator() then {
+            self.storage.parsed_defaults.insert(kv.first, kv.second);
+        };
+    };
+
+    // Collect all accumulated parsed parameter defaults
+    public collect_parsed_defaults(self) Dict[String, String] = {
+        return self.storage.parsed_defaults;
     };
 
     public add_module(self, module ModuleInfo) Void = {

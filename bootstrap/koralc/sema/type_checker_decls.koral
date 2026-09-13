@@ -574,6 +574,46 @@ given TypeChecker {
                     if checker.check_conformance_in_module(resolved_target, trait_name, typed_members, span, self.storage.module_path) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()));
                     };
+                    // Validate default value consistency between trait and implementation
+                    when self.storage.trait_registry.flatten_methods_in_module(trait_name, self.storage.module_path) in {
+                        .Ok(trait_methods) then {
+                            for member in members then {
+                                when trait_methods.get(member.name) in {
+                                    .Some(trait_method) then {
+                                        let param_count = if trait_method.params.count() < member.params.count() then trait_method.params.count() else member.params.count();
+                                        let mutable pi UInt = 1;
+                                        while pi < param_count then {
+                                            let trait_param = trait_method.params[pi];
+                                            let impl_param = member.params[pi];
+                                            if trait_param.named and impl_param.named then {
+                                                let trait_key = "\(member.name).\(trait_param.name)";
+                                                let impl_key = "\(member.name).\(impl_param.name)";
+                                                let trait_has_default = self.context().parsed_default_values.contains_key(trait_key);
+                                                let impl_has_default = self.context().parsed_default_values.contains_key(impl_key);
+                                                if trait_has_default and impl_has_default then {
+                                                    self.storage.diagnostics.push(make_diagnostic(
+                                                        DiagnosticStage.Semantic(),
+                                                        self.storage.file_path,
+                                                        "Trait method '\(member.name)' has default value for parameter '\(trait_param.name)', implementation must not also declare a default value"
+                                                    ));
+                                                };
+                                                if not trait_has_default and impl_has_default then {
+                                                    self.storage.diagnostics.push(make_diagnostic(
+                                                        DiagnosticStage.Semantic(),
+                                                        self.storage.file_path,
+                                                        "Trait method '\(member.name)' has no default value for parameter '\(trait_param.name)', implementation cannot add a default value"
+                                                    ));
+                                                };
+                                            };
+                                            pi += 1;
+                                        };
+                                    },
+                                    .None() then {},
+                                };
+                            };
+                        },
+                        .Error(_) then {},
+                    };
                     if not self.contains_generic_parameter(resolved_target) then {
                         self.register_trait_tool_templates_for_concrete_type(
                             resolved_target,

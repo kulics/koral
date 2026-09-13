@@ -2,146 +2,167 @@ import Foundation
 
 struct ConstructorArgumentPlan {
   let orderedCallArgs: [CallArg?]
-  let usesDefaultFill: Bool
-  let usesLabels: Bool
+  let usesDefaults: Bool
 }
 
 extension TypeChecker {
-  func rejectNonConstructorCallArguments(_ callArgs: [CallArg]) throws {
+  /// Validate call argument order: positional args first, named args after.
+  /// Also validates that positional params can't use labels and named params must use labels.
+  func validateCallArgumentOrder(_ callArgs: [CallArg], functionName: String, paramNames: [String]? = nil, paramIsNamed: [Bool]? = nil) throws {
     if callArgs.contains(where: { $0.isDefaultFill }) {
-      throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
+      throw SemanticError(.generic("Default-fill '...' is not supported; use named parameter defaults instead"), span: currentSpan)
     }
-    if callArgs.contains(where: { $0.label != nil }) {
-      throw SemanticError(.generic("Named labels are only allowed on struct and enum constructors; use positional arguments"), span: currentSpan)
+    var seenNamed = false
+    for arg in callArgs {
+      if arg.label != nil {
+        seenNamed = true
+      } else if seenNamed {
+        throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(functionName)'"), span: currentSpan)
+      }
+    }
+    // Validate labels match param named status
+    if let names = paramNames, let isNamed = paramIsNamed {
+      var positionalIndex = 0
+      for arg in callArgs {
+        if let label = arg.label {
+          // Named arg - check that the param is named
+          guard let fieldIndex = names.firstIndex(of: label) else {
+            throw SemanticError(.generic("Unknown named argument '\(label)' for '\(functionName)'"), span: currentSpan)
+          }
+          guard isNamed[fieldIndex] else {
+            throw SemanticError(.generic("Positional parameter cannot be passed by label '\(label)'"), span: currentSpan)
+          }
+        } else {
+          // Positional arg - check that the param is positional
+          while positionalIndex < names.count && isNamed[positionalIndex] {
+            positionalIndex += 1
+          }
+          guard positionalIndex < names.count else {
+            throw SemanticError(.generic("Too many positional arguments in call to '\(functionName)'"), span: currentSpan)
+          }
+          guard !isNamed[positionalIndex] else {
+            throw SemanticError(.generic("Named parameter '\(names[positionalIndex])' must be passed by label"), span: currentSpan)
+          }
+          positionalIndex += 1
+        }
+      }
     }
   }
 
+  /// Plan constructor arguments with support for mixed positional/named params and defaults.
   func planConstructorArguments(
     _ callArgs: [CallArg],
     fieldNames: [String],
-    constructorDescription: String
+    fieldIsNamed: [Bool],
+    constructorDescription: String,
+    parentName: String = ""
   ) throws -> ConstructorArgumentPlan {
-    let defaultFillIndices = callArgs.enumerated().compactMap { index, arg in
-      arg.isDefaultFill ? index : nil
-    }
-
-    if defaultFillIndices.count > 1 {
-      throw SemanticError(.generic("Default-fill '...' may appear at most once in constructor call '\(constructorDescription)'"), span: currentSpan)
-    }
-
-    let usesDefaultFill = !defaultFillIndices.isEmpty
-    if let defaultFillIndex = defaultFillIndices.first, defaultFillIndex != callArgs.count - 1 {
-      throw SemanticError(.generic("Default-fill '...' must be the last constructor argument"), span: currentSpan)
-    }
-
-    let valueArgs = callArgs.filter { !$0.isDefaultFill }
-    let hasLabels = valueArgs.contains { $0.label != nil }
-    let hasPositional = valueArgs.contains { $0.label == nil }
-
-    if hasLabels && hasPositional {
-      throw SemanticError(.generic("Constructor call cannot mix positional and labeled arguments"), span: currentSpan)
-    }
-
-    if !hasLabels {
-      if usesDefaultFill {
-        if !valueArgs.isEmpty {
-          throw SemanticError(.generic("Default-fill '...' requires labeled constructor arguments or no preceding arguments"), span: currentSpan)
-        }
-        return ConstructorArgumentPlan(
-          orderedCallArgs: Array(repeating: nil, count: fieldNames.count),
-          usesDefaultFill: true,
-          usesLabels: true
-        )
-      }
-
-      if valueArgs.count != fieldNames.count {
-        throw SemanticError.invalidArgumentCount(
-          function: constructorDescription,
-          expected: fieldNames.count,
-          got: valueArgs.count
-        )
-      }
-
-      return ConstructorArgumentPlan(
-        orderedCallArgs: valueArgs.map(Optional.some),
-        usesDefaultFill: false,
-        usesLabels: false
-      )
+    // Reject spread syntax
+    if callArgs.contains(where: { $0.isDefaultFill }) {
+      throw SemanticError(.generic("Default-fill '...' is not supported; use named parameter defaults instead"), span: currentSpan)
     }
 
     var orderedCallArgs: [CallArg?] = Array(repeating: nil, count: fieldNames.count)
-    var seenLabels: Set<String> = []
+    var positionalIndex = 0
+    var seenNamed = false
 
-    for arg in valueArgs {
-      guard let label = arg.label else { continue }
-      guard let fieldIndex = fieldNames.firstIndex(of: label) else {
-        throw SemanticError(.generic("Unknown constructor label '\(label)' for type '\(constructorDescription)'"), span: currentSpan)
+    for arg in callArgs {
+      if let label = arg.label {
+        // Named argument
+        seenNamed = true
+        guard let fieldIndex = fieldNames.firstIndex(of: label) else {
+          throw SemanticError(.generic("Unknown named argument '\(label)' for '\(constructorDescription)'"), span: currentSpan)
+        }
+        guard fieldIsNamed[fieldIndex] else {
+          throw SemanticError(.generic("Positional argument provided for named field '\(label)'"), span: currentSpan)
+        }
+        if orderedCallArgs[fieldIndex] != nil {
+          throw SemanticError(.generic("Duplicate argument '\(label)'"), span: currentSpan)
+        }
+        orderedCallArgs[fieldIndex] = arg
+      } else {
+        // Positional argument
+        if seenNamed {
+          throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(constructorDescription)'"), span: currentSpan)
+        }
+        // Find next positional field
+        while positionalIndex < fieldNames.count && fieldIsNamed[positionalIndex] {
+          positionalIndex += 1
+        }
+        guard positionalIndex < fieldNames.count else {
+          throw SemanticError(.generic("Too many positional arguments in call to '\(constructorDescription)'"), span: currentSpan)
+        }
+        orderedCallArgs[positionalIndex] = arg
+        positionalIndex += 1
       }
-      if seenLabels.contains(label) {
-        throw SemanticError(.generic("Duplicate constructor label '\(label)'"), span: currentSpan)
-      }
-      seenLabels.insert(label)
-      orderedCallArgs[fieldIndex] = arg
     }
 
-    let missingIndices = orderedCallArgs.indices.filter { orderedCallArgs[$0] == nil }
-    if missingIndices.isEmpty {
-      if usesDefaultFill {
-        throw SemanticError(.generic("Trailing '...' is redundant because all constructor fields are already provided"), span: currentSpan)
+    // Check for missing fields that don't have defaults
+    var usesDefaults = false
+    for (index, field) in fieldNames.enumerated() {
+      if orderedCallArgs[index] == nil {
+        let key = "\(parentName).\(field)"
+        if self.parsedParameterDefaults[key] != nil {
+          usesDefaults = true
+        } else if fieldIsNamed[index] {
+          throw SemanticError(.generic("Missing named argument '\(field)' for '\(constructorDescription)'; provide '\(field):' or declare a default value"), span: currentSpan)
+        } else {
+          throw SemanticError(.generic("Missing positional argument '\(field)' for '\(constructorDescription)'"), span: currentSpan)
+        }
       }
-    } else if !usesDefaultFill {
-      let missingField = fieldNames[missingIndices[0]]
-      throw SemanticError(.generic("Missing constructor field '\(missingField)'; provide '\(missingField):' or use '...'"), span: currentSpan)
     }
 
     return ConstructorArgumentPlan(
       orderedCallArgs: orderedCallArgs,
-      usesDefaultFill: usesDefaultFill,
-      usesLabels: true
+      usesDefaults: usesDefaults
     )
   }
 
   func reorderPatternArguments(
     _ patternArgs: [PatternArg],
     fieldNames: [String],
+    fieldIsNamed: [Bool],
     patternDescription: String
   ) throws -> [PatternArg] {
-    let hasLabels = patternArgs.contains { $0.label != nil }
-    let hasPositional = patternArgs.contains { $0.label == nil }
-
-    if hasLabels && hasPositional {
-      throw SemanticError(.generic("Pattern '\(patternDescription)' cannot mix positional and labeled arguments"), span: currentSpan)
-    }
-
-    if !hasLabels {
-      if patternArgs.count != fieldNames.count {
-        throw SemanticError.invalidArgumentCount(
-          function: patternDescription,
-          expected: fieldNames.count,
-          got: patternArgs.count
-        )
-      }
-      return patternArgs
-    }
-
     var orderedArgs: [PatternArg?] = Array(repeating: nil, count: fieldNames.count)
-    var seenLabels: Set<String> = []
+    var positionalIndex = 0
+    var seenNamed = false
+
     for arg in patternArgs {
-      guard let label = arg.label else { continue }
-      guard let fieldIndex = fieldNames.firstIndex(of: label) else {
-        throw SemanticError(.generic("Unknown constructor label '\(label)' for type '\(patternDescription)'"), span: currentSpan)
+      if let label = arg.label {
+        // Named pattern
+        seenNamed = true
+        guard let fieldIndex = fieldNames.firstIndex(of: label) else {
+          throw SemanticError(.generic("Unknown pattern label '\(label)' for '\(patternDescription)'"), span: currentSpan)
+        }
+        guard fieldIsNamed[fieldIndex] else {
+          throw SemanticError(.generic("Field '\(label)' is positional and cannot be matched by label"), span: currentSpan)
+        }
+        if orderedArgs[fieldIndex] != nil {
+          throw SemanticError(.generic("Duplicate pattern label '\(label)'"), span: currentSpan)
+        }
+        orderedArgs[fieldIndex] = arg
+      } else {
+        // Positional pattern
+        if seenNamed {
+          throw SemanticError(.generic("Positional pattern cannot appear after named pattern in '\(patternDescription)'"), span: currentSpan)
+        }
+        while positionalIndex < fieldNames.count && fieldIsNamed[positionalIndex] {
+          positionalIndex += 1
+        }
+        guard positionalIndex < fieldNames.count else {
+          throw SemanticError(.generic("Too many positional pattern arguments for '\(patternDescription)'"), span: currentSpan)
+        }
+        orderedArgs[positionalIndex] = arg
+        positionalIndex += 1
       }
-      if seenLabels.contains(label) {
-        throw SemanticError(.generic("Duplicate constructor label '\(label)'"), span: currentSpan)
-      }
-      seenLabels.insert(label)
-      orderedArgs[fieldIndex] = arg
     }
 
-    let missingIndices = orderedArgs.indices.filter { orderedArgs[$0] == nil }
-    if !missingIndices.isEmpty {
-      let missingField = fieldNames[missingIndices[0]]
-      throw SemanticError(.generic("Missing constructor field '\(missingField)' in pattern '\(patternDescription)'"), span: currentSpan)
+    // Patterns don't support defaults - all fields must be provided
+    for (index, name) in fieldNames.enumerated() {
+      if orderedArgs[index] == nil {
+        throw SemanticError(.generic("Missing pattern field '\(name)' in '\(patternDescription)'"), span: currentSpan)
+      }
     }
 
     return orderedArgs.compactMap { $0 }
@@ -211,10 +232,29 @@ extension TypeChecker {
     }
   }
 
+  func enumCaseFieldIsNamed(enumType: Type, caseName: String) throws -> [Bool]? {
+    switch enumType {
+    case .enum(let defId):
+      guard let enumCase = context.getEnumCases(defId)?.first(where: { $0.name == caseName }) else {
+        return nil
+      }
+      return enumCase.parameters.map { $0.named }
+    case .genericEnum(let templateName, _):
+      guard let template = currentScope.lookupGenericEnumTemplate(templateName),
+            let enumCase = template.cases.first(where: { $0.name == caseName }) else {
+        return nil
+      }
+      return enumCase.parameters.map { $0.named }
+    default:
+      return nil
+    }
+  }
+
   func typeCheckConstructorArguments(
     plan: ConstructorArgumentPlan,
-    members: [(name: String, type: Type)],
-    constructorDescription: String
+    members: [(name: String, type: Type, named: Bool)],
+    constructorDescription: String,
+    parentName: String = ""
   ) throws -> [TypedExpressionNode] {
     var typedArguments: [TypedExpressionNode] = []
 
@@ -232,21 +272,27 @@ extension TypeChecker {
         continue
       }
 
-      guard plan.usesDefaultFill else {
-        throw SemanticError(.generic("Missing constructor field '\(member.name)'; provide '\(member.name):' or use '...'"), span: currentSpan)
-      }
+      // Try to use parsed default value
+      let key = "\(parentName).\(member.name)"
 
-      do {
-        let defaultExpr = try buildDefaultValueExpression(for: member.type)
-        if defaultExpr.type != member.type {
+      if let defaultExpr = self.parsedParameterDefaults[key] {
+        var typedArg = try inferTypedExpression(defaultExpr, expectedType: member.type)
+        typedArg = try coerceLiteral(typedArg, to: member.type)
+        if typedArg.type != member.type {
           throw SemanticError.typeMismatch(
             expected: member.type.description,
-            got: defaultExpr.type.description
+            got: typedArg.type.description
           )
         }
-        typedArguments.append(defaultExpr)
-      } catch is SemanticError {
-        throw SemanticError(.generic("Field '\(member.name)' omitted by '...', but type '\(member.type.description)' does not implement Default"), span: currentSpan)
+        typedArguments.append(typedArg)
+        continue
+      }
+
+      // No default available
+      if member.named {
+        throw SemanticError(.generic("Missing named argument '\(member.name)' for '\(constructorDescription)'; provide '\(member.name):' or declare a default value"), span: currentSpan)
+      } else {
+        throw SemanticError(.generic("Missing positional argument '\(member.name)' for '\(constructorDescription)'"), span: currentSpan)
       }
     }
 

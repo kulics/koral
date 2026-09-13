@@ -622,7 +622,7 @@ given TypeChecker {
                 let param_types = param_entry_types(fn_params);
                 let mutable specs = List[FunctionParamSpec].new();
                 for _ in param_types then {
-                    specs.push(FunctionParamSpec("", false, false));
+                    specs.push(FunctionParamSpec("", false, false, false));
                 };
                 yield specs;
             },
@@ -659,7 +659,10 @@ given TypeChecker {
                 .Some(fields) then {
                     let mutable specs = List[FunctionParamSpec].new();
                     for field in fields then {
-                        specs.push(FunctionParamSpec(field.name, field.is_mutable, true));
+                        let type_name = self.context().get_name(def_id) or else "";
+                        let key1 = "\(type_name).\(field.name)";
+                        let has_def = self.context().parsed_default_values.contains_key(key1) or self.context().parsed_default_values.contains_key(field.name);
+                        specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named, has_def));
                     };
                     yield specs;
                 },
@@ -670,7 +673,10 @@ given TypeChecker {
                     .Some(fields) then {
                         let mutable specs = List[FunctionParamSpec].new();
                         for field in fields then {
-                            specs.push(FunctionParamSpec(field.name, field.is_mutable, true));
+                            let type_name = self.context().get_name(struct_template.def_id) or else "";
+                            let key1 = "\(type_name).\(field.name)";
+                            let has_def = self.context().parsed_default_values.contains_key(key1) or self.context().parsed_default_values.contains_key(field.name);
+                            specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named, has_def));
                         };
                         yield specs;
                     },
@@ -746,7 +752,7 @@ given TypeChecker {
                     let mutable idx UInt = 1;
                     while idx < member.params.count() then {
                         let p = member.params[idx];
-                        specs.push(FunctionParamSpec(p.name, p.is_mutable, p.named));
+                        specs.push(FunctionParamSpec(p.name, p.is_mutable, p.named, false));
                         idx += 1;
                     };
                     return specs;
@@ -814,31 +820,73 @@ given TypeChecker {
     };
 
 
-    module_private reject_non_constructor_named_arguments(self, args List[* Expr]) Bool = {
+    module_private validate_call_argument_order(self, args List[* Expr]) Bool = {
+        let mutable seen_named = false;
         for arg in args then {
             when arg in {
-                .NamedArgument(label, _, _) then {
-                    if label == "..." then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Default-fill '...' is only valid in constructor calls"
-                            )
-                        );
-                    } else {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Named labels are only allowed on struct and enum constructors; use positional arguments"
-                            )
-                        );
-                    };
-                    return false;
+                .NamedArgument(_, _, _) then {
+                    seen_named = true;
                 },
-                _ then {},
+                _ then {
+                    if seen_named then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Positional arguments are not allowed after named arguments"
+                            )
+                        );
+                        return false;
+                    };
+                },
             };
+        };
+        return true;
+    };
+
+    module_private validate_named_param_call_labels(self, args List[* Expr], param_specs List[FunctionParamSpec]) Bool = {
+        let mutable arg_idx UInt = 0;
+        for arg in args then {
+            if arg_idx < param_specs.count() then {
+                let spec = param_specs[arg_idx];
+                when arg in {
+                    .NamedArgument(label, _, _) then {
+                        if not spec.named then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Positional argument provided for named field '\(spec.name)'"
+                                )
+                            );
+                            return false;
+                        };
+                        if label <> spec.name then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Named argument label '\(label)' does not match parameter '\(spec.name)'"
+                                )
+                            );
+                            return false;
+                        };
+                    },
+                    _ then {
+                        if spec.named then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Named parameter '\(spec.name)' must be called with label '\(spec.name):'"
+                                )
+                            );
+                            return false;
+                        };
+                    },
+                };
+            };
+            arg_idx += 1;
         };
         return true;
     };

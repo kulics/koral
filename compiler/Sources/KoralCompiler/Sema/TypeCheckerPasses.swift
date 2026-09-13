@@ -2992,6 +2992,30 @@ extension TypeChecker {
           }
         }
 
+        // Check default value consistency between trait and implementation
+        // Rule: if trait has defaults, implementation must NOT have defaults
+        // Rule: if trait has no defaults, implementation cannot add defaults
+        if namedCheckEnd > 1 {
+          for i in 1..<namedCheckEnd {
+            let traitParam = traitParams[i]
+            let implParam = implParams[i]
+            let traitKey = "\(method.name).\(traitParam.name)"
+            let implKey = "\(method.name).\(implParam.name)"
+            let traitHasDefault = parsedParameterDefaults[traitKey] != nil
+            let implHasDefault = parsedParameterDefaults[implKey] != nil
+            if traitHasDefault && implHasDefault {
+              throw SemanticError(.generic(
+                "Trait method '\(method.name)' has default value for parameter '\(traitParam.name)', implementation must not also declare a default value"
+              ), span: span)
+            }
+            if !traitHasDefault && implHasDefault {
+              throw SemanticError(.generic(
+                "Trait method '\(method.name)' has no default value for parameter '\(traitParam.name)', implementation cannot add a default value"
+              ), span: span)
+            }
+          }
+        }
+
         let methodSymbol = makeGlobalSymbol(
           name: method.name,
           type: functionType,

@@ -12,7 +12,7 @@ public type Parser(
     tokens List[Token],
     file_path String,
     mutable index UInt,
-
+    mutable parsed_defaults Dict[String, String],
 );
 
 given Parser {
@@ -195,11 +195,11 @@ given Parser {
     };
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, "", 0);
+        return Parser(tokens, "", 0, Dict[String, String].new());
     };
 
     public new_in_file(tokens List[Token], file_path String) Parser = {
-        return Parser(tokens, file_path, 0);
+        return Parser(tokens, file_path, 0, Dict[String, String].new());
     };
 
     module_private current(self) Token = {
@@ -863,7 +863,7 @@ given Parser {
         return .Ok(params);
     };
 
-    module_private parse_param_list(*mutable self) Result[List[Param]] = {
+    module_private parse_param_list(*mutable self, func_name String) Result[List[Param]] = {
         let mutable params = List[Param].new();
 
         while true then {
@@ -910,8 +910,11 @@ given Parser {
                     return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(name)));
                 };
 
+                // Check for colon - indicates named parameter
+                let mutable is_named = false;
                 if self.current().kind is .Colon() then {
-                    return .Error(self.parser_error_without_span("Function parameters use 'name Type', not 'name: Type'"));
+                    is_named = true;
+                    self.advance();
                 };
 
                 if not self.is_type_start() then {
@@ -921,7 +924,40 @@ given Parser {
                     return .Error(self.parser_error("parse parameter type error"));
                 };
 
-                params.push(Param(name, is_mut, param_type, false));
+                // Only named parameters can have default values
+                if self.current().kind is .Assign() then {
+                    if not is_named then {
+                        return .Error(self.parser_error_without_span("Default values are only allowed for named parameters (use 'name: Type = value' syntax)"));
+                    };
+                    self.advance();
+                    let mutable default_val = "";
+                    when self.current().kind in {
+                        .IntegerLiteral(v) then {
+                            self.advance();
+                            default_val = v;
+                        },
+                        .FloatLiteral(v) then { self.advance(); default_val = v; },
+                        .StringLiteral(v) then { self.advance(); default_val = "\"\(v)\""; },
+                        .RuneLiteral(v) then { self.advance(); default_val = "'\(v)'"; },
+                        .KwTrue() then { self.advance(); default_val = "true"; },
+                        .KwFalse() then { self.advance(); default_val = "false"; },
+                        .LBracket() then {
+                            self.advance();
+                            when self.current().kind in {
+                                .RBracket() then { self.advance(); default_val = "[]"; },
+                                _ then { return .Error(self.parser_error_without_span("Expected ']' for empty collection default value")); },
+                            };
+                        },
+                        .Range() then {
+                            self.advance();
+                            default_val = "..";
+                        },
+                        _ then { return .Error(self.parser_error_without_span("Expected literal default value after '='")); },
+                    };
+                    self.parsed_defaults.insert("\(func_name).\(name)", default_val);
+                };
+
+                params.push(Param(name, is_mut, param_type, is_named));
             };
 
             when self.current().kind in {
@@ -973,7 +1009,15 @@ given Parser {
             };
 
             self.advance();
-            let params = self.parse_param_list() or return;
+            let params = self.parse_param_list(name) or return;
+
+            if is_foreign then {
+                for p in params then {
+                    if p.named then {
+                        return .Error(self.parser_error_without_span("Named parameters are not supported in foreign declarations"));
+                    };
+                };
+            };
 
             when self.current().kind in {
                 .RParen() then {},
@@ -1096,6 +1140,7 @@ given Parser {
             .LParen() then {
                 self.advance();
                 let mutable fields = List[Field].new();
+                let mutable seen_named_field = false;
                 while true then {
                     when self.current().kind in {
                         .RParen() then {
@@ -1117,15 +1162,55 @@ given Parser {
                             if not self.is_valid_value_name(field_name) then {
                                 return .Error(self.parser_error_without_span(self.invalid_field_name_error(field_name)));
                             };
+
+                            // Check for colon - indicates named field
+                            let mutable field_named = false;
                             if self.current().kind is .Colon() then {
-                                return .Error(self.parser_error_without_span("Constructor field declarations use 'name Type', not 'name: Type'"));
+                                field_named = true;
+                                seen_named_field = true;
+                                self.advance();
+                            } else if seen_named_field then {
+                                return .Error(self.parser_error_without_span("Positional field '\(field_name)' cannot appear after named fields"));
                             };
 
                             let field_type = self.parse_type() or else {
                                 return .Error(self.parser_error("parse field type error"));
                             };
 
-                            fields.push(Field(field_access, field_name, field_mut, field_type, false));
+                            // Only named fields can have default values
+                            if self.current().kind is .Assign() then {
+                                if not field_named then {
+                                    return .Error(self.parser_error_without_span("Default values are only allowed for named parameters (use 'name: Type = value' syntax)"));
+                                };
+                                self.advance();
+                                let mutable field_default_val = "";
+                                when self.current().kind in {
+                                    .IntegerLiteral(v) then {
+                                        self.advance();
+                                        field_default_val = v;
+                                    },
+                                    .FloatLiteral(v) then { self.advance(); field_default_val = v; },
+                                    .StringLiteral(v) then { self.advance(); field_default_val = "\"\(v)\""; },
+                                    .RuneLiteral(v) then { self.advance(); field_default_val = "'\(v)'"; },
+                                    .KwTrue() then { self.advance(); field_default_val = "true"; },
+                                    .KwFalse() then { self.advance(); field_default_val = "false"; },
+                                    .LBracket() then {
+                                        self.advance();
+                                        when self.current().kind in {
+                                            .RBracket() then { self.advance(); field_default_val = "[]"; },
+                                            _ then { return .Error(self.parser_error_without_span("Expected ']' for empty collection default value")); },
+                                        };
+                                    },
+                                    .Range() then {
+                                        self.advance();
+                                        field_default_val = "..";
+                                    },
+                                    _ then { return .Error(self.parser_error_without_span("Expected literal default value after '='")); },
+                                };
+                                self.parsed_defaults.insert("\(name).\(field_name)", field_default_val);
+                            };
+
+                            fields.push(Field(field_access, field_name, field_mut, field_type, field_named));
                             if self.current().kind is .Comma() then {
                                 self.advance();
                             };
@@ -1183,13 +1268,48 @@ given Parser {
                                             if not self.is_valid_value_name(payload_name) then {
                                                 return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(payload_name)));
                                             };
+                                            // Check for colon - indicates named field
+                                            let mutable payload_named = false;
                                             if self.current().kind is .Colon() then {
-                                                return .Error(self.parser_error_without_span("Enum payload field declarations use 'name Type', not 'name: Type'"));
+                                                payload_named = true;
+                                                self.advance();
                                             };
                                             let payload_type = self.parse_type() or else {
                                                 return .Error(self.parser_error("parse enum payload type error"));
                                             };
-                                            case_fields.push(EnumCaseField(payload_name, payload_type, false));
+                                            // Parse optional default value for named fields
+                                            if self.current().kind is .Assign() then {
+                                                if not payload_named then {
+                                                    return .Error(self.parser_error_without_span("Default values are only allowed for named parameters (use 'name: Type = value' syntax)"));
+                                                };
+                                                self.advance();
+                                                let mutable field_default_val = "";
+                                                when self.current().kind in {
+                                                    .IntegerLiteral(v) then {
+                                                        self.advance();
+                                                        field_default_val = v;
+                                                    },
+                                                    .FloatLiteral(v) then { self.advance(); field_default_val = v; },
+                                                    .StringLiteral(v) then { self.advance(); field_default_val = "\"\(v)\""; },
+                                                    .RuneLiteral(v) then { self.advance(); field_default_val = "'\(v)'"; },
+                                                    .KwTrue() then { self.advance(); field_default_val = "true"; },
+                                                    .KwFalse() then { self.advance(); field_default_val = "false"; },
+                                                    .LBracket() then {
+                                                        self.advance();
+                                                        when self.current().kind in {
+                                                            .RBracket() then { self.advance(); field_default_val = "[]"; },
+                                                            _ then { return .Error(self.parser_error_without_span("Expected ']' for empty collection default value")); },
+                                                        };
+                                                    },
+                                                    .Range() then {
+                                                        self.advance();
+                                                        field_default_val = "..";
+                                                    },
+                                                    _ then { return .Error(self.parser_error_without_span("Expected literal default value after '='")); },
+                                                };
+                                                self.parsed_defaults.insert("\(case_name).\(payload_name)", field_default_val);
+                                            };
+                                            case_fields.push(EnumCaseField(payload_name, payload_type, payload_named));
                                             when self.current().kind in {
                                                 .Comma() then {
                                                     self.advance();
