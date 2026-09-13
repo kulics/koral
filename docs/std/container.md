@@ -11,75 +11,83 @@ This page lists the public API of module `Std.Container` (declaration-only synta
 
 ## Types
 ```koral
-public type PriorityQueue[T Ord]
+public type PriorityQueue[T Ord];
 
-public type PriorityQueueIterator[T Ord]
+public type PriorityQueueIterator[T Ord];
 
-public type Queue[T Any]
+public type Queue[T Any];
 
-public type QueueIterator[T Any]
+public type QueueIterator[T Any];
 
-public type Stack[T Any]
+public type Stack[T Any];
 
-public type StackIterator[T Any]
+public type StackIterator[T Any];
 ```
 
 ## Given Implementations
 ```koral
 given[T Ord and Deref] PriorityQueue[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public is_empty(*self) Bool
-    public clear(*mutable self) Void
-    public push(*mutable self, value T) Void
-    public pop(*mutable self) Option[T]
-    public peek(*self) Option[T]
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public is_empty(*self) Bool;
+    public clear(*mutable self) Void;
+    public push(*mutable self, value T) Void;
+    public pop(*mutable self) Option[T];
+    public peek(*self) Option[T];
+};
 
 given[T Ord and Deref] PriorityQueue[T] as Iterable[T, PriorityQueueIterator[T]] {
-    public iterator(*self) PriorityQueueIterator[T]
-}
+    public iterator(*self) PriorityQueueIterator[T];
+};
 
 given[T Ord and Deref] PriorityQueueIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Deref] Queue[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public is_empty(*self) Bool
-    public clear(*mutable self) Void
-    public push(*mutable self, value T) Void
-    public pop(*mutable self) Option[T]
-    public peek(*self) Option[T]
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public is_empty(*self) Bool;
+    public clear(*mutable self) Void;
+    public push(*mutable self, value T) Void;
+    public pop(*mutable self) Option[T];
+    public peek(*self) Option[T];
+};
+
+given[T Deref] Queue[T] as Default {
+    public default() Self;
+};
 
 given[T Deref] Queue[T] as Iterable[T, QueueIterator[T]] {
-    public iterator(*self) QueueIterator[T]
-}
+    public iterator(*self) QueueIterator[T];
+};
 
 given[T Deref] QueueIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Deref] Stack[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public is_empty(*self) Bool
-    public clear(*mutable self) Void
-    public push(*mutable self, value T) Void
-    public pop(*mutable self) Option[T]
-    public peek(*self) Option[T]
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public is_empty(*self) Bool;
+    public clear(*mutable self) Void;
+    public push(*mutable self, value T) Void;
+    public pop(*mutable self) Option[T];
+    public peek(*self) Option[T];
+};
+
+given[T Deref] Stack[T] as Default {
+    public default() Self;
+};
 
 given[T Deref] Stack[T] as Iterable[T, StackIterator[T]] {
-    public iterator(*self) StackIterator[T]
-}
+    public iterator(*self) StackIterator[T];
+};
 
 given[T Deref] StackIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 ```

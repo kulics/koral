@@ -5,174 +5,174 @@ This page lists the public API of module `Std` (declaration-only syntax), organi
 
 ## Free Functions
 ```koral
-public let sleep(d Duration) Void
+public let sleep(d Duration) Void;
 
-public let make_bytes(count UInt) List[UInt8]
+public let make_bytes(count UInt) List[UInt8];
 
-public let make_uninitialized_bytes(count UInt) List[UInt8]
+public let make_uninitialized_bytes(count UInt) List[UInt8];
 
-public let box[T Any](mutable v T) *mutable T
+public let box[T Any](mutable v T) *mutable T;
 
-public let max[T Ord](a T, b T) T
+public let max[T Ord](a T, b T) T;
 
-public let min[T Ord](a T, b T) T
+public let min[T Ord](a T, b T) T;
 
-public foreign let exit(code Int) Never
+public foreign let exit(code Int) Never;
 
-public foreign let abort() Never
+public foreign let abort() Never;
 
-public let last_error_message() String
+public let last_error_message() String;
 
-public let args() List[String]
+public let args() List[String];
 
-public let panic(message String) Never
+public let panic(message String) Never;
 
-public let assert(condition Bool, message String) Void
+public let assert(condition Bool, message String) Void;
 
-public let print[T ToString](value T) Void
+public let print[T ToString](value T) Void;
 
-public let println[T ToString](value T) Void
+public let println[T ToString](value T) Void;
 
-public let eprint[T ToString](value T) Void
+public let eprint[T ToString](value T) Void;
 
-public let eprintln[T ToString](value T) Void
+public let eprintln[T ToString](value T) Void;
 
-public let scanln() Option[String]
+public let scanln() Option[String];
 ```
 
 ## Traits
 ```koral
 public trait Zero {
-    zero() Self
-}
+    zero() Self;
+};
 
 public trait One {
-    one() Self
-}
+    one() Self;
+};
 
 public trait Add[R Any] {
-    add(self, other R) Self
-}
+    add(self, other R) Self;
+};
 
 public trait Sub[R Any] {
-    sub(self, other R) Self
-}
+    sub(self, other R) Self;
+};
 
 public trait Neg {
-    neg(self) Self
-}
+    neg(self) Self;
+};
 
 public trait Mul[R Any] {
-    mul(self, other R) Self
-}
+    mul(self, other R) Self;
+};
 
 public trait Div[R Any] {
-    div(self, other R) Self
-}
+    div(self, other R) Self;
+};
 
 public trait Rem[R Any] {
-    rem(self, other R) Self
-}
+    rem(self, other R) Self;
+};
 
 public trait Eq {
-    equals(self, other Self) Bool
-}
+    equals(self, other Self) Bool;
+};
 
 public trait Ord Eq {
-    compare(self, other Self) Int
-}
+    compare(self, other Self) Int;
+};
 
 public trait Bounded Ord {
-    max_value() Self
-    min_value() Self
-}
+    max_value() Self;
+    min_value() Self;
+};
 
 public trait Iterator[T Any] {
-    next(*mutable self) Option[T]
-}
+    next(*mutable self) Option[T];
+};
 
 public trait Iterable[T Any, R Iterator[T]] {
-    iterator(*self) R
-}
+    iterator(*self) R;
+};
 
 public trait Step Bounded {
-    succ(self) Option[Self]
-    pred(self) Option[Self]
-}
+    succ(self) Option[Self];
+    pred(self) Option[Self];
+};
 
 public trait ToString {
-    to_string(*self) String
-}
+    to_string(*self) String;
+};
 
 public trait Hash Eq {
-    hash(self) UInt
-}
+    hash(self) UInt;
+};
 
 public trait Error {
-    message(*self) String
-}
+    message(*self) String;
+};
 
 public trait Drop {
-    drop(source *unsafe mutable Self) Void
-}
+    drop(source *unsafe mutable Self) Void;
+};
 
 public trait Default {
-    default() Self
-}
+    default() Self;
+};
 ```
 
 ## Types
 ```koral
-public type Deque[T Any]
+public type Deque[T Any];
 
-public type DequeIterator[T Any]
+public type DequeIterator[T Any];
 
-public type Dict[K Hash, V Any]
+public type Dict[K Hash, V Any];
 
-public type DictIterator[K Hash, V Any]
+public type DictIterator[K Hash, V Any];
 
-public type DictKeysIterator[K Hash, V Any]
+public type DictKeysIterator[K Hash, V Any];
 
-public type DictValuesIterator[K Hash, V Any]
+public type DictValuesIterator[K Hash, V Any];
 
-public type Duration
+public type Duration;
 
-public type FilterIterator[T Any, R Iterator[T]]
+public type FilterIterator[T Any, R Iterator[T]];
 
-public type MapIterator[T Any, U Any, R Iterator[T]]
+public type MapIterator[T Any, U Any, R Iterator[T]];
 
-public type FilterMapIterator[T Any, U Any, R Iterator[T]]
+public type FilterMapIterator[T Any, U Any, R Iterator[T]];
 
-public type TakeIterator[T Any, R Iterator[T]]
+public type TakeIterator[T Any, R Iterator[T]];
 
-public type SkipIterator[T Any, R Iterator[T]]
+public type SkipIterator[T Any, R Iterator[T]];
 
-public type StepIterator[T Any, R Iterator[T]]
+public type StepIterator[T Any, R Iterator[T]];
 
-public type EnumerateIterator[T Any, R Iterator[T]]
+public type EnumerateIterator[T Any, R Iterator[T]];
 
-public type InspectIterator[T Any, R Iterator[T]]
+public type InspectIterator[T Any, R Iterator[T]];
 
-public type IntersperseIterator[T Any, R Iterator[T]]
+public type IntersperseIterator[T Any, R Iterator[T]];
 
-public type TakeWhileIterator[T Any, R Iterator[T]]
+public type TakeWhileIterator[T Any, R Iterator[T]];
 
-public type SkipWhileIterator[T Any, R Iterator[T]]
+public type SkipWhileIterator[T Any, R Iterator[T]];
 
-public type ChainIterator[T Any, R1 Iterator[T], R2 Iterator[T]]
+public type ChainIterator[T Any, R1 Iterator[T], R2 Iterator[T]];
 
-public type ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]]
+public type ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]];
 
-public type FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]]
+public type FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]];
 
-public type List[T Any]
+public type List[T Any];
 
-public type ListIterator[T Any]
+public type ListIterator[T Any];
 
 public type Option[T Any] {
     None(),
     Some(value T),
-}
+};
 
 public type Range[T Ord] {
     Closed(start T, end T),
@@ -184,1613 +184,1682 @@ public type Range[T Ord] {
     To(end T),
     Until(end T),
     Full(),
-}
+};
 
-public type SliceSpec
+public type SliceSpec;
 
-public type RangeIterator[T Step]
+public type RangeIterator[T Step];
 
 public type Result[T Any] {
     Ok(value T),
-    Error(error *Error),
-}
+    Error(error * Error),
+};
 
-public type Rune
+public type Rune;
 
-public type Set[T Hash]
+public type Set[T Hash];
 
-public type SetIterator[T Hash]
+public type SetIterator[T Hash];
 
-public type String
+public type String;
 
-public type StringSplitAsciiWhitespaceIterator
+public type StringSplitAsciiWhitespaceIterator;
 
-public type StringSplitIterator
+public type StringSplitIterator;
 
-public type StringLinesIterator
+public type StringLinesIterator;
 
-public type StringBytesIterator
+public type StringBytesIterator;
 
-public type StringRunesIterator
+public type StringRunesIterator;
 
 public type Pair[T Any, U Any](
     first T,
     second U,
-)
+);
 ```
 
 ## Given Implementations
 ```koral
 intrinsic given Int {
-    public wrapping_add(self, other Int) Int
-    public wrapping_sub(self, other Int) Int
-    public wrapping_mul(self, other Int) Int
-    public wrapping_div(self, other Int) Int
-    public wrapping_rem(self, other Int) Int
-    public wrapping_neg(self) Int
-    public wrapping_shl(self, other UInt32) Int
-    public wrapping_shr(self, other UInt32) Int
-}
+    public wrapping_add(self, other Int) Int;
+    public wrapping_sub(self, other Int) Int;
+    public wrapping_mul(self, other Int) Int;
+    public wrapping_div(self, other Int) Int;
+    public wrapping_rem(self, other Int) Int;
+    public wrapping_neg(self) Int;
+    public wrapping_shl(self, other UInt32) Int;
+    public wrapping_shr(self, other UInt32) Int;
+};
 
 intrinsic given Int8 {
-    public wrapping_add(self, other Int8) Int8
-    public wrapping_sub(self, other Int8) Int8
-    public wrapping_mul(self, other Int8) Int8
-    public wrapping_div(self, other Int8) Int8
-    public wrapping_rem(self, other Int8) Int8
-    public wrapping_neg(self) Int8
-    public wrapping_shl(self, other UInt32) Int8
-    public wrapping_shr(self, other UInt32) Int8
-}
+    public wrapping_add(self, other Int8) Int8;
+    public wrapping_sub(self, other Int8) Int8;
+    public wrapping_mul(self, other Int8) Int8;
+    public wrapping_div(self, other Int8) Int8;
+    public wrapping_rem(self, other Int8) Int8;
+    public wrapping_neg(self) Int8;
+    public wrapping_shl(self, other UInt32) Int8;
+    public wrapping_shr(self, other UInt32) Int8;
+};
 
 intrinsic given Int16 {
-    public wrapping_add(self, other Int16) Int16
-    public wrapping_sub(self, other Int16) Int16
-    public wrapping_mul(self, other Int16) Int16
-    public wrapping_div(self, other Int16) Int16
-    public wrapping_rem(self, other Int16) Int16
-    public wrapping_neg(self) Int16
-    public wrapping_shl(self, other UInt32) Int16
-    public wrapping_shr(self, other UInt32) Int16
-}
+    public wrapping_add(self, other Int16) Int16;
+    public wrapping_sub(self, other Int16) Int16;
+    public wrapping_mul(self, other Int16) Int16;
+    public wrapping_div(self, other Int16) Int16;
+    public wrapping_rem(self, other Int16) Int16;
+    public wrapping_neg(self) Int16;
+    public wrapping_shl(self, other UInt32) Int16;
+    public wrapping_shr(self, other UInt32) Int16;
+};
 
 intrinsic given Int32 {
-    public wrapping_add(self, other Int32) Int32
-    public wrapping_sub(self, other Int32) Int32
-    public wrapping_mul(self, other Int32) Int32
-    public wrapping_div(self, other Int32) Int32
-    public wrapping_rem(self, other Int32) Int32
-    public wrapping_neg(self) Int32
-    public wrapping_shl(self, other UInt32) Int32
-    public wrapping_shr(self, other UInt32) Int32
-}
+    public wrapping_add(self, other Int32) Int32;
+    public wrapping_sub(self, other Int32) Int32;
+    public wrapping_mul(self, other Int32) Int32;
+    public wrapping_div(self, other Int32) Int32;
+    public wrapping_rem(self, other Int32) Int32;
+    public wrapping_neg(self) Int32;
+    public wrapping_shl(self, other UInt32) Int32;
+    public wrapping_shr(self, other UInt32) Int32;
+};
 
 intrinsic given Int64 {
-    public wrapping_add(self, other Int64) Int64
-    public wrapping_sub(self, other Int64) Int64
-    public wrapping_mul(self, other Int64) Int64
-    public wrapping_div(self, other Int64) Int64
-    public wrapping_rem(self, other Int64) Int64
-    public wrapping_neg(self) Int64
-    public wrapping_shl(self, other UInt32) Int64
-    public wrapping_shr(self, other UInt32) Int64
-}
+    public wrapping_add(self, other Int64) Int64;
+    public wrapping_sub(self, other Int64) Int64;
+    public wrapping_mul(self, other Int64) Int64;
+    public wrapping_div(self, other Int64) Int64;
+    public wrapping_rem(self, other Int64) Int64;
+    public wrapping_neg(self) Int64;
+    public wrapping_shl(self, other UInt32) Int64;
+    public wrapping_shr(self, other UInt32) Int64;
+};
 
 intrinsic given UInt {
-    public wrapping_add(self, other UInt) UInt
-    public wrapping_sub(self, other UInt) UInt
-    public wrapping_mul(self, other UInt) UInt
-    public wrapping_div(self, other UInt) UInt
-    public wrapping_rem(self, other UInt) UInt
-    public wrapping_shl(self, other UInt32) UInt
-    public wrapping_shr(self, other UInt32) UInt
-}
+    public wrapping_add(self, other UInt) UInt;
+    public wrapping_sub(self, other UInt) UInt;
+    public wrapping_mul(self, other UInt) UInt;
+    public wrapping_div(self, other UInt) UInt;
+    public wrapping_rem(self, other UInt) UInt;
+    public wrapping_shl(self, other UInt32) UInt;
+    public wrapping_shr(self, other UInt32) UInt;
+};
 
 intrinsic given UInt8 {
-    public wrapping_add(self, other UInt8) UInt8
-    public wrapping_sub(self, other UInt8) UInt8
-    public wrapping_mul(self, other UInt8) UInt8
-    public wrapping_div(self, other UInt8) UInt8
-    public wrapping_rem(self, other UInt8) UInt8
-    public wrapping_shl(self, other UInt32) UInt8
-    public wrapping_shr(self, other UInt32) UInt8
-}
+    public wrapping_add(self, other UInt8) UInt8;
+    public wrapping_sub(self, other UInt8) UInt8;
+    public wrapping_mul(self, other UInt8) UInt8;
+    public wrapping_div(self, other UInt8) UInt8;
+    public wrapping_rem(self, other UInt8) UInt8;
+    public wrapping_shl(self, other UInt32) UInt8;
+    public wrapping_shr(self, other UInt32) UInt8;
+};
 
 intrinsic given UInt16 {
-    public wrapping_add(self, other UInt16) UInt16
-    public wrapping_sub(self, other UInt16) UInt16
-    public wrapping_mul(self, other UInt16) UInt16
-    public wrapping_div(self, other UInt16) UInt16
-    public wrapping_rem(self, other UInt16) UInt16
-    public wrapping_shl(self, other UInt32) UInt16
-    public wrapping_shr(self, other UInt32) UInt16
-}
+    public wrapping_add(self, other UInt16) UInt16;
+    public wrapping_sub(self, other UInt16) UInt16;
+    public wrapping_mul(self, other UInt16) UInt16;
+    public wrapping_div(self, other UInt16) UInt16;
+    public wrapping_rem(self, other UInt16) UInt16;
+    public wrapping_shl(self, other UInt32) UInt16;
+    public wrapping_shr(self, other UInt32) UInt16;
+};
 
 intrinsic given UInt32 {
-    public wrapping_add(self, other UInt32) UInt32
-    public wrapping_sub(self, other UInt32) UInt32
-    public wrapping_mul(self, other UInt32) UInt32
-    public wrapping_div(self, other UInt32) UInt32
-    public wrapping_rem(self, other UInt32) UInt32
-    public wrapping_shl(self, other UInt32) UInt32
-    public wrapping_shr(self, other UInt32) UInt32
-}
+    public wrapping_add(self, other UInt32) UInt32;
+    public wrapping_sub(self, other UInt32) UInt32;
+    public wrapping_mul(self, other UInt32) UInt32;
+    public wrapping_div(self, other UInt32) UInt32;
+    public wrapping_rem(self, other UInt32) UInt32;
+    public wrapping_shl(self, other UInt32) UInt32;
+    public wrapping_shr(self, other UInt32) UInt32;
+};
 
 intrinsic given UInt64 {
-    public wrapping_add(self, other UInt64) UInt64
-    public wrapping_sub(self, other UInt64) UInt64
-    public wrapping_mul(self, other UInt64) UInt64
-    public wrapping_div(self, other UInt64) UInt64
-    public wrapping_rem(self, other UInt64) UInt64
-    public wrapping_shl(self, other UInt32) UInt64
-    public wrapping_shr(self, other UInt32) UInt64
-}
+    public wrapping_add(self, other UInt64) UInt64;
+    public wrapping_sub(self, other UInt64) UInt64;
+    public wrapping_mul(self, other UInt64) UInt64;
+    public wrapping_div(self, other UInt64) UInt64;
+    public wrapping_rem(self, other UInt64) UInt64;
+    public wrapping_shl(self, other UInt32) UInt64;
+    public wrapping_shr(self, other UInt32) UInt64;
+};
 
 given Int as Zero {
-    public zero() Int
-}
+    public zero() Int;
+};
 
 given Int as One {
-    public one() Int
-}
+    public one() Int;
+};
 
 given Int as Add[Int] {
-    public add(self, other Int) Int
-}
+    public add(self, other Int) Int;
+};
 
 given Int as Sub[Int] {
-    public sub(self, other Int) Int
-}
+    public sub(self, other Int) Int;
+};
 
 given Int as Neg {
-    public neg(self) Int
-}
+    public neg(self) Int;
+};
 
 given Int as Mul[Int] {
-    public mul(self, other Int) Int
-}
+    public mul(self, other Int) Int;
+};
 
 given Int as Div[Int] {
-    public div(self, other Int) Int
-}
+    public div(self, other Int) Int;
+};
 
 given Int as Rem[Int] {
-    public rem(self, other Int) Int
-}
+    public rem(self, other Int) Int;
+};
 
 given Int8 as Zero {
-    public zero() Int8
-}
+    public zero() Int8;
+};
 
 given Int8 as One {
-    public one() Int8
-}
+    public one() Int8;
+};
 
 given Int8 as Add[Int8] {
-    public add(self, other Int8) Int8
-}
+    public add(self, other Int8) Int8;
+};
 
 given Int8 as Sub[Int8] {
-    public sub(self, other Int8) Int8
-}
+    public sub(self, other Int8) Int8;
+};
 
 given Int8 as Neg {
-    public neg(self) Int8
-}
+    public neg(self) Int8;
+};
 
 given Int8 as Mul[Int8] {
-    public mul(self, other Int8) Int8
-}
+    public mul(self, other Int8) Int8;
+};
 
 given Int8 as Div[Int8] {
-    public div(self, other Int8) Int8
-}
+    public div(self, other Int8) Int8;
+};
 
 given Int8 as Rem[Int8] {
-    public rem(self, other Int8) Int8
-}
+    public rem(self, other Int8) Int8;
+};
 
 given Int16 as Zero {
-    public zero() Int16
-}
+    public zero() Int16;
+};
 
 given Int16 as One {
-    public one() Int16
-}
+    public one() Int16;
+};
 
 given Int16 as Add[Int16] {
-    public add(self, other Int16) Int16
-}
+    public add(self, other Int16) Int16;
+};
 
 given Int16 as Sub[Int16] {
-    public sub(self, other Int16) Int16
-}
+    public sub(self, other Int16) Int16;
+};
 
 given Int16 as Neg {
-    public neg(self) Int16
-}
+    public neg(self) Int16;
+};
 
 given Int16 as Mul[Int16] {
-    public mul(self, other Int16) Int16
-}
+    public mul(self, other Int16) Int16;
+};
 
 given Int16 as Div[Int16] {
-    public div(self, other Int16) Int16
-}
+    public div(self, other Int16) Int16;
+};
 
 given Int16 as Rem[Int16] {
-    public rem(self, other Int16) Int16
-}
+    public rem(self, other Int16) Int16;
+};
 
 given Int32 as Zero {
-    public zero() Int32
-}
+    public zero() Int32;
+};
 
 given Int32 as One {
-    public one() Int32
-}
+    public one() Int32;
+};
 
 given Int32 as Add[Int32] {
-    public add(self, other Int32) Int32
-}
+    public add(self, other Int32) Int32;
+};
 
 given Int32 as Sub[Int32] {
-    public sub(self, other Int32) Int32
-}
+    public sub(self, other Int32) Int32;
+};
 
 given Int32 as Neg {
-    public neg(self) Int32
-}
+    public neg(self) Int32;
+};
 
 given Int32 as Mul[Int32] {
-    public mul(self, other Int32) Int32
-}
+    public mul(self, other Int32) Int32;
+};
 
 given Int32 as Div[Int32] {
-    public div(self, other Int32) Int32
-}
+    public div(self, other Int32) Int32;
+};
 
 given Int32 as Rem[Int32] {
-    public rem(self, other Int32) Int32
-}
+    public rem(self, other Int32) Int32;
+};
 
 given Int64 as Zero {
-    public zero() Int64
-}
+    public zero() Int64;
+};
 
 given Int64 as One {
-    public one() Int64
-}
+    public one() Int64;
+};
 
 given Int64 as Add[Int64] {
-    public add(self, other Int64) Int64
-}
+    public add(self, other Int64) Int64;
+};
 
 given Int64 as Sub[Int64] {
-    public sub(self, other Int64) Int64
-}
+    public sub(self, other Int64) Int64;
+};
 
 given Int64 as Neg {
-    public neg(self) Int64
-}
+    public neg(self) Int64;
+};
 
 given Int64 as Mul[Int64] {
-    public mul(self, other Int64) Int64
-}
+    public mul(self, other Int64) Int64;
+};
 
 given Int64 as Div[Int64] {
-    public div(self, other Int64) Int64
-}
+    public div(self, other Int64) Int64;
+};
 
 given Int64 as Rem[Int64] {
-    public rem(self, other Int64) Int64
-}
+    public rem(self, other Int64) Int64;
+};
 
 given UInt as Zero {
-    public zero() UInt
-}
+    public zero() UInt;
+};
 
 given UInt as One {
-    public one() UInt
-}
+    public one() UInt;
+};
 
 given UInt as Add[UInt] {
-    public add(self, other UInt) UInt
-}
+    public add(self, other UInt) UInt;
+};
 
 given UInt as Sub[UInt] {
-    public sub(self, other UInt) UInt
-}
+    public sub(self, other UInt) UInt;
+};
 
 given UInt as Mul[UInt] {
-    public mul(self, other UInt) UInt
-}
+    public mul(self, other UInt) UInt;
+};
 
 given UInt as Div[UInt] {
-    public div(self, other UInt) UInt
-}
+    public div(self, other UInt) UInt;
+};
 
 given UInt as Rem[UInt] {
-    public rem(self, other UInt) UInt
-}
+    public rem(self, other UInt) UInt;
+};
 
 given UInt8 as Zero {
-    public zero() UInt8
-}
+    public zero() UInt8;
+};
 
 given UInt8 as One {
-    public one() UInt8
-}
+    public one() UInt8;
+};
 
 given UInt8 as Add[UInt8] {
-    public add(self, other UInt8) UInt8
-}
+    public add(self, other UInt8) UInt8;
+};
 
 given UInt8 as Sub[UInt8] {
-    public sub(self, other UInt8) UInt8
-}
+    public sub(self, other UInt8) UInt8;
+};
 
 given UInt8 as Mul[UInt8] {
-    public mul(self, other UInt8) UInt8
-}
+    public mul(self, other UInt8) UInt8;
+};
 
 given UInt8 as Div[UInt8] {
-    public div(self, other UInt8) UInt8
-}
+    public div(self, other UInt8) UInt8;
+};
 
 given UInt8 as Rem[UInt8] {
-    public rem(self, other UInt8) UInt8
-}
+    public rem(self, other UInt8) UInt8;
+};
 
 given UInt16 as Zero {
-    public zero() UInt16
-}
+    public zero() UInt16;
+};
 
 given UInt16 as One {
-    public one() UInt16
-}
+    public one() UInt16;
+};
 
 given UInt16 as Add[UInt16] {
-    public add(self, other UInt16) UInt16
-}
+    public add(self, other UInt16) UInt16;
+};
 
 given UInt16 as Sub[UInt16] {
-    public sub(self, other UInt16) UInt16
-}
+    public sub(self, other UInt16) UInt16;
+};
 
 given UInt16 as Mul[UInt16] {
-    public mul(self, other UInt16) UInt16
-}
+    public mul(self, other UInt16) UInt16;
+};
 
 given UInt16 as Div[UInt16] {
-    public div(self, other UInt16) UInt16
-}
+    public div(self, other UInt16) UInt16;
+};
 
 given UInt16 as Rem[UInt16] {
-    public rem(self, other UInt16) UInt16
-}
+    public rem(self, other UInt16) UInt16;
+};
 
 given UInt32 as Zero {
-    public zero() UInt32
-}
+    public zero() UInt32;
+};
 
 given UInt32 as One {
-    public one() UInt32
-}
+    public one() UInt32;
+};
 
 given UInt32 as Add[UInt32] {
-    public add(self, other UInt32) UInt32
-}
+    public add(self, other UInt32) UInt32;
+};
 
 given UInt32 as Sub[UInt32] {
-    public sub(self, other UInt32) UInt32
-}
+    public sub(self, other UInt32) UInt32;
+};
 
 given UInt32 as Mul[UInt32] {
-    public mul(self, other UInt32) UInt32
-}
+    public mul(self, other UInt32) UInt32;
+};
 
 given UInt32 as Div[UInt32] {
-    public div(self, other UInt32) UInt32
-}
+    public div(self, other UInt32) UInt32;
+};
 
 given UInt32 as Rem[UInt32] {
-    public rem(self, other UInt32) UInt32
-}
+    public rem(self, other UInt32) UInt32;
+};
 
 given UInt64 as Zero {
-    public zero() UInt64
-}
+    public zero() UInt64;
+};
 
 given UInt64 as One {
-    public one() UInt64
-}
+    public one() UInt64;
+};
 
 given UInt64 as Add[UInt64] {
-    public add(self, other UInt64) UInt64
-}
+    public add(self, other UInt64) UInt64;
+};
 
 given UInt64 as Sub[UInt64] {
-    public sub(self, other UInt64) UInt64
-}
+    public sub(self, other UInt64) UInt64;
+};
 
 given UInt64 as Mul[UInt64] {
-    public mul(self, other UInt64) UInt64
-}
+    public mul(self, other UInt64) UInt64;
+};
 
 given UInt64 as Div[UInt64] {
-    public div(self, other UInt64) UInt64
-}
+    public div(self, other UInt64) UInt64;
+};
 
 given UInt64 as Rem[UInt64] {
-    public rem(self, other UInt64) UInt64
-}
+    public rem(self, other UInt64) UInt64;
+};
 
 given Float32 as Zero {
-    public zero() Float32
-}
+    public zero() Float32;
+};
 
 given Float32 as One {
-    public one() Float32
-}
+    public one() Float32;
+};
 
 given Float32 as Add[Float32] {
-    public add(self, other Float32) Float32
-}
+    public add(self, other Float32) Float32;
+};
 
 given Float32 as Sub[Float32] {
-    public sub(self, other Float32) Float32
-}
+    public sub(self, other Float32) Float32;
+};
 
 given Float32 as Neg {
-    public neg(self) Float32
-}
+    public neg(self) Float32;
+};
 
 given Float32 as Mul[Float32] {
-    public mul(self, other Float32) Float32
-}
+    public mul(self, other Float32) Float32;
+};
 
 given Float32 as Div[Float32] {
-    public div(self, other Float32) Float32
-}
+    public div(self, other Float32) Float32;
+};
 
 given Float64 as Zero {
-    public zero() Float64
-}
+    public zero() Float64;
+};
 
 given Float64 as One {
-    public one() Float64
-}
+    public one() Float64;
+};
 
 given Float64 as Add[Float64] {
-    public add(self, other Float64) Float64
-}
+    public add(self, other Float64) Float64;
+};
 
 given Float64 as Sub[Float64] {
-    public sub(self, other Float64) Float64
-}
+    public sub(self, other Float64) Float64;
+};
 
 given Float64 as Neg {
-    public neg(self) Float64
-}
+    public neg(self) Float64;
+};
 
 given Float64 as Mul[Float64] {
-    public mul(self, other Float64) Float64
-}
+    public mul(self, other Float64) Float64;
+};
 
 given Float64 as Div[Float64] {
-    public div(self, other Float64) Float64
-}
+    public div(self, other Float64) Float64;
+};
 
 given String as Add[String] {
-    public add(self, other String) String
-}
+    public add(self, other String) String;
+};
 
 given[T Deref] List[T] as Add[List[T]] {
-    public add(self, other Self) Self
-}
+    public add(self, other Self) Self;
+};
 
 given Duration as Zero {
-    public zero() Duration
-}
+    public zero() Duration;
+};
 
 given Duration as Add[Duration] {
-    public add(self, other Duration) Duration
-}
+    public add(self, other Duration) Duration;
+};
 
 given Duration as Sub[Duration] {
-    public sub(self, other Duration) Duration
-}
+    public sub(self, other Duration) Duration;
+};
 
 given Duration as Neg {
-    public neg(self) Duration
-}
+    public neg(self) Duration;
+};
 
 given Duration as Mul[Int] {
-    public mul(self, k Int) Duration
-}
+    public mul(self, k Int) Duration;
+};
 
 given Duration as Div[Int] {
-    public div(self, k Int) Duration
-}
+    public div(self, k Int) Duration;
+};
 
 given Bool as Eq {
-    public equals(self, other Bool) Bool
-}
+    public equals(self, other Bool) Bool;
+};
 
 given Bool as Ord {
-    public compare(self, other Bool) Int
-}
+    public compare(self, other Bool) Int;
+};
 
 given Int as Eq {
-    public equals(self, other Int) Bool
-}
+    public equals(self, other Int) Bool;
+};
 
 given Int as Ord {
-    public compare(self, other Int) Int
-}
+    public compare(self, other Int) Int;
+};
 
 given Int as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Int8 as Eq {
-    public equals(self, other Int8) Bool
-}
+    public equals(self, other Int8) Bool;
+};
 
 given Int8 as Ord {
-    public compare(self, other Int8) Int
-}
+    public compare(self, other Int8) Int;
+};
 
 given Int8 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Int16 as Eq {
-    public equals(self, other Int16) Bool
-}
+    public equals(self, other Int16) Bool;
+};
 
 given Int16 as Ord {
-    public compare(self, other Int16) Int
-}
+    public compare(self, other Int16) Int;
+};
 
 given Int16 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Int32 as Eq {
-    public equals(self, other Int32) Bool
-}
+    public equals(self, other Int32) Bool;
+};
 
 given Int32 as Ord {
-    public compare(self, other Int32) Int
-}
+    public compare(self, other Int32) Int;
+};
 
 given Int32 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Int64 as Eq {
-    public equals(self, other Int64) Bool
-}
+    public equals(self, other Int64) Bool;
+};
 
 given Int64 as Ord {
-    public compare(self, other Int64) Int
-}
+    public compare(self, other Int64) Int;
+};
 
 given Int64 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given UInt as Eq {
-    public equals(self, other UInt) Bool
-}
+    public equals(self, other UInt) Bool;
+};
 
 given UInt as Ord {
-    public compare(self, other UInt) Int
-}
+    public compare(self, other UInt) Int;
+};
 
 given UInt as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given UInt8 as Eq {
-    public equals(self, other UInt8) Bool
-}
+    public equals(self, other UInt8) Bool;
+};
 
 given UInt8 as Ord {
-    public compare(self, other UInt8) Int
-}
+    public compare(self, other UInt8) Int;
+};
 
 given UInt8 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given UInt16 as Eq {
-    public equals(self, other UInt16) Bool
-}
+    public equals(self, other UInt16) Bool;
+};
 
 given UInt16 as Ord {
-    public compare(self, other UInt16) Int
-}
+    public compare(self, other UInt16) Int;
+};
 
 given UInt16 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given UInt32 as Eq {
-    public equals(self, other UInt32) Bool
-}
+    public equals(self, other UInt32) Bool;
+};
 
 given UInt32 as Ord {
-    public compare(self, other UInt32) Int
-}
+    public compare(self, other UInt32) Int;
+};
 
 given UInt32 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given UInt64 as Eq {
-    public equals(self, other UInt64) Bool
-}
+    public equals(self, other UInt64) Bool;
+};
 
 given UInt64 as Ord {
-    public compare(self, other UInt64) Int
-}
+    public compare(self, other UInt64) Int;
+};
 
 given UInt64 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Float32 as Eq {
-    public equals(self, other Float32) Bool
-}
+    public equals(self, other Float32) Bool;
+};
 
 given Float32 as Ord {
-    public compare(self, other Float32) Int
-}
+    public compare(self, other Float32) Int;
+};
 
 given Float32 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given Float64 as Eq {
-    public equals(self, other Float64) Bool
-}
+    public equals(self, other Float64) Bool;
+};
 
 given Float64 as Ord {
-    public compare(self, other Float64) Int
-}
+    public compare(self, other Float64) Int;
+};
 
 given Float64 as Bounded {
-    public max_value() Self
-    public min_value() Self
-}
+    public max_value() Self;
+    public min_value() Self;
+};
 
 given[T Deref] Deque[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public reserve(*mutable self, additional UInt) Void
-    public is_empty(*self) Bool
-    public push_back(*mutable self, value T) Void
-    public push_front(*mutable self, value T) Void
-    public pop_front(*mutable self) Option[T]
-    public pop_back(*mutable self) Option[T]
-    public first(*self) Option[T]
-    public last(*self) Option[T]
-    public get(*self, index UInt) Option[T]
-    public clear(*mutable self) Void
-    public reverse(*mutable self) Void
-    public retain(*mutable self, predicate Func(T) Bool) Void
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public reserve(*mutable self, additional UInt) Void;
+    public is_empty(*self) Bool;
+    public push_back(*mutable self, value T) Void;
+    public push_front(*mutable self, value T) Void;
+    public pop_front(*mutable self) Option[T];
+    public pop_back(*mutable self) Option[T];
+    public first(*self) Option[T];
+    public last(*self) Option[T];
+    public get(*self, index UInt) Option[T];
+    public clear(*mutable self) Void;
+    public reverse(*mutable self) Void;
+    public retain(*mutable self, predicate Func(T) Bool) Void;
+};
+
+given[T Deref] Deque[T] as Default {
+    public default() Self;
+};
 
 given[T Eq and Deref] Deque[T] {
-    public contains(*self, value T) Bool
-}
+    public contains(*self, value T) Bool;
+};
 
 given[T Deref] Deque[T] as Iterable[T, DequeIterator[T]] {
-    public iterator(*self) DequeIterator[T]
-}
+    public iterator(*self) DequeIterator[T];
+};
 
 given[T Deref] DequeIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[K Hash, V Any] Dict[K, V] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public insert(*mutable self, key K, value V) Void
-    public try_insert(*mutable self, key K, value V) Bool
-    public insert_dict(*mutable self, other Dict[K, V]) Void
-    public get(*self, key K) Option[V]
-    public get_or_insert(*mutable self, key K, value V) V
-    public contains_key(*self, key K) Bool
-    public remove(*mutable self, key K) Void
-    public try_remove(*mutable self, key K) Bool
-    public take(*mutable self, key K) Option[V]
-    public is_empty(*self) Bool
-    public clear(*mutable self) Void
-    public retain(*mutable self, predicate Func(K, V) Bool) Void
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public borrow_ptr(*self) *unsafe DictBucket[K, V];
+    public insert(*mutable self, key K, value V) Void;
+    public try_insert(*mutable self, key K, value V) Bool;
+    public insert_dict(*mutable self, other Dict[K, V]) Void;
+    public get(*self, key K) Option[V];
+    public get_or_insert(*mutable self, key K, value V) V;
+    public contains_key(*self, key K) Bool;
+    public remove(*mutable self, key K) Void;
+    public try_remove(*mutable self, key K) Bool;
+    public take(*mutable self, key K) Option[V];
+    public is_empty(*self) Bool;
+    public clear(*mutable self) Void;
+    public retain(*mutable self, predicate Func(K, V) Bool) Void;
+};
+
+given[K Hash, V Any] Dict[K, V] as Default {
+    public default() Self;
+};
 
 given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
-    public next(*mutable self) Option[Pair[K, V]]
-}
+    public next(*mutable self) Option[Pair[K, V]];
+};
 
 given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
-    public next(*mutable self) Option[K]
-}
+    public next(*mutable self) Option[K];
+};
 
 given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
-    public next(*mutable self) Option[V]
-}
+    public next(*mutable self) Option[V];
+};
 
 given[K Hash, V Any] Dict[K, V] {
-    public keys(*self) DictKeysIterator[K, V]
-    public values(*self) DictValuesIterator[K, V]
-}
+    public keys(*self) DictKeysIterator[K, V];
+    public values(*self) DictValuesIterator[K, V];
+};
 
 given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
-    public iterator(*self) DictIterator[K, V]
-}
+    public iterator(*self) DictIterator[K, V];
+};
 
 given[T Deref] List[T] {
-    public group_by[K Hash](*self, key Func(T) K) Dict[K, List[T]]
-}
+    public group_by[K Hash](*self, key Func(T) K) Dict[K, List[T]];
+};
 
 given Duration {
-    public new(seconds Int64, nanoseconds Int64) Result[Duration]
-    public as_nanoseconds(self) Int64
-    public as_microseconds(self) Int64
-    public as_milliseconds(self) Int64
-    public as_seconds(self) Int64
-    public as_minutes(self) Int64
-    public as_hours(self) Int64
-    public ratio(self, other Duration) Float64
-}
-
-given Duration as Eq {
-    public equals(self, other Duration) Bool
-}
-
-given Duration as Ord {
-    public compare(self, other Duration) Int
-}
+    public new(seconds: Int64, nanoseconds: Int64) Result[Duration];
+    public as_nanoseconds(self) Int64;
+    public as_microseconds(self) Int64;
+    public as_milliseconds(self) Int64;
+    public as_seconds(self) Int64;
+    public as_minutes(self) Int64;
+    public as_hours(self) Int64;
+    public ratio(self, other Duration) Float64;
+};
 
 given Duration as Default {
-    public default() Self
-}
+    public default() Self;
+};
+
+given Duration as Eq {
+    public equals(self, other Duration) Bool;
+};
+
+given Duration as Ord {
+    public compare(self, other Duration) Int;
+};
 
 given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
-    public next(*mutable self) Option[U]
-}
+    public next(*mutable self) Option[U];
+};
 
 given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
-    public next(*mutable self) Option[U]
-}
+    public next(*mutable self) Option[U];
+};
 
 given[T Any, R Iterator[T]] TakeIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] SkipIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] StepIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
-    public next(*mutable self) Option[Pair[UInt, T]]
-}
+    public next(*mutable self) Option[Pair[UInt, T]];
+};
 
 given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R Iterator[T]] SkipWhileIterator[T, R] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as Iterator[Pair[A, B]] {
-    public next(*mutable self) Option[Pair[A, B]]
-}
+    public next(*mutable self) Option[Pair[A, B]];
+};
 
 given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, InnerR] as Iterator[U] {
-    public next(*mutable self) Option[U]
-}
+    public next(*mutable self) Option[U];
+};
 
 given[T Any] Iterator[T] {
-    public filter(self, fn Func(T) Bool) FilterIterator[T, Self]
-    public map[U Any](self, fn Func(T) U) MapIterator[T, U, Self]
-    public filter_map[U Any](self, fn Func(T) Option[U]) FilterMapIterator[T, U, Self]
-    public take(self, n UInt) TakeIterator[T, Self]
-    public skip(self, n UInt) SkipIterator[T, Self]
-    public step_by(self, n UInt) StepIterator[T, Self]
-    public enumerate(self) EnumerateIterator[T, Self]
-    public inspect(self, fn Func(T) Void) InspectIterator[T, Self]
-    public intersperse(self, v T) IntersperseIterator[T, Self]
-    public take_while(self, fn Func(T) Bool) TakeWhileIterator[T, Self]
-    public skip_while(self, fn Func(T) Bool) SkipWhileIterator[T, Self]
-    public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2]
-    public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2]
-    public flat_map[U Any, InnerR Iterator[U]](self, fn Func(T) InnerR) FlatMapIterator[T, U, Self, InnerR]
-}
+    public filter(self, fn Func(T) Bool) FilterIterator[T, Self];
+    public map[U Any](self, fn Func(T) U) MapIterator[T, U, Self];
+    public filter_map[U Any](self, fn Func(T) Option[U]) FilterMapIterator[T, U, Self];
+    public take(self, n UInt) TakeIterator[T, Self];
+    public skip(self, n UInt) SkipIterator[T, Self];
+    public step_by(self, n UInt) StepIterator[T, Self];
+    public enumerate(self) EnumerateIterator[T, Self];
+    public inspect(self, fn Func(T) Void) InspectIterator[T, Self];
+    public intersperse(self, v T) IntersperseIterator[T, Self];
+    public take_while(self, fn Func(T) Bool) TakeWhileIterator[T, Self];
+    public skip_while(self, fn Func(T) Bool) SkipWhileIterator[T, Self];
+    public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2];
+    public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2];
+    public flat_map[U Any, InnerR Iterator[U]](self, fn Func(T) InnerR) FlatMapIterator[T, U, Self, InnerR];
+};
 
 given[T Any] Iterator[T] {
-    public fold[U Any](self, initial U, fn Func(U, T) U) U
-    public reduce(self, fn Func(T, T) T) Option[T]
-    public into_list(self) List[T]
-    public for_each(self, fn Func(T) Void) Void
-    public count(self) UInt
-    public first(self) Option[T]
-    public last(self) Option[T]
-    public nth(self, n UInt) Option[T]
-    public position(self, fn Func(T) Bool) Option[UInt]
-    public find(self, fn Func(T) Bool) Option[T]
-    public find_map[U Any](self, fn Func(T) Option[U]) Option[U]
-    public any(self, fn Func(T) Bool) Bool
-    public all(self, fn Func(T) Bool) Bool
-    public is_empty(self) Bool
-    public max_by[K Ord](self, fn Func(T) K) Option[T]
-    public min_by[K Ord](self, fn Func(T) K) Option[T]
-}
+    public fold[U Any](self, initial U, fn Func(U, T) U) U;
+    public reduce(self, fn Func(T, T) T) Option[T];
+    public into_list(self) List[T];
+    public for_each(self, fn Func(T) Void) Void;
+    public count(self) UInt;
+    public first(self) Option[T];
+    public last(self) Option[T];
+    public nth(self, n UInt) Option[T];
+    public position(self, fn Func(T) Bool) Option[UInt];
+    public find(self, fn Func(T) Bool) Option[T];
+    public find_map[U Any](self, fn Func(T) Option[U]) Option[U];
+    public any(self, fn Func(T) Bool) Bool;
+    public all(self, fn Func(T) Bool) Bool;
+    public is_empty(self) Bool;
+    public max_by[K Ord](self, fn Func(T) K) Option[T];
+    public min_by[K Ord](self, fn Func(T) K) Option[T];
+};
 
 given[T Eq] Iterator[T] {
-    public contains(self, value T) Bool
-}
+    public contains(self, value T) Bool;
+};
 
 given[T Ord] Iterator[T] {
-    public max(self) Option[T]
-    public min(self) Option[T]
-}
+    public max(self) Option[T];
+    public min(self) Option[T];
+};
 
 given[T Hash] Iterator[T] {
-    public into_set(self) Set[T]
-}
+    public into_set(self) Set[T];
+};
 
 given[T Add[T] and Zero] Iterator[T] {
-    public sum(self) T
-}
+    public sum(self) T;
+};
 
 given[T Mul[T] and One] Iterator[T] {
-    public product(self) T
-}
+    public product(self) T;
+};
 
 given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
-    public average(self) Option[T]
-}
+    public average(self) Option[T];
+};
 
 given[T Deref] List[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public reserve(*mutable self, additional UInt) Void
-    public push(*mutable self, value T) Void
-    public push_list(*mutable self, other List[T]) Void
-    public push_sublist(*mutable self, other List[T], range Range[UInt]) Void
-    public pop(*mutable self) Option[T]
-    public insert_list_at(*mutable self, index UInt, other List[T]) Void
-    public insert_sublist_at(*mutable self, index UInt, other List[T], range Range[UInt]) Void
-    public insert_at(*mutable self, index UInt, value T) Void
-    public remove_at(*mutable self, index UInt) Void
-    public take_at(*mutable self, index UInt) T
-    public get(*self, index UInt) Option[T]
-    public first(*self) Option[T]
-    public last(*self) Option[T]
-    public is_empty(*self) Bool
-    public clear(*mutable self) Void
-    public fill(*mutable self, value T) Void
-    public map[U Deref](*self, fn Func(T) U) List[U]
-    public reverse(*mutable self) Void
-    public borrow_ptr(*self) *unsafe T
-    public borrow_mut_ptr(*mutable self) *unsafe mutable T
-    public slice_spec(*self, range Range[UInt]) SliceSpec
-    public sublist(*self, range Range[UInt]) List[T]
-    public enumerate(*self) EnumerateIterator[T, ListIterator[T]]
-    public retain(*mutable self, predicate Func(T) Bool) Void
-    public sort_by[K Ord](*mutable self, key Func(T) K) Void
-    public binary_search_by[K Ord](*self, key Func(T) K, target K) Pair[UInt, Bool]
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public reserve(*mutable self, additional UInt) Void;
+    public push(*mutable self, value T) Void;
+    public push_list(*mutable self, other List[T]) Void;
+    public push_sublist(*mutable self, other List[T], range Range[UInt]) Void;
+    public pop(*mutable self) Option[T];
+    public insert_list_at(*mutable self, index UInt, other List[T]) Void;
+    public insert_sublist_at(*mutable self, index UInt, other List[T], range Range[UInt]) Void;
+    public insert_at(*mutable self, index UInt, value T) Void;
+    public remove_at(*mutable self, index UInt) Void;
+    public take_at(*mutable self, index UInt) T;
+    public get(*self, index UInt) Option[T];
+    public first(*self) Option[T];
+    public last(*self) Option[T];
+    public is_empty(*self) Bool;
+    public clear(*mutable self) Void;
+    public fill(*mutable self, value T) Void;
+    public map[U Deref](*self, fn Func(T) U) List[U];
+    public reverse(*mutable self) Void;
+    public borrow_ptr(*self) *unsafe T;
+    public borrow_mut_ptr(*mutable self) *unsafe mutable T;
+    public slice_spec(*self, range Range[UInt]) SliceSpec;
+    public sublist(*self, range Range[UInt]) List[T];
+    public enumerate(*self) EnumerateIterator[T, ListIterator[T]];
+    public retain(*mutable self, predicate Func(T) Bool) Void;
+    public sort_by[K Ord](*mutable self, key Func(T) K) Void;
+    public binary_search_by[K Ord](*self, key Func(T) K, target K) Pair[UInt, Bool];
+};
+
+given[T Deref] List[T] as Default {
+    public default() Self;
+};
 
 given[T Eq and Deref] List[T] as Eq {
-    public equals(self, other List[T]) Bool
-}
+    public equals(self, other List[T]) Bool;
+};
+
+given[T Hash and Deref] List[T] as Hash {
+    public hash(self) UInt;
+};
+
+given[T Ord and Deref] List[T] as Ord {
+    public compare(self, other List[T]) Int;
+};
 
 given[T Eq and Deref] List[T] {
-    public contains(*self, value T) Bool
-    public dedup(*mutable self) Void
-}
+    public contains(*self, value T) Bool;
+    public dedup(*mutable self) Void;
+};
 
 given[T Deref] ListIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Deref] List[T] as Iterable[T, ListIterator[T]] {
-    public iterator(*self) ListIterator[T]
-}
+    public iterator(*self) ListIterator[T];
+};
 
 given[T Ord and Deref] List[T] {
-    public binary_search(*self, target T) Pair[UInt, Bool]
-    public sort(*mutable self) Void
-}
+    public binary_search(*self, target T) Pair[UInt, Bool];
+    public sort(*mutable self) Void;
+};
 
 given[T Any] Option[T] {
-    public is_some(*self) Bool
-    public is_none(*self) Bool
-    public unwrap(self) T
-    public expect(self, message String) T
-    public unwrap_or(self, default T) T
-    public map[U Any](self, f Func(T) U) Option[U]
-    public filter(self, predicate Func(T) Bool) Option[T]
-}
+    public is_some(*self) Bool;
+    public is_none(*self) Bool;
+    public unwrap(self) T;
+    public expect(self, message String) T;
+    public unwrap_or(self, default T) T;
+    public map[U Any](self, f Func(T) U) Option[U];
+    public filter(self, predicate Func(T) Bool) Option[T];
+};
+
+given[T Any] Option[T] as Default {
+    public default() Self;
+};
 
 given[T Eq] Option[T] as Eq {
-    public equals(self, other Option[T]) Bool
-}
-
-intrinsic given[T Any] ?*T {
-    public upgrade(self) Option[*T]
-}
-
-intrinsic given[T Any] ?*mutable T {
-    public upgrade(self) Option[*mutable T]
-}
+    public equals(self, other Option[T]) Bool;
+};
 
 given Float32 {
-    public to_bits(self) UInt32
-    public from_bits(bits UInt32) Float32
-}
+    public to_bits(self) UInt32;
+    public from_bits(bits UInt32) Float32;
+};
 
 given Float64 {
-    public to_bits(self) UInt64
-    public from_bits(bits UInt64) Float64
-}
+    public to_bits(self) UInt64;
+    public from_bits(bits UInt64) Float64;
+};
 
 given Float32 {
-    public inf() Float32
-    public nan() Float32
-    public min_normal() Float32
-    public min_denormal() Float32
-    public is_nan(self) Bool
-    public is_inf(self) Bool
-    public is_normal(self) Bool
-}
+    public inf() Float32;
+    public nan() Float32;
+    public min_normal() Float32;
+    public min_denormal() Float32;
+    public is_nan(self) Bool;
+    public is_inf(self) Bool;
+    public is_normal(self) Bool;
+};
 
 given Float64 {
-    public inf() Float64
-    public nan() Float64
-    public min_normal() Float64
-    public min_denormal() Float64
-    public is_nan(self) Bool
-    public is_inf(self) Bool
-    public is_normal(self) Bool
-}
+    public inf() Float64;
+    public nan() Float64;
+    public min_normal() Float64;
+    public min_denormal() Float64;
+    public is_nan(self) Bool;
+    public is_inf(self) Bool;
+    public is_normal(self) Bool;
+};
 
 given Float64 {
-    public is_finite(self) Bool
-    public is_sign_positive(self) Bool
-    public is_sign_negative(self) Bool
-}
+    public is_finite(self) Bool;
+    public is_sign_positive(self) Bool;
+    public is_sign_negative(self) Bool;
+};
 
 given Float32 {
-    public is_finite(self) Bool
-    public is_sign_positive(self) Bool
-    public is_sign_negative(self) Bool
-}
+    public is_finite(self) Bool;
+    public is_sign_positive(self) Bool;
+    public is_sign_negative(self) Bool;
+};
 
 given UInt {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-    public is_power_of_two(self) Bool
-    public next_power_of_two(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+    public is_power_of_two(self) Bool;
+    public next_power_of_two(self) Self;
+};
 
 given UInt64 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-    public is_power_of_two(self) Bool
-    public next_power_of_two(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+    public is_power_of_two(self) Bool;
+    public next_power_of_two(self) Self;
+};
 
 given UInt32 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-    public is_power_of_two(self) Bool
-    public next_power_of_two(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+    public is_power_of_two(self) Bool;
+    public next_power_of_two(self) Self;
+};
 
 given UInt16 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-    public is_power_of_two(self) Bool
-    public next_power_of_two(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+    public is_power_of_two(self) Bool;
+    public next_power_of_two(self) Self;
+};
 
 given UInt8 {
-    public is_ascii(self) Bool
-    public is_ascii_alphabetic(self) Bool
-    public is_ascii_alphanumeric(self) Bool
-    public is_ascii_digit(self) Bool
-    public is_ascii_hexdigit(self) Bool
-    public is_ascii_whitespace(self) Bool
-    public is_ascii_uppercase(self) Bool
-    public is_ascii_lowercase(self) Bool
-    public to_ascii_lowercase(self) UInt8
-    public to_ascii_uppercase(self) UInt8
-    public equals_ascii_ignore_case(self, other UInt8) Bool
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-    public is_power_of_two(self) Bool
-    public next_power_of_two(self) Self
-}
+    public is_ascii(self) Bool;
+    public is_ascii_alphabetic(self) Bool;
+    public is_ascii_alphanumeric(self) Bool;
+    public is_ascii_digit(self) Bool;
+    public is_ascii_hexdigit(self) Bool;
+    public is_ascii_whitespace(self) Bool;
+    public is_ascii_uppercase(self) Bool;
+    public is_ascii_lowercase(self) Bool;
+    public to_ascii_lowercase(self) UInt8;
+    public to_ascii_uppercase(self) UInt8;
+    public equals_ascii_ignore_case(self, other UInt8) Bool;
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+    public is_power_of_two(self) Bool;
+    public next_power_of_two(self) Self;
+};
 
 given Int {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int64 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int32 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int16 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int8 {
-    public count_ones(self) UInt
-    public count_zeros(self) UInt
-    public leading_zeros(self) UInt
-    public trailing_zeros(self) UInt
-    public leading_ones(self) UInt
-    public trailing_ones(self) UInt
-    public rotate_left(self, n UInt) Self
-    public rotate_right(self, n UInt) Self
-    public reverse_bits(self) Self
-    public swap_bytes(self) Self
-}
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given SliceSpec {
-    public new(offset UInt, len UInt) SliceSpec
-    public start(self) UInt
-    public end(self) UInt
-    public len(self) UInt
-}
+    public new(offset: UInt, len: UInt) SliceSpec;
+    public start(self) UInt;
+    public end(self) UInt;
+    public len(self) UInt;
+};
 
 given[T Ord] Range[T] {
-    public contains(*self, value T) Bool
-    public is_empty(*self) Bool
-}
+    public contains(*self, value T) Bool;
+    public is_empty(*self) Bool;
+};
 
 given Int as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given Int8 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given Int16 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given Int32 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given Int64 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given UInt as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given UInt8 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given UInt16 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given UInt32 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given UInt64 as Step {
-    public succ(self) Option[Self]
-    public pred(self) Option[Self]
-}
+    public succ(self) Option[Self];
+    public pred(self) Option[Self];
+};
 
 given[T Step] RangeIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given[T Step] Range[T] as Iterable[T, RangeIterator[T]] {
-    public iterator(*self) RangeIterator[T]
-}
+    public iterator(*self) RangeIterator[T];
+};
 
 given[T Any] Result[T] {
-    public is_ok(*self) Bool
-    public is_error(*self) Bool
-    public unwrap(self) T
-    public expect(self, message String) T
-    public unwrap_error(self) *Error
-    public unwrap_or(self, default T) T
-    public map[U Any](self, f Func(T) U) Result[U]
-}
+    public is_ok(*self) Bool;
+    public is_error(*self) Bool;
+    public unwrap(self) T;
+    public expect(self, message String) T;
+    public unwrap_error(self) * Error;
+    public unwrap_or(self, default T) T;
+    public map[U Any](self, f Func(T) U) Result[U];
+};
 
 given Rune {
-    public replacement_char() Rune
-    public from_uint32(value UInt32) Result[Rune]
-    public from_uint32_unchecked(value UInt32) Rune
-    public to_uint32(self) UInt32
-    public is_ascii(self) Bool
-    public is_ascii_digit(self) Bool
-    public is_ascii_hexdigit(self) Bool
-    public is_ascii_whitespace(self) Bool
-    public is_ascii_alphabetic(self) Bool
-    public is_ascii_alphanumeric(self) Bool
-    public is_ascii_uppercase(self) Bool
-    public is_ascii_lowercase(self) Bool
-    public to_ascii_lowercase(self) Rune
-    public to_ascii_uppercase(self) Rune
-    public is_valid(self) Bool
-    public byte_count(self) UInt
-    public is_newline(self) Bool
-    public equals_ascii_ignore_case(self, other Rune) Bool
-    public is_identifier_start(self) Bool
-    public is_identifier_continue(self) Bool
-}
+    public replacement_char() Rune;
+    public from_uint32(value UInt32) Result[Rune];
+    public from_uint32_unchecked(value UInt32) Rune;
+    public to_uint32(self) UInt32;
+    public is_ascii(self) Bool;
+    public is_ascii_digit(self) Bool;
+    public is_ascii_hexdigit(self) Bool;
+    public is_ascii_whitespace(self) Bool;
+    public is_ascii_alphabetic(self) Bool;
+    public is_ascii_alphanumeric(self) Bool;
+    public is_ascii_uppercase(self) Bool;
+    public is_ascii_lowercase(self) Bool;
+    public to_ascii_lowercase(self) Rune;
+    public to_ascii_uppercase(self) Rune;
+    public is_valid(self) Bool;
+    public byte_count(self) UInt;
+    public is_newline(self) Bool;
+    public equals_ascii_ignore_case(self, other Rune) Bool;
+    public is_identifier_start(self) Bool;
+    public is_identifier_continue(self) Bool;
+};
 
 given Rune as Eq {
-    public equals(self, other Rune) Bool
-}
+    public equals(self, other Rune) Bool;
+};
 
 given Rune as Ord {
-    public compare(self, other Rune) Int
-}
+    public compare(self, other Rune) Int;
+};
 
 given Rune as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T Hash] Set[T] {
-    public new() Self
-    public with_capacity(capacity UInt) Self
-    public count(*self) UInt
-    public insert(*mutable self, value T) Void
-    public try_insert(*mutable self, value T) Bool
-    public insert_set(*mutable self, other Set[T]) Void
-    public contains(*self, value T) Bool
-    public remove(*mutable self, value T) Void
-    public try_remove(*mutable self, value T) Bool
-    public is_empty(*self) Bool
-    public is_subset_of(*self, other Set[T]) Bool
-    public is_superset_of(*self, other Set[T]) Bool
-    public clear(*mutable self) Void
-    public retain(*mutable self, predicate Func(T) Bool) Void
-    public union(*self, other Set[T]) Set[T]
-    public intersection(*self, other Set[T]) Set[T]
-    public difference(*self, other Set[T]) Set[T]
-    public symmetric_difference(*self, other Set[T]) Set[T]
-}
+    public new() Self;
+    public with_capacity(capacity UInt) Self;
+    public count(*self) UInt;
+    public insert(*mutable self, value T) Void;
+    public try_insert(*mutable self, value T) Bool;
+    public insert_set(*mutable self, other Set[T]) Void;
+    public contains(*self, value T) Bool;
+    public remove(*mutable self, value T) Void;
+    public try_remove(*mutable self, value T) Bool;
+    public is_empty(*self) Bool;
+    public is_subset_of(*self, other Set[T]) Bool;
+    public is_superset_of(*self, other Set[T]) Bool;
+    public clear(*mutable self) Void;
+    public retain(*mutable self, predicate Func(T) Bool) Void;
+    public union(*self, other Set[T]) Set[T];
+    public intersection(*self, other Set[T]) Set[T];
+    public difference(*self, other Set[T]) Set[T];
+    public symmetric_difference(*self, other Set[T]) Set[T];
+};
+
+given[T Hash] Set[T] as Default {
+    public default() Self;
+};
 
 given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
-    public iterator(*self) SetIterator[T]
-}
+    public iterator(*self) SetIterator[T];
+};
 
 given[T Hash] SetIterator[T] as Iterator[T] {
-    public next(*mutable self) Option[T]
-}
+    public next(*mutable self) Option[T];
+};
 
 given String {
-    public from_utf8_ptr_unchecked(bytes *unsafe UInt8, len UInt) String
-    public from_utf8_ptr(bytes *unsafe UInt8, len UInt) Result[String]
-    public from_bytes(bytes List[UInt8]) Result[String]
-    public from_bytes_unchecked(bytes List[UInt8]) String
-    public from_cstring(cstr *unsafe UInt8) Result[String]
-    public from_cstring_unchecked(cstr *unsafe UInt8) String
-    public with_capacity(capacity UInt) String
-    public new() String
-    public count(*self) UInt
-    public is_empty(*self) Bool
-    public capacity(*self) UInt
-    public borrow_ptr(*self) *unsafe UInt8
-    public to_bytes(*self) List[UInt8]
-    public get(*self, index UInt) Option[UInt8]
-    public push_byte(*mutable self, value UInt8) Void
-    public push_string(*mutable self, other String) Void
-    public push_substring(*mutable self, other String, range Range[UInt]) Void
-    public reserve(*mutable self, capacity UInt) Void
-    public starts_with(*self, prefix String) Bool
-    public ends_with(*self, suffix String) Bool
-    public find(*self, pat String) Option[UInt]
-    public find_last(*self, pat String) Option[UInt]
-    public is_rune_boundary(*self, byte_index UInt) Bool
-    public slice_spec(*self, range Range[UInt]) SliceSpec
-    public substring(*self, range Range[UInt]) String
-    public trim_ascii_start(*self) String
-    public trim_ascii_end(*self) String
-    public trim_ascii(*self) String
-    public is_ascii(*self) Bool
-    public is_ascii_whitespace(*self) Bool
-    public to_ascii_lowercase(*self) String
-    public to_ascii_uppercase(*self) String
-    public to_ascii_titlecase(*self) String
-    public find_from(*self, start UInt, pat String) Option[UInt]
-    public contains(*self, pat String) Bool
-    public repeat(*self, times UInt) String
-    public replace_n(*self, pat String, n UInt, with String) String
-    public split_once(*self, sep String) Option[Pair[String, String]]
-    public split_last_once(*self, sep String) Option[Pair[String, String]]
-    public replace_all(*self, pat String, with String) String
-    public split_ascii_whitespace(*self) StringSplitAsciiWhitespaceIterator
-    public split(*self, sep String) StringSplitIterator
-    public lines(*self) StringLinesIterator
-    public trim_prefix(*self, prefix String) String
-    public trim_suffix(*self, suffix String) String
-    public strip_prefix(*self, prefix String) Option[String]
-    public strip_suffix(*self, suffix String) Option[String]
-    public bytes(*self) StringBytesIterator
-    public runes(*self) StringRunesIterator
-    public to_runes(*self) List[Rune]
-    public push_rune(*mutable self, rune Rune) Void
-}
+    public from_utf8_ptr_unchecked(bytes *unsafe UInt8, len UInt) String;
+    public from_utf8_ptr(bytes *unsafe UInt8, len UInt) Result[String];
+    public from_bytes(bytes List[UInt8]) Result[String];
+    public from_bytes_unchecked(bytes List[UInt8]) String;
+    public from_cstring(cstr *unsafe UInt8) Result[String];
+    public from_cstring_unchecked(cstr *unsafe UInt8) String;
+    public with_capacity(capacity UInt) String;
+    public new() String;
+    public count(*self) UInt;
+    public is_empty(*self) Bool;
+    public capacity(*self) UInt;
+    public borrow_ptr(*self) *unsafe UInt8;
+    public to_bytes(*self) List[UInt8];
+    public get(*self, index UInt) Option[UInt8];
+    public push_byte(*mutable self, value UInt8) Void;
+    public push_string(*mutable self, other String) Void;
+    public push_substring(*mutable self, other String, range Range[UInt]) Void;
+    public reserve(*mutable self, capacity UInt) Void;
+    public starts_with(*self, prefix String) Bool;
+    public ends_with(*self, suffix String) Bool;
+    public find(*self, pat String) Option[UInt];
+    public find_last(*self, pat String) Option[UInt];
+    public is_rune_boundary(*self, byte_index UInt) Bool;
+    public slice_spec(*self, range Range[UInt]) SliceSpec;
+    public substring(*self, range Range[UInt]) String;
+    public trim_ascii_start(*self) String;
+    public trim_ascii_end(*self) String;
+    public trim_ascii(*self) String;
+    public is_ascii(*self) Bool;
+    public is_ascii_whitespace(*self) Bool;
+    public to_ascii_lowercase(*self) String;
+    public to_ascii_uppercase(*self) String;
+    public to_ascii_titlecase(*self) String;
+    public find_from(*self, start UInt, pat String) Option[UInt];
+    public contains(*self, pat String) Bool;
+    public repeat(*self, times UInt) String;
+    public replace_n(*self, pat String, n UInt, with: String) String;
+    public split_once(*self, sep String) Option[Pair[String, String]];
+    public split_last_once(*self, sep String) Option[Pair[String, String]];
+    public replace_all(*self, pat String, with: String) String;
+    public split_ascii_whitespace(*self) StringSplitAsciiWhitespaceIterator;
+    public split(*self, sep String) StringSplitIterator;
+    public lines(*self) StringLinesIterator;
+    public trim_prefix(*self, prefix String) String;
+    public trim_suffix(*self, suffix String) String;
+    public strip_prefix(*self, prefix String) Option[String];
+    public strip_suffix(*self, suffix String) Option[String];
+    public bytes(*self) StringBytesIterator;
+    public runes(*self) StringRunesIterator;
+    public to_runes(*self) List[Rune];
+    public push_rune(*mutable self, rune Rune) Void;
+};
+
+given String as Default {
+    public default() Self;
+};
 
 given String as Eq {
-    public equals(self, other String) Bool
-}
+    public equals(self, other String) Bool;
+};
 
 given String as Ord {
-    public compare(self, other String) Int
-}
+    public compare(self, other String) Int;
+};
 
 given String as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
 
 given StringSplitAsciiWhitespaceIterator as Iterator[String] {
-    public next(*mutable self) Option[String]
-}
+    public next(*mutable self) Option[String];
+};
 
 given StringSplitIterator as Iterator[String] {
-    public next(*mutable self) Option[String]
-}
+    public next(*mutable self) Option[String];
+};
 
 given StringLinesIterator as Iterator[String] {
-    public next(*mutable self) Option[String]
-}
+    public next(*mutable self) Option[String];
+};
 
 given StringRunesIterator as Iterator[Rune] {
-    public next(*mutable self) Option[Rune]
-}
+    public next(*mutable self) Option[Rune];
+};
 
 given StringBytesIterator as Iterator[UInt8] {
-    public next(*mutable self) Option[UInt8]
-}
+    public next(*mutable self) Option[UInt8];
+};
 
 given String as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Bool as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Int as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Int8 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Int16 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Int32 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Int64 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given UInt as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given UInt8 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given UInt16 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given UInt32 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given UInt64 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Float32 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Float64 as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T ToString, U ToString] Pair[T, U] as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T ToString] Option[T] as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T ToString and Deref] List[T] as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T ToString] Iterator[T] {
-    public join_to_string(self, seperator String) String
-}
+    public join_to_string(self, seperator String) String;
+};
 
 given[T ToString and Deref] List[T] {
-    public join_to_string(self, seperator String) String
-}
+    public join_to_string(self, seperator String) String;
+};
 
 given[K ToString and Hash, V ToString] Dict[K, V] as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T ToString and Hash] Set[T] as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Duration as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given Hash {
-    public combine_hash(self, value UInt) UInt
-}
+    public combine_hash(self, value UInt) UInt;
+};
 
 given String as Error {
-    public message(*self) String
-}
+    public message(*self) String;
+};
 
 given Bool as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Bool as Default {
+    public default() Self;
+};
 
 given UInt as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given UInt as Default {
+    public default() Self;
+};
 
 given UInt8 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given UInt8 as Default {
+    public default() Self;
+};
 
 given UInt16 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given UInt16 as Default {
+    public default() Self;
+};
 
 given UInt32 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given UInt32 as Default {
+    public default() Self;
+};
 
 given UInt64 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given UInt64 as Default {
+    public default() Self;
+};
 
 given Int as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Int as Default {
+    public default() Self;
+};
 
 given Int8 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Int8 as Default {
+    public default() Self;
+};
 
 given Int16 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Int16 as Default {
+    public default() Self;
+};
 
 given Int32 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Int32 as Default {
+    public default() Self;
+};
 
 given Int64 as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
+
+given Int64 as Default {
+    public default() Self;
+};
 
 given[T Any] *unsafe T as Eq {
-    public equals(self, other *unsafe T) Bool
-}
+    public equals(self, other *unsafe T) Bool;
+};
 
 given[T Any] *unsafe T as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
 
 given[T Any] *unsafe mutable T as Eq {
-    public equals(self, other *unsafe mutable T) Bool
-}
+    public equals(self, other *unsafe mutable T) Bool;
+};
 
 given[T Any] *unsafe mutable T as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
 
-given[T Eq and Deref] *T as Eq {
-    public equals(self, other *T) Bool
-}
+given[T Eq and Deref] * T as Eq {
+    public equals(self, other * T) Bool;
+};
 
 given[T Eq and Deref] *mutable T as Eq {
-    public equals(self, other *mutable T) Bool
-}
+    public equals(self, other *mutable T) Bool;
+};
 
-given[T Hash and Deref] *T as Hash {
-    public hash(self) UInt
-}
+given[T Hash and Deref] * T as Hash {
+    public hash(self) UInt;
+};
 
 given[T Hash and Deref] *mutable T as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
 
-given[T Ord and Deref] *T as Ord {
-    public compare(self, other *T) Int
-}
+given[T Ord and Deref] * T as Ord {
+    public compare(self, other * T) Int;
+};
 
 given[T Ord and Deref] *mutable T as Ord {
-    public compare(self, other *mutable T) Int
-}
+    public compare(self, other *mutable T) Int;
+};
 
-given[T ToString and Deref] *T as ToString {
-    public to_string(*self) String
-}
+given[T ToString and Deref] * T as ToString {
+    public to_string(*self) String;
+};
 
 given[T ToString and Deref] *mutable T as ToString {
-    public to_string(*self) String
-}
+    public to_string(*self) String;
+};
 
 given[T Eq, U Eq] Pair[T, U] as Eq {
-    public equals(self, other Pair[T, U]) Bool
-}
+    public equals(self, other Pair[T, U]) Bool;
+};
 
 given[T Hash, U Hash] Pair[T, U] as Hash {
-    public hash(self) UInt
-}
+    public hash(self) UInt;
+};
 
 given[T Ord, U Ord] Pair[T, U] as Ord {
-    public compare(self, other Pair[T, U]) Int
-}
+    public compare(self, other Pair[T, U]) Int;
+};
 
 given Ord {
-    public clamp(self, min Self, max Self) Self
-}
+    public clamp(self, min: Self, max: Self) Self;
+};
 ```
