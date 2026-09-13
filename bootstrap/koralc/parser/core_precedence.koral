@@ -448,7 +448,7 @@ given Parser {
         };
     };
 
-    module_private parse_trait_member(*mutable self) Result[TraitMember] = {
+    module_private parse_trait_member(*mutable self, trait_name String) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public());
         let name = self.expect_identifier("trait member") or else {
             return .Error(self.parser_error("parse trait member error"));
@@ -465,7 +465,7 @@ given Parser {
             _ then { return .Error(self.parser_error("Expected '(' in trait member declaration"));},
         };
 
-        let params = self.parse_param_list(name) or return;
+        let params = self.parse_param_list(trait_name + "." + name) or return;
 
         when self.current().kind in {
             .RParen() then { self.advance();},
@@ -537,7 +537,7 @@ given Parser {
         return .Ok(GivenMember(name, type_params, access, params, return_type, body));
     };
 
-    module_private parse_trait_members(*mutable self) Result[List[TraitMember]] = {
+    module_private parse_trait_members(*mutable self, trait_name String) Result[List[TraitMember]] = {
         let mutable members = List[TraitMember].new();
 
         while true then {
@@ -553,7 +553,7 @@ given Parser {
                     return .Error(self.parser_error("Unexpected EOF in trait declaration"));
                 },
                 _ then {
-                    let member = self.parse_trait_member() or else {
+                    let member = self.parse_trait_member(trait_name) or else {
                         let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it);
                         let mutable message = "parse trait member error: ";
                         message.push_string(nested.message);
@@ -774,7 +774,7 @@ given Parser {
             _ then { return .Error(self.parser_error("Expected '{' in trait declaration"));},
         };
 
-        let members = self.parse_trait_members() or return;
+        let members = self.parse_trait_members(name) or return;
         self.consume_semicolon();
         let base = Decl.TraitDecl(access, name, type_params, parents, members, self.span_from_start(start));
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
