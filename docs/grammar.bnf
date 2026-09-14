@@ -25,7 +25,7 @@
 <module-item-alias> ::= "as" <identifier>
 
 // 说明：
-// 1) using std::io { Reader }：从显式模块导入当前可见符号（public；同 package 时也可导入 protected public）
+// 1) using std::io { Reader }：从显式模块导入当前可见符号（public；同 package 时也可导入 package_private）
 // 2) using std::io { Reader as IoReader, Writer }：支持逐项别名
 // 3) using std::io { .. }：导入该模块全部当前可见符号
 // 4) ".." 必须单独出现，不能与其他导入项混用
@@ -47,8 +47,6 @@
                     | "file_private"
                     | "module_private"
                     | "package_private"
-                    | "private"      // alias for file_private
-                    | "protected"    // alias for module_private
 
 // ============================================================================
 // Let Declarations (Variables and Functions)
@@ -74,7 +72,7 @@
                | "mutable"? <identifier> ":" <type-annotation>               // named param
                | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named param with default
 // Positional params must come before named params.
-// Named params must be called with labels: name(value) or name: value.
+// Named params must be called with labels: name: value.
 // Only named params (with colon) can have default values.
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
@@ -145,8 +143,8 @@
 // If the trait declares defaults, the given implementation must NOT redeclare them.
 // If the trait declares no defaults, the given implementation cannot add them.
 // 说明：
-// 1) `given Type { ... }` 为类型固有实现
-// 2) `given Type as Trait { ... }` 为 trait 实现
+// 1) `given Type { members }` 为类型固有实现
+// 2) `given Type as Trait { members }` 为 trait 实现
 
 // ============================================================================
 // Generic Parameters
@@ -187,7 +185,7 @@
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
 <function-type> ::= "Func" "(" <function-type-param-list>? ")" <type>
 <function-type-param-list> ::= <type> ("," <type>)* ","?
-// Function type: Func(ParamType1, ParamType2, ...) ReturnType
+// Function type: Func(T1, T2, TN) ReturnType
 // The types inside parentheses are parameter types, followed by a return type
 // Examples:
 //   Func() Int           - () -> Int (no params, returns Int)
@@ -362,15 +360,14 @@
 <qualified-method-suffix> ::= "." <identifier> ("[" <type-list> "]")? "(" <argument-list>? ")"
 
 <argument> ::= <identifier> ":" <expression>
-             | "..."
              | <expression>
 <argument-list> ::= <argument> ("," <argument>)* ","?
 <expression-list> ::= <expression> ("," <expression>)* ","?
-// Semantic rules for constructor argument lists:
-// - Ordinary function/method calls accept only positional arguments.
-// - Struct and enum constructors accept either all-positional or all-labeled arguments.
-// - Labeled constructor arguments match by field name and may be reordered.
-// - `...` is constructor-only, may appear at most once, and must be the final argument.
+// Semantic rules for labeled arguments:
+// - Ordinary functions, methods, and constructors may all use labels when the corresponding parameter is named.
+// - Positional arguments must not appear after named arguments.
+// - Named arguments match by parameter/field name and may reorder named fields in constructors.
+// - Default values are provided by named parameter / named field declarations, not by call-site fill syntax.
 
 // ============================================================================
 // Primary Expressions
@@ -436,7 +433,7 @@
 // Logical pattern combinators under `is` must be grouped explicitly with parentheses.
 
 <match-pattern> ::= <or-pattern>
-// Used only by `when ... in` arms. Logical pattern combinators remain supported here.
+// Used only by `when` arms. Logical pattern combinators remain supported here.
 
 <or-pattern> ::= <and-pattern> ("or" <and-pattern>)*
 <and-pattern> ::= <not-pattern> ("and" <not-pattern>)*
@@ -493,8 +490,8 @@
 <comparison-pattern-op> ::= ">" | "<" | ">=" | "<="
 // Comparison patterns: > n, < n, >= n, <= n (where n is an integer literal, optionally negative)
 
-<enum-case-pattern> ::= "." <type-identifier> ("(" <pattern-arg-list>? ")")?
-// 模式语法独立于构造语法；零字段 enum case 模式可写为 .None
+<enum-case-pattern> ::= "." <type-identifier> "(" <pattern-arg-list>? ")"
+// 模式语法独立于构造语法；即使是零字段 enum case，模式位置也写空括号，如 .None()
 <pattern-arg> ::= <identifier> ":" <match-pattern>    // named pattern argument
                 | <match-pattern>                      // positional pattern argument
 <pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
@@ -591,7 +588,7 @@
 //   and, or, not
 //   return, break, continue, defer
 //   true, false
-//   public, private, protected, protected public
+//   public, file_private, module_private, package_private
 
 // ============================================================================
 // Operators
@@ -628,8 +625,8 @@
 // Comments
 // ============================================================================
 
-// Line comment: // ...
-// Block comment: /* ... */
+// Line comment: // text
+// Block comment: /* text */
 
 // ============================================================================
 // Statement Termination

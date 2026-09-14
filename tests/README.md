@@ -73,6 +73,9 @@ Use this bucket when changing declaration parsing, package visibility, import ru
 - `protected_method_visibility_error_test`
 - `protected_public_method_same_package_test`
 - `protected_public_method_cross_package_error_test`
+- `module_private_method_access_error_test`
+- `package_private_method_same_package_test`
+- `package_private_method_cross_package_error_test`
 - `protected_public_type_same_package_test`
 - `public_signature_protected_public_type_error_test`
 - `using_batch_with_named_import_error`

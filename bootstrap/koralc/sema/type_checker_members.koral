@@ -38,6 +38,21 @@ given TypeChecker {
         context.set_param_specs(symbol.def_id, param_specs);
     };
 
+    module_private stamp_method_symbol_visibility_metadata(
+        self,
+        symbol Symbol,
+        access AccessModifier,
+        module_path List[String],
+        source_file String,
+        package_id String,
+    ) Void = {
+        let mutable context = self.context();
+        context.set_module_path(symbol.def_id, module_path);
+        context.set_source_file(symbol.def_id, source_file);
+        context.set_package_id(symbol.def_id, package_id);
+        context.set_access(symbol.def_id, access);
+    };
+
     module_private make_method_callable_symbol(self, method_name String, params List[TypedParam], return_type Type) Symbol = {
         let mutable param_types = List[* Type].new();
         for param in params then {
@@ -62,27 +77,8 @@ given TypeChecker {
         source_file String,
         package_id String,
     ) Symbol = {
-        if not (access is .FilePrivate()) then {
-            return self.make_method_callable_symbol(method_name, params, return_type);
-        };
-        let mutable param_types = List[* Type].new();
-        for param in params then {
-            param_types.push(box(param.param_type));
-        };
-        let mutable context = self.context();
-        let method_symbol = context.create_symbol_with_package(
-            method_name,
-            module_path,
-            source_file,
-            make_function_type(param_types, return_type),
-            SymbolKind.Function(),
-            MethodKind.Normal(),
-            access,
-            unknown_span(),
-            false,
-            package_id,
-        );
-        context.set_param_specs(method_symbol.def_id, self.function_param_specs_from_typed_params(params));
+        let method_symbol = self.make_method_callable_symbol(method_name, params, return_type);
+        self.stamp_method_symbol_visibility_metadata(method_symbol, access, module_path, source_file, package_id);
         return method_symbol;
     };
 
@@ -97,29 +93,13 @@ given TypeChecker {
         source_file String,
         package_id String,
     ) Symbol = {
-        if access is .FilePrivate() then {
-            let mutable context = self.context();
-            let method_symbol = context.create_symbol_with_package(
-                method_name,
-                module_path,
-                source_file,
-                make_function_type(self.to_type_ref_list(param_types), return_type),
-                SymbolKind.Function(),
-                MethodKind.Normal(),
-                access,
-                unknown_span(),
-                false,
-                package_id,
-            );
-            context.set_param_specs(method_symbol.def_id, param_specs);
-            return method_symbol;
-        };
         let method_symbol = Symbol(
             self.allocate_unindexed_def_id(method_name, DefKind.Function()),
             make_function_type(self.to_type_ref_list(param_types), return_type),
             SymbolKind.Function(),
         );
         self.register_function_symbol_metadata(method_symbol, param_specs);
+        self.stamp_method_symbol_visibility_metadata(method_symbol, access, module_path, source_file, package_id);
         return method_symbol;
     };
 

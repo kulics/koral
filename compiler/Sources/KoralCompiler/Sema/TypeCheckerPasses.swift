@@ -1539,8 +1539,25 @@ extension TypeChecker {
         }
 
         if !hasExistingMethodSignature {
+          let preRegisteredMethods: [MethodDeclaration]
+          if let traitInfo = visibleTraitInfo(traitName) {
+            let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
+            preRegisteredMethods = methods.map { method in
+              let requirementAccess = requirementByName[method.name]?.access ?? method.access
+              return MethodDeclaration(
+                name: method.name,
+                typeParameters: method.typeParameters,
+                parameters: method.parameters,
+                returnType: method.returnType,
+                body: method.body,
+                access: requirementAccess
+              )
+            }
+          } else {
+            preRegisteredMethods = methods
+          }
           try collectGivenSignatures(
-            .givenDeclaration(typeParams: typeParams, type: typeNode, methods: methods, span: span),
+            .givenDeclaration(typeParams: typeParams, type: typeNode, methods: preRegisteredMethods, span: span),
             enforceTypeDeclarationModuleLocality: false
           )
         }
@@ -2945,6 +2962,15 @@ extension TypeChecker {
           continue
         }
 
+        let visibleMethod = MethodDeclaration(
+          name: method.name,
+          typeParameters: method.typeParameters,
+          parameters: method.parameters,
+          returnType: method.returnType,
+          body: method.body,
+          access: requirement.access
+        )
+
         let (functionType, params, returnType) = try buildImplMethodInfo(method)
 
         var substitution: [String: Type] = [:]
@@ -3020,7 +3046,7 @@ extension TypeChecker {
           name: method.name,
           type: functionType,
           kind: .function,
-          access: method.access
+          access: requirement.access
         )
         registerReceiverStyleMethod(
           methodSymbol,
@@ -3031,7 +3057,7 @@ extension TypeChecker {
 
         methodInfos.append(
           ImplMethodInfo(
-            method: method,
+            method: visibleMethod,
             symbol: methodSymbol,
             parameters: params,
             returnType: returnType

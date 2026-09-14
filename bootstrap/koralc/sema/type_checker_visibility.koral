@@ -312,11 +312,26 @@ given TypeChecker {
     };
 
     module_private is_method_accessible_from_current_context(self, method Symbol) Bool = {
+        if self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) is .Some(info)
+            and info.conformance_trait_name is .Some(_) then {
+            return true;
+        };
         return when self.context().get_access(method.def_id) in {
-            .Some(access) then if access is .FilePrivate() then {
-                let def_source_file = self.context().get_source_file(method.def_id) or else "";
-                yield def_source_file == self.storage.file_path;
-            } else true,
+            .Some(access) then when access in {
+                .Public() then true,
+                .FilePrivate() then {
+                    let def_source_file = self.context().get_source_file(method.def_id) or else "";
+                    yield def_source_file == self.storage.file_path;
+                },
+                .ModulePrivate() then {
+                    let def_module_path = self.context().get_module_path(method.def_id) or else List[String].new();
+                    yield string_list_eq(def_module_path, self.storage.module_path);
+                },
+                .PackagePrivate() then {
+                    let def_package_id = self.context().get_package_id(method.def_id) or else "";
+                    yield not self.storage.package_id.is_empty() and def_package_id == self.storage.package_id;
+                },
+            },
             .None() then true,
         };
     };
@@ -324,10 +339,16 @@ given TypeChecker {
     module_private reject_inaccessible_method_from_current_context(self, method Symbol, method_name String, span SourceSpan) Bool = {
         return when self.context().get_access(method.def_id) in {
             .Some(access) then {
-                if not (access is .FilePrivate()) or self.is_method_accessible_from_current_context(method) then {
+                if self.is_method_accessible_from_current_context(method) then {
                     return false;
                 };
-                let message = "Cannot access file_private method '\(method_name)'";
+                let access_label = when access in {
+                    .FilePrivate() then "file_private",
+                    .ModulePrivate() then "module_private",
+                    .PackagePrivate() then "package_private",
+                    .Public() then "public",
+                };
+                let message = "Cannot access \(access_label) method '\(method_name)'";
                 if not self.has_matching_last_diagnostic(message, span) then {
                     self.push_diagnostic_at_span(message, span);
                 };

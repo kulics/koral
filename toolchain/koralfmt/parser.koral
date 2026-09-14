@@ -452,11 +452,14 @@ given CstParser {
     };
 
     file_private is_access_mod(*self) Bool =
-        self.peek() is .KwPublic() or self.peek() is .KwPrivate() or self.peek() is .KwProtected();
+        self.peek() is .KwPublic() or self.peek() is .KwPrivate() or self.peek() is .KwProtected() or self.peek() is .KwProtectedPublic();
 
     file_private access_modifier_token_count(*self) UInt = {
         if self.peek() is .KwProtected() and self.peek_at_skip_nl(1) is .KwPublic() then {
             return 2;
+        };
+        if self.peek() is .KwProtectedPublic() then {
+            return 1;
         };
         if self.is_access_mod() then { return 1;};
         return 0;
@@ -467,6 +470,9 @@ given CstParser {
             self.eat();
             self.eat();
             return .Some(.KwProtectedPublic());
+        };
+        if self.check(.KwProtectedPublic()) then {
+            return .Some(self.eat());
         };
         if self.is_access_mod() then { return .Some(self.eat());};
         return .None();
@@ -793,8 +799,9 @@ given CstParser {
                 .Error(e) then { return .Error(e);},
             };
 
+            let mutable colon = Option[Token].None();
             if self.check(.Colon()) then {
-                return .Error(box("Parse error: Function parameters use 'name Type', not 'name: Type'"));
+                colon = .Some(self.eat());
             };
 
             // Parameters must have explicit type annotation.
@@ -806,7 +813,7 @@ given CstParser {
                 .Error(e) then { return .Error(e);},
             };
             let comma = self.eat_comma();
-            params.push(.NamedParam(name, param_mut, .None(), box(pt), comma));
+            params.push(.NamedParam(name, param_mut, colon, box(pt), comma));
             first = 0;
         };
         return .Ok(params);
@@ -1442,14 +1449,8 @@ given CstParser {
             };
             let before = self.pos;
             if self.check(.Unbounded()) then {
-                let ellipsis = self.eat();
-                let comma = self.eat_comma();
-                args.push(.DefaultFill(leading_comments, ellipsis, comma));
-                if self.pos == before then {
-                    self.leave_line_join_grouping();
-                    return .Error(box("Parse error: parser made no progress in argument list"));
-                };
-                continue;
+                self.leave_line_join_grouping();
+                return .Error(box("Parse error: Default-fill '...' is not supported; use named parameter defaults instead"));
             };
             let mutable label = Option[Token].None();
             let mutable colon = Option[Token].None();
@@ -2211,9 +2212,6 @@ given CstParser {
             .KwReturn() then {
                 let kw = self.eat();
                 // Check if there's a value on the same line
-                if self.peek_raw() is .Newline() or self.peek_raw() is .EOF() then {
-                    return .Ok(.Return(kw, .None()));
-                };
                 if self.check(.RBrace()) then {
                     return .Ok(.Return(kw, .None()));
                 };
@@ -2225,19 +2223,19 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e);},
                 };
-                // Eat optional semicolon
-                if self.peek() is .Semi() then { self.eat();};
+                if self.peek() is not .Semi() then {
+                    return .Error(box("Parse error: expected ';' after return"));
+                };
+                self.eat();
                 return .Ok(.Return(kw, .Some(box(value))));
             },
             .KwBreak() then {
                 let kw = self.eat();
-                if self.peek_raw() is .Newline() or self.peek_raw() is .EOF() then {
-                    return .Ok(.Break(kw));
+                if self.peek() is not .Semi() then {
+                    return .Error(box("Parse error: expected ';' after break"));
                 };
-                if self.check(.RBrace()) then {
-                    return .Ok(.Break(kw));
-                };
-                return .Error(box("Parse error: expected statement terminator after 'break'"));
+                self.eat();
+                return .Ok(.Break(kw));
             },
             .KwYield() then {
                 let kw = self.eat();
@@ -2245,12 +2243,18 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e);},
                 };
-                if self.peek() is .Semi() then { self.eat();};
+                if self.peek() is not .Semi() then {
+                    return .Error(box("Parse error: expected ';' after yield"));
+                };
+                self.eat();
                 return .Ok(.Yield(kw, box(value)));
             },
             .KwContinue() then {
                 let kw = self.eat();
-                if self.peek() is .Semi() then { self.eat();};
+                if self.peek() is not .Semi() then {
+                    return .Error(box("Parse error: expected ';' after continue"));
+                };
+                self.eat();
                 return .Ok(.Continue(kw));
             },
             _ then {},
@@ -2268,14 +2272,18 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e);},
                 };
-                if self.peek() is .Semi() then { self.eat();};
+                if self.peek() is not .Semi() then {
+                    return .Error(box("Parse error: expected ';' after assignment"));
+                };
+                self.eat();
                 return .Ok(.Assignment(box(expr), op, box(value)));
             },
             _ then {},
         };
-        // Eat optional semicolon
-        let mutable semi = Option[Token].None();
-        if self.peek() is .Semi() then { semi = .Some(self.eat());};
+        if self.peek() is not .Semi() then {
+            return .Error(box("Parse error: expected ';' after expression"));
+        };
+        let semi Option[Token] = .Some(self.eat());
         return .Ok(.ExprStmt(box(expr), semi));
     };
 
@@ -2311,7 +2319,10 @@ given CstParser {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
             };
-            if self.peek() is .Semi() then { self.eat();};
+            if self.peek() is not .Semi() then {
+                return .Error(box("Parse error: expected ';' after let declaration"));
+            };
+            self.eat();
             return .Ok(.PairVarDecl(let_kw, lp, first, comma, second, rp, eq, box(value)));
         };
 
@@ -2342,8 +2353,10 @@ given CstParser {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
-        // Eat optional semicolon
-        if self.peek() is .Semi() then { self.eat();};
+        if self.peek() is not .Semi() then {
+            return .Error(box("Parse error: expected ';' after let declaration"));
+        };
+        self.eat();
         return .Ok(.VarDecl(let_kw, mut_kw, name, var_type, eq, box(value)));
     };
 

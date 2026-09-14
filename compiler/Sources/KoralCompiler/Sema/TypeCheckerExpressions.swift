@@ -5474,24 +5474,43 @@ extension TypeChecker {
     }
   }
 
-  private func isMethodAccessibleForMemberAccess(_ method: Symbol) -> Bool {
-    guard let methodAccess = context.getAccess(method.defId) else {
+  private func effectiveMethodAccessForMemberAccess(_ method: Symbol, memberName: String) -> AccessModifier? {
+    if let conformance = methodTraitConformanceByDefId[method.defId],
+       let traitMethod = try? flattenedTraitMethods(conformance.traitName)[memberName] {
+      return traitMethod.access
+    }
+    return context.getAccess(method.defId)
+  }
+
+  private func isMethodAccessibleForMemberAccess(_ method: Symbol, memberName: String) -> Bool {
+    let logicalMethodName = receiverMethodDispatchByDefId[method.defId]?.methodName
+      ?? context.getName(method.defId)
+      ?? memberName
+    guard let methodAccess = effectiveMethodAccessForMemberAccess(method, memberName: logicalMethodName) else {
       return true
     }
-    guard methodAccess == .file_private else {
+    switch methodAccess {
+    case .public:
       return true
+    case .file_private:
+      let defSourceFile = context.getSourceFile(method.defId) ?? ""
+      return isSameSourceFile(defSourceFile, currentSourceFile)
+    case .module_private:
+      let defModulePath = context.getModulePath(method.defId) ?? []
+      return defModulePath == currentModulePath
+    case .package_private:
+      guard !currentPackageID.isEmpty else { return false }
+      return context.getPackageID(method.defId) == currentPackageID
     }
-    let defSourceFile = context.getSourceFile(method.defId) ?? ""
-    return isSameSourceFile(defSourceFile, currentSourceFile)
   }
 
   private func ensureMethodAccessibleForMemberAccess(_ method: Symbol, memberName: String) throws {
-    guard context.getAccess(method.defId) == .file_private,
-          !isMethodAccessibleForMemberAccess(method) else {
+    guard let methodAccess = effectiveMethodAccessForMemberAccess(method, memberName: memberName),
+          !isMethodAccessibleForMemberAccess(method, memberName: memberName) else {
       return
     }
 
-    throw SemanticError(.generic("Cannot access file_private method '\(memberName)'"), span: currentSpan)
+    throw SemanticError(.generic("Cannot access \(methodAccess.description) method '\(memberName)'"), span: currentSpan)
   }
 
   private func makeCallableValueLambda(
@@ -5574,6 +5593,7 @@ extension TypeChecker {
               let methodSym = try resolveGenericExtensionMethod(
                 baseType: type, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
+              try ensureMethodAccessibleForMemberAccess(methodSym, memberName: memberName)
               guard case .function(let parameters, let returnType) = methodSym.type else {
                 throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
@@ -5653,6 +5673,7 @@ extension TypeChecker {
       }
 
       if let method = methodSymbol {
+        try ensureMethodAccessibleForMemberAccess(method, memberName: memberName)
         return .variable(identifier: method)
       }
     }
@@ -6306,6 +6327,7 @@ extension TypeChecker {
     }
 
     if let methods = extensionMethods[lookupTypeName], let methodSym = methods[methodName] {
+      try ensureMethodAccessibleForMemberAccess(methodSym, memberName: methodName)
       if context.containsGenericParameter(methodSym.type) {
         return try inferStaticGenericMethodCallOnConcreteType(
           baseType: type,
@@ -6459,6 +6481,7 @@ extension TypeChecker {
       methodName: methodName,
       methodTypeArgs: methodTypeArgs
     )
+    try ensureMethodAccessibleForMemberAccess(methodResult.methodSymbol, memberName: methodName)
 
     guard case .function(let params, let returnType) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)

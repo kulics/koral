@@ -437,27 +437,9 @@ given Parser {
         };
     };
 
-    // 只有分号是语句终止符，RBrace 和换行不终止语句
-    module_private should_terminate_statement(self) Bool = {
-        if self.current().kind is .Semicolon() then {
-            return true;
-        };
-        if self.current().kind is .Eof() then {
-            return true;
-        };
-        return false;
-    };
-
-    // 消耗显式分号终止符
-    module_private consume_statement_terminator(*mutable self) Void = {
+    module_private require_semicolon(*mutable self) Result[Void] = {
         if self.current().kind is .Semicolon() then {
             self.advance();
-        };
-    };
-
-    module_private expect_statement_terminator_after(*mutable self, keyword String) Result[Void] = {
-        if self.should_terminate_statement() then {
-            self.consume_statement_terminator();
             return .Ok({});
         };
         return .Error(self.parser_error("Unexpected token: \(token_kind_description(self.current())), expected: ';'"));
@@ -1042,29 +1024,21 @@ given Parser {
                     };
                     return .Error(self.parser_error_without_span("intrinsic function declaration should not have body"));
                 };
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 let span = self.span_from_start(start);
                 let base = Decl.FunctionDecl(access, name, type_params, params, return_type, box(Expr.Identifier("<intrinsic-body>", span)), span);
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             };
 
-            while true then {
-                when self.current().kind in {
-                    .Assign() then {
-                        break;
-                    },
-                    .Eof() then {
-                        return .Error(self.parser_error("Unexpected EOF in function declaration"));
-                    },
-                    _ then {
-                        self.advance();
-                    },
-                };
+            if self.current().kind is .Eof() then {
+                return .Error(self.parser_error("Unexpected EOF in function declaration"));
             };
-
+            if self.current().kind is not .Assign() then {
+                return .Error(self.parser_error("Unexpected token: \(token_text(self.current())), expected: '='"));
+            };
             self.advance();
             let body = self.parse_expression_checked("function body") or return;
-            self.consume_semicolon();
+            let _ = self.require_semicolon() or return;
             let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start));
             return self.wrap_decl(access, is_foreign, is_intrinsic, base);
         };
@@ -1081,7 +1055,7 @@ given Parser {
             let foreign_type = self.parse_type() or else {
                 return .Error(self.parser_error("parse foreign let type error"));
             };
-            self.consume_semicolon();
+            let _ = self.require_semicolon() or return;
             let span = self.span_from_start(start);
             let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), box(Expr.Identifier("<foreign-init>", span)), span);
             return self.wrap_decl(access, is_foreign, is_intrinsic, base);
@@ -1104,7 +1078,7 @@ given Parser {
         };
         self.advance();
         let initializer = self.parse_expression_checked("let declaration initializer") or return;
-        self.consume_semicolon();
+        let _ = self.require_semicolon() or return;
         let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start));
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
     };
@@ -1217,7 +1191,7 @@ given Parser {
                         },
                     };
                 };
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 if is_foreign then {
                     return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start)));
                 };
@@ -1229,7 +1203,7 @@ given Parser {
                     self.advance();
                     if self.current().kind is .RBrace() then {
                         self.advance();
-                        self.consume_semicolon();
+                        let _ = self.require_semicolon() or return;
                         return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)));
                     };
                     return .Error(self.parser_error_without_span("foreign type must use an empty body: {}"));
@@ -1331,7 +1305,7 @@ given Parser {
                         },
                     };
                 };
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start));
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
@@ -1340,7 +1314,7 @@ given Parser {
                     return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"));
                 };
                 if is_intrinsic then {
-                    self.consume_semicolon();
+                    let _ = self.require_semicolon() or return;
                     return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)));
                 };
                 return .Error(self.parser_error("Expected '=', '(' or '{' after type name"));
@@ -1388,10 +1362,12 @@ given Parser {
         if self.current().kind is .Eof() then {
             return .Error(self.parser_error("Expected '=' in let statement"));
         };
-
+        if self.current().kind is not .Assign() then {
+            return .Error(self.parser_error("Expected '=' in let statement"));
+        };
         self.advance();
         let value = self.parse_expression_checked("let statement value") or return;
-        self.consume_semicolon();
+        let _ = self.require_semicolon() or return;
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)));
     };
 
@@ -1415,10 +1391,13 @@ given Parser {
         if self.current().kind is .Eof() then {
             return .Error(self.parser_error("Expected '=' in pair let statement"));
         };
+        if self.current().kind is not .Assign() then {
+            return .Error(self.parser_error("Expected '=' in pair let statement"));
+        };
         self.advance();
 
         let value = self.parse_expression_checked("pair let statement value") or return;
-        self.consume_semicolon();
+        let _ = self.require_semicolon() or return;
         return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)));
     };
 
@@ -1543,34 +1522,34 @@ given Parser {
             },
             .KwReturn() then {
                 self.advance();
-                if self.should_terminate_statement() then {
-                    self.consume_statement_terminator();
+                if self.current().kind is .Semicolon() then {
+                    self.advance();
                     return .Ok(Statement.ReturnStmt(Option[* Expr].None(), self.span_from_start(start)));
                 };
                 let value = self.parse_expression_checked("return statement value") or return;
-                self.consume_statement_terminator();
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)));
             },
             .KwYield() then {
                 self.advance();
                 let value = self.parse_expression_checked("yield statement value") or return;
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.YieldStmt(value, self.span_from_start(start)));
             },
             .KwBreak() then {
                 self.advance();
-                let _ = self.expect_statement_terminator_after("break") or return;
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.BreakStmt(self.span_from_start(start)));
             },
             .KwContinue() then {
                 self.advance();
-                let _ = self.expect_statement_terminator_after("continue") or return;
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.ContinueStmt(self.span_from_start(start)));
             },
             .KwDefer() then {
                 self.advance();
                 let value = self.parse_expression_checked("defer statement value") or return;
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.DeferStmt(value, self.span_from_start(start)));
             },
             _ then {
@@ -1582,11 +1561,11 @@ given Parser {
                     };
                     self.advance();
                     let rhs = self.parse_expression_checked("assignment right-hand side") or return;
-                    self.consume_semicolon();
+                    let _ = self.require_semicolon() or return;
                     return .Ok(Statement.AssignmentStmt(value, op, rhs, self.span_from_start(start)));
                 };
 
-                self.consume_semicolon();
+                let _ = self.require_semicolon() or return;
                 return .Ok(Statement.ExprStmt(value, self.span_from_start(start)));
             },
         };

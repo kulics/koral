@@ -108,7 +108,7 @@ given TypeChecker {
         let mutable has_positional = false;
         for arg in args then {
             when arg in {
-                .NamedArgument(label, _, _) then if label <> "..." then { has_named = true;},
+                .NamedArgument(_, _, _) then { has_named = true;},
                 _ then { has_positional = true;},
             };
         };
@@ -175,37 +175,6 @@ given TypeChecker {
                 yield TypeNode.Generic(template, arg_nodes);
             },
             _ then TypeNode.Identifier(self.context().type_display_name(t)),
-        };
-    };
-
-    module_private default_fill_expr_for_type(self, field_type Type) Option[* Expr] = {
-        if not self.has_explicit_trait_conformance(field_type, "Default") then {
-            return Option[* Expr].None();
-        };
-        let span = unknown_span();
-        return when field_type in {
-            .GenericStruct(template, type_args) then {
-                let mutable arg_nodes = List[* TypeNode].new();
-                for arg in type_args then {
-                    arg_nodes.push(box(self.type_node_for_type(*arg)));
-                };
-                yield Option[* Expr].Some(box(Expr.StaticMethodCall(template, arg_nodes, "default", List[* Expr].new(), span)));
-            },
-            .GenericEnum(template, type_args) then {
-                let mutable arg_nodes = List[* TypeNode].new();
-                for arg in type_args then {
-                    arg_nodes.push(box(self.type_node_for_type(*arg)));
-                };
-                yield Option[* Expr].Some(box(Expr.StaticMethodCall(template, arg_nodes, "default", List[* Expr].new(), span)));
-            },
-            _ then {
-                let type_name = when field_type in {
-                    .StructureType(def_id) then self.context().get_name(def_id) or else self.context().type_display_name(field_type),
-                    .EnumType(def_id) then self.context().get_name(def_id) or else self.context().type_display_name(field_type),
-                    _ then self.context().type_display_name(field_type),
-                };
-                yield Option[* Expr].Some(box(Expr.StaticMethodCall(type_name, List[* TypeNode].new(), "default", List[* Expr].new(), span)));
-            },
         };
     };
 
@@ -878,7 +847,23 @@ given TypeChecker {
             },
             .None() then {},
         };
-        let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name);
+        let raw_static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name);
+        let static_sig_opt = when raw_static_sig_opt in {
+            .Some(sig) then {
+                if self.is_method_accessible_from_current_context(sig) then {
+                    yield Option[Symbol].Some(sig);
+                };
+                if self.resolve_conformance_method_signature(declared_receiver_type, method_name) is .Some(_) then {
+                    yield Option[Symbol].Some(sig);
+                };
+                let _ = self.reject_inaccessible_method_from_current_context(sig, method_name, unknown_span());
+                yield Option[Symbol].None();
+            },
+            .None() then Option[Symbol].None(),
+        };
+        if raw_static_sig_opt is .Some(_) and static_sig_opt is .None() and enum_constructor_type_opt is .None() then {
+            return self.empty_typed_block(Type.Unknown());
+        };
         let static_param_types = when static_sig_opt in {
             .Some(sig) then {
                 let bindings = self.resolve_static_call_type_bindings(

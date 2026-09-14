@@ -1304,10 +1304,16 @@ extension Parser {
       }
 
       cases.append(MatchCaseNode(pattern: pattern, body: body))
-      
-      // Use comma as separator between match arms (optional trailing comma)
+
+      // Match arms are separated by commas; a trailing comma before '}' is allowed.
       if currentToken === .comma {
         try match(.comma)
+      } else if currentToken !== .rightBrace {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "',' or '}' after when arm"
+        )
       }
     }
     try match(.rightBrace)

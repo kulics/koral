@@ -265,7 +265,7 @@ let collect_signature(lines List[String], start UInt, keep_open_brace Bool) Coll
             break;
         };
         // Break on '=' outside parens (expression body)
-        if find_eq_outside_parens(cleaned) >= 0 then {
+        if not has_unclosed_delimiters(parts) and find_eq_outside_parens(cleaned) >= 0 then {
             break;
         };
         if not has_unclosed_delimiters(parts) and signature_seems_complete(cleaned) then {
@@ -729,6 +729,57 @@ let parse_public_api(file_path Path) ParsedApi = {
     return ParsedApi(free_functions, traits, types, givens);
 };
 
+let assert_lines_equal(name String, actual List[String], expected List[String]) Void = {
+    if actual.count() <> expected.count() then {
+        eprintln("SELF-TEST FAIL: \(name) line count mismatch: expected \(expected.count()), got \(actual.count())");
+        exit(1);
+    };
+    let mutable i UInt = 0;
+    while i < expected.count() then {
+        if actual[i] <> expected[i] then {
+            eprintln("SELF-TEST FAIL: \(name) line \(i) mismatch");
+            eprintln("  expected: \(expected[i])");
+            eprintln("  got: \(actual[i])");
+            exit(1);
+        };
+        i += 1;
+    };
+};
+
+let run_self_test() Void = {
+    let single_lines = split_lines("public type Mixed(public_name String, module_private hidden Int, package_private token Int, file_private cache Int);\n");
+    let single = extract_type_api(single_lines, 0).declaration;
+    let sanitized_single = sanitize_type_declaration(single);
+    assert_lines_equal(
+        "single-line mixed fields",
+        sanitized_single.lines,
+        ["public type Mixed(public_name String)"],
+    );
+
+    let multi_lines = split_lines(
+        "public type Config(\n" +
+        "    public_name String,\n" +
+        "    module_private hidden Int,\n" +
+        "    label: String = \"ok\",\n" +
+        "    package_private token Int,\n" +
+        ");\n"
+    );
+    let multi = extract_type_api(multi_lines, 0).declaration;
+    let sanitized_multi = sanitize_type_declaration(multi);
+    assert_lines_equal(
+        "multi-line mixed fields",
+        sanitized_multi.lines,
+        [
+            "public type Config(",
+            "    public_name String,",
+            "    label: String = \"ok\",",
+            ")",
+        ],
+    );
+
+    println("doc self-test ok");
+};
+
 let to_pascal_case(s String) String = {
     if s.is_empty() then { return s;};
     let first = s.substring(0..<1).to_ascii_uppercase();
@@ -990,6 +1041,12 @@ let find_repo_root() Result[Path] = {
 };
 
 let main() Void = {
+    let args = args();
+    if args.count() > 1 and args[1] == "--self-test" then {
+        run_self_test();
+        return;
+    };
+
     let repo_root = find_repo_root() or else {
         eprintln("Error: \(it.message())");
         exit(1);

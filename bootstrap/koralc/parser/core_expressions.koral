@@ -251,8 +251,7 @@ given Parser {
                 let span = self.span_from_start(t);
                 self.advance(); // consume '.'
                 let member_name = self.expect_identifier("implicit member name") or return;
-                let no_newline = not self.current().has_newline_before;
-                if not (self.current().kind is .LParen() and no_newline) then {
+                if self.current().kind is not .LParen() then {
                     return .Error(self.parser_error("Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name"));
                 };
 
@@ -268,7 +267,7 @@ given Parser {
             .Range() then {
                 self.advance();
                 if self.can_start_range_bound(self.current().kind) and true then {
-                    let rhs = self.parse_unary() or return;
+                    let rhs = self.parse_comparison() or return;
                     return .Ok(box(Expr.RangeExpr(RangeOperator.To(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))));
                 };
                 return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), Option[* Expr].None(), Option[* Expr].None(), self.span_from_start(t))));
@@ -278,7 +277,7 @@ given Parser {
                 if not true then {
                     return .Error(self.parser_error("Unexpected token: \(token_text(self.current()))"));
                 };
-                let rhs = self.parse_unary() or return;
+                let rhs = self.parse_comparison() or return;
                 return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))));
             },
             _ then {
@@ -418,8 +417,8 @@ given Parser {
         let saved = self.save_state();
 
         if self.current().kind is .Ellipsis() then {
-            self.advance();
-            return .Ok(box(Expr.NamedArgument("...", box(Expr.Identifier("<default-fill>", self.span_from_start(start))), self.span_from_start(start))));
+            let _ = start;
+            return .Error(self.parser_error_without_span("Default-fill '...' is not supported; use named parameter defaults instead"));
         };
 
         when self.current_labeled_argument_name(true) in {
@@ -597,8 +596,14 @@ given Parser {
                 _ then {
                     let arm = self.parse_when_arm() or return;
                     arms.push(arm);
-                    if self.current().kind is .Comma() then {
-                        self.advance();
+                    when self.current().kind in {
+                        .Comma() then {
+                            self.advance();
+                        },
+                        .RBrace() then {},
+                        _ then {
+                            return .Error(self.parser_error("Expected ',' or '}' after when arm"));
+                        },
                     };
                 },
             };
