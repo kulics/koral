@@ -298,6 +298,145 @@ file_private let contains_module_path(paths List[List[String]], target List[Stri
     return false;
 };
 
+file_private let is_std_manifest_module_name(name String) Bool = {
+    return name == "std" or name.starts_with("std::");
+};
+
+file_private let is_std_module_path(path_segments List[String]) Bool = {
+    if path_segments.is_empty() then {
+        return false;
+    };
+    return module_identifier_to_file_name(path_segments[0(UInt)]) == "std";
+};
+
+file_private let manifest_module_name_for_path(path_segments List[String]) String = {
+    let mutable parts = List[String].new();
+    for segment in path_segments then {
+        parts.push(module_identifier_to_file_name(segment));
+    };
+    return parts.join_to_string("::");
+};
+
+file_private let manifest_root_module_name(manifest PackageManifest) Option[String] = {
+    when manifest.default_target_module_name in {
+        .Some(name) then {
+            return Option[String].Some(name);
+        },
+        .None() then {},
+    };
+
+    let mutable iter = manifest.modules.iterator();
+    while iter.next() is .Some(entry) then {
+        if not entry.first.contains("::") then {
+            return Option[String].Some(entry.first);
+        };
+    };
+
+    return Option[String].None();
+};
+
+file_private let push_unique_module_name(names *mutable List[String], seen *mutable Set[String], candidate String) Void = {
+    if seen.contains(candidate) then {
+        return;
+    };
+    seen.insert(candidate);
+    names.push(candidate);
+};
+
+file_private let collect_manifest_required_module_names(manifest PackageManifest, seed_names List[String]) List[String] = {
+    let mutable selected = List[String].new();
+    let mutable seen = Set[String].new();
+    let mutable pending = List[String].new();
+
+    for seed_name in seed_names then {
+        if manifest.modules.get(seed_name) is .Some(_) and not seen.contains(seed_name) then {
+            seen.insert(seed_name);
+            pending.push(seed_name);
+        };
+    };
+
+    while not pending.is_empty() then {
+        let current = pending.pop() or else { continue;};
+        selected.push(current);
+
+        let spec = manifest.modules.get(current) or else { continue;};
+        let mutable index = spec.requires.count();
+        while index > 0(UInt) then {
+            index -= 1(UInt);
+            let dependency = spec.requires[index];
+            if manifest.modules.get(dependency) is .Some(_) and not seen.contains(dependency) then {
+                seen.insert(dependency);
+                pending.push(dependency);
+            };
+        };
+    };
+
+    selected.sort();
+    return selected;
+};
+
+file_private let collect_needed_std_module_names(
+    manifest PackageManifest,
+    graph ImportGraph,
+    extra_seed_names List[String],
+) List[String] = {
+    let mutable seeds = List[String].new();
+    let mutable seen = Set[String].new();
+
+    when manifest_root_module_name(manifest) in {
+        .Some(root_name) then push_unique_module_name(&mutable seeds, &mutable seen, root_name),
+        .None() then {},
+    };
+
+    for seed_name in extra_seed_names then {
+        if manifest.modules.get(seed_name) is .Some(_) then {
+            push_unique_module_name(&mutable seeds, &mutable seen, seed_name);
+        };
+    };
+
+    for edge in graph.edges then {
+        if is_std_module_path(edge.target) then {
+            let module_name = manifest_module_name_for_path(edge.target);
+            if manifest.modules.get(module_name) is .Some(_) then {
+                push_unique_module_name(&mutable seeds, &mutable seen, module_name);
+            };
+        };
+    };
+
+    for symbol_import in graph.symbol_imports then {
+        if is_std_module_path(symbol_import.target) then {
+            let module_name = manifest_module_name_for_path(symbol_import.target);
+            if manifest.modules.get(module_name) is .Some(_) then {
+                push_unique_module_name(&mutable seeds, &mutable seen, module_name);
+            };
+        };
+    };
+
+    return collect_manifest_required_module_names(manifest, seeds);
+};
+
+file_private let filter_manifest_modules(manifest PackageManifest, module_names List[String]) PackageManifest = {
+    let mutable filtered_modules = Dict[String, PackageModuleConfig].new();
+    for module_name in module_names then {
+        when manifest.modules.get(module_name) in {
+            .Some(spec) then {
+                filtered_modules.insert(module_name, spec);
+            },
+            .None() then {},
+        };
+    };
+
+    return PackageManifest(
+        manifest.manifest_path,
+        manifest.package_root,
+        manifest.name,
+        manifest.default_target_module_name,
+        manifest.links,
+        filtered_modules,
+        manifest.dependencies,
+    );
+};
+
 file_private let collect_unique_module_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
     let mutable seen = Set[String].new();
     let mutable out = List[List[String]].new();
@@ -484,6 +623,13 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
     let mutable linked_libraries = List[String].new();
     let mutable loaded_module_paths = List[List[String]].new();
     let mutable all_parsed_defaults = Dict[String, String].new();
+    let mutable std_seed_module_names = List[String].new();
+
+    for module_name in package_graph.reachable_module_names then {
+        if is_std_manifest_module_name(module_name) then {
+            std_seed_module_names.push(module_name);
+        };
+    };
 
     let mutable module_names_to_load = List[String].new();
     let mutable all_module_names = List[String].new();
@@ -495,7 +641,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
     for module_name in all_module_names then {
         let spec = package_graph.modules_by_name.get(module_name) or else { continue;};
         let include = when spec.package_kind in {
-            .Std() then true,
+            .Std() then false,
             _ then contains_string(package_graph.reachable_module_names, module_name),
         };
         if include then {
@@ -546,6 +692,31 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
         for link in spec.links then { linked_libraries.push(link);};
     };
 
+    when resolved_std_manifest_path in {
+        .Some(std_manifest_path) then {
+            let std_manifest = load_package_manifest(std_manifest_path) or return;
+            let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, std_seed_module_names);
+            let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
+            let std_prepared = load_manifest_modules_into_prepared(
+                &mutable resolver,
+                filtered_std_manifest,
+                ResolvedPackageKind.Std(),
+                package_graph.std_root_module_name,
+                Option[String].None(),
+                std_manifest_path.into_path().dir_name(),
+            ) or return;
+            std_pairs = std_prepared.graph.loaded_nodes_with_path;
+            merged_graph.merge(std_prepared.graph.import_graph);
+            for link in std_prepared.linked_libraries then {
+                linked_libraries.push(link);
+            };
+            for kv in std_prepared.graph.parsed_defaults.iterator() then {
+                all_parsed_defaults.insert(kv.first, kv.second);
+            };
+        },
+        .None() then {},
+    };
+
     let target_spec = package_graph.modules_by_name.get(package_graph.target_module_name) or else {
         return Result[PreparedCompilation].Error(box("Target module '\(package_graph.target_module_name)' not found in resolved module graph"));
     };
@@ -585,9 +756,11 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
     when resolved_std_manifest_path in {
         .Some(std_manifest_path) then {
             let std_manifest = load_package_manifest(std_manifest_path) or return;
+            let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, List[String].new());
+            let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
             let std_prepared = load_manifest_modules_into_prepared(
                 &mutable resolver,
-                std_manifest,
+                filtered_std_manifest,
                 ResolvedPackageKind.Std(),
                 Option[String].None(),
                 Option[String].None(),

@@ -259,6 +259,129 @@ public class Driver {
     }
   }
 
+  private func isStdManifestModuleName(_ name: String) -> Bool {
+    name == "std" || name.hasPrefix("std::")
+  }
+
+  private func isStdModulePath(_ pathSegments: [String]) -> Bool {
+    guard let first = pathSegments.first else {
+      return false
+    }
+    return moduleIdentifierToFileName(first) == "std"
+  }
+
+  private func manifestModuleName(for pathSegments: [String]) -> String {
+    pathSegments
+      .map(moduleIdentifierToFileName)
+      .joined(separator: "::")
+  }
+
+  private func manifestRootModuleName(in manifest: PackageManifest) -> String? {
+    if let defaultTargetModuleName = manifest.defaultTargetModuleName {
+      return defaultTargetModuleName
+    }
+
+    return manifest.modules.keys.sorted().first(where: { !$0.contains("::") })
+      ?? manifest.modules.keys.sorted().first
+  }
+
+  private func pushUniqueModuleName(_ candidate: String, into names: inout [String], seen: inout Set<String>) {
+    guard !seen.contains(candidate) else {
+      return
+    }
+    seen.insert(candidate)
+    names.append(candidate)
+  }
+
+  private func collectManifestRequiredModuleNames(
+    in manifest: PackageManifest,
+    seedNames: [String]
+  ) -> [String] {
+    var selected: [String] = []
+    var seen = Set<String>()
+    var pending: [String] = []
+
+    for seedName in seedNames {
+      guard manifest.modules[seedName] != nil, !seen.contains(seedName) else {
+        continue
+      }
+      seen.insert(seedName)
+      pending.append(seedName)
+    }
+
+    while let current = pending.popLast() {
+      selected.append(current)
+      guard let spec = manifest.modules[current] else {
+        continue
+      }
+      for dependency in spec.requires.reversed() where manifest.modules[dependency] != nil {
+        guard !seen.contains(dependency) else {
+          continue
+        }
+        seen.insert(dependency)
+        pending.append(dependency)
+      }
+    }
+
+    return selected.sorted()
+  }
+
+  private func collectNeededStdModuleNames(
+    in manifest: PackageManifest,
+    importGraph: ImportGraph,
+    extraSeedNames: [String]
+  ) -> [String] {
+    var seedNames: [String] = []
+    var seen = Set<String>()
+
+    if let rootModuleName = manifestRootModuleName(in: manifest) {
+      pushUniqueModuleName(rootModuleName, into: &seedNames, seen: &seen)
+    }
+
+    for seedName in extraSeedNames where manifest.modules[seedName] != nil {
+      pushUniqueModuleName(seedName, into: &seedNames, seen: &seen)
+    }
+
+    for edge in importGraph.edges where isStdModulePath(edge.target) {
+      let moduleName = manifestModuleName(for: edge.target)
+      guard manifest.modules[moduleName] != nil else {
+        continue
+      }
+      pushUniqueModuleName(moduleName, into: &seedNames, seen: &seen)
+    }
+
+    for symbolImport in importGraph.symbolImports where isStdModulePath(symbolImport.target) {
+      let moduleName = manifestModuleName(for: symbolImport.target)
+      guard manifest.modules[moduleName] != nil else {
+        continue
+      }
+      pushUniqueModuleName(moduleName, into: &seedNames, seen: &seen)
+    }
+
+    return collectManifestRequiredModuleNames(in: manifest, seedNames: seedNames)
+  }
+
+  private func filterManifest(_ manifest: PackageManifest, to moduleNames: [String]) -> PackageManifest {
+    var filteredModules: [String: PackageModuleConfig] = [:]
+    for moduleName in moduleNames {
+      guard let module = manifest.modules[moduleName] else {
+        continue
+      }
+      filteredModules[moduleName] = module
+    }
+
+    return PackageManifest(
+      manifestPath: manifest.manifestPath,
+      packageRoot: manifest.packageRoot,
+      name: manifest.name,
+      version: manifest.version,
+      defaultTargetModuleName: manifest.defaultTargetModuleName,
+      links: manifest.links,
+      modules: filteredModules,
+      dependencies: manifest.dependencies
+    )
+  }
+
   private func defaultTargetModuleName(in manifest: PackageManifest) -> String? {
     if let defaultTargetModuleName = manifest.defaultTargetModuleName {
       if manifest.modules[defaultTargetModuleName] != nil {
@@ -457,6 +580,7 @@ public class Driver {
     var userNodeSourceInfoList: [GlobalNodeSourceInfo] = []
     var mergedImportGraph = ImportGraph()
     var extraLinkedLibraries: [String] = []
+    let stdSeedModuleNames = packageGraph.reachableModuleNames.filter(isStdManifestModuleName)
     let moduleNamesToLoad = packageGraph.modulesByName.keys.sorted { lhs, rhs in
       let lhsStd = packageGraph.modulesByName[lhs].map {
         if case .std = $0.packageKind { return true }
@@ -479,7 +603,7 @@ public class Driver {
       guard let spec = packageGraph.modulesByName[moduleName] else { return false }
       switch spec.packageKind {
       case .std:
-        return true
+        return false
       case .root, .dependency:
         return packageGraph.reachableModuleNames.contains(moduleName)
       }
@@ -531,6 +655,25 @@ public class Driver {
       }
 
       extraLinkedLibraries.append(contentsOf: spec.links)
+    }
+
+    if let resolvedStdConfigPath {
+      let stdManifest = try loadPackageManifest(at: resolvedStdConfigPath)
+      let neededStdModuleNames = collectNeededStdModuleNames(
+        in: stdManifest,
+        importGraph: mergedImportGraph,
+        extraSeedNames: stdSeedModuleNames
+      )
+      let filteredStdManifest = filterManifest(stdManifest, to: neededStdModuleNames)
+      let stdModules = try loadAllModules(
+        manifest: filteredStdManifest,
+        displayPrefixSelector: { $0 },
+        resolver: resolver
+      )
+      stdGlobalNodes = stdModules.globalNodes
+      stdNodeSourceInfoList = stdModules.nodeSourceInfoList
+      mergedImportGraph.merge(stdModules.importGraph)
+      extraLinkedLibraries.append(contentsOf: stdModules.linkedLibraries)
     }
 
     let allGlobalNodes = stdGlobalNodes + userGlobalNodes
@@ -587,8 +730,14 @@ public class Driver {
 
     if !noStd, let resolvedStdConfigPath = stdConfigPath ?? getStdManifestPath() {
       let stdManifest = try loadPackageManifest(at: resolvedStdConfigPath)
+      let neededStdModuleNames = collectNeededStdModuleNames(
+        in: stdManifest,
+        importGraph: mergedImportGraph,
+        extraSeedNames: []
+      )
+      let filteredStdManifest = filterManifest(stdManifest, to: neededStdModuleNames)
       let stdModules = try loadAllModules(
-        manifest: stdManifest,
+        manifest: filteredStdManifest,
         displayPrefixSelector: { $0 },
         resolver: resolver
       )
