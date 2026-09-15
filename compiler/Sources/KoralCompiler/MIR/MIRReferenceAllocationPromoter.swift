@@ -3,29 +3,40 @@ import Foundation
 final class MIRReferenceAllocationPromoter {
   private let program: MIRProgram
   private let context: CompilerContext
-  private let functionParameterTypesByDefId: [DefId: [Type]]
-  private let functionParameterTypesByName: [String: [Type]]
+  private let functionParametersByDefId: [DefId: [Parameter]]
+  private let functionParametersByName: [String: [Parameter]]
   private let escapeSummariesByDefId: [DefId: MIREscapeSummary]
 
   init(program: MIRProgram) {
     self.program = program
     self.context = program.context
-    self.functionParameterTypesByDefId = Dictionary(
+    self.functionParametersByDefId = Dictionary(
       uniqueKeysWithValues: program.functions.map { function in
-        (function.identifier.defId, function.parameters.map(\.type))
+        let parameters: [Parameter]
+        if case .function(let functionParameters, _) = function.identifier.type {
+          parameters = functionParameters
+        } else {
+          parameters = function.parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
+        }
+        return (function.identifier.defId, parameters)
       }
     )
-    var parameterTypesByName: [String: [Type]] = [:]
+    var parametersByName: [String: [Parameter]] = [:]
     for function in program.functions {
-      let parameterTypes = function.parameters.map(\.type)
+      let parameters: [Parameter]
+      if case .function(let functionParameters, _) = function.identifier.type {
+        parameters = functionParameters
+      } else {
+        parameters = function.parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
+      }
       if let qualifiedName = context.getQualifiedName(function.identifier.defId) {
-        parameterTypesByName[qualifiedName] = parameterTypes
+        parametersByName[qualifiedName] = parameters
       }
       if let name = context.getName(function.identifier.defId) {
-        parameterTypesByName[name] = parameterTypes
+        parametersByName[name] = parameters
       }
     }
-    self.functionParameterTypesByName = parameterTypesByName
+    self.functionParametersByName = parametersByName
     self.escapeSummariesByDefId = Self.computeEscapeSummaries(program: program, context: context)
   }
 
@@ -34,8 +45,8 @@ final class MIRReferenceAllocationPromoter {
       return MIRReferenceAllocationFunctionPromoter(
         function: function,
         globals: program.globals,
-        functionParameterTypesByDefId: functionParameterTypesByDefId,
-        functionParameterTypesByName: functionParameterTypesByName,
+        functionParametersByDefId: functionParametersByDefId,
+        functionParametersByName: functionParametersByName,
         escapeSummariesByDefId: escapeSummariesByDefId,
         context: context
       ).promote()
@@ -54,6 +65,8 @@ final class MIRReferenceAllocationPromoter {
   }
 
   private static func computeEscapeSummaries(program: MIRProgram, context: CompilerContext) -> [DefId: MIREscapeSummary] {
+    _ = context
+
     func localParameterIndexMap(for function: MIRFunction) -> [MIRLocalID: Int] {
       var result: [MIRLocalID: Int] = [:]
       for (index, parameter) in function.parameters.enumerated() {
@@ -64,162 +77,215 @@ final class MIRReferenceAllocationPromoter {
       return result
     }
 
-    var summaries: [DefId: MIREscapeSummary] = Dictionary(
-      uniqueKeysWithValues: program.functions.map { ($0.identifier.defId, MIREscapeSummary(returningParameterIndices: [], directReferenceEscapingParameterIndices: [])) }
-    )
+    func baseLocalID(of place: MIRPlace) -> MIRLocalID? {
+      switch place {
+      case .local(let localID):
+        return localID
+      case .global:
+        return nil
+      case .field(let base, _):
+        return baseLocalID(of: base)
+      case .enumPayload(let base, _, _, _, _):
+        return baseLocalID(of: base)
+      case .deref(let base, _):
+        if case .operand(.local(let localID)) = base {
+          return localID
+        }
+        return nil
+      case .pointerElement(let base, _):
+        if case .operand(.local(let localID)) = base {
+          return localID
+        }
+        return nil
+      }
+    }
 
-    func visitValue(
+    func collectParameterSources(
       _ value: MIRValue,
       parameterLocals: [MIRLocalID: Int],
+      localSources: [MIRLocalID: Set<Int>],
+      out: inout Set<Int>
+    ) {
+      let maybeLocalID: MIRLocalID?
+      switch value {
+      case .operand(.local(let localID)):
+        maybeLocalID = localID
+      case .placeRead(let place, _):
+        maybeLocalID = baseLocalID(of: place)
+      case .ref(let place, _, _):
+        maybeLocalID = baseLocalID(of: place)
+      default:
+        maybeLocalID = nil
+      }
+
+      guard let localID = maybeLocalID else {
+        return
+      }
+      if let parameterIndex = parameterLocals[localID] {
+        out.insert(parameterIndex)
+        return
+      }
+      for parameterIndex in localSources[localID] ?? [] {
+        out.insert(parameterIndex)
+      }
+    }
+
+    func mergeValueParameterSources(
+      targetLocal: MIRLocalID,
+      value: MIRValue,
+      parameterLocals: [MIRLocalID: Int],
+      localSources: inout [MIRLocalID: Set<Int>]
+    ) {
+      var collected: Set<Int> = []
+      collectParameterSources(value, parameterLocals: parameterLocals, localSources: localSources, out: &collected)
+      var merged = localSources[targetLocal] ?? []
+      merged.formUnion(collected)
+      if !merged.isEmpty {
+        localSources[targetLocal] = merged
+      }
+    }
+
+    func visitEscapeValue(
+      _ value: MIRValue,
+      parameterLocals: [MIRLocalID: Int],
+      localSources: [MIRLocalID: Set<Int>],
       summaries: [DefId: MIREscapeSummary],
       returning: inout Set<Int>,
       directEscaping: inout Set<Int>
     ) {
-      func baseLocalID(of place: MIRPlace) -> MIRLocalID? {
-        switch place {
-        case .local(let id): return id
-        case .global: return nil
-        case .field(let base, _): return baseLocalID(of: base)
-        case .enumPayload(let base, _, _, _, _): return baseLocalID(of: base)
-        case .deref(let base, _):
-          if case .operand(.local(let id)) = base { return id }
-          return nil
-        case .pointerElement(let base, _):
-          if case .operand(.local(let id)) = base { return id }
-          return nil
-        }
+      func markDirectEscape(_ value: MIRValue) {
+        collectParameterSources(value, parameterLocals: parameterLocals, localSources: localSources, out: &directEscaping)
       }
 
-      func markEscaping(_ value: MIRValue) {
-        switch value {
-        case .operand(.local(let localID)):
-          if let index = parameterLocals[localID] {
-            directEscaping.insert(index)
-          }
-        case .placeRead(let place, _):
-          if let id = baseLocalID(of: place), let index = parameterLocals[id] {
-            directEscaping.insert(index)
-          }
-        case .ref(let place, _, _):
-          if let id = baseLocalID(of: place), let index = parameterLocals[id] {
-            directEscaping.insert(index)
-          }
-        default:
-          break
-        }
+      func markReturning(_ value: MIRValue) {
+        collectParameterSources(value, parameterLocals: parameterLocals, localSources: localSources, out: &returning)
       }
 
       switch value {
       case .call(let call):
         if case .function(let callee) = call.callee,
            let calleeSummary = summaries[callee.defId] {
-          for index in calleeSummary.escapingParameterIndices where index < call.arguments.count {
-            markEscaping(call.arguments[index])
+          for (index, argument) in call.arguments.enumerated() {
+            if calleeSummary.directReferenceEscapingParameterIndices.contains(index) {
+              markDirectEscape(argument)
+            }
+            if calleeSummary.returningParameterIndices.contains(index) {
+              markReturning(argument)
+            }
           }
         } else {
           for argument in call.arguments {
-            markEscaping(argument)
+            markDirectEscape(argument)
           }
         }
         for argument in call.arguments {
-          visitValue(argument, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(argument, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         }
       case .traitMethodCall(let call):
-        visitValue(call.receiver, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        visitEscapeValue(call.receiver, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         for argument in call.arguments {
-          visitValue(argument, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(argument, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         }
-        // Conservatively mark receiver and arguments as escaping.
-        // Trait method dispatch cannot resolve to a concrete callee summary
-        // at this stage, so we must assume all passed references escape.
-        markEscaping(call.receiver)
+        markDirectEscape(call.receiver)
         for argument in call.arguments {
-          markEscaping(argument)
+          markDirectEscape(argument)
         }
       case .aggregate(let aggregate):
         for field in aggregate.fields {
-          markEscaping(field)
-          visitValue(field, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          markDirectEscape(field)
+          visitEscapeValue(field, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         }
       case .enumCase(let construction):
         for argument in construction.arguments {
-          markEscaping(argument)
-          visitValue(argument, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          markDirectEscape(argument)
+          visitEscapeValue(argument, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         }
       case .traitObjectConversion(let conversion):
-        markEscaping(conversion.inner)
-        visitValue(conversion.inner, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        markDirectEscape(conversion.inner)
+        visitEscapeValue(conversion.inner, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
       case .enumTag(let tag):
-        visitValue(tag.subject, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        visitEscapeValue(tag.subject, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
       case .intrinsic(let intrinsic):
         switch intrinsic {
         case .makeRef(_, let owner, _), .makeMutRef(_, let owner, _):
-          markEscaping(owner)
-          visitValue(owner, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-        case .downgradeRef(let value, _), .downgradeMutRef(let value, _):
-          visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-        case .upgradeRef(let value, _), .upgradeMutRef(let value, _),
-             .isUniqueMutable(let value), .refCount(let value),
-             .traitObjectMatches(let value, _, _, _), .traitObjectDowncast(let value, _):
-          visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-        case .copyMemory(let dest, let source, let count), .moveMemory(let dest, let source, let count):
-          visitValue(dest, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(source, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(count, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          markDirectEscape(owner)
+          visitEscapeValue(owner, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        case .downgradeRef(let value, _),
+             .downgradeMutRef(let value, _),
+             .upgradeRef(let value, _),
+             .upgradeMutRef(let value, _),
+             .isUniqueMutable(let value),
+             .refCount(let value),
+             .traitObjectMatches(let value, _, _, _),
+             .traitObjectDowncast(let value, _):
+          visitEscapeValue(value, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        case .copyMemory(let dest, let source, let count),
+             .moveMemory(let dest, let source, let count):
+          visitEscapeValue(dest, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(source, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(count, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         case .initMemory(let ptr, let value):
-          visitValue(ptr, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-        case .deallocMemory(let ptr), .deinitMemory(let ptr), .takeMemory(let ptr, _):
-          visitValue(ptr, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(ptr, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(value, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+        case .deallocMemory(let ptr),
+             .deinitMemory(let ptr),
+             .takeMemory(let ptr, _):
+          visitEscapeValue(ptr, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
-          visitValue(outHandle, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(outTid, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(closure, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
-          visitValue(stackSize, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(outHandle, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(outTid, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(closure, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+          visitEscapeValue(stackSize, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         case .allocMemory, .nullPtr:
           break
         }
-      case .binary, .unary, .lambda, .operand, .placeRead, .ref, .pointer, .cast:
-        if case .lambda(let lambda) = value {
-          for source in lambda.captureSources {
-            if case .local(let localID) = source, let index = parameterLocals[localID] {
-              directEscaping.insert(index)
-            }
+      case .lambda(let lambda):
+        for source in lambda.captureSources {
+          if case .local(let localID) = source,
+             let parameterIndex = parameterLocals[localID] {
+            directEscaping.insert(parameterIndex)
           }
         }
+      case .binary, .unary, .operand, .placeRead, .ref, .pointer, .cast:
+        break
       }
     }
 
-    var changed = true
+    var summaries: [DefId: MIREscapeSummary] = Dictionary(
+      uniqueKeysWithValues: program.functions.map { ($0.identifier.defId, MIREscapeSummary(returningParameterIndices: [], directReferenceEscapingParameterIndices: [])) }
+    )
     let parameterLocalMaps: [DefId: [MIRLocalID: Int]] = Dictionary(
       uniqueKeysWithValues: program.functions.map { ($0.identifier.defId, localParameterIndexMap(for: $0)) }
     )
+
+    var changed = true
     while changed {
       changed = false
       for function in program.functions {
         let parameterLocals = parameterLocalMaps[function.identifier.defId] ?? [:]
         var returning: Set<Int> = []
         var directEscaping: Set<Int> = []
+        var localSources: [MIRLocalID: Set<Int>] = [:]
+
         for block in function.blocks {
           for statement in block.statements {
             switch statement {
-            case .assign(_, let value), .evaluate(let value), .retain(let value), .release(let value):
-              visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+            case .assign(let place, let value):
+              visitEscapeValue(value, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+              if case .local(let localID) = place {
+                mergeValueParameterSources(targetLocal: localID, value: value, parameterLocals: parameterLocals, localSources: &localSources)
+              }
             case .compoundAssign(let assignment):
-              visitValue(assignment.value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+              visitEscapeValue(assignment.value, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
+            case .evaluate(let value), .retain(let value), .release(let value):
+              visitEscapeValue(value, parameterLocals: parameterLocals, localSources: localSources, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
             case .declare, .drop, .scopeEnter, .scopeExit, .debugSource:
               break
             }
           }
-          if case .returnValue(let operand) = block.terminator {
-            switch operand {
-            case .some(.local(let localID)):
-              if let index = parameterLocals[localID] {
-                returning.insert(index)
-              }
-            default:
-              break
-            }
+
+          if case .returnValue(let operand?) = block.terminator {
+            collectParameterSources(.operand(operand), parameterLocals: parameterLocals, localSources: localSources, out: &returning)
           }
         }
 
@@ -242,33 +308,33 @@ final class MIRReferenceAllocationPromoter {
 private final class MIRReferenceAllocationFunctionPromoter {
   private let function: MIRFunction
   private let globals: [MIRGlobal]
-  private let functionParameterTypesByDefId: [DefId: [Type]]
-  private let functionParameterTypesByName: [String: [Type]]
+  private let functionParametersByDefId: [DefId: [Parameter]]
+  private let functionParametersByName: [String: [Parameter]]
   private let escapeSummariesByDefId: [DefId: MIREscapeSummary]
   private let context: CompilerContext
   private let resolver: MIRTypeResolver
-  private let escapingLocals: Set<MIRLocalID>
-  private let escapingValueLocals: Set<MIRLocalID>
+  private let escapeAnalysis: MIRFunctionEscapeAnalysis
   private let temporaryLocalIds: Set<MIRLocalID>
+  private let temporaryValueSourcesByLocal: [MIRLocalID: MIRValue]
 
   init(
     function: MIRFunction,
     globals: [MIRGlobal],
-    functionParameterTypesByDefId: [DefId: [Type]],
-    functionParameterTypesByName: [String: [Type]],
+    functionParametersByDefId: [DefId: [Parameter]],
+    functionParametersByName: [String: [Parameter]],
     escapeSummariesByDefId: [DefId: MIREscapeSummary],
     context: CompilerContext
   ) {
     self.function = function
     self.globals = globals
-    self.functionParameterTypesByDefId = functionParameterTypesByDefId
-    self.functionParameterTypesByName = functionParameterTypesByName
+    self.functionParametersByDefId = functionParametersByDefId
+    self.functionParametersByName = functionParametersByName
     self.escapeSummariesByDefId = escapeSummariesByDefId
     self.context = context
     self.resolver = MIRTypeResolver(function: function, context: context)
-    self.escapingLocals = Self.computeLocalsFlowingToLambdaCaptures(function: function)
-    self.escapingValueLocals = Self.computeEscapingValueLocals(function: function)
     self.temporaryLocalIds = Set(function.locals.filter({ $0.storage == .temporary }).map(\.id))
+    self.escapeAnalysis = Self.computeFunctionEscapeAnalysis(function: function, summaries: escapeSummariesByDefId)
+    self.temporaryValueSourcesByLocal = Self.buildTemporaryValueSources(function: function, temporaryLocalIds: temporaryLocalIds)
   }
 
   func promote() -> MIRFunction {
@@ -282,24 +348,154 @@ private final class MIRReferenceAllocationFunctionPromoter {
     return updated
   }
 
-  /// Computes the set of local IDs whose values transitively flow into lambda
-  /// captures.  When a temporary ref flows into one of these locals, it must be
-  /// promoted to heapOwned so the captured pointer does not dangle.
-  private static func computeLocalsFlowingToLambdaCaptures(function: MIRFunction) -> Set<MIRLocalID> {
-    var escaping: Set<MIRLocalID> = []
-    // Seed: locals directly captured by lambdas.
-    for block in function.blocks {
-      for statement in block.statements {
-        if case .assign(_, let value) = statement, case .lambda(let lambda) = value {
-          for source in lambda.captureSources {
-            if case .local(let id) = source {
-              escaping.insert(id)
-            }
+  private static func baseLocalID(of place: MIRPlace) -> MIRLocalID? {
+    switch place {
+    case .local(let localID):
+      return localID
+    case .global:
+      return nil
+    case .field(let base, _):
+      return baseLocalID(of: base)
+    case .enumPayload(let base, _, _, _, _):
+      return baseLocalID(of: base)
+    case .deref(let base, _):
+      if case .operand(.local(let localID)) = base {
+        return localID
+      }
+      return nil
+    case .pointerElement(let base, _):
+      if case .operand(.local(let localID)) = base {
+        return localID
+      }
+      return nil
+    }
+  }
+
+  private static func markLocalEscape(_ value: MIRValue, escaping: inout Set<MIRLocalID>) {
+    switch value {
+    case .operand(.local(let localID)):
+      escaping.insert(localID)
+    case .placeRead(let place, _):
+      if let localID = baseLocalID(of: place) {
+        escaping.insert(localID)
+      }
+    case .ref(let place, _, _):
+      if let localID = baseLocalID(of: place) {
+        escaping.insert(localID)
+      }
+    default:
+      break
+    }
+  }
+
+  private static func visitLocalEscapeValue(
+    _ value: MIRValue,
+    summaries: [DefId: MIREscapeSummary],
+    escaping: inout Set<MIRLocalID>
+  ) {
+    switch value {
+    case .call(let call):
+      if case .function(let callee) = call.callee,
+         let calleeSummary = summaries[callee.defId] {
+        for (index, argument) in call.arguments.enumerated() {
+          if calleeSummary.directReferenceEscapingParameterIndices.contains(index) {
+            markLocalEscape(argument, escaping: &escaping)
           }
         }
+      } else {
+        for argument in call.arguments {
+          markLocalEscape(argument, escaping: &escaping)
+        }
+      }
+      for argument in call.arguments {
+        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+      }
+    case .traitMethodCall(let call):
+      markLocalEscape(call.receiver, escaping: &escaping)
+      visitLocalEscapeValue(call.receiver, summaries: summaries, escaping: &escaping)
+      for argument in call.arguments {
+        markLocalEscape(argument, escaping: &escaping)
+        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+      }
+    case .aggregate(let aggregate):
+      for field in aggregate.fields {
+        markLocalEscape(field, escaping: &escaping)
+        visitLocalEscapeValue(field, summaries: summaries, escaping: &escaping)
+      }
+    case .enumCase(let construction):
+      for argument in construction.arguments {
+        markLocalEscape(argument, escaping: &escaping)
+        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+      }
+    case .traitObjectConversion(let conversion):
+      markLocalEscape(conversion.inner, escaping: &escaping)
+      visitLocalEscapeValue(conversion.inner, summaries: summaries, escaping: &escaping)
+    case .enumTag(let tag):
+      visitLocalEscapeValue(tag.subject, summaries: summaries, escaping: &escaping)
+    case .intrinsic(let intrinsic):
+      switch intrinsic {
+      case .makeRef(_, let owner, _), .makeMutRef(_, let owner, _):
+        markLocalEscape(owner, escaping: &escaping)
+        visitLocalEscapeValue(owner, summaries: summaries, escaping: &escaping)
+      case .downgradeRef(let value, _),
+           .downgradeMutRef(let value, _),
+           .upgradeRef(let value, _),
+           .upgradeMutRef(let value, _),
+           .isUniqueMutable(let value),
+           .refCount(let value),
+           .traitObjectMatches(let value, _, _, _),
+           .traitObjectDowncast(let value, _):
+        visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+      case .copyMemory(let dest, let source, let count),
+           .moveMemory(let dest, let source, let count):
+        visitLocalEscapeValue(dest, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(source, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(count, summaries: summaries, escaping: &escaping)
+      case .initMemory(let ptr, let value):
+        visitLocalEscapeValue(ptr, summaries: summaries, escaping: &escaping)
+        markLocalEscape(value, escaping: &escaping)
+        visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+      case .deallocMemory(let ptr), .deinitMemory(let ptr), .takeMemory(let ptr, _):
+        visitLocalEscapeValue(ptr, summaries: summaries, escaping: &escaping)
+      case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+        visitLocalEscapeValue(outHandle, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(outTid, summaries: summaries, escaping: &escaping)
+        markLocalEscape(closure, escaping: &escaping)
+        visitLocalEscapeValue(closure, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(stackSize, summaries: summaries, escaping: &escaping)
+      case .allocMemory, .nullPtr:
+        break
+      }
+    case .lambda(let lambda):
+      for source in lambda.captureSources {
+        if case .local(let localID) = source {
+          escaping.insert(localID)
+        }
+      }
+    case .binary, .unary, .operand, .placeRead, .ref, .pointer, .cast:
+      break
+    }
+  }
+
+  private static func computeEscapingLocals(function: MIRFunction, summaries: [DefId: MIREscapeSummary]) -> Set<MIRLocalID> {
+    var escaping: Set<MIRLocalID> = []
+    for block in function.blocks {
+      for statement in block.statements {
+        switch statement {
+        case .assign(_, let value), .evaluate(let value), .retain(let value), .release(let value):
+          visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+        case .compoundAssign(let assignment):
+          visitLocalEscapeValue(assignment.value, summaries: summaries, escaping: &escaping)
+        case .declare, .drop, .scopeEnter, .scopeExit, .debugSource:
+          break
+        }
+      }
+      if case .returnValue(let operand?) = block.terminator,
+         case .local(let localID) = operand {
+        escaping.insert(localID)
       }
     }
-    // Backward propagation: if A = B and A is escaping, then B is escaping too.
+
     var changed = true
     while changed {
       changed = false
@@ -307,12 +503,22 @@ private final class MIRReferenceAllocationFunctionPromoter {
         for statement in block.statements {
           guard case .assign(let dest, let value) = statement,
                 case .local(let destID) = dest,
-                escaping.contains(destID) else { continue }
+                escaping.contains(destID) else {
+            continue
+          }
           switch value {
-          case .operand(.local(let src)):
-            if escaping.insert(src).inserted { changed = true }
-          case .placeRead(.local(let src), _):
-            if escaping.insert(src).inserted { changed = true }
+          case .operand(.local(let sourceID)):
+            if escaping.insert(sourceID).inserted {
+              changed = true
+            }
+          case .placeRead(let place, _):
+            if let sourceID = baseLocalID(of: place), escaping.insert(sourceID).inserted {
+              changed = true
+            }
+          case .ref(let place, _, _):
+            if let sourceID = baseLocalID(of: place), escaping.insert(sourceID).inserted {
+              changed = true
+            }
           default:
             break
           }
@@ -341,135 +547,58 @@ private final class MIRReferenceAllocationFunctionPromoter {
                 escaping.contains(destID) else {
             continue
           }
-          for localID in localDependencies(of: value) {
-            if escaping.insert(localID).inserted {
+          switch value {
+          case .operand(.local(let sourceID)):
+            if escaping.insert(sourceID).inserted {
               changed = true
             }
+          case .placeRead(let place, _):
+            if let sourceID = baseLocalID(of: place), escaping.insert(sourceID).inserted {
+              changed = true
+            }
+          case .ref(let place, _, _):
+            if let sourceID = baseLocalID(of: place), escaping.insert(sourceID).inserted {
+              changed = true
+            }
+          default:
+            break
           }
         }
       }
     }
-
     return escaping
   }
 
-  private static func localDependencies(of value: MIRValue) -> Set<MIRLocalID> {
-    var result: Set<MIRLocalID> = []
-
-    func collect(place: MIRPlace) {
-      switch place {
-      case .local(let localID):
-        result.insert(localID)
-      case .field(let base, _), .enumPayload(let base, _, _, _, _):
-        collect(place: base)
-      case .deref(let base, _), .pointerElement(let base, _):
-        collect(value: base)
-      case .global:
-        break
-      }
-    }
-
-    func collect(operand: MIROperand) {
-      if case .local(let localID) = operand {
-        result.insert(localID)
-      }
-    }
-
-    func collect(value: MIRValue) {
-      switch value {
-      case .operand(let operand):
-        collect(operand: operand)
-      case .placeRead(let place, _), .ref(let place, _, _), .pointer(let place):
-        collect(place: place)
-      case .binary(let operation):
-        collect(operand: operation.left)
-        collect(operand: operation.right)
-      case .unary(let operation):
-        collect(operand: operation.operand)
-      case .call(let call):
-        collect(operand: call.callee)
-        for argument in call.arguments {
-          collect(value: argument)
-        }
-      case .aggregate(let aggregate):
-        for field in aggregate.fields {
-          collect(value: field)
-        }
-      case .enumCase(let construction):
-        for argument in construction.arguments {
-          collect(value: argument)
-        }
-      case .enumTag(let tag):
-        collect(value: tag.subject)
-      case .traitObjectConversion(let conversion):
-        collect(value: conversion.inner)
-      case .traitMethodCall(let call):
-        collect(value: call.receiver)
-        for argument in call.arguments {
-          collect(value: argument)
-        }
-      case .cast(let operand, _):
-        collect(operand: operand)
-      case .intrinsic(let intrinsic):
-        switch intrinsic {
-        case .allocMemory(let count, _):
-          collect(value: count)
-        case .deallocMemory(let ptr), .deinitMemory(let ptr), .takeMemory(let ptr, _):
-          collect(value: ptr)
-        case .copyMemory(let dest, let source, let count), .moveMemory(let dest, let source, let count):
-          collect(value: dest)
-          collect(value: source)
-          collect(value: count)
-        case .isUniqueMutable(let value), .refCount(let value), .downgradeRef(let value, _), .downgradeMutRef(let value, _), .upgradeRef(let value, _), .upgradeMutRef(let value, _):
-          collect(value: value)
-        case .traitObjectMatches(let value, _, _, let concreteType):
-          collect(value: value)
-          _ = concreteType
-        case .traitObjectDowncast(let value, _):
-          collect(value: value)
-        case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _), .initMemory(let ptr, let owner):
-          collect(value: ptr)
-          collect(value: owner)
-        case .nullPtr:
-          break
-        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
-          collect(value: outHandle)
-          collect(value: outTid)
-          collect(value: closure)
-          collect(value: stackSize)
-        }
-      case .lambda:
-        break
-      }
-    }
-
-    collect(value: value)
-    return result
+  private static func computeFunctionEscapeAnalysis(function: MIRFunction, summaries: [DefId: MIREscapeSummary]) -> MIRFunctionEscapeAnalysis {
+    MIRFunctionEscapeAnalysis(
+      escapingLocals: computeEscapingLocals(function: function, summaries: summaries),
+      escapingValueLocals: computeEscapingValueLocals(function: function)
+    )
   }
 
-
-  /// Returns true if the place is a member-path access (contains deref or field projections).
-  /// Simple local references return false.
-  private func isMemberPathPlace(_ place: MIRPlace) -> Bool {
-    switch place {
-    case .local:
-      return false
-    case .global:
-      return false
-    case .field:
-      return true
-    case .enumPayload:
-      return true
-    case .deref:
-      return true
-    case .pointerElement:
-      return true
+  private static func buildTemporaryValueSources(
+    function: MIRFunction,
+    temporaryLocalIds: Set<MIRLocalID>
+  ) -> [MIRLocalID: MIRValue] {
+    var sources: [MIRLocalID: MIRValue] = [:]
+    var ambiguous: Set<MIRLocalID> = []
+    for block in function.blocks {
+      for statement in block.statements {
+        guard case .assign(let place, let value) = statement,
+              case .local(let localID) = place,
+              temporaryLocalIds.contains(localID),
+              !ambiguous.contains(localID) else {
+          continue
+        }
+        if sources[localID] != nil {
+          sources.removeValue(forKey: localID)
+          ambiguous.insert(localID)
+        } else {
+          sources[localID] = value
+        }
+      }
     }
-  }
-
-  private func isTemporaryLocal(_ place: MIRPlace) -> Bool {
-    guard case .local(let localID) = place else { return false }
-    return temporaryLocalIds.contains(localID)
+    return sources
   }
   private func promoteStatement(_ statement: MIRStatement) -> MIRStatement {
     switch statement {
@@ -574,7 +703,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
     case .lambda(let lambda):
       if let destinationPlace,
          case .local(let localID) = destinationPlace,
-         escapingValueLocals.contains(localID),
+         escapeAnalysis.escapingValueLocals.contains(localID),
          lambda.captures.contains(where: { $0.captureKind == .byMutReference }) {
         recursivelyPromoted = .lambda(rewriteEscapingMutableCaptures(in: lambda))
       } else {
@@ -583,13 +712,12 @@ private final class MIRReferenceAllocationFunctionPromoter {
     case .binary, .unary, .operand, .placeRead, .pointer, .cast:
       recursivelyPromoted = value
     case .ref(let place, let kind, .stackBorrow):
-      let destIsTemp = destinationPlace.map { isTemporaryLocal($0) } ?? false
-      let destEscapesViaLambda = destinationPlace.map {
-        if case .local(let id) = $0 { return self.escapingLocals.contains(id) }
+      let keepStackBorrow = destinationPlace.map {
+        if case .local(let localID) = $0 {
+          return !escapeAnalysis.escapingLocals.contains(localID)
+        }
         return false
       } ?? false
-      let keepStackBorrow = isMemberPathPlace(place)
-        || (kind == .mutable && destIsTemp && !destEscapesViaLambda)
       if keepStackBorrow {
         return .ref(place, kind: kind, allocation: .stackBorrow)
       }
@@ -599,6 +727,11 @@ private final class MIRReferenceAllocationFunctionPromoter {
     }
 
     guard let destinationType, typeRequiresOwnedReferenceStorage(destinationType) else {
+      return recursivelyPromoted
+    }
+    if let destinationPlace,
+       case .local(let localID) = destinationPlace,
+       !escapeAnalysis.escapingLocals.contains(localID) {
       return recursivelyPromoted
     }
     return promoteDirectReferences(in: recursivelyPromoted)
@@ -621,62 +754,145 @@ private final class MIRReferenceAllocationFunctionPromoter {
   }
 
   private func promoteCallArguments(_ arguments: [MIRValue], callee: MIROperand) -> [MIRValue] {
-    let parameterTypes: [Type]
+    let parameters: [Parameter]
     let directRefEscapingIndices: Set<Int>
+    let returningParameterIndices: Set<Int>
     switch callee {
     case .function(let symbol):
-      if let exactParameterTypes = globalFunctionParameterTypes(for: symbol) {
-        parameterTypes = exactParameterTypes
-      } else if case .function(let parameters, _) = symbol.type {
-        parameterTypes = parameters.map(\.type)
+      if let exactParameters = globalFunctionParameters(for: symbol) {
+        parameters = exactParameters
+      } else if case .function(let functionParameters, _) = symbol.type {
+        parameters = functionParameters
       } else {
-        parameterTypes = []
+        parameters = []
       }
       if let summary = escapeSummariesByDefId[symbol.defId] {
         directRefEscapingIndices = summary.directReferenceEscapingParameterIndices
+        returningParameterIndices = summary.returningParameterIndices
       } else {
-        directRefEscapingIndices = Set(0..<parameterTypes.count)
+        directRefEscapingIndices = Set(0..<arguments.count)
+        returningParameterIndices = []
       }
     default:
-      parameterTypes = []
+      parameters = []
       directRefEscapingIndices = Set(0..<arguments.count)
+      returningParameterIndices = []
     }
 
     return arguments.enumerated().map { index, argument in
-      let destinationType = index < parameterTypes.count ? parameterTypes[index] : nil
-      let promoted = promoteValue(argument, destinationType: destinationType)
-      guard directRefEscapingIndices.contains(index) else {
-        return promoted
+      var destinationType = index < parameters.count ? promotionDestinationType(for: parameters[index]) : nil
+      let preserveReturnedStackBorrow = returningParameterIndices.contains(index)
+        && !directRefEscapingIndices.contains(index)
+        && {
+          switch resolveTemporaryRefSource(argument) {
+          case .ref(_, _, .stackBorrow):
+            if let destinationType {
+              return typeRequiresOwnedReferenceStorage(destinationType)
+            }
+            return false
+          default:
+            return false
+          }
+        }()
+      if preserveReturnedStackBorrow {
+        destinationType = nil
       }
-      return promoteDirectReferences(in: promoted)
+      var promoted = promoteValue(argument, destinationType: destinationType)
+      if directRefEscapingIndices.contains(index) {
+        promoted = promoteDirectReferences(in: promoted)
+      }
+      return promoted
     }
   }
 
-  private func globalFunctionParameterTypes(for symbol: Symbol) -> [Type]? {
-    if let exactParameterTypes = functionParameterTypesByDefId[symbol.defId] {
-      return exactParameterTypes
+  private func promotionDestinationType(for parameter: Parameter) -> Type {
+    switch parameter.kind {
+    case .byRef:
+      switch parameter.type {
+      case .reference(let inner):
+        return .borrowedReference(inner: inner)
+      case .borrowedReference:
+        return parameter.type
+      default:
+        return .borrowedReference(inner: parameter.type)
+      }
+    case .byMutRef:
+      switch parameter.type {
+      case .mutableReference(let inner):
+        return .mutableBorrowedReference(inner: inner)
+      case .mutableBorrowedReference:
+        return parameter.type
+      default:
+        return .mutableBorrowedReference(inner: parameter.type)
+      }
+    case .byVal:
+      return parameter.type
+    }
+  }
+
+  private func globalFunctionParameters(for symbol: Symbol) -> [Parameter]? {
+    if let exactParameters = functionParametersByDefId[symbol.defId] {
+      return exactParameters
     }
     if let qualifiedName = context.getQualifiedName(symbol.defId),
-       let exactParameterTypes = functionParameterTypesByName[qualifiedName] {
-      return exactParameterTypes
+       let exactParameters = functionParametersByName[qualifiedName] {
+      return exactParameters
     }
     if let name = context.getName(symbol.defId),
-       let exactParameterTypes = functionParameterTypesByName[name] {
-      return exactParameterTypes
+       let exactParameters = functionParametersByName[name] {
+      return exactParameters
     }
     for global in globals {
       switch global {
       case .function(let identifier, let parameters, _)
       where identifier.defId == symbol.defId:
-        return parameters.map { $0.type }
+        if case .function(let functionParameters, _) = identifier.type {
+          return functionParameters
+        }
+        return parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
       case .foreignFunction(let identifier, let parameters)
       where identifier.defId == symbol.defId:
-        return parameters.map { $0.type }
+        if case .function(let functionParameters, _) = identifier.type {
+          return functionParameters
+        }
+        return parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
       default:
         continue
       }
     }
     return nil
+  }
+
+  private func resolveTemporaryRefSource(_ value: MIRValue) -> MIRValue {
+    var seen: Set<MIRLocalID> = []
+    return resolveTemporaryRefSource(value, seen: &seen)
+  }
+
+  private func resolveTemporaryRefSource(_ value: MIRValue, seen: inout Set<MIRLocalID>) -> MIRValue {
+    switch value {
+    case .ref:
+      return value
+    case .operand(.local(let localID)):
+      return resolveTemporaryRefLocal(localID, original: value, seen: &seen)
+    case .placeRead(.local(let localID), _):
+      return resolveTemporaryRefLocal(localID, original: value, seen: &seen)
+    default:
+      return value
+    }
+  }
+
+  private func resolveTemporaryRefLocal(_ localID: MIRLocalID, original: MIRValue, seen: inout Set<MIRLocalID>) -> MIRValue {
+    guard !seen.contains(localID),
+          let source = temporaryValueSourcesByLocal[localID] else {
+      return original
+    }
+    seen.insert(localID)
+    let resolved = resolveTemporaryRefSource(source, seen: &seen)
+    seen.remove(localID)
+    if case .ref = resolved {
+      return resolved
+    }
+    return original
   }
 
   private func promoteIntrinsic(_ intrinsic: MIRIntrinsic) -> MIRIntrinsic {
@@ -752,7 +968,8 @@ private final class MIRReferenceAllocationFunctionPromoter {
   }
 
   private func promoteDirectReferences(in value: MIRValue) -> MIRValue {
-    switch value {
+    let resolved = resolveTemporaryRefSource(value)
+    switch resolved {
     case .ref(let place, let kind, .stackBorrow):
       return .ref(place, kind: kind, allocation: .heapOwned)
     case .call(let call):
@@ -814,7 +1031,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
     case .intrinsic(let intrinsic):
       return .intrinsic(promoteDirectReferences(in: intrinsic))
     case .lambda, .binary, .unary, .operand, .placeRead, .ref, .pointer, .cast:
-      return value
+      return resolved
     }
   }
 

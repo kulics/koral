@@ -716,8 +716,7 @@ type MIRReferenceAllocationFunctionPromoter(
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     local_types_by_id Dict[UInt, Type],
     local_storages_by_id Dict[UInt, MIRStorage],
-    escaping_locals Set[UInt],
-    escaping_value_locals Set[UInt],
+    escape_analysis MIRFunctionEscapeAnalysis,
     temporary_local_ids Set[UInt],
     temporary_value_sources_by_id Dict[UInt, MIRValue],
     escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
@@ -726,6 +725,11 @@ type MIRReferenceAllocationFunctionPromoter(
 type MIREscapeSummary(
     returning_parameter_indices Set[UInt],
     direct_reference_escaping_parameter_indices Set[UInt],
+);
+
+type MIRFunctionEscapeAnalysis(
+    escaping_locals Set[UInt],
+    escaping_value_locals Set[UInt],
 );
 
 file_private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
@@ -763,6 +767,27 @@ file_private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) 
         _ then {},
     };
 };
+
+// --- Unified CFG-based escape analysis model ---
+//
+// The following functions form a single escape analysis model that computes
+// ownership/escape decisions from explicit CFG dataflow. They share a common
+// fixed-point iteration pattern over basic blocks and cover all escape-sensitive
+// operations: closure capture, branch merge, alias container store, and
+// borrowed/managed transitions.
+//
+//   - compute_escape_summaries: inter-procedural fixed-point analysis producing
+//     per-function MIREscapeSummary (returning parameters, directly escaping parameters).
+//   - compute_escaping_locals_for_function: per-function backward propagation of
+//     escaping locals using summary data, with fixed-point iteration over blocks.
+//   - compute_escaping_value_locals_for_function: per-function value-local escape
+//     backward propagation with fixed-point iteration over blocks.
+//   - visit_local_escape_value: shared visitor that identifies escaping sources in
+//     MIR values (calls, aggregates, closures, trait objects, enum tags, spawns).
+//   - MIRReferenceAllocationFunctionPromoter: consumer that applies escape results
+//     to decide reference allocation promotion, closure capture rewriting, and
+//     stack-borrow lifetime management.
+// --- End unified model ---
 
 file_private let visit_local_escape_value(
     value MIRValue,
@@ -890,6 +915,15 @@ file_private let compute_escaping_locals_for_function(function * MIRFunction, su
                                                 changed = true;
                                             };
                                         },
+                                        .Ref(place, _, _) then {
+                                            when base_local_id_of_place(place) in {
+                                                .Some(src_id) then if not escaping.contains(src_id) then {
+                                                    escaping.insert(src_id);
+                                                    changed = true;
+                                                },
+                                                .None() then {},
+                                            };
+                                        },
                                         _ then {},
                                     };
                                 };
@@ -937,6 +971,15 @@ file_private let compute_escaping_value_locals_for_function(function * MIRFuncti
                                                 changed = true;
                                             };
                                         },
+                                        .Ref(place, _, _) then {
+                                            when base_local_id_of_place(place) in {
+                                                .Some(src_id) then if not escaping.contains(src_id) then {
+                                                    escaping.insert(src_id);
+                                                    changed = true;
+                                                },
+                                                .None() then {},
+                                            };
+                                        },
                                         _ then {},
                                     };
                                 };
@@ -950,6 +993,13 @@ file_private let compute_escaping_value_locals_for_function(function * MIRFuncti
         };
     };
     return escaping;
+};
+
+file_private let compute_function_escape_analysis(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) MIRFunctionEscapeAnalysis = {
+    return MIRFunctionEscapeAnalysis(
+        compute_escaping_locals_for_function(function, summaries),
+        compute_escaping_value_locals_for_function(function),
+    );
 };
 
 file_private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
@@ -1358,7 +1408,7 @@ given MIRReferenceAllocationPromoter {
 
         let mutable functions = List[* MIRFunction].new();
         for function_ref in self.program.functions then {
-            let escaping_locals = compute_escaping_locals_for_function(function_ref, escape_summaries);
+            let escape_analysis = compute_function_escape_analysis(function_ref, escape_summaries);
             let temporary_ids = compute_temporary_local_ids(function_ref);
             let mutable promoter = MIRReferenceAllocationFunctionPromoter.new(
                 function_ref,
@@ -1367,7 +1417,7 @@ given MIRReferenceAllocationPromoter {
                 &self.program.context,
                 self.program.receiver_method_dispatch,
                 self.program.concrete_callables_by_def_id,
-                escaping_locals,
+                escape_analysis,
                 temporary_ids,
                 escape_summaries,
             );
@@ -1467,13 +1517,12 @@ given MIRReferenceAllocationFunctionPromoter {
         context * CompilerContext,
         receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-        escaping_locals Set[UInt],
+        escape_analysis MIRFunctionEscapeAnalysis,
         temporary_local_ids Set[UInt],
         escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
     ) MIRReferenceAllocationFunctionPromoter = {
         let mutable local_types_by_id = Dict[UInt, Type].new();
         let mutable local_storages_by_id = Dict[UInt, MIRStorage].new();
-        let escaping_value_locals = compute_escaping_value_locals_for_function(function);
         for local in function.locals then {
             local_types_by_id.insert(local.id.raw_value, local.local_type);
             local_storages_by_id.insert(local.id.raw_value, local.storage);
@@ -1488,8 +1537,7 @@ given MIRReferenceAllocationFunctionPromoter {
             concrete_callables_by_def_id,
             local_types_by_id,
             local_storages_by_id,
-            escaping_locals,
-            escaping_value_locals,
+            escape_analysis,
             temporary_local_ids,
             temporary_value_sources_by_id,
             escape_summaries_by_def_id,
@@ -1588,7 +1636,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 when destination_place in {
                     .Some(dp) then when dp in {
                         .Local(local_id) then {
-                            if self.escaping_value_locals.contains(local_id.raw_value) then {
+                            if self.escape_analysis.escaping_value_locals.contains(local_id.raw_value) then {
                                 escaping_lambda = true;
                             };
                         },
@@ -1599,12 +1647,9 @@ given MIRReferenceAllocationFunctionPromoter {
                 yield if escaping_lambda then MIRValue.Lambda(self.rewrite_escaping_mutable_lambda(lambda)) else value;
             },
             .Ref(place, kind, .StackBorrow()) then {
-                if is_member_path_place(place) then {
-                    return value;
-                };
                 let keep_stack_borrow = when destination_place in {
                     .Some(dp) then when dp in {
-                        .Local(local_id) then not self.escaping_locals.contains(local_id.raw_value),
+                        .Local(local_id) then not self.escape_analysis.escaping_locals.contains(local_id.raw_value),
                         _ then false,
                     },
                     _ then false,
@@ -1621,7 +1666,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 when destination_place in {
                     .Some(dp) then when dp in {
                         .Local(local_id) then {
-                            if not self.escaping_locals.contains(local_id.raw_value) then {
+                            if not self.escape_analysis.escaping_locals.contains(local_id.raw_value) then {
                                 return promoted;
                             };
                         },

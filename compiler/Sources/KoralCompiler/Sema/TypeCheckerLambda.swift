@@ -208,6 +208,12 @@ extension TypeChecker {
         // and must not be materialized as closure environment fields.
         guard case .variable(_) = kind else { return }
 
+        // Match bootstrap capture rules: only local values/parameters become
+        // closure environment fields. Top-level globals keep direct access.
+        if !info.modulePath.isEmpty || !(info.sourceFile ?? "").isEmpty {
+          return
+        }
+
         if info.type.containsBorrowedReference {
           throw SemanticError(.generic("Cannot capture borrowed reference value '\(name)'"), span: currentSpan)
         }

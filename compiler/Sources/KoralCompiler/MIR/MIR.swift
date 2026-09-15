@@ -54,6 +54,11 @@ struct MIREscapeSummary: Equatable {
   }
 }
 
+struct MIRFunctionEscapeAnalysis: Equatable {
+  let escapingLocals: Set<MIRLocalID>
+  let escapingValueLocals: Set<MIRLocalID>
+}
+
 enum MIRGlobal {
   case foreignFunction(identifier: Symbol, parameters: [Symbol])
   case foreignType(identifier: Symbol)

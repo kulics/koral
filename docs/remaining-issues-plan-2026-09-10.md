@@ -16,36 +16,12 @@ This document renumbers only the issues that are still not fully resolved after 
 
 - `R1`: parser acceptance logic is now consolidated enough to close for the current backlog. The latest work pulled named-argument lookahead, range-bound starts, generic function/method instantiation diagnostics, control-statement terminator checks, and top-level declaration flag classification into shared parser helper layers on both compilers. The current shared suite is green end-to-end on both compilers, including the newly added parser regressions.
 - `R2`: interpolation now crosses the lexer/parser boundary as a structured lexer-level token stream in bootstrap rather than as a plain string re-scanned by parser helpers. Single-line and multiline interpolation parts preserve embedded-expression start locations well enough for file-relative diagnostics, and the current full shared suite is clean on both compilers.
+- `R3`: managed-reference lifetime / escape analysis is now closed for the current backlog. Bootstrap and Swift now both compute explicit per-function MIR escape analysis, keep direct-escaping vs returned-only summaries separate, and drive ref-promotion decisions from the same CFG-derived facts instead of separate member-path heuristics. Shared regression coverage now includes branch-return refs, alias container store, mutable escaping closures, member-path escaping refs, and mutable global access through escaping closures. The focused R3 bucket is green on both compilers.
 - `R4`: MIR-lowering invariant panic chain is resolved in the current local code state. Bootstrap parser/sema/mono/driver crash paths now route through diagnostics instead of unrecovered panics.
 - `R5`: type-equivalence and alias canonicalization are now closed for the current backlog. The alias-aware comparison/canonicalization work was consolidated across sema (`same_expr_type` now canonicalizes both sides), method lookup (`normalize_method_receiver_type` applies alias canonicalization to all reference/pointer wrappers), mono receiver matching (`resolve_alias_receiver_match_type` + `receiver_match_keys_equal` replace all ad hoc `layout_key` comparisons), and static member dispatch (Swift `canonicalizedTypeForComparison` / `typesEquivalentForComparison` / `nominalInstantiationMatchesGeneric` provide a unified equivalence model). New regression tests cover deep alias canonicalization, generic static receivers through aliases, generic enum static receivers, trait dispatch through aliases, and static member value references. The latest bootstrap full-suite validation is green at `580/580` and Swift is green at `580/580`. The remaining work is now the deeper architectural pass under `R3`, not another open `R5` regression chain.
 
 ## Remaining Issues (Renumbered)
 
-### R3. Managed-Reference Lifetime / Escape Analysis Is Still Heuristic
+None in this renumbered deep-fix list.
 
-Maps from old issue: `#7`
-
-Current state:
-
-- Many concrete regressions are covered and fixed.
-- The implementation still relies on conservative summaries and heuristic lowering choices rather than a full CFG dataflow model.
-
-Why this is still open:
-
-- Borrow vs heap-owned managed-reference decisions still depend on local lowering heuristics, owner-shape checks, and summary propagation instead of a whole-function fixed-point analysis.
-- Remaining edge cases are most likely in alias-heavy control flow, nested closures, and conditional ownership transfer.
-
-Primary areas:
-
-- `bootstrap/koralc/codegen/codegen_mir.koral`
-- `bootstrap/koralc/mir/*`
-- `bootstrap/koralc/sema/type_checker_expressions_lowering.koral`
-
-Exit criteria:
-
-- Ownership / escape decisions are computed from explicit CFG dataflow.
-- Closure capture, branch merge, alias container store, and borrowed/managed transitions share one analysis model instead of several local heuristics.
-
-## Recommended Execution Order
-
-1. `R3` — largest architectural item; likely requires a dedicated design pass.
+Broader compiler failures, when present, should be tracked in the issue tracker rather than reopened under `R1`-`R5` without a new root-cause link.
