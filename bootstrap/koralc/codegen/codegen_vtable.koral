@@ -33,8 +33,34 @@ given CodeGen {
         return "__koral_vtable_\(sanitized_trait)";
     };
 
+    /// Returns a mangled trait name that includes type arguments.
+    /// For non-generic traits this is identical to trait_name.
+    /// For generic traits like Comparable[Int] this produces "Comparable_Int_".
+    public mangled_trait_name(self, trait_name String, trait_type_args List[* Type]) String = {
+        if trait_type_args.is_empty() then {
+            return trait_name;
+        };
+        let mutable mangled = trait_name;
+        for targ in trait_type_args then {
+            mangled.push_string("_");
+            mangled.push_string(self.sanitize_codegen_identifier(self.c_type_name(*targ)));
+        };
+        mangled.push_string("_");
+        return mangled;
+    };
+
     public specialized_vtable_struct_name(self, trait_name String, concrete_type_c_name String) String = {
         return "\(self.vtable_struct_name(trait_name))_for_\(self.sanitize_codegen_identifier(concrete_type_c_name))";
+    };
+
+    public specialized_vtable_struct_name_with_args(self, trait_name String, trait_type_args List[* Type], concrete_type_c_name String) String = {
+        return "\(self.vtable_struct_name(self.mangled_trait_name(trait_name, trait_type_args)))_for_\(self.sanitize_codegen_identifier(concrete_type_c_name))";
+    };
+
+    public vtable_instance_name_with_args(self, trait_name String, trait_type_args List[* Type], concrete_type_c_name String) String = {
+        let sanitized_trait = self.sanitize_codegen_identifier(self.mangled_trait_name(trait_name, trait_type_args));
+        let sanitized_type = self.sanitize_codegen_identifier(concrete_type_c_name);
+        return "__koral_vtable_\(sanitized_trait)_for_\(sanitized_type)";
     };
 
     /// 返回 vtable 实例的 C 变量名
@@ -669,8 +695,8 @@ given CodeGen {
     /// - *mutable self：直接使用实际方法 C 名称
     ///
     /// Requirements: 10.5
-    public generate_vtable_instance(*mutable self, concrete_type Type, concrete_type_c_name String, trait_name String, members List[MIRTraitVTableMethod], actual_method_def_ids Dict[String, DefId]) Void = {
-        let instance_name = self.vtable_instance_name(trait_name, concrete_type_c_name);
+    public generate_vtable_instance(*mutable self, concrete_type Type, concrete_type_c_name String, trait_name String, trait_type_args List[*Type], members List[MIRTraitVTableMethod], actual_method_def_ids Dict[String, DefId]) Void = {
+        let instance_name = self.vtable_instance_name_with_args(trait_name, trait_type_args, concrete_type_c_name);
 
         // 去重：如果已生成，跳过
         if self.generated_vtable_instances.contains(instance_name) then {
@@ -678,7 +704,7 @@ given CodeGen {
         };
         self.generated_vtable_instances.insert(instance_name);
 
-        let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name);
+        let struct_name = self.specialized_vtable_struct_name_with_args(trait_name, trait_type_args, concrete_type_c_name);
 
         self.buffer.push_string("static const struct \(struct_name) \(instance_name) = {\n");
 
@@ -1283,10 +1309,11 @@ given CodeGen {
             };
 
             // 步骤1：生成 vtable 结构体定义（按具体接收者专门化）
-            let struct_key = self.specialized_vtable_struct_name(trait_name, concrete_c_name);
+            let struct_key = self.specialized_vtable_struct_name_with_args(trait_name, req.trait_type_args, concrete_c_name);
             if not generated_vtable_structs.contains(struct_key) then {
                 generated_vtable_structs.insert(struct_key);
-                self.generate_vtable_struct_definition(trait_name, concrete_c_name, ordered_members);
+                let mangled = self.mangled_trait_name(trait_name, req.trait_type_args);
+                self.generate_vtable_struct_definition(mangled, concrete_c_name, ordered_members);
                 self.buffer.push_string("\n");
             };
 
@@ -1321,7 +1348,7 @@ given CodeGen {
             };
 
             // 步骤3：生成 vtable 实例
-            self.generate_vtable_instance(concrete_type, concrete_c_name, trait_name, ordered_members, actual_method_def_ids);
+            self.generate_vtable_instance(concrete_type, concrete_c_name, trait_name, req.trait_type_args, ordered_members, actual_method_def_ids);
             self.buffer.push_string("\n");
         };
     };
@@ -1334,7 +1361,7 @@ given CodeGen {
     /// 仅引用类型可以转换为 trait 对象。
     ///
     /// Requirements: 10.6
-    public generate_trait_object_conversion_from_ref_value(*mutable self, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
+    public generate_trait_object_conversion_from_ref_value(*mutable self, ref_value String, trait_name String, trait_type_args List[*Type], concrete_type Type, retain_source Bool) String = {
         let normalized_concrete_type = concrete_type;
         let trait_object_like_source = when normalized_concrete_type in {
             .TraitObject(_, _) then true,
@@ -1348,7 +1375,7 @@ given CodeGen {
             .Some(name) then name,
             .None() then self.c_type_name(normalized_concrete_type),
         };
-        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name);
+        let vtable_name = self.vtable_instance_name_with_args(trait_name, trait_type_args, concrete_c_name);
         let result = self.next_temp_with_decl("struct __koral_TraitRef");
         self.add_indent();
         self.buffer.push_string("\(result).ptr = \(ref_value).ptr;\n");

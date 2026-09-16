@@ -6,6 +6,102 @@
     mutable diagnostics DiagnosticCollector,
 );
 
+file_private type PreparedMIRLowering(
+    metadata_program * MIRProgram,
+    work_items List[* MIRFunctionWorkItem],
+    builder_program MonomorphizedProgram,
+);
+
+public type LoweredMIRProgram(
+    mir_program *mutable MIRProgram,
+    diagnostics DiagnosticCollector,
+);
+
+file_private let empty_monomorphized_program() MonomorphizedProgram = {
+    return MonomorphizedProgram(
+        List[* TypedDecl].new(),
+        Dict[String, TraitDeclInfo].new(),
+        List[VtableRequest].new(),
+        Dict[DefId, ReceiverMethodDispatchInfo].new(),
+        Dict[DefId, ConcreteCallableInfo].new(),
+        Dict[String, DefId].new(),
+        GenericTemplateRegistry.new(),
+        Scope.new_root(),
+        ImportGraph.new(),
+        MethodTable.new(),
+        TraitRegistry.new(),
+        Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        Dict[String, Dict[String, ConcreteMethodEntry]].new(),
+        Dict[String, DefId].new(),
+        Dict[UInt, List[Pair[DefId, Type]]].new(),
+    );
+};
+
+file_private let make_builder_program_view(program *mutable MonomorphizedProgram) MonomorphizedProgram = {
+    return MonomorphizedProgram(
+        List[* TypedDecl].new(),
+        Dict[String, TraitDeclInfo].new(),
+        List[VtableRequest].new(),
+        program.receiver_method_dispatch,
+        program.concrete_callables_by_def_id,
+        program.static_method_by_key,
+        GenericTemplateRegistry.new(),
+        Scope.new_root(),
+        ImportGraph.new(),
+        MethodTable.new(),
+        TraitRegistry.new(),
+        Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        Dict[String, Dict[String, ConcreteMethodEntry]].new(),
+        Dict[String, DefId].new(),
+        Dict[UInt, List[Pair[DefId, Type]]].new(),
+    );
+};
+
+file_private let prepare_mir_lowering(program *mutable MonomorphizedProgram, context * CompilerContext) PreparedMIRLowering = {
+    let mutable prep = MIRLowerer.new(program, context);
+    let metadata_program = prep.metadata_program();
+    let mutable work_items = List[* MIRFunctionWorkItem].new();
+    let mutable done = false;
+    prep.prepare_streaming_nodes();
+    while not done then {
+        when prep.pending_work_items.pop() in {
+            .Some(item) then {
+                work_items.push(item);
+                continue;
+            },
+            .None() then {},
+        };
+        when prep.program.global_nodes.pop() in {
+            .Some(node_ref) then prep.enqueue_node_work_items(node_ref),
+            .None() then { done = true;},
+        };
+    };
+    return PreparedMIRLowering(metadata_program, work_items, make_builder_program_view(program));
+};
+
+public let lower_monomorphized_program_releasing_source(mutable program MonomorphizedProgram, context * CompilerContext) LoweredMIRProgram = {
+    let prepared = prepare_mir_lowering(&mutable program, context);
+    program = empty_monomorphized_program();
+
+    let mutable builder_program = box(prepared.builder_program);
+    let mutable lowerer = MIRLowerer.new(builder_program, context);
+    let mutable functions = List[* MIRFunction].new();
+    for item in prepared.work_items then {
+        functions.push(lowerer.lower_work_item(item));
+    };
+    let lowered = box(MIRProgram(
+        prepared.metadata_program.globals,
+        functions,
+        prepared.metadata_program.context,
+        prepared.metadata_program.static_method_lookup,
+        prepared.metadata_program.traits,
+        prepared.metadata_program.receiver_method_dispatch,
+        prepared.metadata_program.concrete_callables_by_def_id,
+    ));
+    let mutable promoter = MIRReferenceAllocationPromoter.new(lowered);
+    return LoweredMIRProgram(promoter.promote(), lowerer.diagnostics);
+};
+
 given MIRLowerer {
     public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false, DiagnosticCollector.new());
@@ -704,7 +800,7 @@ given MIRLowerer {
 };
 
 type MIRReferenceAllocationPromoter(
-    program * MIRProgram,
+    program *mutable MIRProgram,
 );
 
 type MIRReferenceAllocationFunctionPromoter(
@@ -731,6 +827,10 @@ type MIRFunctionEscapeAnalysis(
     escaping_locals Set[UInt],
     escaping_value_locals Set[UInt],
 );
+
+file_private let empty_escape_summary() MIREscapeSummary = {
+    return MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+};
 
 file_private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
     return when place in {
@@ -798,7 +898,7 @@ file_private let visit_local_escape_value(
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
-                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else empty_escape_summary();
                     let mutable ai = 0(UInt);
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
@@ -1137,7 +1237,7 @@ file_private let visit_escape_value(
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
-                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else empty_escape_summary();
                     let mutable ai = 0(UInt);
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
@@ -1236,11 +1336,12 @@ file_private let visit_escape_statement(
 file_private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
     let mutable param_maps = Dict[UInt, Dict[UInt, UInt]].new();
     for function_ref in program.functions then {
-        param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref));
+        let param_map = build_param_local_map(function_ref);
+        param_maps.insert(function_ref.identifier.def_id.id, param_map);
     };
     let mutable summaries = Dict[UInt, MIREscapeSummary].new();
     for function_ref in program.functions then {
-        summaries.insert(function_ref.identifier.def_id.id, MIREscapeSummary(Set[UInt].new(), Set[UInt].new()));
+        summaries.insert(function_ref.identifier.def_id.id, empty_escape_summary());
     };
     let mutable changed = true;
     while changed then {
@@ -1248,6 +1349,9 @@ file_private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREs
         for function_ref in program.functions then {
             let func_id = function_ref.identifier.def_id.id;
             let param_map = param_maps.get(func_id) or else Dict[UInt, UInt].new();
+            if param_map.is_empty() then {
+                continue;
+            };
             let mutable returning = Set[UInt].new();
             let mutable direct_escaping = Set[UInt].new();
             let mutable local_sources = Dict[UInt, Set[UInt]].new();
@@ -1278,7 +1382,7 @@ file_private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREs
                 };
             };
             let next = MIREscapeSummary(returning, direct_escaping);
-            let current = summaries.get(func_id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+            let current = summaries.get(func_id) or else empty_escape_summary();
             if not (sets_equal(current.returning_parameter_indices, next.returning_parameter_indices) and sets_equal(current.direct_reference_escaping_parameter_indices, next.direct_reference_escaping_parameter_indices)) then {
                 summaries.insert(func_id, next);
                 changed = true;
@@ -1386,11 +1490,11 @@ file_private let mir_function_needs_reference_allocation_promotion(function * MI
 };
 
 given MIRReferenceAllocationPromoter {
-    public new(program * MIRProgram) MIRReferenceAllocationPromoter = {
+    public new(program *mutable MIRProgram) MIRReferenceAllocationPromoter = {
         return MIRReferenceAllocationPromoter(program);
     };
 
-    public promote(*mutable self) * MIRProgram = {
+    public promote(*mutable self) *mutable MIRProgram = {
         let mutable needs_promotion = false;
         for function_ref in self.program.functions then {
             if mir_function_needs_reference_allocation_promotion(function_ref) then {
@@ -1407,7 +1511,12 @@ given MIRReferenceAllocationPromoter {
         let escape_summaries = compute_escape_summaries(self.program);
 
         let mutable functions = List[* MIRFunction].new();
-        for function_ref in self.program.functions then {
+        while not self.program.functions.is_empty() then {
+            let function_ref = self.program.functions.pop().unwrap();
+            if not mir_function_needs_reference_allocation_promotion(function_ref) then {
+                functions.push(function_ref);
+                continue;
+            };
             let escape_analysis = compute_function_escape_analysis(function_ref, escape_summaries);
             let temporary_ids = compute_temporary_local_ids(function_ref);
             let mutable promoter = MIRReferenceAllocationFunctionPromoter.new(
@@ -1856,7 +1965,7 @@ given MIRReferenceAllocationFunctionPromoter {
         };
         let direct_ref_escaping = when callee in {
             .Function(symbol) then {
-                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else empty_escape_summary();
                 yield summary.direct_reference_escaping_parameter_indices;
             },
             _ then {
@@ -1871,7 +1980,7 @@ given MIRReferenceAllocationFunctionPromoter {
         };
         let returning_params = when callee in {
             .Function(symbol) then {
-                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new());
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else empty_escape_summary();
                 yield summary.returning_parameter_indices;
             },
             _ then Set[UInt].new(),

@@ -1313,12 +1313,13 @@ given MIRFunctionBuilder {
         self.pattern_subject_tag = Option[MIROperand].None();
         self.pattern_comparison_local = Option[MIRLocalID].None();
         let mutable index UInt = 0;
+        let unmatched_trap_block = self.make_block();
         while index < arms.count() then {
             self.set_current_block(next_test_block);
             let condition = self.lower_pattern_condition(subject_place, subject.expr_type, arms[index].pattern, false);
             let condition_block = self.current_block_id();
             let body_block = self.make_block();
-            let next_block = if index + 1(UInt) == arms.count() then join_block else self.make_block();
+            let next_block = if index + 1(UInt) == arms.count() then unmatched_trap_block else self.make_block();
             self.set_current_block(condition_block);
             self.terminate(MIRTerminator.Branch(condition, body_block, next_block));
             self.set_current_block(body_block);
@@ -1345,6 +1346,8 @@ given MIRFunctionBuilder {
         self.pattern_subject_operand = saved_pattern_subject;
         self.pattern_subject_tag = saved_pattern_tag;
         self.pattern_comparison_local = saved_comparison_local;
+        self.set_current_block(unmatched_trap_block);
+        self.terminate(MIRTerminator.Unreachable());
         self.set_current_block(join_block);
         when subject_scope in {
             .Some(scope) then {
@@ -2883,7 +2886,7 @@ given MIRFunctionBuilder {
                     };
                 };
                 yield self.lower_value(base);
-            }
+            },
             _ then self.lower_value(base),
         };
     };
