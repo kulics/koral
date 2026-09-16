@@ -6,6 +6,119 @@ import Foundation
 
 extension TypeChecker {
 
+  func explicitImportErrorForUnresolvedType(_ name: String) -> SemanticError? {
+    for moduleInfo in moduleSymbols.values {
+      guard let type = moduleInfo.publicTypes[name] else {
+        continue
+      }
+
+      let modulePath = moduleInfo.modulePath
+      guard !modulePath.isEmpty else {
+        continue
+      }
+
+      let access: AccessModifier
+      switch type {
+      case .structure(let defId), .enum(let defId), .opaque(let defId):
+        access = defIdMap.getAccess(defId) ?? .module_private
+      default:
+        access = .public
+      }
+
+      switch access {
+      case .file_private, .module_private:
+        continue
+      case .package_private:
+        let packageMatches: Bool = {
+          switch type {
+          case .structure(let defId), .enum(let defId), .opaque(let defId):
+            return !currentPackageID.isEmpty && defIdMap.getPackageID(defId) == currentPackageID
+          default:
+            return false
+          }
+        }()
+        guard packageMatches else {
+          continue
+        }
+      case .public:
+        break
+      }
+
+      return SemanticError(
+        .generic(
+          visibilityChecker.generateErrorMessage(
+            symbolName: name,
+            symbolModulePath: modulePath,
+            currentModulePath: currentModulePath
+          )
+        ),
+        span: currentSpan
+      )
+    }
+
+    for defId in defIdMap.allDefIds {
+      guard defIdMap.getName(defId) == name,
+            let kind = defIdMap.getKind(defId) else {
+        continue
+      }
+
+      switch kind {
+      case .type(let typeKind):
+        if typeKind == .trait {
+          continue
+        }
+      case .genericTemplate(let templateKind):
+        switch templateKind {
+        case .structure, .enum:
+          break
+        case .function:
+          continue
+        }
+      default:
+        continue
+      }
+
+      let modulePath = defIdMap.getModulePath(defId) ?? []
+      guard !modulePath.isEmpty else {
+        continue
+      }
+
+      let access = defIdMap.getAccess(defId) ?? .module_private
+      switch access {
+      case .file_private, .module_private:
+        continue
+      case .package_private:
+        guard !currentPackageID.isEmpty,
+              defIdMap.getPackageID(defId) == currentPackageID else {
+          continue
+        }
+      case .public:
+        break
+      }
+
+      if !visibilityChecker.canAccessDirectly(
+        symbolModulePath: modulePath,
+        currentModulePath: currentModulePath,
+        currentSourceFile: currentSourceFile,
+        symbolName: name,
+        importGraph: importGraph
+      ) {
+        return SemanticError(
+          .generic(
+            visibilityChecker.generateErrorMessage(
+              symbolName: name,
+              symbolModulePath: modulePath,
+              currentModulePath: currentModulePath
+            )
+          ),
+          span: currentSpan
+        )
+      }
+    }
+
+    return nil
+  }
+
   private func wrapManagedReference(inner: Type, mutable: Bool) -> Type {
     return mutable ? .mutableReference(inner: inner) : .reference(inner: inner)
   }
@@ -154,6 +267,9 @@ extension TypeChecker {
       }
       if visibleTraitInfo(name) != nil {
         throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
+      }
+      if let importError = explicitImportErrorForUnresolvedType(name) {
+        throw importError
       }
       throw SemanticError.undefinedType(name)
     case .inferredSelf:

@@ -1,11 +1,50 @@
 import Foundation
 
+fileprivate func buildEscapeSummaryDefIdByName(
+  functions: [MIRFunction],
+  context: CompilerContext
+) -> [String: DefId] {
+  var result: [String: DefId] = [:]
+  for function in functions {
+    if let qualifiedName = context.getQualifiedName(function.identifier.defId) {
+      result[qualifiedName] = function.identifier.defId
+    }
+    if let name = context.getName(function.identifier.defId) {
+      result[name] = function.identifier.defId
+    }
+  }
+  return result
+}
+
+fileprivate func lookupEscapeSummary(
+  for symbol: Symbol,
+  summariesByDefId: [DefId: MIREscapeSummary],
+  summaryDefIdByName: [String: DefId],
+  context: CompilerContext
+) -> MIREscapeSummary? {
+  if let summary = summariesByDefId[symbol.defId] {
+    return summary
+  }
+  if let qualifiedName = context.getQualifiedName(symbol.defId),
+     let defId = summaryDefIdByName[qualifiedName],
+     let summary = summariesByDefId[defId] {
+    return summary
+  }
+  if let name = context.getName(symbol.defId),
+     let defId = summaryDefIdByName[name],
+     let summary = summariesByDefId[defId] {
+    return summary
+  }
+  return nil
+}
+
 final class MIRReferenceAllocationPromoter {
   private let program: MIRProgram
   private let context: CompilerContext
   private let functionParametersByDefId: [DefId: [Parameter]]
   private let functionParametersByName: [String: [Parameter]]
   private let escapeSummariesByDefId: [DefId: MIREscapeSummary]
+  private let escapeSummaryDefIdByName: [String: DefId]
 
   init(program: MIRProgram) {
     self.program = program
@@ -37,6 +76,7 @@ final class MIRReferenceAllocationPromoter {
       }
     }
     self.functionParametersByName = parametersByName
+    self.escapeSummaryDefIdByName = buildEscapeSummaryDefIdByName(functions: program.functions, context: context)
     self.escapeSummariesByDefId = Self.computeEscapeSummaries(program: program, context: context)
   }
 
@@ -48,6 +88,7 @@ final class MIRReferenceAllocationPromoter {
         functionParametersByDefId: functionParametersByDefId,
         functionParametersByName: functionParametersByName,
         escapeSummariesByDefId: escapeSummariesByDefId,
+        escapeSummaryDefIdByName: escapeSummaryDefIdByName,
         context: context
       ).promote()
     }
@@ -65,7 +106,7 @@ final class MIRReferenceAllocationPromoter {
   }
 
   private static func computeEscapeSummaries(program: MIRProgram, context: CompilerContext) -> [DefId: MIREscapeSummary] {
-    _ = context
+    let summaryDefIdByName = buildEscapeSummaryDefIdByName(functions: program.functions, context: context)
 
     func localParameterIndexMap(for function: MIRFunction) -> [MIRLocalID: Int] {
       var result: [MIRLocalID: Int] = [:]
@@ -164,7 +205,12 @@ final class MIRReferenceAllocationPromoter {
       switch value {
       case .call(let call):
         if case .function(let callee) = call.callee,
-           let calleeSummary = summaries[callee.defId] {
+           let calleeSummary = lookupEscapeSummary(
+             for: callee,
+             summariesByDefId: summaries,
+             summaryDefIdByName: summaryDefIdByName,
+             context: context
+           ) {
           for (index, argument) in call.arguments.enumerated() {
             if calleeSummary.directReferenceEscapingParameterIndices.contains(index) {
               markDirectEscape(argument)
@@ -311,6 +357,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
   private let functionParametersByDefId: [DefId: [Parameter]]
   private let functionParametersByName: [String: [Parameter]]
   private let escapeSummariesByDefId: [DefId: MIREscapeSummary]
+  private let escapeSummaryDefIdByName: [String: DefId]
   private let context: CompilerContext
   private let resolver: MIRTypeResolver
   private let escapeAnalysis: MIRFunctionEscapeAnalysis
@@ -323,6 +370,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
     functionParametersByDefId: [DefId: [Parameter]],
     functionParametersByName: [String: [Parameter]],
     escapeSummariesByDefId: [DefId: MIREscapeSummary],
+    escapeSummaryDefIdByName: [String: DefId],
     context: CompilerContext
   ) {
     self.function = function
@@ -330,10 +378,16 @@ private final class MIRReferenceAllocationFunctionPromoter {
     self.functionParametersByDefId = functionParametersByDefId
     self.functionParametersByName = functionParametersByName
     self.escapeSummariesByDefId = escapeSummariesByDefId
+    self.escapeSummaryDefIdByName = escapeSummaryDefIdByName
     self.context = context
     self.resolver = MIRTypeResolver(function: function, context: context)
     self.temporaryLocalIds = Set(function.locals.filter({ $0.storage == .temporary }).map(\.id))
-    self.escapeAnalysis = Self.computeFunctionEscapeAnalysis(function: function, summaries: escapeSummariesByDefId)
+    self.escapeAnalysis = Self.computeFunctionEscapeAnalysis(
+      function: function,
+      summaries: escapeSummariesByDefId,
+      summaryDefIdByName: escapeSummaryDefIdByName,
+      context: context
+    )
     self.temporaryValueSourcesByLocal = Self.buildTemporaryValueSources(function: function, temporaryLocalIds: temporaryLocalIds)
   }
 
@@ -391,12 +445,19 @@ private final class MIRReferenceAllocationFunctionPromoter {
   private static func visitLocalEscapeValue(
     _ value: MIRValue,
     summaries: [DefId: MIREscapeSummary],
+    summaryDefIdByName: [String: DefId],
+    context: CompilerContext,
     escaping: inout Set<MIRLocalID>
   ) {
     switch value {
     case .call(let call):
       if case .function(let callee) = call.callee,
-         let calleeSummary = summaries[callee.defId] {
+         let calleeSummary = lookupEscapeSummary(
+           for: callee,
+           summariesByDefId: summaries,
+           summaryDefIdByName: summaryDefIdByName,
+           context: context
+         ) {
         for (index, argument) in call.arguments.enumerated() {
           if calleeSummary.directReferenceEscapingParameterIndices.contains(index) {
             markLocalEscape(argument, escaping: &escaping)
@@ -408,35 +469,35 @@ private final class MIRReferenceAllocationFunctionPromoter {
         }
       }
       for argument in call.arguments {
-        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(argument, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       }
     case .traitMethodCall(let call):
       markLocalEscape(call.receiver, escaping: &escaping)
-      visitLocalEscapeValue(call.receiver, summaries: summaries, escaping: &escaping)
+      visitLocalEscapeValue(call.receiver, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       for argument in call.arguments {
         markLocalEscape(argument, escaping: &escaping)
-        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(argument, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       }
     case .aggregate(let aggregate):
       for field in aggregate.fields {
         markLocalEscape(field, escaping: &escaping)
-        visitLocalEscapeValue(field, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(field, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       }
     case .enumCase(let construction):
       for argument in construction.arguments {
         markLocalEscape(argument, escaping: &escaping)
-        visitLocalEscapeValue(argument, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(argument, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       }
     case .traitObjectConversion(let conversion):
       markLocalEscape(conversion.inner, escaping: &escaping)
-      visitLocalEscapeValue(conversion.inner, summaries: summaries, escaping: &escaping)
+      visitLocalEscapeValue(conversion.inner, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
     case .enumTag(let tag):
-      visitLocalEscapeValue(tag.subject, summaries: summaries, escaping: &escaping)
+      visitLocalEscapeValue(tag.subject, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
     case .intrinsic(let intrinsic):
       switch intrinsic {
       case .makeRef(_, let owner, _), .makeMutRef(_, let owner, _):
         markLocalEscape(owner, escaping: &escaping)
-        visitLocalEscapeValue(owner, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(owner, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .downgradeRef(let value, _),
            .downgradeMutRef(let value, _),
            .upgradeRef(let value, _),
@@ -445,24 +506,24 @@ private final class MIRReferenceAllocationFunctionPromoter {
            .refCount(let value),
            .traitObjectMatches(let value, _, _, _),
            .traitObjectDowncast(let value, _):
-        visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(value, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .copyMemory(let dest, let source, let count),
            .moveMemory(let dest, let source, let count):
-        visitLocalEscapeValue(dest, summaries: summaries, escaping: &escaping)
-        visitLocalEscapeValue(source, summaries: summaries, escaping: &escaping)
-        visitLocalEscapeValue(count, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(dest, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
+        visitLocalEscapeValue(source, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
+        visitLocalEscapeValue(count, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .initMemory(let ptr, let value):
-        visitLocalEscapeValue(ptr, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(ptr, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
         markLocalEscape(value, escaping: &escaping)
-        visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(value, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .deallocMemory(let ptr), .deinitMemory(let ptr), .takeMemory(let ptr, _):
-        visitLocalEscapeValue(ptr, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(ptr, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
-        visitLocalEscapeValue(outHandle, summaries: summaries, escaping: &escaping)
-        visitLocalEscapeValue(outTid, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(outHandle, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
+        visitLocalEscapeValue(outTid, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
         markLocalEscape(closure, escaping: &escaping)
-        visitLocalEscapeValue(closure, summaries: summaries, escaping: &escaping)
-        visitLocalEscapeValue(stackSize, summaries: summaries, escaping: &escaping)
+        visitLocalEscapeValue(closure, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
+        visitLocalEscapeValue(stackSize, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
       case .allocMemory, .nullPtr:
         break
       }
@@ -477,15 +538,20 @@ private final class MIRReferenceAllocationFunctionPromoter {
     }
   }
 
-  private static func computeEscapingLocals(function: MIRFunction, summaries: [DefId: MIREscapeSummary]) -> Set<MIRLocalID> {
+  private static func computeEscapingLocals(
+    function: MIRFunction,
+    summaries: [DefId: MIREscapeSummary],
+    summaryDefIdByName: [String: DefId],
+    context: CompilerContext
+  ) -> Set<MIRLocalID> {
     var escaping: Set<MIRLocalID> = []
     for block in function.blocks {
       for statement in block.statements {
         switch statement {
         case .assign(_, let value), .evaluate(let value), .retain(let value), .release(let value):
-          visitLocalEscapeValue(value, summaries: summaries, escaping: &escaping)
+          visitLocalEscapeValue(value, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
         case .compoundAssign(let assignment):
-          visitLocalEscapeValue(assignment.value, summaries: summaries, escaping: &escaping)
+          visitLocalEscapeValue(assignment.value, summaries: summaries, summaryDefIdByName: summaryDefIdByName, context: context, escaping: &escaping)
         case .declare, .drop, .scopeEnter, .scopeExit, .debugSource:
           break
         }
@@ -569,9 +635,19 @@ private final class MIRReferenceAllocationFunctionPromoter {
     return escaping
   }
 
-  private static func computeFunctionEscapeAnalysis(function: MIRFunction, summaries: [DefId: MIREscapeSummary]) -> MIRFunctionEscapeAnalysis {
+  private static func computeFunctionEscapeAnalysis(
+    function: MIRFunction,
+    summaries: [DefId: MIREscapeSummary],
+    summaryDefIdByName: [String: DefId],
+    context: CompilerContext
+  ) -> MIRFunctionEscapeAnalysis {
     MIRFunctionEscapeAnalysis(
-      escapingLocals: computeEscapingLocals(function: function, summaries: summaries),
+      escapingLocals: computeEscapingLocals(
+        function: function,
+        summaries: summaries,
+        summaryDefIdByName: summaryDefIdByName,
+        context: context
+      ),
       escapingValueLocals: computeEscapingValueLocals(function: function)
     )
   }
@@ -734,6 +810,12 @@ private final class MIRReferenceAllocationFunctionPromoter {
        !escapeAnalysis.escapingLocals.contains(localID) {
       return recursivelyPromoted
     }
+    switch recursivelyPromoted {
+    case .call, .traitMethodCall:
+      return recursivelyPromoted
+    default:
+      break
+    }
     return promoteDirectReferences(in: recursivelyPromoted)
   }
 
@@ -766,7 +848,12 @@ private final class MIRReferenceAllocationFunctionPromoter {
       } else {
         parameters = []
       }
-      if let summary = escapeSummariesByDefId[symbol.defId] {
+      if let summary = lookupEscapeSummary(
+        for: symbol,
+        summariesByDefId: escapeSummariesByDefId,
+        summaryDefIdByName: escapeSummaryDefIdByName,
+        context: context
+      ) {
         directRefEscapingIndices = summary.directReferenceEscapingParameterIndices
         returningParameterIndices = summary.returningParameterIndices
       } else {

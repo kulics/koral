@@ -20,6 +20,16 @@ file_private type PreparedCompilation(
     default_output_dir Path,
 );
 
+file_private let phase_trace_enabled() Bool = {
+    return if env("KORAL_DEBUG_PHASE") is .Some(value) then value == "1" or value == "true" or value == "TRUE" else false;
+};
+
+file_private let trace_phase(label String) Void = {
+    if phase_trace_enabled() then {
+        eprintln(label);
+    };
+};
+
 public let run_driver() Int = {
     let argv = args();
 
@@ -948,16 +958,39 @@ file_private let build_c_output_path(artifact_base_name String, default_output_d
 };
 
 type MIRLoweringOutput(
-    mir_program Option[* MIRProgram],
+    mir_program Option[*mutable MIRProgram],
     context CompilerContext,
     diagnostics DiagnosticCollector,
 );
 
-file_private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program * TypedProgram, display_name String) MIRLoweringOutput = {
-    let mutable context = result.context;
+type MonomorphizationOutput(
+    mono_program Option[MonomorphizedProgram],
+    diagnostics DiagnosticCollector,
+);
 
+file_private let empty_typed_program() TypedProgram = {
+    return TypedProgram(List[* TypedDecl].new(), Dict[UInt, String].new());
+};
+
+file_private let empty_body_checker_output() BodyCheckerOutput = {
+    return BodyCheckerOutput(
+        Option[TypedProgram].None(),
+        CompilerContext.new(),
+        Scope.new_root(),
+        ImportGraph.new(),
+        MethodTable.new(),
+        TraitRegistry.new(),
+        Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        DiagnosticCollector.new(),
+        GenericTemplateRegistry.new(),
+        Set[InstantiationRequest].new(),
+    );
+};
+
+file_private let monomorphize_after_typecheck(mutable result BodyCheckerOutput, mutable typed_program TypedProgram, context CompilerContext, phase_prefix String) MonomorphizationOutput = {
+    trace_phase(phase_prefix + ": monomorphize");
     let mutable mono = Monomorphizer.new_with_inputs(
-        *typed_program,
+        typed_program,
         result.instantiation_requests,
         result.generic_templates,
         context,
@@ -967,27 +1000,42 @@ file_private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_pro
         result.trait_registry,
         result.conformance_index,
     );
-    let mutable mono_program = (&mutable mono).monomorphize();
-    if mono.diagnostics().has_errors() then {
-        context.drop_concrete_bodies();
-        context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[* MIRProgram].None(), context, mono.diagnostics());
-    };
+    typed_program = empty_typed_program();
+    result = empty_body_checker_output();
 
-    let mutable lowerer = MIRLowerer.new(&mutable mono_program, &mutable context);
-    let mir_program = lowerer.lower();
-    if lowerer.diagnostics.has_errors() then {
+    let built_program = (&mutable mono).monomorphize();
+    if mono.diagnostics().has_errors() then {
+        return MonomorphizationOutput(Option[MonomorphizedProgram].None(), mono.diagnostics());
+    };
+    return MonomorphizationOutput(Option[MonomorphizedProgram].Some(built_program), DiagnosticCollector.new());
+};
+
+file_private let lower_mir_after_typecheck(mutable result BodyCheckerOutput, mutable typed_program TypedProgram, display_name String) MIRLoweringOutput = {
+    let mutable context = result.context;
+
+    let mono_output = monomorphize_after_typecheck(result, typed_program, context, display_name);
+    if mono_output.diagnostics.has_errors() then {
         context.drop_concrete_bodies();
         context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, lowerer.diagnostics);
+        return MIRLoweringOutput(Option[*mutable MIRProgram].None(), context, mono_output.diagnostics);
+    };
+    let mutable mono_program = mono_output.mono_program.unwrap();
+
+    trace_phase(display_name + ": mir");
+    let lowered_mir = lower_monomorphized_program_releasing_source(mono_program, &mutable context);
+    let mir_program = lowered_mir.mir_program;
+    if lowered_mir.diagnostics.has_errors() then {
+        context.drop_concrete_bodies();
+        context.drop_codegen_unused_metadata();
+        return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, lowered_mir.diagnostics);
     };
     let verifier = MIRVerifier.new(mir_program);
-    let mutable diagnostics = lowerer.diagnostics;
+    let mutable diagnostics = lowered_mir.diagnostics;
     let _ = verifier.verify() or else {
         diagnostics.push(make_diagnostic(DiagnosticStage.Other(), display_name, it.message()));
         context.drop_concrete_bodies();
         context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, diagnostics);
+        return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, diagnostics);
     };
 
     // MIR lowering has consumed the concrete body caches; release them
@@ -995,30 +1043,52 @@ file_private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_pro
     context.drop_concrete_bodies();
     context.drop_codegen_unused_metadata();
 
-    return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, DiagnosticCollector.new());
+    return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, DiagnosticCollector.new());
 };
 
 type EmitCGenerationInput(
     output_path Path,
     linked_libraries List[String],
-    mir_program * MIRProgram,
+    mir_program *mutable MIRProgram,
     context CompilerContext,
 );
 
-file_private let prepare_emit_c_generation_input(options InvocationOptions, phase_prefix String) Option[EmitCGenerationInput] = {
+type PreparedEmitTypecheck(
+    output_path Path,
+    linked_libraries List[String],
+    display_name String,
+    result BodyCheckerOutput,
+);
+
+file_private let prepare_emit_c_typecheck(options InvocationOptions, phase_prefix String) Option[PreparedEmitTypecheck] = {
     let prepared = prepare_compilation(options) or else {
         eprintln(it.message());
+        return Option[PreparedEmitTypecheck].None();
+    };
+
+    let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir);
+    let display_name = prepared.display_name;
+    let linked_libraries = prepared.linked_libraries;
+    trace_phase(phase_prefix + ": type check");
+    let result = type_check_resolved_graph(prepared.graph, display_name);
+
+    return Option[PreparedEmitTypecheck].Some(PreparedEmitTypecheck(
+        output_path,
+        linked_libraries,
+        display_name,
+        result,
+    ));
+};
+
+file_private let prepare_emit_c_generation_input(options InvocationOptions, phase_prefix String) Option[EmitCGenerationInput] = {
+    let checked = prepare_emit_c_typecheck(options, phase_prefix) or else {
         return Option[EmitCGenerationInput].None();
     };
 
-    // Extract what we need from prepared before releasing the graph
-    let artifact_base_name = prepared.artifact_base_name;
-    let default_output_dir = prepared.default_output_dir;
-    let linked_libraries = prepared.linked_libraries;
-    let display_name = prepared.display_name;
-
-    let mutable result = type_check_resolved_graph(prepared.graph, display_name);
-    // prepared.graph (parsed AST) is now eligible for GC
+    let output_path = checked.output_path;
+    let linked_libraries = checked.linked_libraries;
+    let display_name = checked.display_name;
+    let mutable result = checked.result;
 
     if result.diagnostics.has_errors() then {
         print_user_focused_diagnostic_records(result.diagnostics, display_name);
@@ -1030,14 +1100,12 @@ file_private let prepare_emit_c_generation_input(options InvocationOptions, phas
         return Option[EmitCGenerationInput].None();
     };
 
-    let output_path = build_c_output_path(artifact_base_name, default_output_dir, options.out_dir);
-
     create_dir_all(output_path.dir_name()) or else {
         eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())");
         return Option[EmitCGenerationInput].None();
     };
 
-    let lowered = lower_mir_after_typecheck(&result, &typed_program, display_name);
+    let lowered = lower_mir_after_typecheck(result, typed_program, phase_prefix);
     if lowered.diagnostics.has_errors() then {
         print_user_focused_diagnostic_records(lowered.diagnostics, display_name);
         return Option[EmitCGenerationInput].None();
@@ -1054,7 +1122,7 @@ file_private let prepare_emit_c_generation_input(options InvocationOptions, phas
     ));
 };
 
-file_private let generate_c_from_mir(mir_program * MIRProgram, context CompilerContext, phase_prefix String) String = {
+file_private let generate_c_from_mir(mir_program *mutable MIRProgram, context CompilerContext, phase_prefix String) String = {
     let mutable concrete_mir_program = mir_program;
 
     let mutable cg = box(CodeGen.new(concrete_mir_program, context));
@@ -1064,6 +1132,7 @@ file_private let generate_c_from_mir(mir_program * MIRProgram, context CompilerC
     cg.finalize_program_into_buffer();
 
     let generated_c = cg.into_generated_string();
+    let _ = phase_prefix;
     return generated_c;
 };
 
@@ -1072,6 +1141,7 @@ file_private let emit_c(options InvocationOptions, phase_prefix String) Option[P
         return Option[Pair[Path, List[String]]].None();
     };
 
+    trace_phase(phase_prefix + ": codegen");
     let generated_c = generate_c_from_mir(generation_input.mir_program, generation_input.context, phase_prefix);
 
     write_text_file(generation_input.output_path, generated_c) or else {

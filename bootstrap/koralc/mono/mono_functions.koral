@@ -1031,7 +1031,7 @@ file_private let conformance_method_has_explicit_body(
                     break;
                 };
             };
-        }
+        },
         .None() then {},
     };
     return explicit;
@@ -1100,6 +1100,101 @@ public let instantiate_conformance_trait_methods_for_type(
     };
 
     mono.storage.conformance_trait_methods_scan_version.insert(parameterized_base_type, current_generation_version);
+};
+
+public let instantiate_conformance_trait_method_for_type(
+    mono * Monomorphizer,
+    base_type Type,
+    trait_name String,
+    method_name String,
+    method_type_args List[* Type],
+) Void = {
+    let parameterized_base_type = resolve_parameterized_type(mono, base_type);
+    if has_generic_parameter(parameterized_base_type) or args_have_generic_parameter(method_type_args) then {
+        return;
+    };
+
+    let method_type_arg_count = Option[UInt].Some(method_type_args.count());
+
+    for node_ref in mono.storage.source_given_decls then {
+        when node_ref in {
+            .GivenTraitDecl(target_type, given_trait_name, trait_args, members, _) then {
+                if not trait_name_matches(given_trait_name, trait_name) then {
+                    continue;
+                };
+                if not trait_conformance_target_shallow_matches(mono, target_type, parameterized_base_type) then {
+                    continue;
+                };
+                let mutable has_member = false;
+                for member_ref in members then {
+                    if member_ref.name == method_name then {
+                        has_member = true;
+                        break;
+                    };
+                };
+                if not has_member then {
+                    continue;
+                };
+                let effective_trait_args = if trait_args.is_empty() then
+                        infer_trait_extension_type_args(mono, target_type, parameterized_base_type, given_trait_name) else resolve_given_trait_args(mono, target_type, trait_args, parameterized_base_type);
+                when select_trait_tool_template_cached(
+                    mono,
+                    given_trait_name,
+                    method_name,
+                    method_type_arg_count,
+                    Option[UInt].Some(effective_trait_args.count()),
+                ) in {
+                    .Some(tool_template_ref) then {
+                        let _ = mono.instantiate_extension_method_impl(
+                            parameterized_base_type,
+                            given_trait_name,
+                            tool_template_ref,
+                            effective_trait_args,
+                            method_type_args,
+                        );
+                        return;
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+    };
+
+    for ext_entry in mono.storage.generic_templates.extension_methods then {
+        for template_ref in ext_entry.second then {
+            let conformance_trait_name = when template_ref.conformance_trait_name in {
+                .Some(name) then name,
+                .None() then { continue;},
+            };
+            if not trait_name_matches(conformance_trait_name, trait_name) then {
+                continue;
+            };
+            if template_ref.method.name <> method_name then {
+                continue;
+            };
+            let conformance_target = when template_ref.conformance_target_type in {
+                .Some(target) then target,
+                .None() then { continue;},
+            };
+            if not trait_conformance_target_shallow_matches(mono, conformance_target, parameterized_base_type) then {
+                continue;
+            };
+            let effective_trait_args = resolve_extension_template_conformance_trait_args(
+                mono,
+                parameterized_base_type,
+                template_ref,
+            );
+            let _ = mono.instantiate_extension_method_impl(
+                parameterized_base_type,
+                ext_entry.first,
+                template_ref,
+                effective_trait_args,
+                method_type_args,
+            );
+            return;
+        };
+    };
 };
 
 // ── instantiate_extension_method ─────────────────────────────────────────────
@@ -1234,77 +1329,6 @@ public let instantiate_extension_method(
                 },
                 .None() then template,
             };
-    };
-
-    // Opportunistically materialize drop for the same concrete base when we
-    // instantiate any other extension method. This covers flows where a
-    // concrete generic type is only seen through method calls (e.g. Box[T].is_empty)
-    // and never receives an explicit struct/enum instantiation request.
-    if resolved_template.method.name <> "drop" and mono.storage.extension_body_resolution_depth == 0 then {
-        when mono.storage.generic_templates.lookup_extension_methods(effective_template_name) in {
-            .Some(ext_list) then {
-                for ext_ref in ext_list then {
-                    let is_drop_trait = when ext_ref.conformance_trait_name in {
-                        .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
-                        .None() then false,
-                    };
-                    if ext_ref.method.name <> "drop" and not is_drop_trait then {
-                        continue;
-                    };
-
-                    let mutable drop_type_args = effective_type_args;
-                    let mutable inferred_args = List[* Type].new();
-                    when resolved_base_type in {
-                        .GenericStruct(_, args) then {
-                            for arg in args then { inferred_args.push(arg);};
-                        },
-                        .GenericEnum(_, args) then {
-                            for arg in args then { inferred_args.push(arg);};
-                        },
-                        .StructureType(def_id) then {
-                            when mono.storage.context.get_type_arguments(def_id) in {
-                                .Some(args) then {
-                                    for arg in args then { inferred_args.push(box(arg));};
-                                },
-                                .None() then {},
-                            };
-                        },
-                        .EnumType(def_id) then {
-                            when mono.storage.context.get_type_arguments(def_id) in {
-                                .Some(args) then {
-                                    for arg in args then { inferred_args.push(box(arg));};
-                                },
-                                .None() then {},
-                            };
-                        },
-                        _ then {},
-                    };
-                    if not inferred_args.is_empty() then {
-                        drop_type_args = inferred_args;
-                    };
-
-                    let expected_count = ext_ref.type_params.count();
-                    if expected_count > 0(UInt) and drop_type_args.count() > expected_count then {
-                        let mutable trimmed = List[* Type].new();
-                        let mutable i = 0(UInt);
-                        while i < expected_count then {
-                            trimmed.push(box((*drop_type_args[i])));
-                            i += 1(UInt);
-                        };
-                        drop_type_args = trimmed;
-                    };
-
-                    let _ = mono.instantiate_extension_method_impl(
-                        resolved_base_type,
-                        effective_template_name,
-                        ext_ref,
-                        drop_type_args,
-                        List[* Type].new(),
-                    );
-                };
-            },
-            .None() then {},
-        };
     };
 
     // 5. Delegate to the inner implementation.
@@ -2480,7 +2504,7 @@ public let instantiate_trait_vtable_methods(
                     instantiated_any = true;
                 };
 
-            }
+            },
             .None() then {},
         };
     };

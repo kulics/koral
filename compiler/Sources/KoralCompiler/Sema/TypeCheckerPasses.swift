@@ -4,6 +4,28 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
+
+  private func containsNeverType(_ type: Type) -> Bool {
+    switch type {
+    case .never:
+      return true
+    case .function(let parameters, let returns):
+      return parameters.contains { containsNeverType($0.type) } || containsNeverType(returns)
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
+         .pointer(let inner),
+         .mutablePointer(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
+      return containsNeverType(inner)
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+      return args.contains(where: containsNeverType)
+    default:
+      return false
+    }
+  }
   
   private func assertNoBorrowedReferenceType(
     _ type: Type,
@@ -12,6 +34,16 @@ extension TypeChecker {
   ) throws {
     guard !type.containsBorrowedReference else {
       throw SemanticError(.generic("\(description) cannot contain borrowed `ref` / `ref mutable` types: '\(type)'"), span: span)
+    }
+  }
+
+  private func assertNoNeverType(
+    _ type: Type,
+    context description: String,
+    span: SourceSpan
+  ) throws {
+    guard !containsNeverType(type) else {
+      throw SemanticError(.generic("\(description) cannot contain Never type: '\(type)'"), span: span)
     }
   }
 
@@ -1535,6 +1567,25 @@ extension TypeChecker {
           if let typeName {
             let existingConcrete = Set((extensionMethods[typeName] ?? [:]).keys)
             hasExistingMethodSignature = methods.contains { existingConcrete.contains($0.name) }
+            // Track trait conformance method sources and detect ambiguity across traits
+            for method in methods {
+              if extensionMethodTraitSources[typeName] == nil {
+                extensionMethodTraitSources[typeName] = [:]
+              }
+              if extensionMethodTraitSources[typeName]![method.name] == nil {
+                extensionMethodTraitSources[typeName]![method.name] = []
+              }
+              let existingSources = extensionMethodTraitSources[typeName]![method.name]!
+              if !existingSources.contains(traitName) {
+                // If another trait already provides this method, it's ambiguous
+                if existingConcrete.contains(method.name) && !existingSources.isEmpty {
+                  throw SemanticError(.generic(
+                    "Ambiguous method '\(method.name)' for type '\(typeName)' via trait extensions"
+                  ), span: span)
+                }
+                extensionMethodTraitSources[typeName]![method.name]!.append(traitName)
+              }
+            }
           }
         }
 
@@ -1670,6 +1721,7 @@ extension TypeChecker {
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
           try assertNoBorrowedReferenceType(paramType, context: "struct field '\(param.name)'", span: span)
+          try assertNoNeverType(paramType, context: "struct field '\(param.name)'", span: span)
           if paramType == placeholder {
             throw SemanticError.invalidOperation(
               op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
@@ -1716,6 +1768,7 @@ extension TypeChecker {
       for field in fields {
         let fieldType = try resolveTypeNode(field.type)
         try assertNoBorrowedReferenceType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
+        try assertNoNeverType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         if fieldType == placeholder {
           throw SemanticError.invalidOperation(
             op: "Direct recursion in foreign struct \(name) not allowed (use ptr)",
@@ -1763,6 +1816,7 @@ extension TypeChecker {
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
             try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
+            try assertNoNeverType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             if resolved == placeholder {
               throw SemanticError.invalidOperation(
                 op: "Direct recursion in enum \(name) not allowed (use ref)", type1: p.name,
@@ -1803,6 +1857,7 @@ extension TypeChecker {
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
           try assertNotOpaqueType(paramType, span: span)
+          try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
           // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
           let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
@@ -1865,6 +1920,7 @@ extension TypeChecker {
       let params = try parameters.map { param -> Parameter in
         let paramType = try resolveTypeNode(param.type)
         try assertNotOpaqueType(paramType, span: span)
+        try assertNoNeverType(paramType, context: "foreign function parameter '\(param.name)'", span: span)
         let passKind = passKindForParameterType(paramType)
         return Parameter(type: paramType, kind: passKind)
       }
@@ -1889,6 +1945,7 @@ extension TypeChecker {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
+          try assertNoNeverType(paramType, context: "intrinsic function parameter '\(param.name)'", span: span)
           let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
         }
@@ -1996,6 +2053,7 @@ extension TypeChecker {
             for p in c.parameters {
               let payloadType = try resolveTypeNode(p.type)
               try assertNoBorrowedReferenceType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
+              try assertNoNeverType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             }
           }
         }
@@ -2210,6 +2268,7 @@ extension TypeChecker {
           try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
           let params = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
+            try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
             return makeLocalSymbol(
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
@@ -2245,6 +2304,7 @@ extension TypeChecker {
       let returnType = try resolveTypeNode(returnTypeNode)
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
+        try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
         return makeLocalSymbol(
           name: param.name, type: paramType,
           kind: .variable(param.mutable ? .MutableValue : .Value))
@@ -2298,6 +2358,7 @@ extension TypeChecker {
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
+        try assertNoNeverType(paramType, context: "foreign function parameter '\(param.name)'", span: span)
         if !isFfiCompatibleType(paramType) {
           throw SemanticError(
             .ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)),

@@ -20,6 +20,10 @@
 using std::os { .. };
 using std::proc { .. };
 
+file_private let codegen_function_trace_enabled() Bool = {
+    return if env("KORAL_DEBUG_CODEGEN_FUNCTIONS") is .Some(value) then value == "1" or value == "true" or value == "TRUE" else false;
+};
+
 type ForeignFunctionPrototype(
     name String,
     params List[TypedParam],
@@ -313,8 +317,6 @@ given CodeGen {
 
     public generate_prelude_into_buffer(*mutable self) Void = {
         self.buffer = CodegenBuffer.new();
-        self.precompute_c_type_name_cache();
-        self.precompute_callable_c_name_cache();
         let foreign_declarations = self.scan_program_codegen_inputs();
         self.emit_includes();
         self.emit_foreign_types(foreign_declarations);
@@ -511,7 +513,20 @@ given CodeGen {
     // ── emit_mir_function_implementations ────────────────────────────────────
 
     public emit_mir_function_implementations(*mutable self) Void = {
-        for function in self.program.functions then {
+        let mutable emitted_count = 0(UInt);
+        while not self.program.functions.is_empty() then {
+            let function = self.program.functions.pop().unwrap();
+            emitted_count += 1;
+            if codegen_function_trace_enabled() then {
+                eprintln(
+                    "codegen-fn \(emitted_count.to_string()) "
+                    + self.context.symbol_name(*(function.identifier))
+                    + " ctype=" + self.c_type_name_cache.count().to_string()
+                    + " cname=" + self.callable_c_name_cache.count().to_string()
+                    + " emitted=" + self.emitted_function_names.count().to_string()
+                    + " ownercache=" + self.current_owner_callable_c_name_cache.count().to_string()
+                );
+            };
             self.emit_mir_global_function(function);
         };
     };

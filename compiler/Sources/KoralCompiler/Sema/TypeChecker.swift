@@ -133,6 +133,8 @@ public class TypeChecker {
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
+  // TypeName -> MethodName -> [TraitName]: tracks which traits provide extension methods for ambiguity detection
+  var extensionMethodTraitSources: [String: [String: [String]]] = [:]
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `*self` / `*mutable self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]

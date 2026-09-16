@@ -4,6 +4,19 @@
 //
 using std::os { .. };
 
+file_private let method_trait_conformance_name(mono * Monomorphizer, method Symbol) Option[String] = {
+    if method.def_id.id == 0 then {
+        return Option[String].None();
+    };
+    return when mono.receiver_method_dispatch_info(method.def_id) in {
+        .Some(info) then info.conformance_trait_name,
+        .None() then when mono.storage.concrete_callables_by_def_id.get(method.def_id) in {
+            .Some(info) then info.trait_conformance,
+            .None() then Option[String].None(),
+        },
+    };
+};
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 // ── substitute_type ───────────────────────────────────────────────────────────
@@ -3418,22 +3431,53 @@ file_private let resolve_concrete_method_call(
             .None() then {},
         };
 
-        instantiate_conformance_trait_methods_for_type(mono, effective_receiver_type);
-        when lookup_concrete_method_for_static_call(
-            mono,
-            effective_receiver_type,
-            effective_method_name,
-            resolved_method_type_args,
-            new_args,
-            resolved_call_type,
-        ) in {
-            .Some(rebound_method) then {
-                if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(mono, rebound_method.def_id) then {
-                    return rebound_method;
-                };
-            },
-            .None() then {},
+        let trait_name = method_trait_conformance_name(mono, preferred_value_method) or else "";
+        if not trait_name.is_empty() then {
+            let mutable method_type_arg_refs = List[* Type].new();
+            for method_type_arg in resolved_method_type_args then {
+                method_type_arg_refs.push(box(method_type_arg));
+            };
+            instantiate_conformance_trait_method_for_type(
+                mono,
+                effective_receiver_type,
+                trait_name,
+                effective_method_name,
+                method_type_arg_refs,
+            );
+            when lookup_concrete_method_for_static_call(
+                mono,
+                effective_receiver_type,
+                effective_method_name,
+                resolved_method_type_args,
+                new_args,
+                resolved_call_type,
+            ) in {
+                .Some(rebound_method) then {
+                    if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(mono, rebound_method.def_id) then {
+                        return rebound_method;
+                    };
+                },
+                .None() then {},
+            };
+        } else {
+            instantiate_conformance_trait_methods_for_type(mono, effective_receiver_type);
+            when lookup_concrete_method_for_static_call(
+                mono,
+                effective_receiver_type,
+                effective_method_name,
+                resolved_method_type_args,
+                new_args,
+                resolved_call_type,
+            ) in {
+                .Some(rebound_method) then {
+                    if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(mono, rebound_method.def_id) then {
+                        return rebound_method;
+                    };
+                },
+                .None() then {},
+            };
         };
+
     };
 
     if preferred_value_method.def_id.id > 0 and not declared_static_receiver_method_is_materialized(mono, preferred_value_method.def_id) then {
@@ -3953,8 +3997,21 @@ file_private let resolve_method_reference_call_callee(
     };
     if bound_method.def_id.id > 0 and not declared_static_receiver_method_is_materialized(mono, bound_method.def_id) then {
         if mono.storage.extension_body_resolution_depth == 0 then {
-            instantiate_conformance_trait_methods_for_type(mono, method_resolution_receiver_type);
             let rebound_method_name = normalize_receiver_call_method_name(get_semantic_method_name(mono, bound_method));
+            let trait_name = method_trait_conformance_name(mono, bound_method) or else "";
+            if not trait_name.is_empty() then {
+                let mutable method_type_arg_refs = List[* Type].new();
+                for method_type_arg in resolved_method_type_args then {
+                    method_type_arg_refs.push(box(method_type_arg));
+                };
+                instantiate_conformance_trait_method_for_type(
+                    mono,
+                    method_resolution_receiver_type,
+                    trait_name,
+                    rebound_method_name,
+                    method_type_arg_refs,
+                );
+            };
             when lookup_concrete_method_for_static_call(
                 mono,
                 method_resolution_receiver_type,
@@ -7443,15 +7500,6 @@ public let try_bind_generic_method_call(
         };
     };
 
-    if not has_generic_method_template then {
-        when lookup_extension_method_def_id(mono, concrete_receiver_type, effective_method_name, List[* Type].new()) in {
-            .Some(def_id) then {
-                return box(resolved_method_symbol(mono, def_id, effective_method_name, method.symbol_type));
-            },
-            .None() then {},
-        };
-    };
-
     when autoderef_fallback in {
         .Some(inner) then { return try_bind_generic_method_call(mono, inner, method, args, expected_return_type);},
         .None() then {},
@@ -9400,10 +9448,26 @@ file_private let enqueue_extension_method_for_static_call(
                                 };
                                 if mono.storage.extension_body_resolution_depth == 0 then {
                                     let mutable lookup_method_type_args = List[Type].new();
+                                    let trait_name = when ext.conformance_trait_name in {
+                                        .Some(name) then name,
+                                        .None() then "",
+                                    };
                                     for method_type_arg in method_type_args then {
                                         lookup_method_type_args.push(*method_type_arg);
                                     };
-                                    instantiate_conformance_trait_methods_for_type(mono, base_type);
+                                    if not trait_name.is_empty() then {
+                                        let mutable method_type_arg_refs = List[* Type].new();
+                                        for method_type_arg in method_type_args then {
+                                            method_type_arg_refs.push(box(*method_type_arg));
+                                        };
+                                        instantiate_conformance_trait_method_for_type(
+                                            mono,
+                                            base_type,
+                                            trait_name,
+                                            method_name,
+                                            method_type_arg_refs,
+                                        );
+                                    };
                                     when lookup_concrete_method_for_static_call(
                                         mono,
                                         base_type,

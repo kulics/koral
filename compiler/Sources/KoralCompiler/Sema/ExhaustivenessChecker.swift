@@ -67,8 +67,28 @@ extension ExhaustivenessChecker {
         var catchallPattern: String? = nil
         var coveredTraitObjectTypes: Set<String> = []
         var remainingFiniteSpace = initialFinitePatternSpace()
+        var seenPatterns: Set<String> = []
         
         for (index, pattern) in patterns.enumerated() {
+            let hasBindingLikeIdentity: Bool = {
+                switch pattern {
+                case .variable, .traitObjectType, .traitObjectTypeBinding:
+                    return true
+                default:
+                    return false
+                }
+            }()
+            if !hasBindingLikeIdentity {
+                let patternDescription = pattern.description
+                if seenPatterns.contains(patternDescription) {
+                    throw SemanticError(
+                        .generic("Duplicate pattern: '\(patternDescription)' already matched earlier"),
+                        span: currentSpan
+                    )
+                }
+                seenPatterns.insert(patternDescription)
+            }
+
             // Check if we already have a catchall pattern
             if let catchallIdx = catchallIndex {
                 throw SemanticError(
@@ -156,6 +176,219 @@ extension ExhaustivenessChecker {
 // MARK: - Exhaustiveness Checking
 
 extension ExhaustivenessChecker {
+    private struct IntegerCoverage {
+        var hasLowerBound: Bool
+        var lowerBound: Int64
+        var hasUpperBound: Bool
+        var upperBound: Int64
+
+        var isEmpty: Bool {
+            hasLowerBound && hasUpperBound && lowerBound > upperBound
+        }
+
+        func coversAllIntegers(bounds: (hasMin: Bool, min: Int64, hasMax: Bool, max: Int64)) -> Bool {
+            guard !isEmpty else { return false }
+            let lowerOK = bounds.hasMin
+                ? (hasLowerBound && lowerBound <= bounds.min)
+                : !hasLowerBound
+            let upperOK = bounds.hasMax
+                ? (hasUpperBound && upperBound >= bounds.max)
+                : !hasUpperBound
+            return lowerOK && upperOK
+        }
+
+        func intersecting(_ other: IntegerCoverage) -> IntegerCoverage {
+            let nextHasLower = hasLowerBound || other.hasLowerBound
+            let nextLower: Int64
+            if hasLowerBound && other.hasLowerBound {
+                nextLower = max(lowerBound, other.lowerBound)
+            } else if hasLowerBound {
+                nextLower = lowerBound
+            } else {
+                nextLower = other.lowerBound
+            }
+
+            let nextHasUpper = hasUpperBound || other.hasUpperBound
+            let nextUpper: Int64
+            if hasUpperBound && other.hasUpperBound {
+                nextUpper = min(upperBound, other.upperBound)
+            } else if hasUpperBound {
+                nextUpper = upperBound
+            } else {
+                nextUpper = other.upperBound
+            }
+
+            return IntegerCoverage(
+                hasLowerBound: nextHasLower,
+                lowerBound: nextLower,
+                hasUpperBound: nextHasUpper,
+                upperBound: nextUpper
+            )
+        }
+
+        func clamped(to bounds: (hasMin: Bool, min: Int64, hasMax: Bool, max: Int64)) -> IntegerCoverage {
+            var result = self
+            if bounds.hasMin && (!result.hasLowerBound || result.lowerBound < bounds.min) {
+                result.hasLowerBound = true
+                result.lowerBound = bounds.min
+            }
+            if bounds.hasMax && (!result.hasUpperBound || result.upperBound > bounds.max) {
+                result.hasUpperBound = true
+                result.upperBound = bounds.max
+            }
+            return result
+        }
+
+        func touchesOrOverlaps(_ other: IntegerCoverage) -> Bool {
+            guard !isEmpty, !other.isEmpty else { return false }
+            if !hasUpperBound || !other.hasLowerBound {
+                return true
+            }
+            if upperBound == Int64.max {
+                return true
+            }
+            return other.lowerBound <= upperBound + 1
+        }
+
+        func merged(with other: IntegerCoverage) -> IntegerCoverage {
+            let nextHasLower = hasLowerBound && other.hasLowerBound
+            let nextLower = nextHasLower ? min(lowerBound, other.lowerBound) : 0
+            let nextHasUpper = hasUpperBound && other.hasUpperBound
+            let nextUpper = nextHasUpper ? max(upperBound, other.upperBound) : 0
+            return IntegerCoverage(
+                hasLowerBound: nextHasLower,
+                lowerBound: nextLower,
+                hasUpperBound: nextHasUpper,
+                upperBound: nextUpper
+            )
+        }
+    }
+
+    private func integerTypeBounds(_ type: Type) -> (hasMin: Bool, min: Int64, hasMax: Bool, max: Int64) {
+        switch type {
+        case .uint8:
+            return (true, 0, true, 255)
+        case .uint16:
+            return (true, 0, true, 65535)
+        case .uint32, .uint64, .uint:
+            return (true, 0, false, 0)
+        case .int8:
+            return (true, -128, true, 127)
+        case .int16:
+            return (true, -32768, true, 32767)
+        case .int32, .int64, .int:
+            return (false, 0, false, 0)
+        default:
+            return (false, 0, false, 0)
+        }
+    }
+
+    private func baseIntegerCoverage(for pattern: TypedPattern) -> IntegerCoverage? {
+        switch pattern {
+        case .wildcard, .variable:
+            return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: false, upperBound: 0)
+        case .integerLiteral(let value):
+            guard let parsed = Int64(value) else { return nil }
+            return IntegerCoverage(hasLowerBound: true, lowerBound: parsed, hasUpperBound: true, upperBound: parsed)
+        case .comparisonPattern(let op, let value):
+            switch op {
+            case .greater:
+                if value == Int64.max { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
+                return IntegerCoverage(hasLowerBound: true, lowerBound: value + 1, hasUpperBound: false, upperBound: 0)
+            case .greaterEqual:
+                return IntegerCoverage(hasLowerBound: true, lowerBound: value, hasUpperBound: false, upperBound: 0)
+            case .less:
+                if value == Int64.min { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
+                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: value - 1)
+            case .lessEqual:
+                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: value)
+            }
+        default:
+            return nil
+        }
+    }
+
+    private func integerCoverages(for pattern: TypedPattern) -> [IntegerCoverage] {
+        if let coverage = baseIntegerCoverage(for: pattern) {
+            return [coverage]
+        }
+
+        switch pattern {
+        case .orPattern(let left, let right):
+            return integerCoverages(for: left) + integerCoverages(for: right)
+        case .andPattern(let left, let right):
+            let leftCoverages = integerCoverages(for: left)
+            let rightCoverages = integerCoverages(for: right)
+            guard !leftCoverages.isEmpty, !rightCoverages.isEmpty else {
+                return []
+            }
+            var intersections: [IntegerCoverage] = []
+            for leftCoverage in leftCoverages {
+                for rightCoverage in rightCoverages {
+                    let intersection = leftCoverage.intersecting(rightCoverage)
+                    if !intersection.isEmpty {
+                        intersections.append(intersection)
+                    }
+                }
+            }
+            return intersections
+        default:
+            return []
+        }
+    }
+
+    private func patternsCoverIntegerDomain() -> Bool {
+        guard subjectType.isIntegerType else { return false }
+        if patterns.contains(where: { isCatchallPattern($0) }) {
+            return true
+        }
+
+        let bounds = integerTypeBounds(subjectType)
+        var intervals: [IntegerCoverage] = []
+
+        for pattern in patterns {
+            for coverage in integerCoverages(for: pattern) {
+                let clamped = coverage.clamped(to: bounds)
+                if !clamped.isEmpty {
+                    intervals.append(clamped)
+                }
+            }
+        }
+        guard !intervals.isEmpty else { return false }
+        intervals.sort { lhs, rhs in
+            switch (lhs.hasLowerBound, rhs.hasLowerBound) {
+            case (false, true):
+                return true
+            case (true, false):
+                return false
+            case (false, false):
+                if lhs.hasUpperBound != rhs.hasUpperBound {
+                    return lhs.hasUpperBound
+                }
+                return lhs.upperBound < rhs.upperBound
+            case (true, true):
+                if lhs.lowerBound != rhs.lowerBound {
+                    return lhs.lowerBound < rhs.lowerBound
+                }
+                if lhs.hasUpperBound != rhs.hasUpperBound {
+                    return !lhs.hasUpperBound
+                }
+                return lhs.upperBound < rhs.upperBound
+            }
+        }
+
+        var merged: [IntegerCoverage] = []
+        for interval in intervals {
+            if let last = merged.last, last.touchesOrOverlaps(interval) {
+                merged[merged.count - 1] = last.merged(with: interval)
+            } else {
+                merged.append(interval)
+            }
+        }
+
+        return merged.contains { $0.coversAllIntegers(bounds: bounds) }
+    }
+
     /// Check that all possible values are covered by the patterns
     private func checkExhaustiveness() throws {
         if var remaining = initialFinitePatternSpace() {
@@ -214,7 +447,13 @@ extension ExhaustivenessChecker {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
              .float32, .float64:
-            // Numeric types have infinite domain - require catchall
+            if subjectType.isIntegerType {
+                if patternsCoverIntegerDomain() {
+                    return
+                }
+            }
+
+            // Numeric types have infinite domain unless integer comparison patterns fully cover them.
             if !hasCatchall {
                 throw SemanticError(
                     .missingCatchallPattern(type: subjectType.description),

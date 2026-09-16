@@ -1,4 +1,4 @@
-given TypeChecker {
+﻿given TypeChecker {
     module_private validate_drop_member_signature(self, target_type Type, members List[* TypedGivenMember]) Void = {
         let expected_param_type = Type.MutablePointerType(box(target_type));
         for member_ref in members then {
@@ -110,6 +110,11 @@ given TypeChecker {
                                 "function return type cannot contain borrowed reference type '\(self.context().type_display_name(resolved_ret))'"
                             )
                         );
+                    if self.contains_never_type(resolved_ret) then {
+                        self.storage.diagnostics.push(make_diagnostic(
+                            DiagnosticStage.Semantic(), self.storage.file_path,
+                            "function return type cannot contain Never type"));
+                    };
                     };
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret);
                     let typed_params = self.check_params(params);
@@ -118,6 +123,14 @@ given TypeChecker {
                         signature_types.push(param.param_type);
                     };
                     signature_types.push(resolved_ret);
+
+                    for p in typed_params then {
+                        if self.contains_never_type(p.param_type) then {
+                            self.storage.diagnostics.push(make_diagnostic(
+                                DiagnosticStage.Semantic(), self.storage.file_path,
+                                "function parameter cannot contain Never type"));
+                        };
+                    };
                     self.validate_signature_type_visibility(name, access, signature_types, span);
                     let mutable fn_scope = self.make_fn_scope(typed_params);
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope);
@@ -129,6 +142,20 @@ given TypeChecker {
                     };
                     let fn_type = make_function_type(param_refs, stable_ret);
                     let fn_sym = box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false));
+                    // Validate entry point signature
+                    if name == "main" then {
+                        if stable_params.count() > 0 then {
+                            self.storage.diagnostics.push(make_diagnostic(
+                                DiagnosticStage.Semantic(), self.storage.file_path,
+                                "entry function 'main' must not take parameters"));
+                        };
+                        let ret_is_valid = stable_ret is .IntType() or stable_ret is .VoidType();
+                        if not ret_is_valid then {
+                            self.storage.diagnostics.push(make_diagnostic(
+                                DiagnosticStage.Semantic(), self.storage.file_path,
+                                "entry function 'main' must return Int or Void"));
+                        };
+                    };
                     let stable_body = if retain_checked_template_bodies then {
                         let mutable context = self.context();
                         context.set_concrete_function_body(fn_sym.def_id, box(typed_body));
@@ -306,6 +333,11 @@ given TypeChecker {
                             )
                         );
                     };
+                    if self.contains_never_type(field.field_type) then {
+                        self.storage.diagnostics.push(make_diagnostic(
+                            DiagnosticStage.Semantic(), self.storage.file_path,
+                            "struct field cannot contain Never type"));
+                    };
                 };
                 yield if type_params.is_empty() then {
                     let fallback_type = Type.StructureType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()), access, span));
@@ -339,6 +371,11 @@ given TypeChecker {
                                     "enum payload '\(name).\(enum_case.name).\(field.name)' cannot contain borrowed reference type '\(self.context().type_display_name(field.field_type))'"
                                 )
                             );
+                        };
+                        if self.contains_never_type(field.field_type) then {
+                            self.storage.diagnostics.push(make_diagnostic(
+                                DiagnosticStage.Semantic(), self.storage.file_path,
+                                "enum payload field cannot contain Never type"));
                         };
                     };
                 };
@@ -483,7 +520,7 @@ given TypeChecker {
                     };
                     let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies);
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members);
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members, true);
                     };
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members);
                     self.restore_generic_constraints(generic_constraint_snapshot);
@@ -623,7 +660,7 @@ given TypeChecker {
                         );
                     };
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members);
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members, false);
                     };
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), typed_members);
                     self.restore_generic_constraints(generic_constraint_snapshot);
@@ -638,7 +675,7 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty() then self.resolve_type(target_type) else self.resolve_type_with_bindings(target_type, bindings);
                     let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies);
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members);
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mutable typed_members, true);
                     };
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members);
                     self.restore_generic_constraints(generic_constraint_snapshot);

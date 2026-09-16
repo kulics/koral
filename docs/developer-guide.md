@@ -64,6 +64,7 @@ Common options:
 - `--filter <substring>`: run only cases whose file name or relative path contains the substring
 - `-j <N>` / `-j=<N>`: worker count for parallel case execution (default: `1`)
 - `--timeout <sec>`: per-case timeout in seconds (default: `120`)
+- `--memory-limit <MB>`: per-case RSS ceiling (default: `1024`)
 - `--compiler-bin <path>`: explicit compiler executable path when `--compiler custom`
 - `--bootstrap-koralc <path>`: explicit bootstrap compiler executable path
 - `--swift-koralc <path>`: explicit Swift compiler executable path

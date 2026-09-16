@@ -1,4 +1,4 @@
-// 穷举性检查器
+﻿// 穷举性检查器
 // 检查 when 表达式的模式是否覆盖了所有可能的情况
 
 // ── ExhaustivenessChecker ─────────────────────────────────────────────────────
@@ -16,6 +16,42 @@ file_private type PatternSpace {
     Empty(),
     EnumCases(type_name String, cases Dict[String, List[* PatternSpace]]),
     BoolValues(has_true Bool, has_false Bool),
+    IntRange(has_min Bool, min_val Int, has_max Bool, max_val Int),
+};
+
+// Simple integer string parser for exhaustiveness checking.
+let parse_int_str(s String) Int = {
+    if s.is_empty() then { return 0;};
+    let mutable result = 0;
+    let mutable negative = false;
+    let mutable i UInt = 0;
+    let first = s[0(UInt)];
+    if first == '-' then {
+        negative = true;
+        i = 1;
+    } else if first == '+' then {
+        i = 1;
+    };
+    while i < s.count() then {
+        let ch = s[i];
+        let mutable digit = -1;
+        if ch == '0' then { digit = 0;}
+        else if ch == '1' then { digit = 1;}
+        else if ch == '2' then { digit = 2;}
+        else if ch == '3' then { digit = 3;}
+        else if ch == '4' then { digit = 4;}
+        else if ch == '5' then { digit = 5;}
+        else if ch == '6' then { digit = 6;}
+        else if ch == '7' then { digit = 7;}
+        else if ch == '8' then { digit = 8;}
+        else if ch == '9' then { digit = 9;};
+        if digit >= 0 then {
+            result = result * 10 + digit;
+        };
+        i += 1;
+    };
+    if negative then { return 0 - result;};
+    return result;
 };
 
 given ExhaustivenessChecker {
@@ -43,6 +79,13 @@ given ExhaustivenessChecker {
                 };
                 if not self.pattern_space_is_empty(remaining) then {
                     let type_name = self.exhaustiveness_type_name();
+                    when self.subject_type in {
+                        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then {
+                            let message = self.missing_catchall_message(type_name);
+                            return Result[Void].Error(box(message));
+                        },
+                        _ then {},
+                    };
                     let message = self.non_exhaustive_match_message_from_patterns(type_name, self.pattern_space_missing_cases(remaining));
                     return Result[Void].Error(box(message));
                 };
@@ -181,11 +224,23 @@ given ExhaustivenessChecker {
         let pattern_count = self.patterns.count();
         let mutable pattern_index UInt = 0;
         let mutable remaining_space = self.initial_finite_pattern_space();
+        let mutable seen_patterns = Set[String].new();
 
         for p in self.patterns.iterator() then {
             if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
                 pattern_index += 1;
                 continue;
+            };
+            // Skip duplicate check for patterns with variable bindings --
+            // .Variable, .TraitObjectType, .TraitObjectTypeBinding each bind a
+            // fresh name so two arms with the same type are not duplicates.
+            let has_binding = (p is .Variable(_)) or (p is .TraitObjectType(_)) or (p is .TraitObjectTypeBinding(_, _));
+            if not has_binding then {
+                let pd = pattern_description(p);
+                if seen_patterns.contains(pd) then {
+                    return Result[Void].Error(box("Duplicate pattern: '" + pd + "' already matched earlier"));
+                };
+                seen_patterns.insert(pd);
             };
             if has_catchall then {
                 // When the catchall is a struct pattern and the current pattern is a
@@ -203,7 +258,8 @@ given ExhaustivenessChecker {
             when remaining_space in {
                 .Some(space) then {
                     let reduced = self.subtract_pattern(space, p, self.subject_type);
-                    if self.can_precisely_subtract_pattern(space, p, self.subject_type) and self.pattern_space_equals(space, reduced) then {
+                    let is_catchall_pattern = (p is .Wildcard()) or (p is .Variable(_));
+                    if not is_catchall_pattern and self.can_precisely_subtract_pattern(space, p, self.subject_type) and self.pattern_space_equals(space, reduced) then {
                         let mutable message = "Unreachable pattern: already covered by previous patterns";
                         return Result[Void].Error(box(message));
                     };
@@ -255,6 +311,16 @@ given ExhaustivenessChecker {
                 };
             },
             .BoolType() then Option[PatternSpace].Some(PatternSpace.BoolValues(true, true)),
+            .IntType() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+            .UIntType() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
+            .Int8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -128, true, 127)),
+            .Int16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -32768, true, 32767)),
+            .Int32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+            .Int64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+            .UInt8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 255)),
+            .UInt16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 65535)),
+            .UInt32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
+            .UInt64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
             _ then Option[PatternSpace].None(),
         };
     };
@@ -299,6 +365,7 @@ given ExhaustivenessChecker {
             .Full(_) then false,
             .BoolValues(has_true, has_false) then not has_true and not has_false,
             .EnumCases(_, cases) then cases.is_empty(),
+            .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
         };
     };
 
@@ -338,6 +405,128 @@ given ExhaustivenessChecker {
                 },
                 _ then false,
             },
+            .IntRange(lh_min, lv_min, lh_max, lv_max) then when rhs in {
+                .IntRange(rh_min, rv_min, rh_max, rv_max) then {
+                    if lh_min <> rh_min then { return false;};
+                    if lh_min and lv_min <> rv_min then { return false;};
+                    if lh_max <> rh_max then { return false;};
+                    if lh_max and lv_max <> rv_max then { return false;};
+                    return true;
+                },
+                _ then false,
+            },
+        };
+    };
+
+    // Subtract an integer literal from a PatternSpace.
+    // For unbounded ranges (no min, no max), we skip the subtraction because a
+    // single IntRange cannot represent "all integers except N". This avoids
+    // false unreachable-pattern diagnostics.
+    file_private subtract_int_literal(self, space PatternSpace, int_val Int) PatternSpace = {
+        return when space in {
+            .Full(t) then {
+                // Convert Full to IntRange and subtract
+                let range = PatternSpace.IntRange(false, 0, false, 0);
+                yield self.subtract_int_from_range(range, int_val);
+            },
+            .IntRange(has_min, _, has_max, _) then {
+                if not has_min and not has_max then {
+                    // Unbounded range - can't represent a single hole, keep unchanged
+                    return space;
+                };
+                yield self.subtract_int_from_range(space, int_val);
+            },
+            _ then space,
+        };
+    };
+
+    // Subtract a single integer value from an IntRange.
+    // Note: for interior points we keep the left side [min, val-1] since we
+    // can only represent a single contiguous range.
+    file_private subtract_int_from_range(self, space PatternSpace, int_val Int) PatternSpace = {
+        return when space in {
+            .IntRange(has_min, min_val, has_max, max_val) then {
+                if has_min and has_max and min_val > max_val then {
+                    return PatternSpace.Empty();
+                };
+                // Value is outside the range - nothing to subtract
+                if has_min and int_val < min_val then { return space;};
+                if has_max and int_val > max_val then { return space;};
+                // Range is a single point and it matches
+                let is_single_point = has_min and has_max and min_val == max_val;
+                if is_single_point and int_val == min_val then {
+                    return PatternSpace.Empty();
+                };
+                // Value is at the min bound
+                if has_min and int_val == min_val then {
+                    if is_single_point then { return PatternSpace.Empty();};
+                    return PatternSpace.IntRange(true, min_val + 1, has_max, max_val);
+                };
+                // Value is at the max bound
+                if has_max and int_val == max_val then {
+                    if is_single_point then { return PatternSpace.Empty();};
+                    return PatternSpace.IntRange(has_min, min_val, true, max_val - 1);
+                };
+                // Interior point - split needed but we keep the left side [min, val-1]
+                // (best effort: may lose coverage info for right side)
+                return PatternSpace.IntRange(has_min, min_val, true, int_val - 1);
+            },
+            _ then space,
+        };
+    };
+
+    // Convert a comparison pattern to an IntRange.
+    file_private comparison_to_int_range(self, op ComparisonPatternOperator, value_str String) PatternSpace = {
+        let value = parse_int_str(value_str);
+        return when op in {
+            .Greater() then PatternSpace.IntRange(true, value + 1, false, 0),
+            .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
+            .Less() then PatternSpace.IntRange(false, 0, true, value - 1),
+            .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
+        };
+    };
+
+    // Subtract a comparison range from a PatternSpace.
+    file_private subtract_comparison(self, space PatternSpace, op ComparisonPatternOperator, value_str String) PatternSpace = {
+        return when space in {
+            .Full(t) then {
+                // Start with full IntRange, subtract comparison
+                let full_range = PatternSpace.IntRange(false, 0, false, 0);
+                yield self.subtract_range_from_range(full_range, self.comparison_to_int_range(op, value_str));
+            },
+            .IntRange(_, _, _, _) then self.subtract_range_from_range(space, self.comparison_to_int_range(op, value_str)),
+            _ then space,
+        };
+    };
+
+    // Subtract sub (an IntRange) from space (an IntRange).
+    file_private subtract_range_from_range(self, space PatternSpace, sub PatternSpace) PatternSpace = {
+        return when space in {
+            .IntRange(s_has_min, s_min, s_has_max, s_max) then when sub in {
+                .IntRange(r_has_min, r_min, r_has_max, r_max) then {
+                    // Check no overlap
+                    if s_has_max and r_has_min and s_max < r_min then { return space;};
+                    if s_has_min and r_has_max and s_min > r_max then { return space;};
+                    // sub covers all of space
+                    let sub_covers_min = (not r_has_min) or (s_has_min and r_min <= s_min);
+                    let sub_covers_max = (not r_has_max) or (s_has_max and r_max >= s_max);
+                    if sub_covers_min and sub_covers_max then {
+                        return PatternSpace.Empty();
+                    };
+                    // sub covers min side of space
+                    if sub_covers_min then {
+                        return PatternSpace.IntRange(true, r_max + 1, s_has_max, s_max);
+                    };
+                    // sub covers max side of space
+                    if sub_covers_max then {
+                        return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
+                    };
+                    // sub is interior - keep min side (best effort)
+                    return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
+                },
+                _ then space,
+            },
+            _ then space,
         };
     };
 
@@ -346,7 +535,16 @@ given ExhaustivenessChecker {
             .Wildcard() then PatternSpace.Empty(),
             .Variable(_) then PatternSpace.Empty(),
             .BoolLiteral(value) then self.subtract_bool(space, value),
+            .IntegerLiteral(value_str) then {
+                let value = parse_int_str(value_str);
+                yield self.subtract_int_literal(space, value);
+            },
+            .NegativeIntegerLiteral(value_str) then {
+                let value = 0 - (parse_int_str(value_str));
+                yield self.subtract_int_literal(space, value);
+            },
             .EnumCase(case_name, _, elements) then self.subtract_enum_case(space, case_name, elements, subject_type),
+            .ComparisonPattern(op, value_str) then self.subtract_comparison(space, op, value_str),
             .OrPattern(left, right) then {
                 let after_left = self.subtract_pattern(space, left, subject_type);
                 yield self.subtract_pattern(after_left, right, subject_type);
@@ -364,6 +562,53 @@ given ExhaustivenessChecker {
             .Wildcard() then true,
             .Variable(_) then true,
             .BoolLiteral(_) then space is .BoolValues(_, _),
+            .IntegerLiteral(_) then when space in {
+                .IntRange(has_min, min_val, has_max, max_val) then {
+                    if not has_min and not has_max then {
+                        return false;
+                    };
+                    let value = when pattern in {
+                        .IntegerLiteral(value_str) then parse_int_str(value_str),
+                        _ then 0,
+                    };
+                    if has_min and has_max and min_val == max_val and value == min_val then {
+                        return true;
+                    };
+                    if has_min and value == min_val then {
+                        return true;
+                    };
+                    if has_max and value == max_val then {
+                        return true;
+                    };
+                    return false;
+                },
+                .Full(_) then true,
+                _ then false,
+            },
+            .NegativeIntegerLiteral(_) then when space in {
+                .IntRange(has_min, min_val, has_max, max_val) then {
+                    if not has_min and not has_max then {
+                        return false;
+                    };
+                    let value = when pattern in {
+                        .NegativeIntegerLiteral(value_str) then 0 - parse_int_str(value_str),
+                        _ then 0,
+                    };
+                    if has_min and has_max and min_val == max_val and value == min_val then {
+                        return true;
+                    };
+                    if has_min and value == min_val then {
+                        return true;
+                    };
+                    if has_max and value == max_val then {
+                        return true;
+                    };
+                    return false;
+                },
+                .Full(_) then true,
+                _ then false,
+            },
+            .ComparisonPattern(_, _) then space is .IntRange(_, _, _, _) or space is .Full(_),
             .EnumCase(case_name, _, elements) then {
                 let case_fields = when space in {
                     .Full(_) then self.enum_case_map_for_type(subject_type).get(case_name),
@@ -529,6 +774,28 @@ given ExhaustivenessChecker {
                 };
                 yield out;
             },
+            .IntRange(has_min, min_val, has_max, max_val) then {
+                let mutable out = List[String].new();
+                if has_min and has_max then {
+                    let mutable desc = "integer in [";
+                    desc.push_string("\(min_val)");
+                    desc.push_string(", ");
+                    desc.push_string("\(max_val)");
+                    desc.push_string("]");
+                    out.push(desc);
+                } else if has_min then {
+                    let mutable desc = "integer >= ";
+                    desc.push_string("\(min_val)");
+                    out.push(desc);
+                } else if has_max then {
+                    let mutable desc = "integer <= ";
+                    desc.push_string("\(max_val)");
+                    out.push(desc);
+                } else {
+                    out.push("integer (any)");
+                };
+                yield out;
+            },
         };
     };
 
@@ -589,6 +856,28 @@ given ExhaustivenessChecker {
                     let fields = cases.get(case_name) or else List[* PatternSpace].new();
                     let rendered = self.render_missing_constructor(case_name, fields);
                     for value in rendered then { out.push(value);};
+                };
+                yield out;
+            },
+            .IntRange(has_min, min_val, has_max, max_val) then {
+                let mutable out = List[String].new();
+                if has_min and has_max then {
+                    let mutable desc = "integer in [";
+                    desc.push_string("\(min_val)");
+                    desc.push_string(", ");
+                    desc.push_string("\(max_val)");
+                    desc.push_string("]");
+                    out.push(desc);
+                } else if has_min then {
+                    let mutable desc = "integer >= ";
+                    desc.push_string("\(min_val)");
+                    out.push(desc);
+                } else if has_max then {
+                    let mutable desc = "integer <= ";
+                    desc.push_string("\(max_val)");
+                    out.push(desc);
+                } else {
+                    out.push("integer (any)");
                 };
                 yield out;
             },
@@ -786,6 +1075,7 @@ public let is_catchall(pattern * TypedPattern) Bool = {
     };
 };
 
+
 // 获取模式的简短描述（用于错误消息）
 public let pattern_description(pattern * TypedPattern) String = {
     return when pattern in {
@@ -816,13 +1106,47 @@ public let pattern_description(pattern * TypedPattern) String = {
             msg.push_string("'");
             yield msg;
         },
-        .EnumCase(name, _, _) then {
+        .EnumCase(name, _, elements) then {
             let mutable msg = ".";
             msg.push_string(name);
+            if elements.count() > 0 then {
+                msg.push_string("(");
+                let mutable first = true;
+                for elem in elements then {
+                    if not first then { msg.push_string(", "); };
+                    msg.push_string(pattern_description(elem.pattern));
+                    first = false;
+                };
+                msg.push_string(")");
+            };
             yield msg;
         },
-        .StructPattern(name, _) then name,
-        .ComparisonPattern(_, value) then value,
+        .StructPattern(name, elements) then {
+            if elements.count() == 0 then {
+                yield name;
+            } else {
+                let mutable msg = name;
+                msg.push_string("(");
+                let mutable first = true;
+                for elem in elements then {
+                    if not first then { msg.push_string(", "); };
+                    msg.push_string(pattern_description(elem.pattern));
+                    first = false;
+                };
+                msg.push_string(")");
+                yield msg;
+            };
+        },
+        .ComparisonPattern(op, value) then {
+            let mutable msg = when op in {
+                .Greater() then ">",
+                .Less() then "<",
+                .GreaterEqual() then ">=",
+                .LessEqual() then "<=",
+            };
+            msg.push_string(value);
+            yield msg;
+        },
         .AndPattern(_, _) then "<and>",
         .OrPattern(_, _) then "<or>",
         .NotPattern(_) then "<not>",

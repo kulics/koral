@@ -60,13 +60,12 @@ extension TypeChecker {
     guard case .identifier(let baseName) = baseExpr,
           !path.isEmpty,
           isASCIITypeStyleIdentifier(baseName),
-          isASCIITypeStyleIdentifier(path[0]),
           currentScope.lookup(baseName, sourceFile: currentSourceFile) == nil,
           currentScope.lookupType(baseName, sourceFile: currentSourceFile) == nil else {
       return false
     }
 
-    return isKnownModuleIdentifier(baseName)
+    return true
   }
 
   private func enforceGenericFunctionCallConstraints(
@@ -661,6 +660,18 @@ extension TypeChecker {
   func coerceReceiverType(_ base: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
     if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType) {
       return flavorConversion
+    }
+    if let expectedInfo = expectedType.indirectionCompatibilityInfo,
+       let actualInfo = base.type.indirectionCompatibilityInfo,
+       expectedInfo.family == .managedReference,
+       actualInfo.family == .managedReference,
+       expectedInfo.mutable,
+       !actualInfo.mutable,
+       implicitReferenceInnerMatches(expectedInfo.inner, actualType: actualInfo.inner) {
+      throw SemanticError(
+        .generic("Cannot call mutating method through read-only reference of type '\(base.type.description)'"),
+        span: currentSpan
+      )
     }
     if let (inner, mutable) = referenceTypeComponents(expectedType),
        implicitReferenceInnerMatches(inner, actualType: base.type),
@@ -5278,6 +5289,12 @@ extension TypeChecker {
       }
     }
 
+    if case .identifier(let name) = baseExpr,
+       isASCIITypeStyleIdentifier(name),
+       let importError = explicitImportErrorForUnresolvedType(name) {
+      throw importError
+    }
+
     // infer base
     let inferredBase = try inferTypedExpression(baseExpr)
 
@@ -6003,6 +6020,10 @@ extension TypeChecker {
         methodName: methodName,
         arguments: arguments
       )
+    }
+
+    if let importError = explicitImportErrorForUnresolvedType(typeName) {
+      throw importError
     }
 
     throw SemanticError.undefinedType(typeName)

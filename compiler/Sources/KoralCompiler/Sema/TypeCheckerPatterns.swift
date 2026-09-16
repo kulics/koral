@@ -172,6 +172,13 @@ extension TypeChecker {
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
     case .enumCase(let caseName, let subPatternArgs, let span):
+      switch subjectType {
+      case .structure, .genericStruct:
+        return try checkPattern(.structPattern(typeName: caseName, elements: subPatternArgs, span: span), subjectType: subjectType)
+      default:
+        break
+      }
+
       // Handle both concrete enum and genericEnum types
       let typeName: String
       let cases: [EnumCase]

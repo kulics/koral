@@ -549,7 +549,7 @@ given TypeChecker {
         };
     };
 
-    module_private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members * List[* TypedGivenMember]) Void = {
+    module_private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members * List[* TypedGivenMember], mark_inherent Bool) Void = {
         let type_key = self.extension_template_key(target_type);
         for member_ref in *members then {
             let member = *member_ref;
@@ -563,13 +563,29 @@ given TypeChecker {
                 SymbolKind.Function(),
             );
             self.storage.method_table.register(type_key, member.name, method_symbol);
+            if mark_inherent then {
+                self.storage.method_table.mark_inherent(type_key, member.name);
+            };
             when target_type in {
-                .GenericStruct(template_name, _) then self.storage.method_table.register(template_name, member.name, method_symbol),
-                .GenericEnum(template_name, _) then self.storage.method_table.register(template_name, member.name, method_symbol),
+                .GenericStruct(template_name, _) then {
+                    self.storage.method_table.register(template_name, member.name, method_symbol);
+                    if mark_inherent then {
+                        self.storage.method_table.mark_inherent(template_name, member.name);
+                    };
+                },
+                .GenericEnum(template_name, _) then {
+                    self.storage.method_table.register(template_name, member.name, method_symbol);
+                    if mark_inherent then {
+                        self.storage.method_table.mark_inherent(template_name, member.name);
+                    };
+                },
                 .StructureType(def_id) then {
                     if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.storage.method_table.register(name, member.name, method_symbol);
+                            if mark_inherent then {
+                                self.storage.method_table.mark_inherent(name, member.name);
+                            };
                         };
                     };
                 },
@@ -577,6 +593,9 @@ given TypeChecker {
                     if self.context().get_name(def_id) is .Some(name) then {
                         if name <> type_key then {
                             self.storage.method_table.register(name, member.name, method_symbol);
+                            if mark_inherent then {
+                                self.storage.method_table.mark_inherent(name, member.name);
+                            };
                         };
                     };
                 },

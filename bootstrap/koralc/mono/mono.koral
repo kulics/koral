@@ -645,34 +645,13 @@ file_private type MonoProgramInputs(
     source_given_decls List[* TypedDecl],
 );
 
-file_private let strip_given_member_body(member_ref * TypedGivenMember) * TypedGivenMember = {
-    return box(TypedGivenMember(member_ref.def_id, member_ref.name, member_ref.params, member_ref.return_type, Option[* TypedExpr].None()));
-};
-
-file_private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * TypedDecl = {
+file_private let source_given_trait_decl_skeleton(decl_ref * TypedDecl) Option[* TypedDecl] = {
     return when decl_ref in {
-        .GivenDecl(target_type, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new();
-            for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref));
-            };
-            yield box(TypedDecl.GivenDecl(target_type, stripped_members, span));
-        },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new();
-            for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref));
-            };
-            yield box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span));
+            let _ = members;
+            yield Option[* TypedDecl].Some(box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, List[* TypedGivenMember].new(), span)));
         },
-        .IntrinsicGivenDecl(target_type, members, span) then {
-            let mutable stripped_members = List[* TypedGivenMember].new();
-            for member_ref in members then {
-                stripped_members.push(strip_given_member_body(member_ref));
-            };
-            yield box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span));
-        },
-        _ then decl_ref,
+        _ then Option[* TypedDecl].None(),
     };
 };
 
@@ -680,8 +659,9 @@ file_private let collect_mono_program_inputs(program TypedProgram) MonoProgramIn
     let mutable initial_nodes = List[* TypedDecl].new();
     let mutable source_given_decls = List[* TypedDecl].new();
     for decl_ref in program.declarations then {
-        if is_source_given_decl(decl_ref) then {
-            source_given_decls.push(strip_given_decl_bodies_for_source_lookup(decl_ref));
+        when source_given_trait_decl_skeleton(decl_ref) in {
+            .Some(source_decl_ref) then source_given_decls.push(source_decl_ref),
+            .None() then {},
         };
         if is_non_generic_decl(decl_ref) then {
             initial_nodes.push(decl_ref);

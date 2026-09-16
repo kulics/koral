@@ -3145,12 +3145,12 @@ private final class MIRFunctionBuilder {
     case .reference(let inner):
       // Managed ref T: only pass through existing compatible refs, no implicit T → ref T
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: false) {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     case .mutableReference(let inner):
       // Managed ref mutable T: only pass through existing compatible refs, no implicit T → ref mutable T
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: true) {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     case .borrowedReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
@@ -3161,7 +3161,7 @@ private final class MIRFunctionBuilder {
          info.family == actualInfo.family,
          !info.mutable,
          (actualInfo.inner == inner || context.containsGenericParameter(inner)) {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     case .mutableBorrowedReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
@@ -3173,21 +3173,21 @@ private final class MIRFunctionBuilder {
          info.mutable,
          actualInfo.mutable,
          (actualInfo.inner == inner || context.containsGenericParameter(inner)) {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     case .weakReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .weak, allocation: .stackBorrow)
       }
       if argument.type == expectedType {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     case .mutableWeakReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .mutableWeak, allocation: .stackBorrow)
       }
       if argument.type == expectedType {
-        return lowerBorrowedSourceValue(argument)
+        return lowerValue(argument)
       }
     default:
       break

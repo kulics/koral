@@ -202,25 +202,47 @@ given TypeChecker {
                 yield TypedPattern.NotPattern(box(self.lower_typed_pattern(inner, subject_type, scope)));
             },
             .EnumCase(case_name, elements, _) then {
-                let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                self.validate_named_pattern_arguments(elements, param_specs);
-                let ordered_elements = self.reorder_pattern_elements(elements, param_specs);
-                let case_field_types = self.get_enum_case_field_types(subject_type, case_name);
-                let tag_index = self.get_enum_case_tag_index(subject_type, case_name);
-                let mutable typed_elements = List[* TypedPatternElement].new();
-                let mutable i UInt = 0;
-                for elem in ordered_elements then {
-                    let field_type = when case_field_types.get(i) in {
-                        .Some(t) then t,
-                        .None() then Type.Unknown(),
+                // When subject is a struct type, redirect .StructName(...) to StructPattern
+                let struct_param_specs = self.get_struct_pattern_param_specs(subject_type, case_name);
+                if not struct_param_specs.is_empty() then {
+                    self.validate_named_pattern_arguments(elements, struct_param_specs);
+                    let ordered_elements = self.reorder_pattern_elements(elements, struct_param_specs);
+                    let field_types = self.get_struct_pattern_field_types(subject_type, case_name);
+                    let mutable typed_elements = List[* TypedPatternElement].new();
+                    let mutable i UInt = 0;
+                    for elem in ordered_elements then {
+                        let field_type = when field_types.get(i) in {
+                            .Some(t) then t,
+                            .None() then Type.Unknown(),
+                        };
+                        typed_elements.push(box(TypedPatternElement(
+                            elem.label,
+                            box(self.lower_typed_pattern(elem.pattern, field_type, scope))
+                        )));
+                        i += 1;
                     };
-                    typed_elements.push(box(TypedPatternElement(
-                        elem.label,
-                        box(self.lower_typed_pattern(elem.pattern, field_type, scope))
-                    )));
-                    i += 1;
+                    yield TypedPattern.StructPattern(case_name, typed_elements);
+                } else {
+                    let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
+                    self.validate_named_pattern_arguments(elements, param_specs);
+                    let ordered_elements = self.reorder_pattern_elements(elements, param_specs);
+                    let case_field_types = self.get_enum_case_field_types(subject_type, case_name);
+                    let tag_index = self.get_enum_case_tag_index(subject_type, case_name);
+                    let mutable typed_elements = List[* TypedPatternElement].new();
+                    let mutable i UInt = 0;
+                    for elem in ordered_elements then {
+                        let field_type = when case_field_types.get(i) in {
+                            .Some(t) then t,
+                            .None() then Type.Unknown(),
+                        };
+                        typed_elements.push(box(TypedPatternElement(
+                            elem.label,
+                            box(self.lower_typed_pattern(elem.pattern, field_type, scope))
+                        )));
+                        i += 1;
+                    };
+                    yield TypedPattern.EnumCase(case_name, tag_index, typed_elements);
                 };
-                yield TypedPattern.EnumCase(case_name, tag_index, typed_elements);
             },
             .StructPattern(type_name, elements, _) then {
                 let param_specs = self.get_struct_pattern_param_specs(subject_type, type_name);

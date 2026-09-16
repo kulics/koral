@@ -1,4 +1,4 @@
-# The Koral Programming Language
+﻿# The Koral Programming Language
 
 Koral is an open-source programming language focused on performance, readability, and practical cross-platform development.
 
@@ -110,7 +110,16 @@ let main() Void = {};
 
 Here we declare a function named `main`. The right side of `=` is the function body, `{}` represents an empty block expression, returning `Void`.
 
-The `main` function can also accept parameters (command line arguments) and return an integer (status code), but this depends on the specific runtime environment support. More details about functions will be explained in later chapters.
+The `main` function must:
+- Have no parameters.
+- Return `Int` or `Void`.
+
+```koral
+let main() Int = {
+    println("Hello");
+    return 0;
+};
+```
 
 ### Display Information
 
@@ -1177,6 +1186,25 @@ when b in {
 }
 ```
 
+#### Exhaustiveness Checking
+
+The `when` expression checks that patterns are exhaustive:
+
+- For `Bool` types, both `true` and `false` must be covered (or a wildcard used).
+- For `enum` types, all cases must be covered (or a wildcard used).
+- For `Int` / `UInt` types, comparison patterns (`> 0`, `<= 0`, etc.) can establish exhaustiveness when they fully cover the integer range. A wildcard is otherwise required.
+- For struct types, `.StructName(_, _)`-style patterns with wildcards for every field are treated as exhaustive.
+- Duplicate patterns are rejected at compile time.
+- Unreachable patterns (patterns already covered by earlier arms) are rejected at compile time. Wildcard and variable binding patterns are exempt from this check.
+
+```koral
+// Exhaustive via comparison patterns
+let classify(x Int) Int = when x in {
+    > 0 then 1,
+    <= 0 then 0,
+};
+```
+
 ### is Operator
 
 The `is` operator checks whether a value matches a pattern, and the result is always `Bool`. It is now a general-purpose expression and can appear in `let` initializers, return expressions, function arguments, and other expression positions.
@@ -1761,9 +1789,15 @@ For generic methods, the trait qualification wraps the receiver before method ty
 
 - Tool methods are non-override by default.
 - Inherent type methods win over trait tool methods.
-- If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly.
-- You must disambiguate explicitly (or remove the conflict).
+- If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly. You must disambiguate explicitly using trait qualification: `(value as TraitName).method(...)`.
+- If two traits define the same method and one inherits from the other, the child trait's implementation takes precedence (no ambiguity).
 - `given Trait` cannot define a method with the same name/signature as a requirement of that trait.
+
+#### Trait inheritance rules
+
+- A trait can inherit from one or more parent traits: `trait Child Parent1 and Parent2 { ... }`.
+- Trait inheritance is acyclic; cycles are detected and rejected at compile time.
+- A type implementing a child trait must also implement all parent traits (directly or via a `given` block).
 
 #### Module boundary rule
 
@@ -1811,10 +1845,15 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 
 ### Method Receiver Forms
 
-- self: managed value receiver (equivalent to managed value receiver).
-- *self / *mutable self: managed receivers; auto-ref allowed on call sites.
-- self methods can accept *T or *mutable T (auto-deref).
-- Auto-ref and auto-deref apply only to self and *self forms.
+- `self`: managed value receiver.
+- `*self` / `*mutable self`: managed reference receivers; auto-ref allowed on call sites.
+
+**Auto-ref and auto-deref rules:**
+
+- When a method expects `*self` (immutable reference), a plain value `v` is automatically promoted to `&v` at the call site.
+- When a method expects `self` (value), a reference `*T` or `*mutable T` is automatically dereferenced.
+- Auto-ref and auto-deref apply only to `self` and `*self` forms; they do not apply to explicit parameter positions.
+- Calling a `*mutable self` method through a readonly reference (`*T`) is a compile-time error.
 
 ### Trait Objects
 
@@ -2012,6 +2051,15 @@ given[T Any] Option[T] {
     public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
 }
 ```
+
+#### Never Type Restrictions
+
+The `Never` type represents computations that never return (e.g., infinite loops, panics). It is the bottom type.
+
+- `Never` cannot be used as a struct field type.
+- `Never` cannot be used as an enum payload type.
+- `Never` cannot be used as a function parameter type.
+- `Never` may be used as a return type to indicate a function never returns.
 
 ## Standard Library Essentials
 

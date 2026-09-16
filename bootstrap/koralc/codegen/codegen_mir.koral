@@ -1522,7 +1522,7 @@ given MIRFunctionCodeEmitter {
             self.codegen.append_copy_or_move_assignment(inner_type, inner.expression, dest_expr, false);
             ref_expression = ref_temp;
         };
-        let expression = self.codegen.generate_trait_object_conversion_from_ref_value(ref_expression, conversion.trait_name, conversion.concrete_type, should_retain);
+        let expression = self.codegen.generate_trait_object_conversion_from_ref_value(ref_expression, conversion.trait_name, self.codegen.mir_type_args_to_ref_list(conversion.trait_type_args), conversion.concrete_type, should_retain);
         if conversion.source_ownership is .Move() then {
             self.consume_moved_source(*(conversion.inner));
         };
@@ -1538,6 +1538,17 @@ given MIRFunctionCodeEmitter {
             .BorrowedReferenceType(inner) then self.trait_object_target_name(*inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_name(*inner),
             _ then Option[String].None(),
+        };
+    };
+
+    module_private trait_object_target_type_args(*self, t Type) List[*Type] = {
+        return when t in {
+            .TraitObject(_, args) then args,
+            .ReferenceType(inner) then self.trait_object_target_type_args(*inner),
+            .MutableReferenceType(inner) then self.trait_object_target_type_args(*inner),
+            .BorrowedReferenceType(inner) then self.trait_object_target_type_args(*inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_object_target_type_args(*inner),
+            _ then List[*Type].new(),
         };
     };
 
@@ -1569,7 +1580,7 @@ given MIRFunctionCodeEmitter {
         };
         return when self.trait_object_target_name(target_type) in {
             .Some(trait_name) then when self.trait_object_source_concrete_type(source_type) in {
-                .Some(concrete_type) then self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, concrete_type, retain_source),
+                .Some(concrete_type) then self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, self.trait_object_target_type_args(target_type), concrete_type, retain_source),
                 .None() then expression,
             },
             .None() then expression,
@@ -1652,7 +1663,7 @@ given MIRFunctionCodeEmitter {
         for arg in arg_values then { call_args.push(arg);};
         let sanitized_method = self.codegen.sanitize_codegen_identifier(dispatch_method_name);
         let return_c_type = self.codegen.c_type_name(effective_return_type);
-        let method_field_type = "\(return_c_type) (*\(sanitized_method))(\(join_strings(method_param_types, ", ")))";
+        let method_field_type = "\(return_c_type) (*\(sanitized_method))(\(join_strings(method_param_types, ", ")) )";
         let vtable_struct = self.vtable_prefix_struct_type_for_mir_method(members, dispatch_method_name, method_field_type);
         let vt_call_target = "((\(vtable_struct)*)\(receiver_result).vtable)->\(sanitized_method)";
         if self.codegen.type_is_void_or_never(effective_return_type) then {
@@ -2193,7 +2204,8 @@ given MIRFunctionCodeEmitter {
         self.codegen.indent = "    ";
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan);
         let saved_buffer = self.codegen.buffer;
-        self.codegen.buffer = CodegenBuffer.new();
+        let mutable body_buffer = CodegenBuffer.new();
+        self.codegen.buffer = body_buffer;
         let inner_nested = (&mutable body_emitter).emit_body_and_get_nested_definitions();
         let body_text = self.codegen.buffer.into_string();
         self.codegen.buffer = saved_buffer;
@@ -2233,7 +2245,8 @@ given MIRFunctionCodeEmitter {
         self.codegen.indent = "    ";
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan);
         let saved_buffer = self.codegen.buffer;
-        self.codegen.buffer = CodegenBuffer.new();
+        let mutable body_buffer = CodegenBuffer.new();
+        self.codegen.buffer = body_buffer;
         // Override local names for captured variables
         for capture in captures then {
             let capture_name = "__captured->\(self.capture_field_name(*capture))";
@@ -3205,6 +3218,9 @@ given CodeGen {
         let c_name = self.callable_c_name(function.identifier);
         if self.emitted_function_names.contains(c_name) then { return;};
         self.emitted_function_names.insert(c_name);
+        // Bound owner-sensitive callable-name cache to one top-level function.
+        // Keeping it across the full codegen run trades a small lookup win for higher RSS.
+        self.current_owner_callable_c_name_cache = Dict[String, String].new();
         let declared_return_type = self.mir_function_return_type(function);
         if self.type_contains_generic(declared_return_type) or self.params_contain_generic(function.params) then {
             panic("Generic MIR function body reached codegen: \(self.context.symbol_name(*(function.identifier))) :: \(self.context.type_display_name(function.identifier.symbol_type))");

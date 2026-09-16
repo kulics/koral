@@ -5,16 +5,26 @@
 // We use the string representation of the type as the key.
 public type MethodTable(
     mutable methods Dict[String, Dict[String, Symbol]],
+    // Tracks method names that have been registered from multiple sources
+    // (e.g., two different traits). Key: "type_key::method_name"
+    mutable conflict_keys Set[String],
+    // Tracks concrete/intrinsic given methods that should win over trait
+    // extension ambiguity during direct receiver lookup.
+    mutable inherent_keys Set[String],
 );
 
 given MethodTable {
     public new() MethodTable = {
-        return MethodTable(Dict[String, Dict[String, Symbol]].new());
+        return MethodTable(Dict[String, Dict[String, Symbol]].new(), Set[String].new(), Set[String].new());
     };
 
     public register(*mutable self, type_key String, method_name String, method Symbol) Void = {
         when self.methods.get(type_key) in {
             .Some(existing) then {
+                if existing.get(method_name) is .Some(_) then {
+                    // Method already registered -- potential conflict
+                    self.conflict_keys.insert(type_key + "::" + method_name);
+                };
                 let mutable m = existing;
                 m.insert(method_name, method);
                 self.methods.insert(type_key, m);
@@ -32,5 +42,20 @@ given MethodTable {
             return m.get(method_name);
         };
         return .None();
+    };
+
+    public mark_inherent(*mutable self, type_key String, method_name String) Void = {
+        self.inherent_keys.insert(type_key + "::" + method_name);
+    };
+
+    public is_inherent(self, type_key String, method_name String) Bool = {
+        return self.inherent_keys.contains(type_key + "::" + method_name);
+    };
+
+    /// Returns true if the given (type_key, method_name) has been registered
+    /// from multiple sources (e.g., two different traits), meaning the call
+    /// requires explicit trait qualification.
+    public has_conflict(self, type_key String, method_name String) Bool = {
+        return self.conflict_keys.contains(type_key + "::" + method_name);
     };
 };

@@ -1,4 +1,4 @@
-# Koral 编程语言
+﻿# Koral 编程语言
 
 Koral 是一个专注于性能、可读性和实用跨平台开发的开源编程语言。
 
@@ -112,7 +112,16 @@ let main() Void = {};
 
 这里我们声明了一个名称为 `main` 的函数。`=` 右边是函数体，`{}` 表示一个空的块表达式，返回 `Void`。
 
-`main` 函数也可以接受参数（命令行参数）并返回整数（状态码），但这取决于具体的运行环境支持。关于函数的更多细节将在之后的章节中说明。
+`main` 函数必须：
+- 没有参数。
+- 返回 `Int` 或 `Void`。
+
+```koral
+let main() Int = {
+    println("Hello");
+    return 0;
+};
+```
 
 ### 显示信息
 
@@ -1219,6 +1228,25 @@ when b in {
 }
 ```
 
+#### 穷举性检查
+
+when 表达式会检查模式是否穷举：
+
+- 对于 Bool 类型，必须覆盖 true 和 false（或使用通配符）。
+- 对于 enum 类型，必须覆盖所有分支（或使用通配符）。
+- 对于 Int / UInt 类型，比较模式（> 0、<= 0 等）在完全覆盖整数范围时可以建立穷举性，否则需要通配符。
+- 对于结构体类型，.StructName(_, _) 形式（所有字段使用通配符）被视为穷举。
+- 重复模式在编译期被拒绝。
+- 不可达模式（已被前面的分支覆盖的模式）在编译期被拒绝。通配符和变量绑定模式不受此检查约束。
+
+```koral
+// 通过比较模式实现穷举
+let classify(x Int) Int = when x in {
+    > 0 then 1,
+    <= 0 then 0,
+};
+```
+
 ### is 操作符
 
 `is` 操作符用于检查一个值是否匹配某个模式，结果为 `Bool` 类型。它现在是一个通用表达式，可以出现在 `let` 初始化、函数返回值、函数参数等任意表达式位置。
@@ -1801,10 +1829,17 @@ given[T Ord] Iterator[T] {
 
 #### 覆盖与冲突规则
 
+- 工具方法默认不可覆盖其他候选。
 - 类型自身方法优先于工具方法。
-- 多个 trait 工具来源产生同签名时，Koral 不做隐式优先级选择。
-- 必须显式消歧（或消除冲突声明）。
+- 如果多个 trait 工具来源提供同名同签名方法，Koral 不会隐式选择；必须使用 trait 限定显式消歧，例如 `(value as TraitName).method(...)`。
+- 如果两个 trait 都定义了同名方法，且其中一个继承自另一个，则子 trait 的实现优先，不会形成歧义。
 - `given Trait` 中不允许与该 trait requirement 同名同签名的方法。
+
+#### Trait 继承规则
+
+- 一个 trait 可以继承一个或多个父 trait：`trait Child Parent1 and Parent2 { ... }`。
+- Trait 继承必须无环；编译期会检测并拒绝环。
+- 一个类型实现子 trait 时，必须同时实现所有父 trait（可以通过直接 `given` 块完成）。
 
 #### 模块边界规则
 
@@ -1852,10 +1887,15 @@ let p = Point.origin();
 
 ### 方法接收器形式
 
-- `​self`：托管值接收器（equivalent to managed value receiver）。
-- `*self` / `*mutable self`：托管接收器，调用端允许 auto-ref。
-- `self` 方法可接受 `*T` / `*mutable T`（auto-deref）。
-- Auto-ref 和 auto-deref 仅适用于 `self` 和 `*self` 形式。
+- `self`：托管值接收器。
+- `*self` / `*mutable self`：托管引用接收器；调用端允许 auto-ref。
+
+**Auto-ref 与 auto-deref 规则：**
+
+- 当方法期望 `*self`（只读引用）时，普通值 `v` 会在调用点自动提升为 `&v`。
+- 当方法期望 `self`（值）时，`*T` 或 `*mutable T` 会自动解引用。
+- Auto-ref 和 auto-deref 只适用于 `self` 与 `*self` 形式，不适用于其他显式参数位置。
+- 通过只读引用（`*T`）调用 `*mutable self` 方法会在编译期报错。
 
 ### Trait Object
 
@@ -2053,6 +2093,15 @@ given[T Any] Option[T] {
     public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
 }
 ```
+
+#### Never 类型限制
+
+`Never` 类型表示永不返回的计算，例如无限循环或 `panic`。它是底类型。
+
+- `Never` 不能用作结构体字段类型。
+- `Never` 不能用作枚举 payload 类型。
+- `Never` 不能用作函数参数类型。
+- `Never` 可以用作返回类型，表示函数永不返回。
 
 ## 标准库最小常用示例
 
