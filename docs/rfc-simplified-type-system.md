@@ -12,12 +12,12 @@
 - **保留** unsafe pointer 系统（`*unsafe T`、`*unsafe mutable T`）用于 FFI / 系统编程
 - **保留** `foreign type` 语法；其语义继续等价于 C 兼容外部类型
 - **采用**声明处二分模型：`type A` / `type mutable B`
-- **保留**字段级 `mutable`，并规定字段默认仍为不可变；`type mutable` 不会自动使字段可写
+- **保留**字段级 `mutable`，但规则为：非 `type mutable` 类型的字段必须全部不可变；只有 `type mutable` 类型允许显式声明 `mutable` 字段；默认仍然不可变
 - **规定** `mutable` 只出现在声明形态中：`let mutable`、`type mutable`、字段声明、unsafe pointer pointee mutability；不存在通用的 `mutable expr` 或使用处 `mutable T`
 - **移除** `Deref` trait 及其在泛型约束中的传播
 - **移除** method receiver 的 auto-ref / auto-deref
 - **移除**标准库容器的默认 COW 语义，改为共享语义 + 显式 `clone()`
-- **引入** `Weak` 标记 trait；只有实现了 `Weak` 的类型才能使用 `?T`、`downgrade()`、`upgrade()`
+- **去掉** `Object` 标记 trait；弱引用能力改为约束处的 `mutable` 语法（如 `[T mutable]`），trait object 直接使用 trait 名作为 type position
 - **保留** raw pointer 指向普通 Koral 类型的能力，但必须明确它对布局自由、地址稳定性与优化边界的约束
 - **允许**不带 `mutable` 的类型也由编译器按需使用 ARC、隐藏间接层、隐藏堆分配、递归布局和 `Drop`
 
@@ -39,7 +39,7 @@
 6. **让编译器接管布局细节**：递归、trait object、closure capture、drop storage、hidden sharing 由编译器实现
 7. **保留字段级可变性表达**：类型的共享语义与字段能否赋值是两个独立概念
 8. **审慎保留 raw pointer 的通用性**：如果继续允许 `*unsafe T` 指向普通 Koral 类型，必须明确它对布局自由、地址稳定性和优化边界的约束
-9. **让 weak 成为显式能力**：只有真正需要 weak graph 的类型才承担 weak 运行时成本
+9. **让 weak 成为显式能力约束**：只有带 `mutable` 约束的类型才承担 weak 运行时成本
 
 ## 3. 动机
 
@@ -63,16 +63,10 @@
 
 ```koral
 // 不可变类型
-type Point {
-    x Float64,
-    y Float64,
-}
+type Point(x Float64, y Float64)
 
 // 可变类型
-type mutable Buffer {
-    mutable data List[UInt8],
-    mutable len UInt,
-}
+type mutable Buffer(mutable data List[UInt8], mutable len UInt)
 
 // 枚举仍然使用 type
 type Option[T] {
@@ -84,7 +78,8 @@ type Option[T] {
 建议的语法骨架：
 
 ```koral
-TypeDecl ::= "type" ["mutable"] TypeName GenericParams? TypeBody
+TypeDecl ::= "type" ["mutable"] TypeName GenericParams? StructBody
+         | "type" TypeName GenericParams? EnumBody
 ```
 
 本 RFC 当前范围内：
@@ -113,15 +108,9 @@ type mutable Path = String
 ```koral
 let mutable counter = 0;
 
-type mutable Counter {
-    mutable value Int,
-    id UInt,
-}
+type mutable Counter(mutable value Int, id UInt)
 
-type Vec {
-    mutable x Int,
-    y Int,
-}
+type Vec(x Int, y Int)
 
 let p *unsafe mutable UInt8 = ...;
 let raw = &unsafe mutable some_local;
@@ -133,6 +122,8 @@ let raw = &unsafe mutable some_local;
 let x = mutable Counter(0);     // 非法：不存在 mutable expr
 foo(mutable value);             // 非法：不存在这种实参形式
 let x mutable Counter = ...;    // 非法：不存在使用处 mutable T
+
+type Vec(mutable x Int)  // 非法：非 mutable type 的字段必须全部不可变
 ```
 
 这条规则是本 RFC 的重要边界：
@@ -140,6 +131,8 @@ let x mutable Counter = ...;    // 非法：不存在使用处 mutable T
 - **变量可变性**用 `let mutable`
 - **类型可变性**用 `type mutable`
 - **字段可变性**用字段上的 `mutable`
+- **非 `type mutable` 类型的字段必须全部不可变**
+- **只有 `type mutable` 类型允许显式声明 `mutable` 字段**
 - **不存在**第三类“表达式可变性”或“使用处可变性”
 
 ### 4.3 构造语法
@@ -147,14 +140,9 @@ let x mutable Counter = ...;    // 非法：不存在使用处 mutable T
 `type mutable` 的构造语法和普通 `type` 一样，不需要也不允许在表达式上再写 `mutable`：
 
 ```koral
-type Point {
-    x Int,
-    y Int,
-}
+type Point(x Int, y Int)
 
-type mutable Counter {
-    mutable value Int,
-}
+type mutable Counter(mutable value Int)
 
 let p = Point(1, 2);
 let c = Counter(0);
@@ -173,7 +161,7 @@ let mutable current = Counter(10);
 
 `type` 表示**不可变类型**：
 
-- 字段默认不可直接修改；只有显式写 `mutable` 的字段才可改写
+- 字段全部不可变，不允许声明 `mutable` 字段
 - 没有用户可见的 identity
 - 赋值 / 传参 / 返回不会暴露共享可变别名
 - 编译器可以自由决定底层布局与所有权实现
@@ -190,14 +178,9 @@ let mutable current = Counter(10);
 例子：
 
 ```koral
-type Point {
-    x Int,
-    y Int,
-}
+type Point(x Int, y Int)
 
-type mutable Counter {
-    mutable value Int,
-}
+type mutable Counter(mutable value Int)
 
 let p1 = Point(1, 2);
 let p2 = p1;
@@ -215,20 +198,15 @@ c2.value = 5;
 
 | | `type` | `type mutable` |
 |---|---|---|
-| `let` | 绑定不可重赋值；仅显式 `mutable` 字段可改 | 绑定不可重赋值；仅显式 `mutable` 字段可改 |
-| `let mutable` | 绑定可重赋值；仅显式 `mutable` 字段可改 | 绑定可重赋值；仅显式 `mutable` 字段可改 |
+| `let` | 绑定不可重赋值；字段全部不可变 | 绑定不可重赋值；仅显式 `mutable` 字段可改 |
+| `let mutable` | 绑定可重赋值；字段全部不可变 | 绑定可重赋值；仅显式 `mutable` 字段可改 |
 
 示例：
 
 ```koral
-type Point {
-    x Int,
-    y Int,
-}
+type Point(x Int, y Int)
 
-type mutable Counter {
-    mutable value Int,
-}
+type mutable Counter(mutable value Int)
 
 let mutable p = Point(1, 2);
 p = Point(3, 4);     // 合法：重绑定
@@ -322,40 +300,22 @@ ARC 在新模型里是**实现层能力**，不是用户必须直接操作的类
 
 ### 4.7 `Drop` 语义
 
-`Drop` 不再只属于可变类型。
-
-以下两种类型都可以实现 `Drop`：
-
-```koral
-type TempFile {
-    path Path,
-}
-
-given TempFile as Drop {
-    drop(self) Void = ...;
-}
-
-type mutable FileHandle {
-    fd Int32,
-}
-
-given FileHandle as Drop {
-    drop(self) Void = ...;
-}
-```
+`Drop` 不再只属于可变类型，但它必须建立在 ARC 语义之上。
 
 规则：
 
 - 任何类型都可以实现 `Drop`
 - `Drop` 的表面签名统一为 `drop(self) Void`
-- 对 plain `type`，编译器负责在其真实 backing storage 生命周期结束时调用 drop 逻辑
+- 对 plain `type`，编译器可以在隐藏 ARC / hidden ownership backing 上实现 drop；如果逃逸分析证明该值可以不必堆分配或共享，就可以优化掉额外 ARC，多数实现仍然以 ARC-backed finalization 作为基础模型
 - 对 `type mutable`，drop 在最后一个 owning handle 死亡时触发
+- `Drop` 实现类型必然是 ARC-backed 的对象语义；其运行时表示必须保有最终ization / retain-release 生命周期
 - drop 发生在受控 finalization context 中，不再向用户暴露析构期 raw pointer
 
 这意味着：
 
 - 开发者不需要因为“这类型要 drop”就强制把它设计成 `type mutable`
 - 编译器要负责用隐藏布局 / hidden ownership 保证 drop 行为正确
+- `Drop` 不是一个“值语义的 destructor”，而是“拥有对象的 finalizer”
 
 #### `drop(self)` 的析构上下文规则
 
@@ -399,65 +359,31 @@ type JsonValue {
 
 如果布局因此不再有限，编译器自动插入所需的隐藏间接层。开发者不需要写 `*T`、不需要写 `indirect`，也不需要为递归单独设计“引用 break edge”。
 
-### 4.9 弱引用
+### 4.9 约束处的 mutable 与 weak
 
-弱引用语法改为：
-
-```koral
-?T
-```
-
-但它不是对所有 `T` 都有意义。弱引用能力改为显式 opt-in。
+弱引用语法保留为 `?T`，但它只对“满足 mutable 约束”的类型参数和具体类型有意义。
 
 ```koral
-trait Weak {}
+let downgrade[T mutable](value T) ?T = ...
+let upgrade[T mutable](value ?T) Option[T] = ...
 ```
 
 规则：
 
-- `?T` 只对实现了 `Weak` 的类型合法
-- 普通 `type` 默认不支持 `Weak`
-- 一般只有 `type mutable` 或继承 `Weak` 的 trait object 类型可以使用弱引用
-- 未实现 `Weak` 的类型不需要 weak count
+- `?T` 只对满足 `mutable` 约束的类型合法
+- `mutable` 不是布局差异，而是语义能力约束：它表示该类型支持 weak graph 语义
+- 普通 `type` 默认不满足 `mutable` 约束
+- `type mutable` 类型可以满足 `mutable` 约束
+- `downgrade()` 和 `upgrade()` 只接受满足 `mutable` 约束的类型
+- `upgrade_mutable` / `downgrade_mutable` 不再存在；弱引用 API 只保留一套名字
 
-trait object 上的 `Weak` 规则也需要明确：
-
-1. `?TraitName` 只有在该 trait 自身继承 `Weak` 时才合法
-2. erased object 的具体实现类型也必须满足 `Weak`
-3. 如果 trait 没有继承 `Weak`，则即使某个具体实现类型支持 weak，也不能把 `TraitName` 当成 weak-capable trait object 使用
-
-这条规则能避免“trait object 表面允许 weak，但具体实现并不统一支持”的语义裂缝。
-
-本 RFC 进一步规定：
-
-1. `Weak` 是纯标记 trait，不包含方法签名
-2. `Weak` 可以被其它 trait 继承；一旦某 trait 继承 `Weak`，该 trait object 才可以出现在 `?Trait` 位置
-3. `type mutable` 并不会自动实现 `Weak`；是否支持 weak 必须显式声明
-4. `type` 不得实现 `Weak`，除非未来单独 RFC 明确放开
-
-这样可以把 weak 成本和语义显式绑定到用户声明，而不是绑定到“可变类型”这一大类上。
-
-示例：
+`mutable` 约束可以和其它泛型约束并列出现，例如：
 
 ```koral
-type mutable Node {
-    mutable parent ?Node,
-}
-
-given Node as Weak {}
+type mutable Node[T mutable](mutable parent ?T)
 ```
 
-操作保持一致：
-
-```koral
-downgrade(node)      // T -> ?T
-upgrade(weak_node)  // ?T -> Option[T]
-```
-
-移除的旧 API：
-
-- `upgrade_mutable`
-- `downgrade_mutable`
+这条规则把 weak 成本显式绑定到“可变类型能力”上，而不是单独引入一个 `Weak` 标记 trait。
 
 ### 4.10 方法接收者
 
@@ -502,46 +428,59 @@ trait ToString {
     to_string(self) String;
 }
 
-trait Error {
-    message(self) String;
-}
-
 trait Drop {
     drop(self) Void;
 }
 
-trait Weak {}
-```
-
-trait object 的表面语法不再使用 `*Trait` / `*mutable Trait`，而直接写 trait 名：
+任意普通 trait 都可以在 type position 中充当 trait object 目标；前提是它满足 object safety：
 
 ```koral
-let err Error = IoError.Other("boom");
+trait Drawable {
+    draw(self) String;
+}
+
+type Circle(radius Int);
+
+given Circle as Drawable {
+    draw(self) String = "Drawing circle";
+}
+
+let shape Drawable = Circle(10);
+shape.draw();
+```
+
+trait object 的表面语法直接写 trait 名：
+
+```koral
+let shape Drawable = Circle(10);
 let drawables List[Drawable] = ...;
 ```
 
-trait object 的实现层可以按需：
+规则：
 
-- 盒装 concrete value
-- 持有 concrete shared object
-- 用 ARC 管理 erased storage
+- trait object 不再依赖 `Object` 标记 trait
+- `Drop`、`Error` 或任何其它普通 trait 都可以参与 trait object 语义，只要 object-safe
+- trait object 的实现层可以按需：
+  - 盒装 concrete value
+  - 持有 concrete shared object
+  - 用 ARC 管理 erased storage
 
-但这些都不再以 `*Trait` 语法暴露给用户。
+这些都不再以 managed-reference 语法暴露给用户。
 
 object safety 规则保持原本方向，但签名表面更新为：
 
 - 不允许泛型 requirement 方法进入 trait object vtable
 - 除 receiver 之外，参数和返回值中不应使用未擦除的 `Self`
+- receiver 使用 `self`，不再出现 `*self` / `*mutable self`
 
 #### trait object 的类型测试与模式匹配
 
-当前语言里，trait object 的精确实现类型匹配依赖 `*IoError` 这类模式。移除托管引用表面语法后，这部分也需要同步改写。
+当前语言里，trait object 的精确实现类型匹配直接使用 concrete type 名。
 
 建议规则：
 
 - trait object subject 仍然允许做“精确实现类型测试”
-- 模式不再写 `*ConcreteType`
-- 改为直接写 concrete type 名
+- 模式直接写 concrete type 名
 
 ```koral
 if err is IoError then {
@@ -609,20 +548,18 @@ let x = *p;
 ```koral
 *T
 *mutable T
-?*T
-?*mutable T
-*Trait
-*mutable Trait
+?T
+Trait
 mutable T        // 使用处 mutable 类型
 ```
 
 #### 保留和新增的类型形式
 
 ```koral
-type Point { ... }
-type mutable Counter { ... }
+type Point(...)
+type mutable Counter(...)
 
-?Counter              // 仅在 Counter 实现 Weak 时合法
+?Counter              // 仅在 Counter 满足 mutable 约束时合法
 Drawable              // trait object
 
 *unsafe UInt8
@@ -635,7 +572,8 @@ Drawable              // trait object
 - `mutable` 不是 use-site type qualifier
 - 一个类型是否 mutable，由它自己的声明决定
 - 使用时直接写类型名本身，不再写 `mutable T`
-- `*unsafe T` / `*unsafe mutable T` 只允许 primitive 或 `foreign type` 作为 pointee
+- `*unsafe T` / `*unsafe mutable T` 对任何 Koral type 都可接受，但必须满足地址稳定性和布局稳定性的实现约束；编译器不能将已进入 raw pointee 语义的类型重新做布局上偷偷改变
+- raw pointer 不再视为“只允许 primitive / foreign type”这一类狭窄能力；它是底层内存观察能力，必须服从稳定布局承诺
 
 ### 4.14 额外语义影响
 
@@ -644,21 +582,15 @@ Drawable              // trait object
 字段级 `mutable` 语法保留，但字段默认仍不可变。
 
 ```koral
-type Vec {
-    mutable x Int,
-    y Int,
-}
+type Vec(x Int, y Int)
 
-type mutable Counter {
-    mutable value Int,
-    id UInt,
-}
+type mutable Counter(mutable value Int, id UInt)
 ```
 
 也就是说：
 
-- `type` 的字段默认为不可变
-- `type mutable` 的字段也默认为不可变
+- `type` 的字段全部不可变，不允许声明 `mutable` 字段
+- `type mutable` 的字段默认不可变，但允许显式声明 `mutable` 字段
 - 是否能原地修改字段，只由该字段自己是否写了 `mutable` 决定
 - `type mutable` 决定的是共享对象语义，不是字段自动可写
 
@@ -748,7 +680,10 @@ let t *unsafe KoralTimespec = ...;
 
 - 成员访问直接以不可变类型或可变类型语义工作
 - 下标赋值直接由容器 API / 编译器 lowering 支持
-- 不再暴露 `__index_ref` / `__index_mut_ref` 这类面向 managed ref 的用户模型
+- 不再暴露 `__index_ref` / `__index_mut_ref` / `__index_mut_ptr` 这类面向 ref/ptr 的旧用户模型
+- 对 plain `type`，`a[i].field = ...` 不做隐式 get-modify-set 回写；需要时用户应显式先取临时值、改写、再 `a[i] = tmp`
+- 对 `type mutable`，`a[i]` 得到的是共享句柄，因此成员写入与 mutating method call 可以自然工作
+
 
 #### 泛型约束
 
@@ -821,6 +756,7 @@ let t *unsafe KoralTimespec = ...;
 - **移除** `ensure_unique` / `is_unique` / COW 检查
 - **赋值 = 共享对象**
 - **独立副本 = 显式 `clone()`**
+- **`clone()` 的语义必须声明为浅拷贝**：复制的是对象句柄/共享 backing，而不是递归 deep-copy 结构体内容
 
 示例：
 
@@ -860,8 +796,8 @@ given[T Any] List[T] {
 `String` 改为真正的不可变值类型：
 
 ```koral
-type String { ... }
-type mutable StringBuilder { ... }
+type String(...)
+type mutable StringBuilder(...)
 ```
 
 原则：
@@ -992,15 +928,13 @@ trait Drop {
 trait Clone {
     clone(self) Self;
 }
-
-trait Weak {}
 ```
 
 `Deref` 从 std 和语言语义中移除。
 
 与之配套，所有原本依赖 receiver mutability 语法区分的 trait / given 实现，都要改为由 concrete type 本身决定语义：
 
-- 对 plain `type`，trait 方法不能原地修改非 `mutable` 字段
+- 对 plain `type`，trait 方法不能修改任何字段（`type` 不允许声明 `mutable` 字段）
 - 对 `type mutable`，trait 方法可以修改共享对象上的显式 `mutable` 字段
 - 调用者不再通过 `*self` / `*mutable self` 观察这种差异
 
@@ -1042,7 +976,7 @@ trait Weak {}
 3. 为 trait object 自动生成 erased storage 表示
 4. 为 closure capture 自动生成隐藏 capture storage
 5. 为实现 `Drop` 的 plain `type` 选择合适的 hidden ownership 模型，并以 `drop(self)` 语义触发析构
-6. 跟踪哪些类型实现了 `Weak`，仅为这些类型生成 weak count / downgrade / upgrade 支持
+6. 跟踪哪些类型满足 `mutable` 约束，仅为这些类型生成 weak count / downgrade / upgrade 支持
 7. 为共享容器 / shared object 语义实现 `clone()` 等显式复制能力
 8. 为泛型容器提供 opaque raw storage + typed slot intrinsic 支持
 
@@ -1051,7 +985,7 @@ trait Weak {}
 运行时层面：
 
 - **保留** ARC / retain / release 作为实现工具
-- **保留** weak reference 运行时支持，但仅用于实现了 `Weak` 的类型
+- **保留** weak reference 运行时支持，但仅用于满足 `mutable` 约束的类型
 - **保留** trait object vtable / erased storage 支持
 - **保留** unsafe pointer 相关运行时或 ABI 支持
 - **移除**为 managed `&` / `box()` / promotion / COW uniqueness 服务的专门表层机制
@@ -1091,7 +1025,8 @@ TypeDecl ::= "type" TypeName GenericParams? TypeBody
 新：
 
 ```koral
-TypeDecl ::= "type" ["mutable"] TypeName GenericParams? TypeBody
+TypeDecl ::= "type" ["mutable"] TypeName GenericParams? StructBody
+         | "type" TypeName GenericParams? EnumBody
 ```
 
 影响：
@@ -1149,7 +1084,7 @@ TypeNode ::= Name
 
 额外约束：
 
-- `?T` 只在 `T` 实现 `Weak` 时合法
+- `?T` 只在 `T` 满足 `mutable` 约束时合法
 - `mutable T` 不再是合法类型表达式
 - trait object 直接写 trait 名，不再走 `*Trait`
 - `*unsafe T` / `*unsafe mutable T` 始终允许 primitive 与 `foreign type`，普通 Koral 类型是否允许作为 pointee 由其布局约束是否可满足决定
@@ -1251,20 +1186,13 @@ TypePattern ::= ConcreteType
 旧：
 
 ```koral
-WeakType ::= "?*" TypeNode
-           | "?*mutable" TypeNode
-```
-
-新：
-
-```koral
 WeakType ::= "?" TypeNode
 ```
 
 影响：
 
 - 弱引用不再编码 pointee mutability
-- 是否能被弱引用由 `Weak` trait 决定，而不是由写法是否带 `*` 决定
+- 是否能被弱引用由该类型是否满足 `mutable` 约束决定，而不是由写法是否带 `*` 决定
 
 #### foreign type
 
@@ -1295,7 +1223,7 @@ ForeignTypeDecl ::= "foreign" "type" Name ForeignBody
 3. 删除 managed address-of 表达式节点
 4. 删除 managed deref 表达式节点
 5. 删除 receiver mutability / receiver ref-shape 节点分支
-6. 新增或保留一个更抽象的 `Weak(Type)` 语义节点，并记录 `Weak` conformance
+6. 保留 `Weak(Type)` 语义节点，改为记录该类型是否满足 `mutable` 约束
 7. trait object 从 `Ref<Trait>` 风格内部表示转为“erased trait object”直接节点
 8. 对泛型容器内部表示，引入 opaque raw storage / typed slot 级内部节点或 intrinsic 对接层
 
@@ -1311,7 +1239,6 @@ ForeignTypeDecl ::= "foreign" "type" Name ForeignBody
 
 - 删除 `box[T Any](mutable v T) *mutable T`
 - 保留 `make_bytes` / `make_uninitialized_bytes`，但其返回值现在是 `type mutable List[UInt8]`
-- 新增 `Weak` 标记 trait
 - 保留 `upgrade` / `downgrade`，删除 `upgrade_mutable` / `downgrade_mutable`
 - `print` / `println` / `eprint` / `eprintln` 无需表面签名变化，但 `ToString` 的 receiver 会变
 
@@ -1363,8 +1290,6 @@ trait Error {
 trait Drop {
     drop(self) Void;
 }
-
-trait Weak {}
 ```
 
 #### 核心类型分类
@@ -1539,14 +1464,14 @@ trait Seeker {
 
 弱引用不是自动获得的：
 
-- 如果某个同步类型需要参与 weak graph，必须显式 `given Type as Weak {}`
+- 如果某个同步类型需要参与 weak graph，必须满足 `mutable` 约束
 - 否则不生成 weak count 支持
 
 ### 8.6 `Std.Proc`
 
 改为 `type mutable`：
 
-- `Command`
+- `Command`满足 `mutable` 约束
 - `Process`
 - `StdinPipe`
 - `StdoutPipe`
@@ -1564,7 +1489,7 @@ trait Seeker {
 - `CommandOutput.is_success(*self)` -> `is_success(self)`
 - `ExitStatus.code(*self)` -> `code(self)`
 - `StdoutPipe.read(*self, into: *mutable List[UInt8], ...)` -> `read(self, into: List[UInt8], ...)`
-- `Process` / pipe / command 类型若需要 weak 引用，也必须显式实现 `Weak`
+- `Process` / pipe / command 类型若需要 weak 引用，也必须满足 `mutable` 约束
 
 ### 8.7 `Std.Text`
 
@@ -1746,14 +1671,14 @@ plain `type` 只是用户看来是不可变类型，不代表：
 |---|---|---|
 | nominal type 声明 | `type` + 字段级 `mutable` + managed refs | `type` / `type mutable` + 字段级 `mutable` |
 | 安全引用 | `*T` / `*mutable T` / `&` / `box()` | 移除 |
-| 弱引用 | `?*T` / `?*mutable T` | `?T`（仅 `Weak` 类型） |
+| 弱引用 | `?*T` / `?*mutable T` | `?T`（仅满足 `mutable` 约束的类型） |
 | receiver | `self` / `*self` / `*mutable self` | 统一 `self` |
 | trait object | `*Trait` / `*mutable Trait` | `Trait` |
 | 容器语义 | COW | 共享语义 + `clone()` |
 | `Deref` | 广泛存在 | 移除 |
 | 递归 | 显式引用 break edge | 编译器自动隐藏间接层 |
 | `Drop` | `drop(*unsafe mutable Self)` | `drop(self)` |
-| ARC | 用户可见地绑定到托管引用模型 | 编译器 / runtime 的实现手段 |
+| ARC | 用户可见地绑定到托管引用模型 | 编译器 / runtime 实现细节，不再暴露为用户可见的类型系统轴 |
 | unsafe pointer | 与托管引用并存 | 保留；若继续支持指向普通 Koral 类型，则会约束布局自由与优化边界 |
 | `foreign type` | 与 C 互操作 | 保留，继续承担 C ABI 值布局 |
 
@@ -1767,7 +1692,7 @@ plain `type` 只是用户看来是不可变类型，不代表：
 
 规范层面的最终含义是：
 
-- `Weak` 是否存在，是声明者显式决定的能力
+- 弱引用能力是否可用，由类型是否满足 `mutable` 约束决定
 - `drop(self)` 虽然表面简洁，但仍是受限析构上下文
 - `*unsafe T` 若继续支持普通 Koral 类型，就不再是“纯实现细节”，而是对布局与优化边界有约束力的语言承诺
 
