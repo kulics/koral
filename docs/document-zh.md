@@ -13,7 +13,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 ## 关键特性
 
 - 现代化、易于辨识的语法，支持显式分号和表达式导向控制流：`if`、`when`、`while`、`for` 都采用表达式形态的表面语法。其中 `if` 和 `when` 可以产值；`while` 与 `for` 始终产生 `Void`。
-- 基于引用计数、所有权分析和逃逸分析的自动内存管理。
+- 基于声明处二分（`type` / `type mutable`）的类型模型与 ARC 实现层自动内存管理。
 - 带有 Trait 约束的泛型系统，通过单态化实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷尽式模式匹配。
 - 基于 Trait 的多态，支持 Trait 对象实现运行时分发。
@@ -201,62 +201,42 @@ let (_, g) = (1, 2);                   // 丢弃第一个元素
 
 编译器会直接从 Pair 值中移动字段到目标变量，避免不必要的拷贝和析构开销。
 
-#### 引用创建规则（`&` / `box`）
+#### Unsafe Pointer 与取址（`&unsafe`）
 
-Koral 使用引用类型来引用另一个值：
+Koral 不再提供安全托管引用（`*T`、`*mutable T`）和取址操作（`&`、`&mutable`、`box()`）。数据共享通过 `type` / `type mutable` 的声明语义实现。
 
-- `*T` / `*mutable T` 是托管引用。
-  - 允许逃逸，可以返回、存字段、存容器、存枚举 payload。
-  - 不允许逃逸，不允许返回、存字段、存枚举 payload、全局或闭包环境。
-  - 仅允许出现在函数参数和 receiver 位置。
-- 两种引用在运行时布局相同，retain / release 行为也相同；区别只在前端静态语义。
+低层地址操作保留为 `&unsafe` / `&unsafe mutable`，用于 FFI 与系统编程场景：
 
-`&` 是引用取址运算符：
-
-- 普通 `&` 既可作用于左值，也可作用于右值；对右值时，编译器会按需物化托管存储。
-- `&mutable` 仍然要求可写左值。
 - `&unsafe` / `&unsafe mutable` 要求可取地址的存储，因此字面量和临时值会被拒绝。
-- `&` 产生 `*T`（或用 `&mutable` 产生 `*mutable T`）。编译器通过逃逸分析决定栈分配还是堆分配。
-- `box(expr)` 是显式托管构造，返回 `*mutable T`。
+- `&unsafe` 产生 `*unsafe T`（只读 raw pointer）。
+- `&unsafe mutable` 产生 `*unsafe mutable T`（可变 raw pointer）。
 
-隐式转换规则：
+指针类型区分只读和可变：
 
-- **函数参数和方法参数均不允许隐式托管引用提升或 auto-deref。** 如果函数期望 `*T` 或 `*mutable T`，调用方必须用 `&x` 或 `&mutable x` 显式传入。如果函数期望 `T`，从托管引用出发时需要显式用 `*r` 解引用。此规则适用于所有参数，包括方法参数。
-- **auto-ref 和 auto-deref 仅对 method receiver（`self`）生效。** `*self` 方法可接受值（auto-ref）；`self` 方法可接受 `*T` / `*mutable T`（auto-deref，跟随 Go 的 pointer receiver 设计）。
-
-接收者调整规则：
-
-- `*self` 是托管 receiver，可接受左值和右值接收者；对右值接收者，编译器会物化稳定的临时值。
-- `*mutable self` 是可变托管 receiver，仍然要求可写左值接收者；右值会被拒绝。
-- `*self` 在右值上可能引入临时值物化，此类调用可能带来隐藏的 retain/分配开销。
-- raw 指针支持直接字段访问语法糖（`p.field`），但不会做隐式 pointee 方法查找。
+- `*unsafe T` — 只读 raw pointer。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值。
+- `*unsafe mutable T` — 可变 raw pointer。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
+- `*unsafe mutable T` 可隐式转换为 `*unsafe T`；反向转换不允许。
 
 ```koral
-let mutable x = 10;
-let rx *mutable Int = &mutable x;
+let x = 10;
+let p *unsafe Int = &unsafe x;
 
-let y = 10;
-let ry *Int = &y;    // 只读引用
+let mutable y = 42;
+let mp *unsafe mutable Int = &unsafe mutable y;
+*mp = 100;
 
-let owned *mutable Int = box(42); // box() 返回 *mutable T
-let temp *Int = &42;          // OK：托管 & 可按需物化右值
-
-// let bad = &mutable 42      // 错误：&mutable 仍然要求可写左值
 // let raw_bad = &unsafe 42  // 错误：raw 取址需要可取地址存储
+```
 
-// 函数参数不允许隐式托管引用提升：
-let takes_ref(r * Int) Int = *r;
-let v = 42;
-// takes_ref(v)              // 错误：期望 *Int，得到 Int
-takes_ref(&v);                // OK：显式 &
+方法接收者统一使用 `self`，不再有 `*self` / `*mutable self`：
 
-// auto-deref 仅对 receiver 生效：
-type Counter(mutable value Int);
+```koral
+type mutable Counter(mutable value Int);
 given Counter {
-    public get(*self) Int = self.value;
+    public get(self) Int = self.value;
 }
 let c = Counter(10);
-c.get();                      // OK：*self 接受值（auto-ref）
+c.get();                      // OK：self 接受 Counter
 ```
 
 ### 赋值
@@ -536,55 +516,39 @@ let empty List[Int] = [];             // 空字面量必须有类型上下文
 - 集合字面量和 Dict 字面量都支持尾随逗号。
 - 集合字面量仅支持内置 `List` / `Set` / `Dict`，不支持第三方容器类型。
 
-### 引用类型 (Reference)
+### 指针类型 (Pointer)
 
-引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用：
+Koral 通过 `type` / `type mutable` 的声明语义实现数据共享，不再使用安全托管引用（`*T`、`*mutable T`）。低层地址操作保留为 `&unsafe` / `&unsafe mutable`，用于 FFI 与系统编程。
 
-- `*T` — 托管只读引用。支持 `*expr` 解引用读取，但不支持 `*expr = value` 赋值。
-- `*mutable T` — 托管可变引用。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
+- `*unsafe T` — 只读 raw pointer。支持 `*expr` 解引用读取，但不支持 `*expr = value` 赋值。
+- `*unsafe mutable T` — 可变 raw pointer。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
+- `*unsafe mutable T` 可隐式转换为 `*unsafe T`；反向转换不允许。
 
-使用 `&` 前缀表达式创建托管引用。普通 `&` 产生 `*T`；`&mutable` 产生 `*mutable T`。
+`*unsafe T` / `*unsafe mutable T` 仅表示底层 raw pointer 视图，编译器仍然必须满足稳定布局和地址稳定性要求。
 
 ```koral
-let mutable n = 42;
-let a *mutable Int = &mutable n;
-let b = *a;            // 解引用，得到 42
-*a = 100;              // 解引用赋值（*mutable 支持 *expr = value）
+let x = 42;
+let p *unsafe Int = &unsafe x;
 
-let m = 42;
-let c *Int = &m;
-let d = *c;            // 解引用读取，得到 42
-// *c = 100           // 错误：* 不支持解引用赋值
+let mutable n = 10;
+let mp *unsafe mutable Int = &unsafe mutable n;
+*mp = 100;               // 解引用赋值
 
-let owned *mutable Int = &mutable n;
+let rp *unsafe Int = mp;  // *unsafe mutable -> *unsafe 隐式转换
 ```
-
-`&` 产生 `*T`（或用 `&mutable` 产生 `*mutable T`）。编译器通过逃逸分析决定栈分配还是堆分配。`box(expr)` 始终显式构造托管 `*mutable T`。
-
-指针类型同样区分只读和可变：
-
-- `*unsafe T` — 只读指针。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值和 `p[i]` 赋值。
-- `*unsafe mutable T` — 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
-- `*unsafe mutable T` 可隐式转换为 `*unsafe T`。反向转换不允许。
 
 #### 弱引用
 
-弱引用不会增加引用计数，用于打破循环引用。与 `*`/`*mutable` 一样，弱引用也区分可变性：`?*T`（只读）和 `?*mutable T`（可变）。
-
-使用 `downgrade(*T)` 创建 `?*T`（或 `downgrade_mutable(*mutable T)` 创建 `?*mutable T`），使用 `upgrade(?*T)` 尝试升级回 `Option[*T]`（或 `upgrade_mutable(?*mutable T)` 返回 `Option[*mutable T]`）。
+弱引用改为显式能力约束：只有满足 `mutable` 约束的类型才允许 `?T`。运行时仍然会带 weak count，但这个能力必须通过约束显式声明，而不是通过 `Weak` 标记 trait 表达。
 
 ```koral
-let strong *mutable Int = box(42);
+let downgrade[T mutable](value T) ?T = ...
+let upgrade[T mutable](value ?T) Option[T] = ...
 
-// 可变路径：*mutable → ?*mutable → Option[*mutable T]
-let weak = downgrade_mutable(strong);     // *mutable T → ?*mutable T
-let upgraded = upgrade_mutable(weak);     // ?*mutable T → Option[*mutable T]
-
-// 只读路径：* → ?* → Option[*T]
-let ro *Int = strong;                // 隐式宽化
-let ro_weak = downgrade(ro);         // *T → ?*T
-let ro_upgraded = upgrade(ro_weak);  // ?*T → Option[*T]
+type mutable Node(mutable parent ?Node);
 ```
+
+这里的 `?T` 不再与旧的 `?*T` / `?*mutable T` 混用；`mutable` 约束表示该类型允许进入 weak graph 语义。
 
 
 #### Self 类型
@@ -610,11 +574,14 @@ given Point as Eq {
 
 ### 内存管理
 
-Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
+Koral 的内存管理基于声明处二分模型（`type` / `type mutable`），由编译器接管布局与所有权细节。
 
-- **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`*` / `*mutable` 是托管引用。普通 `&` 可从左值或右值形成托管引用；`&mutable` 仍要求可写左值；`&unsafe` / `&unsafe mutable` 只会从可取地址存储形成 raw 指针。编译器通过逃逸分析决定托管引用走栈还是走堆，`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `&` 显式传入。普通参数不允许 auto-deref——传入 `*T` 给期望 `T` 的参数需要显式用 `*expr`。隐式转换仅对 method receiver（`self`）生效；其中 `*self` 可在右值接收者上通过物化临时值调用，而 `*mutable self` 仍要求可写左值。Koral 使用所有权分析和逃逸分析来决定栈安全借用还是堆支持的引用计数，防止悬垂指针和内存泄漏。
-- **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
+- **不可变类型（`type`）**：默认情况下，Koral 中的类型（如 `Int`、结构体）没有用户可见的 identity。赋值或传参时，编译器可自由选择栈值、寄存器、隐藏共享 backing 等实现策略，用户无需关心。
+- **可变类型（`type mutable`）**：引入共享对象 identity。赋值 / 传参传递的是同一个对象的共享句柄。只有字段被显式声明为 `mutable` 时才允许原地修改。
+- **raw pointer**：`&unsafe` / `&unsafe mutable` 只从可取地址存储创建 raw pointer，用于 FFI 与系统编程。它们属于低层内存访问能力，仍受地址稳定性和布局稳定性约束。
+- **ARC 实现层细节**：编译器仍可能在内部使用 ARC / hidden storage，但这些都不是用户可见语法。语言协议围绕 `type` / `type mutable` 和字段级 `mutable` 展开。
+- **显式 `clone()`**：`type mutable` 的容器和共享对象不使用 COW 语义。独立副本需要通过显式 `clone()` 创建。
+- **所有权转移（Move Semantics）**：对于 `type` 类型，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
 
@@ -795,7 +762,7 @@ dealloc_memory(p);
 
 - `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`*unsafe T`、`*unsafe mutable T`。
 - `String[key]` 返回 `UInt8` 字节值，只读且不可取地址。
-- `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `*` / `*mutable` 上下文。
+- `List[T]` 和 `Deque[T]` 是 `type mutable`，支持值读取、赋值和深层 place 更新。
 - `*unsafe T` 只支持 `*expr` 读取；`*unsafe mutable T` 同时支持 `*expr` 读取和写入。
 - 用户自定义类型不能通过 Trait 获得 `[]` 能力，泛型约束也不能为类型添加下标能力。
 
@@ -839,7 +806,7 @@ let load_port(path String) Result[Int] = {
 操作符优先级从高到低如下：
 
 1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 限定/泛型方法后缀
-2. 前缀 / 控制流: 一元 `-`, `~`，解引用 `*`，以及取址 `&`、`&mutable`、`&unsafe`、`&unsafe mutable`；`if`、`while`、`for`、`when`
+2. 前缀 / 控制流: 一元 `-`, `~`，解引用 `*`，以及取址 `&unsafe`、`&unsafe mutable`；`if`、`while`、`for`、`when`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
 5. 移位: `<<`, `>>`
@@ -940,32 +907,32 @@ if foo() is .A(x) and bar(x) is .B(y) and y > 0 then {
 
 ```koral
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 
-if err is *IoError then {
+if err is IoError then {
     println("io");
 }
 
-if err is io *IoError then {
+if err is io IoError then {
     println(io.render());
 }
 ```
 
 这类精确类型模式遵循以下规则：
 
-- subject 仍然是 trait object 引用，不会自动解引用成实现值。
-- 目标必须写成 `*ConcreteType` 或 `*mutable ConcreteType`。
-- `err is io *IoError` 会把 `io` 绑定成 `*IoError`。
-- `*Problem` 不能匹配 `*mutable IoError`；`*mutable Problem` 可以匹配 `*IoError` 或 `*mutable IoError`。
+- subject 仍然是 trait object，不会自动转换成实现值。
+- 目标直接写成 `ConcreteType`。
+- `err is io IoError` 会把 `io` 绑定成 `IoError`。
+- `Problem` 可以匹配 `IoError`；精确类型测试作用于已擦除的 trait object subject。
 
 ## 循环结构
 
@@ -1144,7 +1111,7 @@ let label = when score in {
 - 通配符模式：`_`（匹配任意值）
 - 字面量模式：`1`、`-5`、`"abc"`、`'a'`、`true`（支持负整数字面量模式如 `-5`）
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mutable x`（可变绑定）
-- trait object 精确类型模式：`*IoError`、`*mutable IoError`、`err *IoError`
+- trait object 精确类型模式：`IoError`、`err IoError`
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair 解构模式：`(a, b)`（等价于 `Pair(a, b)` 模式）
@@ -1173,18 +1140,18 @@ let grade = when score in {
 
 // trait object 实现类型精确匹配
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 when err in {
-    io *IoError then println(io.render()),
+    io IoError then println(io.render()),
     _ then println("other"),
 }
 
@@ -1511,6 +1478,14 @@ type Empty();
 type Point(x Int, y Int);
 ```
 
+结构体还支持声明为可变类型，使用 `type mutable` 语法。可变类型引入共享对象语义——赋值或传参时传递的是同一对象的共享句柄，而不是值拷贝：
+
+```koral
+type mutable Counter(mutable value Int, id UInt);
+```
+
+只有 `type mutable` 类型允许声明 `mutable` 字段。非 `type mutable` 类型的字段必须全部不可变。
+
 结构体字段可以是位置字段或命名字段。命名字段使用冒号语法，可以有默认值：
 
 ```koral
@@ -1554,21 +1529,30 @@ let main() Void = {
 }
 ```
 
-#### 可变成员变量
+#### 可变成员变量与 `type mutable`
 
-成员变量默认是只读的。使用 `mutable` 关键字标注可变成员变量：
+成员变量默认是只读的。只有 `type mutable` 类型允许使用 `mutable` 关键字标注可变成员变量，非 `type mutable` 类型的字段必须全部不可变：
 
 ```koral
-type Point(mutable x Int, mutable y Int);
+// 非法：Point 不是 type mutable，不允许 mutable 字段
+type Point(mutable x Int, mutable y Int); // 错误
+
+// 合法：Counter 是 type mutable，可以声明 mutable 字段
+type mutable Counter(mutable value Int, id UInt);
 
 let main() Void = {
-    let a = Point(64, 128);
-    a.x = 2;  // ok，因为 x 是 mutable
-    a.y = 0;  // ok，因为 y 是 mutable
+    let c = Counter(0, 1);
+    c.value = 5;  // ok，因为 value 是 mutable 字段
+    // c.id = 2;  // 错误：id 不是 mutable 字段
 }
 ```
 
-成员变量的可变性跟随类型定义，与实例变量是否可变无关。
+规则：
+
+- `type` 的字段必须全部不可变，不允许声明 `mutable` 字段。
+- `type mutable` 的字段默认不可变，但允许显式声明 `mutable` 字段。
+- 是否能原地修改字段，只由该字段自己是否写了 `mutable` 决定。
+- `type mutable` 决定的是共享对象语义（赋值 / 传参传递同一对象的句柄），不是字段自动可写。
 
 ### 枚举 (Sum Type)
 
@@ -1684,7 +1668,7 @@ Trait 定义了一组方法签名，任何实现了该 Trait 的类型都必须�
 
 ```koral
 trait Printable {
-    to_string(*self) String;
+    to_string(self) String;
 }
 ```
 
@@ -1793,7 +1777,7 @@ println(a.not_equals(b));
 
 ```koral
 trait Iterator[T Any] {
-    next(*mutable self) Option[T];
+    next(self) Option[T];
 }
 
 given[T Ord] Iterator[T] {
@@ -1877,101 +1861,78 @@ let p = Point.origin();
 - `Eq` / `Ord`：相等性与排序比较。
 - `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
-- `Iterator[T]`：迭代协议（`next(*mutable self) Option[T]`）。
-- `Error`：错误消息接口（`message(*self) String`）。
-- `Drop`：析构钩子（`drop(source *unsafe mutable Self) Void`）。
+- `Iterator[T]`：迭代协议（`next(self) Option[T]`）。
+- `Error`：错误消息接口（`message(self) String`）。
+- `Drop`：析构钩子（`drop(self) Void`）。
 
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
 
-`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source *unsafe mutable Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
+`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它只由编译器在对象生命周期终点自动调用，`self` 在析构上下文中是只读访问视图。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
 
 ### 方法接收器形式
 
-- `self`：托管值接收器。
-- `*self` / `*mutable self`：托管引用接收器；调用端允许 auto-ref。
+- `self`：唯一 receiver 形式。
 
-**Auto-ref 与 auto-deref 规则：**
+**receiver 语义规则：**
 
-- 当方法期望 `*self`（只读引用）时，普通值 `v` 会在调用点自动提升为 `&v`。
-- 当方法期望 `self`（值）时，`*T` 或 `*mutable T` 会自动解引用。
-- Auto-ref 和 auto-deref 只适用于 `self` 与 `*self` 形式，不适用于其他显式参数位置。
-- 通过只读引用（`*T`）调用 `*mutable self` 方法会在编译期报错。
+- 对 `type`，`self` 表示不可变类型 receiver。
+- 对 `type mutable`，`self` 表示可变类型 receiver。
+- 不再有 auto-ref / auto-deref；调用语义只依赖类型本身。
+- "不可变类型"只是用户可见语义，不等于"总是按固定值布局传递"；编译器仍可为不可变类型选择隐藏共享等实现策略，只要不暴露可变别名。
 
 ### Trait Object
 
-Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `*TraitName` 或 `*mutable TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
+Trait Object 是 Koral 中实现运行时多态（动态派发）的机制，表面语法直接使用 trait 名。
 
 #### 基本语法
 
 Trait object 构造遵循以下规则：
 
-- 目标类型写作 `*TraitName` 或 `*mutable TraitName`。
-- 源值必须实现该 Trait，并在期望该 trait object 类型的上下文中发生转换。
-- `box(...)` 是提供拥有值并完成此类转换的标准方式。
+- 目标类型是 trait 名，不是 managed reference 类型。
+- 源值必须实现该 Trait，并在期望 trait object 的上下文中发生转换。
+- 不再需要 `Object` 标记 trait。
 
 ```koral
 trait Drawable {
-    draw(*self) String;
-    reset(*mutable self) Void;
+    draw(self) String;
 }
 
-type Circle(mutable radius Int);
-type Square(mutable side Int);
+type Circle(radius Int);
 
 given Circle as Drawable {
-    public draw(*self) String = "Drawing circle";
-    public reset(*mutable self) Void = {
-        self.radius = 0;
-    }
-}
-given Square as Drawable {
-    public draw(*self) String = "Drawing square";
-    public reset(*mutable self) Void = {
-        self.side = 0;
-    }
+    draw(self) String = "Drawing circle";
 }
 
-// 创建 trait object
-let shape *Drawable = box(Circle(10));
-let mutable_shape *mutable Drawable = box(Square(4));
-
-// 通过 trait object 调用方法（动态派发）
-shape.draw();  // "Drawing circle"
-mutable_shape.reset();
-mutable_shape.draw();
+let shape Drawable = Circle(10);
+shape.draw();
 ```
 
-通过 trait object 调用时，接收者可变性规则与普通引用一致：
+关键规则：
 
-- `*TraitName` 只能调用声明为 `*self` 的 requirement。
-- `*mutable TraitName` 可以调用 `*mutable self` 和 `*self` 的 requirement。
-- `*TraitName` 不能调用 `*mutable self` 的 requirement。
+- trait object 的 dispatch 依赖具体实现类型的语义，而不再暴露 managed-ref 语法。
+- 任意普通 trait 都可以作为 trait object 目标，只要满足 object safety。
 
 #### 对象安全性
 
 只有满足以下条件的 Trait 才能用作 trait object：
 
-- 方法不能有泛型参数
-- 若存在接收者，则接收者必须是 `*self` 或 `*mutable self`
-- 方法的参数和返回值中不能出现 `Self` 类型（仅接收者中的该用法例外）
+- 方法不能有泛型参数。
+- receiver 使用 `self`，不再出现 `*self` / `*mutable self`。
+- 方法参数和返回值中不能出现未擦除的 `Self`。
 
 ```koral
 // 对象安全 — 可以用作 trait object
 trait Error {
-    message(*self) String;
+    message(self) String;
 }
 
 // 不是对象安全 — 不能用作 trait object
 trait Eq {
-    equals(self, other Self) Bool;  // Self 出现在参数中
-}
-
-trait Resettable {
-    reset(self) Void;  // 按值 self 不是对象安全的
+    equals(self, other Self) Bool;
 }
 ```
 
-Trait object（`*TraitName`、`*mutable TraitName`）不支持直接解引用，应通过动态派发调用 trait 方法。
+Trait object 不支持直接解引用，应通过动态派发调用 trait 方法。
 
 #### 精确类型模式
 
@@ -1979,44 +1940,44 @@ Trait object 也支持通过 Koral 现有模式系统，对实现类型做精确
 
 ```koral
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 type NetError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
 given NetError as Problem {
-    render(*self) String = "net";
+    render(self) String = "net";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 
-if err is *IoError then {
+if err is IoError then {
     println("io");
 }
 
-if err is io *IoError then {
+if err is io IoError then {
     println(io.render());
 }
 
 let label = when err in {
-    io *IoError then io.render(),
+    io IoError then io.render(),
     _ then "other",
 }
 ```
 
 规则：
 
-- 精确类型模式只允许用于 trait object 引用 subject。
-- 目标必须是具体托管引用类型：`*Concrete` 或 `*mutable Concrete`。
+- 精确类型模式用于 trait object subject。
+- 目标直接写具体类型名：`ConcreteType`。
 - 匹配要求实现类型与泛型实参都精确一致。
-- 匹配不会自动解引用成底层值类型。
-- `*TraitName` 不能满足 `*mutable Concrete` 模式。
-- `*mutable TraitName` 可以满足 `*Concrete` 或 `*mutable Concrete`。
+- 匹配不会自动转换成底层值类型。
+- `err is io IoError` 会把 `io` 绑定成已下转后的 concrete value / object view。
+- 绑定变量的具体传递方式由编译器根据 concrete type 决定：如果实现类型是 `type`，按不可变类型语义工作；如果是 `type mutable`，按可变类型语义工作。
 - 这类模式属于开放世界测试；放在 `when` 中时不算穷尽，因此仍需要默认 `_` 分支。
 
 ## 泛型
@@ -2127,9 +2088,9 @@ let read_number(path String) Result[Int] = {
     parse_int(text);
 }
 
-// Result（错误端为 *Error）
+// Result（错误端为 Error trait object）
 let ok = Result[Int].Ok(42);
-let err = Result[Int].Error(box("failed"));
+let err = Result[Int].Error("failed");
 ```
 
 完整 API 请查看 `docs/std/` 下各模块文档。
@@ -2326,5 +2287,5 @@ foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
 
 ```koral
 public intrinsic type Int;
-public intrinsic let is_unique_mutable[T Any](r *T) Bool;
+public intrinsic let alloc_memory[T Any](count UInt) *unsafe mutable T;
 ```

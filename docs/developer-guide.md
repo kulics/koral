@@ -184,48 +184,42 @@ Notes:
 - `[]` is builtin syntax only for `String`, `List`, `Deque`, `*unsafe`, and `*unsafe mutable`; custom traits do not define subscript behavior.
 - `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
 - Generic trait identity includes trait arguments. Do not compare only the base trait name on conformance, witness, vtable, or generic-bound paths.
-- Trait-object exact type patterns use `err *ConcreteType` / `*ConcreteType` and operate on the raw trait-object subject; they do not auto-deref to the concrete value type.
+- Trait-object exact type patterns use the concrete type name directly and operate on the erased trait-object subject; they do not auto-deref to the concrete value type.
 - Trait-object exact type patterns are open-world checks. In `when`, they do not make a match exhaustive; keep a default `_` arm.
+- Trait objects are direct trait-name types; no `Object` marker trait is required.
+- Weak capability is expressed with the `mutable` type-parameter constraint plus `?T`, not via a `Weak` marker trait.
 
-## Reference Creation Semantics (`&` / `box`)
+## Simplified Reference and ARC Semantics
 
-Koral distinguishes managed references (`*T`, `*mutable T`) from raw pointers (`*unsafe T`, `*unsafe mutable T`):
+The active model is the simplified, declaration-site mutability design:
 
-- Managed references may escape and are reference-counted. The compiler uses escape analysis to decide stack vs heap allocation.
-- `&expr` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
-- Plain `&` produces `*T`.
-- `&mutable` produces `*mutable T`.
-- Plain `&` may take an rvalue (for example `&42`) and materializes managed storage as needed.
-- `&mutable` still requires a writable lvalue.
-- `&unsafe` / `&unsafe mutable` require addressable storage and therefore reject literals and temporary values.
-- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must pass `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mutable T` (auto-deref, following Go's pointer receiver behavior).
-- `*T` supports `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
-- `*unsafe T` supports `*expr` dereference read only. `*unsafe mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
-- Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
-- `box(expr)` returns `*mutable T` — an escaping managed reference from temporaries/literals.
-- `box` should be understood as binding its parameter locally and returning `*mutable T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
-- Ordinary parameter `mutable` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
+- managed refs are removed: no `*T`, `*mutable T`, `?*T`, `?*mutable T`, no `&`, no `&mutable`, and no `box()`
+- raw pointers remain: `*unsafe T`, `*unsafe mutable T`, `&unsafe`, `&unsafe mutable`
+- `type mutable` controls nominal shared-object semantics, not field-by-field mutability for ordinary types
+- non-`type mutable` nominal types must keep all fields immutable; only `type mutable` types may declare `mutable` fields
+- `Clone` is explicitly shallow-copy semantics: duplicate the object handle or backing storage, not a recursive deep copy
+
+The compiler may still use ARC and hidden storage for implementation, but those choices are not user-visible semantics. The language contract is about shared identity and field mutability, not whether a value happened to be heap-backed or box-optimized.
 
 ```koral
-let mutable x = 10
-let rx *mutable Int = &mutable x
+type Vec(x Int, y Int);
 
-let y = 10
-let ry *Int = &y     // read-only reference
+type mutable Counter(mutable value Int, id UInt);
 
-let owned *mutable Int = box(42)   // box() returns *mutable T
-let temp *Int = &42            // OK: managed & may materialize rvalues
+let c = Counter(0);
+c.value = 1;    // valid because Counter declares a mutable field
 
-// let bad = &mutable 42       // error: &mutable still requires a writable lvalue
-// let raw_bad = &unsafe 42    // error: raw address-of needs addressable storage
+let v = Vec(1, 2);
+// v.x = 3;     // invalid: Vec is not type mutable and its fields are immutable
 ```
 
 ## Drop Semantics
 
-- `Drop` uses `drop(source *unsafe mutable Self) Void`.
-- Treat `Drop.drop` as a compiler-reserved destructor entry, not a normal user-callable method.
-- The parameter is raw owned storage, so `Drop` should not rely on ref-style escape distinctions such as borrow-vs-owned checks.
+- `Drop` uses `drop(self) Void`.
+- `Drop` is a normal trait requirement with a compiler-reserved finalization context; it is not a user-invoked method.
+- A type that implements `Drop` must behave as an ARC-backed object at runtime, even when the compiler's layout analysis may optimize away some extra layers for a local value.
+- `Drop` is separate from weak capability; trait objects are gated by object safety rather than an `Object` marker trait.
+- The compiler may perform finalization in an internal managed-lifetime context and still hide the raw address details from user code.
 - Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
 
 ## Bootstrap Self-Hosting Repair Notes
@@ -245,8 +239,8 @@ The current bootstrap compiler has been repaired back to a stable self-hosting c
 ### Swift Alignments That Fixed The Bugs
 
 - Treat the codegen driver as operating on one stable mutable object. In bootstrap, `generate_c_from_mir` should keep a single boxed `CodeGen` and mutate that one instance through prelude, body emission, finalization, and string extraction.
-- Avoid by-value `CodeGen` receivers on codegen hot paths. Swift effectively has reference semantics here; bootstrap needed the same practical behavior via `*self` to stop copying internal state such as caches and output buffers.
-- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through `&mutable`-style calls.
+- Avoid by-value `CodeGen` receivers on codegen hot paths. Swift effectively has reference semantics here; bootstrap needed the same practical behavior to stop copying internal state such as caches and output buffers.
+- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through method calls.
 - Align generic type instantiation with Swift's two-step approach:
     1. substitute template parameters
     2. immediately resolve nested parameterized types to concrete instantiated types
@@ -331,45 +325,48 @@ done
 
 ## Standard Library Receiver Design
 
-When designing standard-library APIs, choose method receivers by ownership semantics first and implementation convenience second.
+When designing standard-library APIs, `self` is the only receiver form. Whether `self` acts as an immutable or mutable receiver depends entirely on the type declaration:
+
+- For `type` (immutable types), `self` is an immutable receiver. Fields are all immutable and there is no shared-object identity.
+- For `type mutable` (mutable types), `self` is a mutable receiver on the shared object. Fields can be mutated in place if declared `mutable`.
+
+There is no `*self` or `*mutable self`. There is no auto-ref or auto-deref. The type declaration determines the receiver behavior.
 
 Primary rule:
 
-- Use `*self` for observation and derivation.
-- Use `*mutable self` for in-place mutation.
-- Use `self` only when the method semantically consumes the receiver.
-
-This is a semantic default, not a mechanical rule. For small immutable value types that behave like scalars in the API, using `self` for observation can still be reasonable when it keeps the whole type family consistent and avoids borrow-heavy signatures.
-
-This rule matters because receiver adjustment has asymmetric call behavior:
-
-- `*self` accepts both lvalue and rvalue receivers. Rvalue calls may materialize a temporary.
-- `*mutable self` requires a writable lvalue receiver.
-- `self` transfers ownership and should therefore communicate real consumption, not just implementation preference.
+- On `type`, `self` is naturally suited for observation, derivation, and transformation that returns new values, since the receiver is immutable and there is no shared-object aliasing concern.
+- On `type mutable`, `self` provides shared access to the mutable object. Methods that modify in place (such as `push` on `List`) and methods that observe (such as `count` on `List`) both use `self`; the difference is in what the method body does, not the receiver form.
+- On either kind, `self` may semantically consume the receiver when the method is a terminal extraction, ownership conversion, or linear builder step.
 
 ### Default Receiver Choices
 
-Use `*self` when the call should leave the original value logically usable by the caller.
+Use `self` on `type` when the call should leave the original value logically usable by the caller. Since `type` is immutable, all methods naturally preserve the caller's value.
 
-Common `*self` cases:
+Common cases on `type`:
 
 - predicates such as `is_empty`, `contains`, `starts_with`
 - accessors and getters such as `count`, `name`, `pattern`
 - formatting and display such as `to_string`, `message`
 - pure derived values such as `dir_name`, `base_name`, `components`
 - view-producing methods that do not consume the source
+- transformation methods that return new values, such as `trim`, `normalize`, `to_ascii_uppercase`
 
-Use `*mutable self` when the method mutates the receiver in place.
+Use `self` on `type mutable` for both mutation and observation.
 
-Common `*mutable self` cases:
+Common mutation cases on `type mutable`:
 
 - container updates such as `push`, `insert`, `remove`, `clear`
-- stateful cursor updates on direct value types
+- stateful cursor updates
 - mutation APIs returning removed values, such as `pop` or `take_at`
 
-Use `self` only when consuming the receiver is part of the API contract.
+Common observation cases on `type mutable`:
 
-Common `self` cases:
+- accessors and getters such as `count`, `peek`, `is_empty`
+- predicates and display methods
+
+Use `self` on either kind of type when consuming the receiver is part of the API contract.
+
+Common consumption cases:
 
 - terminal extraction such as `unwrap`, `expect`, `into_list`
 - transforming combinators on ownership-carrying enums such as `Option.map` and `Result.map`
@@ -380,17 +377,18 @@ Common `self` cases:
 Builder-style APIs need one extra distinction:
 
 - keep `self` when the builder is intentionally modeled as a linear fluent pipeline whose chained calls conceptually move from one configuration stage to the next
-- prefer `*self` when the API is really a reusable handle with derived helper methods or repeatable configuration/query operations, even if the implementation stores state behind a ref
+- on `type mutable`, builders naturally support chaining via the shared handle, so methods that configure and return the same handle are idiomatic
+- on `type`, a builder that needs repeated configuration should use a consuming `self` pipeline if the chaining behavior is part of the public contract
 
-In other words, "internally ref-backed" does not automatically make a builder-style API borrowed. Use `self` only when the chaining behavior is part of the public contract, not merely because returning `self` is convenient.
+### Returned New Values Do Not Consume the Receiver
 
-### Returned New Values Do Not Imply `self`
+Returning a new value is not, by itself, a reason to consume the receiver.
 
-Returning a new value is not, by itself, a reason to use `self`.
+On `type`, all methods naturally leave the original value usable because `type` is immutable. Transformation methods such as path manipulation, string trimming, and structural projections return new values while the original remains unchanged.
 
-Prefer `*self` when the method computes a new value but the caller should still think of the original receiver as available. Examples include path manipulation, string trimming, and structural projections.
+On `type mutable`, methods that return new values while preserving the shared object (such as `pop` returning a removed element) also do not consume the receiver.
 
-Prefer `self` only when the API is intentionally framed as consuming or forwarding ownership.
+Consume the receiver only when the API is intentionally framed as consuming or forwarding ownership, such as `into_*` methods or terminal combinators.
 
 ### Small Pure Value Types
 
@@ -413,64 +411,61 @@ For such types, it is acceptable to keep observation and pure derivation methods
 - the family already uses value receivers consistently
 - borrowing would add signature noise without unlocking important mutation or aliasing guarantees
 
-Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where `*self` materially improves reuse expectations for callers.
+Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where shared-object semantics materially improve reuse expectations for callers.
 
 This exception can also cover "sum-of-small-values" enums and tiny wrappers whose payloads are still plain value data rather than handles or heap ownership. Network address values and regex flag bitmasks fit this category; JSON values, strings, paths, and collections generally do not.
 
 ### Handle Types and Interior Mutation
 
-Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `*mutable` storage or OS resources.
+Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by OS resources. These are `type mutable` types.
 
-For such handle types, methods may use `*self` even when the underlying state changes. In these cases the API models shared access to a handle, not direct value mutation of the outer type.
+For such handle types, `self` provides shared access to the handle, and methods that change underlying state (such as advancing a file cursor or buffering new data) model shared handle mutation, not direct value mutation of the outer type.
 
-Use this exception deliberately. Do not generalize handle-style `*self` mutation to ordinary value types such as containers, strings, or path values.
+This pattern is inherent to `type mutable`. Do not generalize interior-mutation reasoning to `type` types such as containers, strings, or path values, which must remain semantically immutable.
 
 ### Borrowed Methods Implemented via Iteration
 
-Do not let an iterator implementation detail force a public receiver to become `self`.
+Do not let an iterator implementation detail force a method to appear consuming.
 
-If a method is semantically observational or purely derived, it should usually remain `*self` even when the easiest implementation strategy is to iterate.
+If a method is semantically observational or purely derived, its public API should reflect that, even when the easiest implementation strategy is to iterate.
 
 Prefer the following order:
 
-1. Implement the method directly with borrowed traversal over storage or fields.
-2. If the type can cheaply create an iterator snapshot without semantically consuming the value, keep the public method on `*self` and construct that iterator internally.
-3. Only keep the public receiver as `self` when iteration truly consumes unique state as part of the API contract.
+1. Implement the method directly with traversal over storage or fields.
+2. If the type can cheaply create an iterator snapshot without semantically consuming the value, construct that iterator internally and keep the method observational.
+3. Only expose a consuming method when iteration truly consumes unique state as part of the API contract.
 
-This distinction matters because many iterators are consuming in the iterator sense while their source container is not consuming in the API sense.
+This distinction matters because many iterators are consuming in the iterator sense while their source container is not consuming in the API sense. On `type mutable` containers, creating an iterator passes the shared handle and does not consume the container.
 
 Examples:
 
-- a `List` or `String` method may stay `*self` even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
-- a stream, generator, or one-shot parser should not expose borrowed observation methods that secretly consume its progression state
+- a `List` or `String` method may remain observational even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
+- a stream, generator, or one-shot parser should not expose observation methods that secretly consume its progression state
 
 ### Iterable as a Borrowed Protocol
 
-`Iterator` itself is inherently consuming and should stay `next(*mutable self)`.
+`Iterator` itself is inherently consuming: `next(self)` advances the iterator's internal cursor and may exhaust the iteration.
 
 `Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not ownership transfer of the source.
 
-When evaluating `iterator(...)`, use this rule:
+For `type mutable` containers, `iterator(self)` naturally models this: the call passes the shared handle to the container, creates an iterator that snapshots the container's storage and cursor state, and the container itself remains reusable. The `type mutable` declaration ensures the container has shared-object identity, and the iterator is an independent cursor over that shared storage.
 
-- prefer `iterator(*self)` when the iterator is just a snapshot of shared storage plus cursor state
-- keep `iterator(self)` only when creating the iterator must semantically consume unique progression state from the source itself
+For `type` values (such as range-like values), `iterator(self)` is equally appropriate since `type` is inherently non-consuming.
 
-Typical borrowed `Iterable` cases include:
+Typical `Iterable` cases where the source remains reusable:
 
-- containers such as `List`, `Set`, `Dict`, `Deque`, `Queue`, `Stack`, and `PriorityQueue`
-- range-like values where the range is a reusable description and the iterator carries the advancing cursor
+- containers such as `List`, `Set`, `Dict`, `Deque`, `Queue`, `Stack`, and `PriorityQueue` (all `type mutable`)
+- range-like values where the range is a reusable description and the iterator carries the advancing cursor (typically `type`)
 
 Typical consuming `Iterable`-like cases would be one-shot sources such as generators, streams, or parsers whose progression state lives in the source value itself.
 
-In current `std/`, `Iterable.iterator` now uses `*self`, which matches the snapshot-style behavior of the existing container and range implementations. Treat that as the default model for reusable sources rather than as a special-case optimization.
-
-This is also why observational methods such as set algebra should not be forced onto `self` merely because they happen to call `iterator()`. If the source collection remains reusable, the public API should still be designed as borrowed.
+This design also means observational methods such as set algebra should not be treated as consuming merely because they happen to call `iterator()`. If the source collection is `type mutable`, the public API naturally preserves the shared handle.
 
 ### Arithmetic Traits and Arithmetic-Like APIs
 
 Do not equate "returns a new value" or "looks like an operator" with consuming ownership.
 
-Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` are value-style protocols today and should generally stay that way. They primarily model scalar algebra over small immutable values, and changing them to managed receivers would impose broad signature churn across numeric APIs for little semantic gain.
+Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` describe pure value algebra and should generally stay value-based. They primarily model scalar algebra over small immutable values, and redesigning them would impose broad signature churn across numeric APIs for little semantic gain.
 
 Use this distinction:
 
@@ -480,68 +475,66 @@ Use this distinction:
 Apply that rule to API design as follows:
 
 - for small pure value types such as `Duration`, `Date`, `ClockTime`, and `MonoTime`, arithmetic-style methods and nearby derived operations may stay on `self`
-- for heavier values or handle-adjacent types such as `DateTime`, use `*self` when the method is observational or derived and not semantically consuming
-- for heap-owning containers, set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` should usually use `*self` even though they are mathematically operator-like
+- for heavier values or handle-adjacent types such as `DateTime`, follow the type's own `type` or `type mutable` semantics when the method is observational or derived
+- for heap-owning containers (typically `type mutable`), set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` follow the container's own semantics even though they are mathematically operator-like
 
 `duration_to` should be classified by type semantics, not by name alone:
 
-- on scalar-like time values, `duration_to(self, other)` can remain value-style
-- on heavier timestamp-like types, `duration_to(*self, other)` is often the better expression of caller expectations
+- on scalar-like time values (typically `type`), `duration_to(self, other)` is naturally value-style
+- on heavier timestamp-like types, follow the type's own declaration semantics
 
-Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal borrowed rule for containers.
+Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal observation semantics for containers.
 
-For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so changing container-like operands from value parameters to `ref` parameters often degrades call-site ergonomics more than it improves ownership clarity. In the current language design, `managed receiver + value operand` is often the right balance for APIs like set algebra and random generation helpers.
+For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so the current language design naturally supports `self + value operand` as the right balance for APIs like set algebra and random generation helpers.
 
-If implementing a `*self` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
+If implementing an observation method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the method should be consuming.
 
-When migrating an existing method from `self` to `*self`, recheck two common implementation leftovers:
+When migrating existing methods to the new `type` / `type mutable` model, recheck two common implementation leftovers:
 
-- branches that still `return self` even though the method returns an owned value
-- helper or iterator constructors that still receive `self` even though they expect an owned source value
+- branches that still pass or return the receiver by value when the method should preserve it
+- helper or iterator constructors that still consume the receiver when they only need observation access
 
-In both cases, the fix is often to pass or return `*self` explicitly. This is a migration detail, not a reason to change the public receiver back to `self`.
+In both cases, the fix is often to adjust the implementation to work with the shared handle rather than consuming the value. This is a migration detail, not a reason to change the public API design.
 
 If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
 
-- add a borrowed helper that traverses storage directly
+- add a helper that traverses storage directly
 - add a dedicated borrowed-view iterator type or borrowed-producing helper
-- keep the method on `self` only if the operation is genuinely consumption-oriented
+- keep the method consuming only if the operation is genuinely consumption-oriented
 
-Avoid exposing `*`-style dereference-copy patterns in public API design discussions. The public rule should be driven by ownership semantics at the call site, not by the current convenience of a specific iterator implementation.
+The public API design should be driven by ownership semantics at the call site, not by the convenience of a specific iterator implementation.
 
 ### Trait Design Guidance
 
-For new traits, prefer the narrowest receiver that matches the semantic contract:
+For new traits, the receiver semantics are determined by the implementing type's declaration:
 
-- observation traits should usually use `*self`
-- mutation traits should use `*mutable self`
-- consuming traits should use `self`
-- traits intended for trait objects should keep requirement receivers on `*self` / `*mutable self` only
-- `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self`
+- for `type` implementors, `self` provides immutable access suitable for observation traits
+- for `type mutable` implementors, `self` provides shared mutable access suitable for mutation traits
+- consuming traits use `self` on either kind of type when the method semantically consumes the receiver
+- trait-object upcasting uses direct trait names and object safety instead of an `Object` marker trait
+- weak capability is opt-in via `mutable` constraints and `?T`
 
-Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
+Existing core traits are not fully uniform today. In particular, observation traits such as `ToString` and `Error` already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
 
-`Formattable` should currently be treated the same way: it remains a value-receiver trait largely because it is rooted in scalar formatting and inherited widely across numeric types. Do not use its value-style receiver as evidence that unrelated derived or observational APIs should also prefer `self`.
+`Formattable` should currently be treated the same way: it remains rooted in scalar formatting and inherited widely across numeric types. Do not use its scalar-value design as evidence that unrelated derived or observational APIs should follow the same pattern.
 
 ### Naming Guidance
 
 Receiver choice and method naming should reinforce each other:
 
 - prefer `into_*` for consuming conversions and ownership-moving adapters
-- prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for borrowed observation or derivation
+- prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for observation or derivation
 - avoid naming a borrowed method in a way that suggests linear consumption
 
 ### Review Checklist
 
 Before adding or changing a method in `std/`, ask:
 
-1. After this call, should the caller still expect to use the original receiver value?
-2. Is any mutation directly observable on the receiver itself, or only through an underlying shared handle?
-3. Is the method a terminal operation, extraction, or ownership conversion?
-4. Does the method name match the ownership behavior implied by the receiver?
-5. Would switching from `self` to `*self` silently broaden call sites by allowing rvalue temporary materialization, and is that desirable for this API?
+1. After this call, should the caller still expect to use the original receiver value? (Almost always yes; the caller retains the original.)
+2. Is the receiver `type` or `type mutable`? (This determines whether `self` is immutable or mutable.)
+3. Does the method name match the ownership behavior of the receiver and the method body?
 
-If the answer to (1) is yes, default to `*self`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `*mutable self`.
+If the type is `type`, all methods are observation or transformation by nature. If the type is `type mutable`, both mutation and observation methods use `self`; verify that the method body matches the stated intent. If the method semantically consumes the receiver, ensure that consumption is part of the public contract (e.g., `into_*` naming).
 
 ## Adding a New Type
 
@@ -759,19 +752,6 @@ generateCIdentifier(
 ```swift
 let key = context.getLayoutKey(.genericStruct(template: "List", args: [.int]))
 let debug = context.getDebugName(.genericStruct(template: "List", args: [.int]))
-```
-
-### Escape Analysis Integration
-
-```swift
-escapeContext.reset(returnType: funcReturnType, functionName: funcName)
-escapeContext.preAnalyze(body: typedBody, params: params)
-
-if escapeContext.shouldUseHeapAllocation(innerExpr) {
-    // heap
-} else {
-    // stack
-}
 ```
 
 ## Test Development

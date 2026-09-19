@@ -1,6 +1,6 @@
 # The Koral Programming Language
 
-Koral is an experimental compiled language that combines **Go's aggressive escape analysis** with **Swift's Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
+Koral is an experimental compiled language that uses a **simplified type system** (`type` / `type mutable`) combined with **Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
 
 This repository contains the compiler, standard library, formatter, language documentation, and sample projects.
 
@@ -12,35 +12,30 @@ Reference note:
 - For syntax-sensitive details, use `docs/grammar.bnf` together with the language reference in `docs/document.md` and `docs/document-zh.md`.
 - When implementation and docs drift, resolve the mismatch by updating the implementation and/or the documents so they converge.
 
-## The Core Idea: ARC + Escape Analysis
+## The Core Idea: `type` / `type mutable` + ARC
 
-Most compiled languages make you choose: either you get high-level ergonomics with a tracing garbage collector, or you get manual control with verbose syntax. Koral offers a middle ground:
+Koral's type system distinguishes between two kinds of composite types:
 
-1. **Escape Analysis First**: Every allocation is analyzed at compile time. If the compiler can prove that an object does not escape its current scope, it is allocated on the stack. Stack allocation is practically free and completely bypasses ARC overhead.
-2. **ARC for the Rest**: If an object *does* escape, it is allocated on the heap and managed via Automatic Reference Counting. This provides predictable, pause-free performance.
+- **`type`** (immutable): An immutable value type. The compiler is free to choose the most efficient representation—inline on the stack, in registers, or elided entirely. Fields cannot be mutated after construction.
+- **`type mutable`** (mutable): A shared mutable object. Instances live on the heap and carry ARC metadata. Fields are immutable by default; individual fields can be declared `mutable` to allow in-place mutation through shared references.
 
-Because Koral compiles to C, stack allocations become standard C local variables. The backend compiler can heavily optimize them, often keeping them entirely in CPU registers and optimizing away reference counting operations for local data.
+ARC (Automatic Reference Counting) is the runtime mechanism that manages `type mutable` lifetimes. It is an implementation detail and is not exposed to the programmer—there is no `retain`, `release`, or `box()` to write by hand.
 
 ```koral
-// The compiler sees this doesn't escape. 
-// It's allocated on the stack. No ARC overhead.
-let local_point = Point(1, 2);
+// Immutable value type — compiler chooses layout freely.
+type Point(x Int, y Int);
 
-// box(...) creates an owned escaping mutable reference.
-let heap_point = box(Point(3, 4));
+// Mutable shared object — heap-allocated, ARC-managed.
+type mutable Counter(mutable count Int);
 
-// The '&' operator borrows from an existing lvalue.
-// Result mutability depends on the source: let mutable → &mutable, let → &.
-let mutable local_point2 = Point(3, 4);
-let heap_point_ref = &mutable local_point2;  // &mutable (from let mutable)
-
-// Bumping the refcount, no deep copy
-let shared_point = heap_point;
+let p = Point(1, 2);
+let c = Counter(0);
+c.count = c.count + 1;  // in-place mutation through shared reference
 ```
 
 ## Language Highlights
 
-- **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
+- **No GC, No Manual `free`**: Automatic memory management based on `type` / `type mutable` semantics and ARC.
 - **Expression-Oriented Control Flow**: `if`, `when`, `while`, and `for` share the same expression surface syntax; `if` and `when` may produce branch values, while `while` and `for` always produce `Void`.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
 - **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
@@ -134,16 +129,16 @@ let max[T Ord](a T, b T) T = if a > b then a else b;
 
 ```koral
 trait Greet {
-    greet(*self) String;
+    greet(self) String;
 }
 
 type Bot(name String);
 
 given Bot as Greet {
-    greet(*self) String = "beep boop, I'm " + self.name;
+    greet(self) String = "beep boop, I'm " + self.name;
 }
 
-let g *Greet = box(Bot("K-9"));  // trait object
+let g Greet = Bot("K-9");  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -157,11 +152,11 @@ Rules:
 ```koral
 type Result[T Any] {
     Ok(value T),
-    Error(error *Error),
+    Error(error Error),
 }
 
 let parse_int(s String) Result[Int] =
-    if s == "42" then .Ok(42) else .Error(box("bad input"));
+    if s == "42" then .Ok(42) else .Error("bad input");
 ```
 
 ### Lazy streams
@@ -184,7 +179,7 @@ let result = list.iterator();
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func(Int, Int) Int` — `(Int, Int) -> Int`
-- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `*unsafe` (read-only raw pointer), `*unsafe mutable` (mutable raw pointer), `?*` (read-only weak), `?*mutable` (mutable weak)
+- Type mutability: `type` (immutable value semantics), `type mutable` (shared object semantics); Weak references: `?T` (requires mutable constraint); Raw pointers: `*unsafe T`, `*unsafe mutable T` (FFI)
 
 ### Control Flow
 
@@ -207,7 +202,7 @@ let result = list.iterator();
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `*Greet`, `*mutable Greet`
+- Trait objects for runtime polymorphism: `Greet`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Neg`, `Mul`, `Div`, `Rem`, `Eq`, `Ord`)
 
 ### Functions and Lambdas
@@ -230,39 +225,25 @@ let result = list.iterator();
 
 ### Memory Management
 
-- Automatic reference counting with copy-on-write semantics
-- Escape analysis for stack vs. heap allocation decisions
-- Weak references (`?*` / `?*mutable`) for breaking reference cycles
-- `defer` for deterministic resource cleanup
-
-Reference creation rules:
-- `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
-- `&` result mutability depends on the source: `let mutable` binding → `*mutable T`, `let` binding → `*T`, mutable path → `*mutable T`.
-- `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
-- `&unsafe` / `&unsafe mutable` produce raw pointers and require addressable storage.
-- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must use `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
-- Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
-- Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self` requirements.
-- Method receiver forms: `self` (managed value), `*self` / `*mutable self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
-- `*T` is read-only: `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
-- `*unsafe T` is read-only raw pointer: `*expr` dereference read only. `*unsafe mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
-- Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mutable T`.
-- `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
-- Ordinary parameter `mutable` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source *unsafe mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
-
-Weak reference rules:
-- `downgrade(*T)` produces `?*T`; `downgrade_mutable(*mutable T)` produces `?*mutable T`.
-- `upgrade(?*T)` returns `Option[*T]`; `upgrade_mutable(?*mutable T)` returns `Option[*mutable T]`.
-- `?*mutable T` implicitly converts to `?*T` (widening).
+- `type` values are immutable and may be stack-allocated, register-promoted, or elided by the compiler. No ARC overhead is incurred.
+- `type mutable` values are heap-allocated shared objects managed by ARC. ARC is an implementation detail—there is no manual `retain`/`release`.
+- Weak references (`?T`) break reference cycles. They require a `mutable` constraint on the target type.
+- `defer` for deterministic resource cleanup.
+- Raw pointers (`*unsafe T`, `*unsafe mutable T`) are available for FFI and low-level interop; they bypass ARC and must be managed manually.
 
 ```koral
-let strong *mutable Int = box(42);
-let weak ?*mutable Int = downgrade_mutable(strong);   // *mutable → ?*mutable
+// Immutable value — compiler decides representation.
+let p = Point(1, 2);
 
-when upgrade_mutable(weak) in {
-    .Some(r) then println(*r),
+// Mutable shared object — ARC-managed on the heap.
+type mutable Counter(mutable count Int);
+let c = Counter(0);
+c.count = c.count + 1;
+
+// Weak reference to a mutable object.
+let weak ?Counter = downgrade(c);
+when upgrade(weak) in {
+    .Some(r) then println(r.count),
     .None    then println("expired"),
 }
 ```
@@ -321,7 +302,7 @@ let parse_port(text String) Result[Int] = {
 }
 
 let ok = Result[Int].Ok(42);
-let err = Result[Int].Error(box("failed"));
+let err = Result[Int].Error("failed");
 ```
 
 ## Documentation

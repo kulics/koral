@@ -77,14 +77,11 @@
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
 // After the first receiver param, remaining params follow the same positional/named rules as func-param.
-<method-first-param> ::= "self"                                          // bare self
-                       | "*self"                                          // managed receiver sugar
-                       | "*mutable self"                                      // mutable managed receiver sugar
+<method-first-param> ::= "self"                                          // unified self receiver
                        | <func-param>
 // Receiver rules:
-// - *self / *mutable self: managed receiver sugar, auto-ref allowed
-// - bare self: equivalent to managed value receiver
-// - auto-deref (*T -> T) only applies to self receivers (following Go)
+// - self: unified self receiver
+// - func-param: explicit typed parameter (not self)
 
 <type-annotation> ::= <type>
 
@@ -92,10 +89,11 @@
 // Type Declarations
 // ============================================================================
 
-<type-decl> ::= "type" <type-identifier> <generic-params>? <type-body> ";"
+<type-decl> ::= "type" "mutable"? <type-identifier> <generic-params>? <type-body> ";"
               | "type" <type-identifier> <generic-params>? ";"          // intrinsic type (no body)
               | "type" <type-identifier> "=" <type> ";"                 // type alias
-// 说明：类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 List[Int]）
+// 说明：`mutable` 仅对 struct 有效，枚举和别名不支持
+// 类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 List[Int]）
 // 类型别名在语义检查阶段被完全消除，后续阶段无需感知其存在
 <type-body> ::= "(" <field-list>? ")"                 // struct
               | "{" <variant-list>? "}"                // enum (sum type)
@@ -171,16 +169,11 @@
               | <function-type>
               | "Self"
 
-<type-prefix> ::= "*" "mutable"?
-               | "*" "unsafe" "mutable"?
-               | "?*" "mutable"?
-// *T             — managed read-only reference
-// *mutable T         — managed mutable reference
+<type-prefix> ::= "*" "unsafe" "mutable"?
+               | "?"
 // *unsafe T         — read-only pointer
 // *unsafe mutable T     — mutable pointer
-// ?*T            — read-only weak reference
-// ?*mutable T        — mutable weak reference
-// Note: `mutable` must follow the keyword, not precede it (e.g. `*mutable T`, not `mutable *T`).
+// ?T            — weak reference
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
 <function-type> ::= "Func" "(" <function-type-param-list>? ")" <type>
@@ -331,11 +324,10 @@
                       | "-" <prefix-expression>
                       | "~" <prefix-expression>
                       | "*" <prefix-expression>
-                      | "&" "unsafe"? "mutable"? <prefix-expression>
+                      | "&" "unsafe" "mutable"? <prefix-expression>
                       | <postfix-expression>
-// Prefix ref/pointer operators:
-// - *expr dereferences managed references or raw pointers depending on operand type
-// - &expr / &mutable expr form managed references
+// Prefix pointer operators:
+// - *expr dereferences raw pointers
 // - &unsafe expr / &unsafe mutable expr form raw pointers
 // Mutability/addressability checks are semantic, not grammar-level.
 
@@ -454,18 +446,17 @@
                     | <enum-case-pattern>                    // enum case pattern
                     | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
 
-<trait-object-type-binding-pattern> ::= "mutable"? <identifier> <trait-object-type-pattern>
+<trait-object-type-binding-pattern> ::= "mutable"? <identifier> <concrete-type-pattern>
 // Binding exact trait-object implementation type pattern.
 // Examples:
-//   err *IoError
-//   mutable err *mutable IoError
+//   err IoError
+//   mutable err IoError
 
-<trait-object-type-pattern> ::= "*" <concrete-type-pattern>
-                              | "*" "mutable" <concrete-type-pattern>
+<trait-object-type-pattern> ::= <concrete-type-pattern>
 // Exact implementation-type pattern for trait objects only.
 // Semantic rules:
-// - The subject must be a trait object reference (`*Trait` or `*mutable Trait`).
-// - The target must be a concrete managed reference type, not a trait object.
+// - The subject must be a trait object.
+// - The target must be a concrete type, not a trait object.
 // - Matching does not auto-deref to the value type.
 // - The target cannot require stronger mutability than the subject.
 
@@ -610,13 +601,10 @@
 // Implicit Conversion Rules (semantic, not grammar)
 // ============================================================================
 
-// No implicit ref promotion (T → *T) for function/method arguments.
-// No auto-deref (*T → T) for function/method arguments.
-// Use explicit &, &mutable, &unsafe, &unsafe mutable, and * at call sites.
-// Auto-ref and auto-deref only apply to method receivers (self).
-// - *self: auto-ref allowed (T → *T)
-// - *mutable self: auto-ref allowed when the receiver is a writable lvalue (T → *mutable T)
-// - self: auto-deref allowed (*T → T, following Go's pointer receiver behavior)
+// No implicit ref promotion for function/method arguments.
+// No auto-deref for function/method arguments.
+// Use explicit &unsafe, &unsafe mutable, and * at call sites.
+// Method receiver is always `self` (unified receiver), no auto-ref or auto-deref.
 
 // Closures: let mutable variables are captured by reference (byMutReference).
 // Mutations inside the closure are visible outside.

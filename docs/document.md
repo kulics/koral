@@ -13,7 +13,7 @@ Specification note:
 ## Key Features
 
 - Modern, easy-to-scan syntax with explicit semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` all use expression-form surface syntax. `if` and `when` may produce values; `while` and `for` always produce `Void`.
-- Automatic memory management based on reference counting, ownership analysis, and escape analysis.
+- Automatic memory management based on reference counting. Declaration-site `type` / `type mutable` controls shared-object semantics; layout details are managed by the compiler.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
 - Trait-based polymorphism with trait objects for runtime dispatch.
@@ -189,60 +189,47 @@ let (_, g) = (1, 2);                   // Discard first element
 
 The compiler moves fields directly from the Pair value into the target variables, avoiding unnecessary copies and drop overhead.
 
-#### Reference Creation Rules (`&` / `box`)
+#### Type Mutability: `type` / `type mutable`
 
-Koral uses reference types to refer to another value rather than holding it:
+Koral uses declaration-site mutability to distinguish two kinds of nominal types:
 
-- `*T` / `*mutable T` are managed references.
-  - May escape; can be returned, stored in fields, containers, or enum payloads.
-- `*mutable T` implicitly converts to `*T`. The reverse is not allowed.
-
-`&` is the reference-of operator:
-
-- Plain `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
-- `&mutable` requires a writable lvalue.
-- `&unsafe` / `&unsafe mutable` require addressable storage, so literals and temporary values are rejected.
-- `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
-- `box(expr)` is explicit managed construction, returning `*mutable T`.
-
-Implicit conversion rules:
-
-- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must use `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T` or `*mutable T` (auto-deref, following Go's pointer receiver behavior).
-
-Receiver adjustment rules:
-
-- `*self` is a managed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
-- `*mutable self` is a mutable managed receiver; it still requires a writable lvalue receiver; rvalues are rejected.
-- `*self` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
-- Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
+- `type` — immutable type. Fields are all immutable. No user-visible identity; assignment/parameter passing does not expose mutable aliases.
+- `type mutable` — mutable type. Shared object semantics. Fields default to immutable, but may declare explicit `mutable` fields that support in-place modification.
 
 ```koral
-let mutable x = 10;
-let rx *mutable Int = &mutable x;
+type Point(x Int, y Int);
 
-let y = 10;
-let ry *Int = &y;       // read-only reference
+type mutable Counter(mutable value Int, id UInt);
 
-let owned *mutable Int = box(42); // box() returns *mutable T
-let temp *Int = &42;          // OK: managed & may materialize rvalues
+let c = Counter(0);
+c.value = 1;    // valid: Counter.value is a mutable field
 
-// let bad = &mutable 42      // error: &mutable still requires a writable lvalue
-// let raw_bad = &unsafe 42  // error: raw address-of needs addressable storage
+let v = Point(1, 2);
+// v.x = 3;     // invalid: Point is not type mutable and its fields are immutable
+```
 
-// No implicit managed-ref promotion for function arguments:
-let takes_ref(r * Int) Int = *r;
-let v = 42;
-// takes_ref(v)              // error: expected *Int, got Int
-takes_ref(&v);                // OK: explicit &
+The compiler may use ARC and hidden storage internally for implementation, but those choices are not user-visible semantics. The language contract is about `type` vs `type mutable`, not about managed-reference syntax.
 
-// Auto-deref only for method receivers:
-type Counter(mutable value Int);
-given Counter {
-    public get(*self) Int = self.value;
-}
-let c = Counter(10);
-c.get();                      // OK: auto-ref for *self receiver
+#### Unsafe Pointers and Weak References
+
+Raw pointers are available for FFI and system programming:
+
+- `*unsafe T` — read-only raw pointer. Supports `*expr` dereference read.
+- `*unsafe mutable T` — mutable raw pointer. Supports `*expr` dereference read and `*expr = value` assignment.
+- `&unsafe` / `&unsafe mutable` — raw address-of operator. Requires addressable storage; literals and temporaries are rejected.
+- `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
+
+Weak references are written as `?T` and are only valid for types that satisfy the `mutable` constraint:
+
+- `downgrade(T)` produces `?T`.
+- `upgrade(?T)` returns `Option[T]`.
+
+```koral
+let p *unsafe Int = &unsafe value;
+let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+
+let x = *p;       // raw deref read
+*mp = 42;         // raw deref write
 ```
 
 ### Assignment
@@ -508,54 +495,36 @@ Rules:
 - Trailing commas are allowed for both collection and dict literals.
 - Collection literals only target built-in `List` / `Set` / `Dict`, not third-party container types.
 
-### Reference Types
+### Raw Pointer Types
 
-Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying:
-
-- `*T` — managed read-only reference. Supports `*expr` dereference read but NOT `*expr = value` assignment.
-- `*mutable T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
-
-Use the `&` prefix expression to create a managed reference. Plain `&` produces `*T`; `&mutable` produces `*mutable T`.
-
-```koral
-let mutable n = 42;
-let a *mutable Int = &mutable n;
-let b = *a;            // Dereference, gets 42
-*a = 100;              // Deref assignment (*mutable supports *expr = value)
-
-let m = 42;
-let c *Int = &m;
-let d = *c;            // Dereference read, gets 42
-// *c = 100           // Error: * does not support deref assignment
-
-let owned *mutable Int = &mutable n;
-```
-
-`&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide whether the reference can be stack-allocated or must be heap-allocated. `box(expr)` always explicitly constructs a managed `*mutable T`.
-
-Pointer types follow the same read-only / mutable distinction:
+Raw pointers are low-level memory access for FFI and system programming:
 
 - `*unsafe T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
 - `*unsafe mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
 - `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
 
+```koral
+let p *unsafe Int = &unsafe value;
+let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+
+let x = *p;       // Dereference read, gets 42
+*mp = 42;         // Deref assignment
+
+// let bad = &unsafe 42  // error: raw address-of needs addressable storage
+```
+
 #### Weak References
 
-Weak references don't increase the reference count, used to break reference cycles. Like `*`/`*mutable`, weak references also distinguish mutability: `?*T` (read-only) and `?*mutable T` (mutable).
+Weak references don't increase the reference count and are written as `?T`. They are only valid for types that satisfy the `mutable` constraint.
 
-Use `downgrade(*T)` to create `?*T` (or `downgrade_mutable(*mutable T)` for `?*mutable T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mutable(?*mutable T)` for `Option[*mutable T]`).
+Use `downgrade(T)` to create `?T`, and `upgrade(?T)` to attempt upgrading back to `Option[T]`.
 
 ```koral
-let strong *mutable Int = box(42);
+type mutable Node(mutable value Int);
 
-// Mutable path: *mutable → ?*mutable → Option[*mutable T]
-let weak = downgrade_mutable(strong);              // *mutable T → ?*mutable T
-let upgraded = upgrade_mutable(weak);           // ?*mutable T → Option[*mutable T]
-
-// Read-only path: * → ?* → Option[*T]
-let ro *Int = strong;                // implicit widening
-let ro_weak = downgrade(ro);         // *T → ?*T
-let ro_upgraded = upgrade(ro_weak);  // ?*T → Option[*T]
+let node = Node(42);
+let weak = downgrade(node);
+let upgraded = upgrade(weak);
 ```
 
 
@@ -582,10 +551,12 @@ given Point as Eq {
 
 ### Memory Management
 
-Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
+Koral aims to provide efficient and safe memory management through declaration-site type semantics and compiler-managed layout.
 
-- **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `*` / `*mutable` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mutable` still requires a writable lvalue. `&unsafe` / `&unsafe mutable` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mutable self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **`type` (immutable types)**: No user-visible identity. Semantically values. The compiler may freely choose stack, register, inline, hidden heap, or ARC-backed layout as long as user-visible semantics are preserved.
+- **`type mutable` (mutable types)**: Shared object semantics with user-visible identity. Assignment/parameter passing shares the same object. Fields default to immutable; only explicitly declared `mutable` fields support in-place modification.
+- **Raw pointers**: `&unsafe` / `&unsafe mutable` form raw pointers only from addressable storage. These are low-level memory access for FFI and remain subject to address-stability and layout constraints.
+- **ARC as implementation detail**: The compiler may use ARC and hidden storage internally for both `type` and `type mutable`. This is not user-visible syntax. The language contract is about `type` vs `type mutable`, not about managed-reference syntax.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -747,7 +718,7 @@ Builtin subscript rules:
 
 - `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*unsafe T`, and `*unsafe mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
-- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mutable` contexts.
+- `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
 - `*unsafe T` supports `*expr` reads only. `*unsafe mutable T` supports both `*expr` reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
@@ -805,7 +776,7 @@ It must be used inside a function whose return kind matches the propagated value
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
-2. Prefix / Control flow: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `&unsafe`, `&unsafe mutable`; `if`, `while`, `for`, `when`
+2. Prefix / Control flow: unary `-`, `~`, dereference `*`, raw address-of `&unsafe`, `&unsafe mutable`; `if`, `while`, `for`, `when`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
@@ -900,32 +871,32 @@ Rules for condition composition:
 
 ```koral
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 
-if err is *IoError then {
+if err is IoError then {
     println("io");
 }
 
-if err is io *IoError then {
+if err is io IoError then {
     println(io.render());
 }
 ```
 
 For these exact type patterns:
 
-- The subject stays a trait object reference; it is not auto-dereferenced to the implementation value.
-- The target must be written as `*ConcreteType` or `*mutable ConcreteType`.
-- `err is io *IoError` binds `io` as `*IoError`.
-- `*Problem` cannot match `*mutable IoError`; `*mutable Problem` may match either `*IoError` or `*mutable IoError`.
+- The subject stays a trait object; it is not auto-dereferenced to the implementation value.
+- The target is written as `ConcreteType`.
+- `err is io IoError` binds `io` as `IoError`.
+- `Problem` can match `IoError`; exact type tests operate on the erased trait-object subject.
 
 ## Loop Structure
 
@@ -1102,7 +1073,7 @@ Supported patterns include:
 - Wildcard pattern: `_` (matches any value)
 - Literal patterns: `1`, `-5`, `"abc"`, `'a'`, `true` (negative integer literals such as `-5` are supported)
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
-- Trait-object exact type patterns: `*IoError`, `*mutable IoError`, `err *IoError`
+- Trait-object exact type patterns: `IoError`, `err IoError`
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
@@ -1157,18 +1128,18 @@ if p is Point(x, y) then {
 
 // Exact trait-object implementation type matching
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 when err in {
-    io *IoError then println(io.render()),
+    io IoError then println(io.render()),
     _ then println("other"),
 }
 
@@ -1514,15 +1485,26 @@ let main() Void = {
 
 #### Mutable Member Variables
 
-Member variables are read-only by default. Use the `mutable` keyword to mark mutable member variables:
+Member variables are read-only by default. Only `type mutable` types may declare `mutable` fields:
 
 ```koral
-type Point(mutable x Int, mutable y Int);
+type mutable Counter(mutable value Int, id UInt);
+
+let main() Void = {
+    let c = Counter(0, 1);
+    c.value = 5;  // ok, because Counter is type mutable and value is a mutable field
+    // c.id = 2;  // error: id is not a mutable field
+}
+```
+
+Non-`type mutable` types must have all fields immutable:
+
+```koral
+type Point(x Int, y Int);
 
 let main() Void = {
     let a = Point(64, 128);
-    a.x = 2;  // ok, because x is mutable
-    a.y = 0;  // ok, because y is mutable
+    // a.x = 2;  // error: Point is not type mutable, fields are immutable
 }
 ```
 
@@ -1642,7 +1624,7 @@ A Trait defines a set of method signatures that any implementing type must provi
 
 ```koral
 trait Printable {
-    to_string(*self) String;
+    to_string(self) String;
 }
 ```
 
@@ -1751,7 +1733,7 @@ Constrained tool block example:
 
 ```koral
 trait Iterator[T Any] {
-    next(*mutable self) Option[T];
+    next(self) Option[T];
 }
 
 given[T Ord] Iterator[T] {
@@ -1835,101 +1817,72 @@ The most commonly used core traits are:
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
-- `Iterator[T]`: iteration protocol (`next(*mutable self) Option[T]`).
-- `Error`: error message interface (`message(*self) String`).
-- `Drop`: destructor hook (`drop(source *unsafe mutable Self) Void`).
+- `Iterator[T]`: iteration protocol (`next(self) Option[T]`).
+- `Error`: error message interface (`message(self) String`).
+- `Drop`: destructor hook (`drop(self) Void`).
 
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
-`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source *unsafe mutable Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
+`Drop.drop` is a compiler-only destructor entry point with a finalization context. It is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 
 ### Method Receiver Forms
 
-- `self`: managed value receiver.
-- `*self` / `*mutable self`: managed reference receivers; auto-ref allowed on call sites.
-
-**Auto-ref and auto-deref rules:**
-
-- When a method expects `*self` (immutable reference), a plain value `v` is automatically promoted to `&v` at the call site.
-- When a method expects `self` (value), a reference `*T` or `*mutable T` is automatically dereferenced.
-- Auto-ref and auto-deref apply only to `self` and `*self` forms; they do not apply to explicit parameter positions.
-- Calling a `*mutable self` method through a readonly reference (`*T`) is a compile-time error.
+- `self` is the only receiver form.
+- For `type` (immutable types), `self` acts as an immutable receiver.
+- For `type mutable` (mutable types), `self` acts as a mutable receiver that can modify explicit `mutable` fields.
 
 ### Trait Objects
 
-Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `*TraitName` or `*mutable TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
-
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch), and the surface syntax is the trait name itself.
 #### Basic Syntax
 
 Trait-object construction follows these rules:
 
-- The target type is written as `*TraitName` or `*mutable TraitName`.
-- The source value must implement the trait and be converted in a context expecting that trait-object type.
-- `box(...)` is the standard way to provide an owned value for this conversion.
+- The target type is a trait name.
+- The source value must implement the trait and be converted into that trait-object context.
+- No `Object` marker trait is required.
 
 ```koral
 trait Drawable {
-    draw(*self) String;
-    reset(*mutable self) Void;
+    draw(self) String;
 }
 
-type Circle(mutable radius Int);
-type Square(mutable side Int);
+type Circle(radius Int);
 
 given Circle as Drawable {
-    public draw(*self) String = "Drawing circle";
-    public reset(*mutable self) Void = {
-        self.radius = 0;
-    }
-}
-given Square as Drawable {
-    public draw(*self) String = "Drawing square";
-    public reset(*mutable self) Void = {
-        self.side = 0;
-    }
+    draw(self) String = "Drawing circle";
 }
 
-// Create trait objects
-let shape *Drawable = box(Circle(10));
-let mutable_shape *mutable Drawable = box(Square(4));
-
-// Call methods through the trait object (dynamic dispatch)
-shape.draw();  // "Drawing circle"
-mutable_shape.reset();
-mutable_shape.draw();
+let shape Drawable = Circle(10);
+shape.draw();
 ```
 
-Dispatch through trait objects respects reference mutability:
+Important rules:
 
-- `*TraitName` can call only requirements declared with `*self`.
-- `*mutable TraitName` can call both `*mutable self` and `*self` requirements.
-- `*TraitName` cannot call `*mutable self` requirements.
+- Trait-object dispatch uses the concrete value's semantics without exposing internal wrappers in the public surface.
+- Any trait can be used as a trait-object target if it is object-safe.
 
 #### Object Safety
 
 Only Traits that satisfy the following conditions can be used as trait objects:
 
-- Methods must not have generic parameters
-- The receiver, if present, must be `*self` or `*mutable self`
-- `Self` must not appear in method parameters or return types (except within that receiver)
+- Methods must not have generic parameters.
+- The receiver, if present, must be `self`.
+- `Self` must not appear in method parameters or return types.
 
 ```koral
 // Object-safe — can be used as a trait object
 trait Error {
-    message(*self) String;
+    message(self) String;
 }
 
 // Not object-safe — cannot be used as a trait object
 trait Eq {
-    equals(self, other Self) Bool;  // Self appears in parameters
-}
-
-trait Resettable {
-    reset(self) Void;  // by-value self is not object-safe
+    equals(self, other Self) Bool;
 }
 ```
 
-Trait objects (`*TraitName`, `*mutable TraitName`) do not support direct dereference; use trait methods through dynamic dispatch.
+Trait objects do not support direct dereference; use trait methods through dynamic dispatch.
 
 #### Exact Type Patterns
 
@@ -1937,44 +1890,41 @@ Trait objects also support exact implementation-type testing through Koral's exi
 
 ```koral
 trait Problem {
-    render(*self) String;
+    render(self) String;
 }
 
 type IoError(code Int);
 type NetError(code Int);
 
 given IoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 }
 
 given NetError as Problem {
-    render(*self) String = "net";
+    render(self) String = "net";
 }
 
-let err *Problem = box(IoError(7));
+let err Problem = IoError(7);
 
-if err is *IoError then {
+if err is IoError then {
     println("io");
 }
 
-if err is io *IoError then {
+if err is io IoError then {
     println(io.render());
 }
 
 let label = when err in {
-    io *IoError then io.render(),
+    io IoError then io.render(),
     _ then "other",
 }
 ```
 
 Rules:
 
-- Exact type patterns are only valid when the subject is a trait object reference.
-- The target must be a concrete managed reference type: `*Concrete` or `*mutable Concrete`.
+- Exact type patterns are only valid when the subject is a trait object.
+- The target must be a concrete type name.
 - Matching is exact on the implementation type and its generic arguments.
-- Matching does not auto-dereference to the underlying value type.
-- `*TraitName` cannot satisfy a `*mutable Concrete` pattern.
-- `*mutable TraitName` may satisfy either `*Concrete` or `*mutable Concrete`.
 - These patterns are open-world tests; in `when`, they do not count as exhaustive coverage, so a default `_` arm is still required.
 
 ## Generics
@@ -2085,9 +2035,9 @@ let read_number(path String) Result[Int] = {
     parse_int(text);
 }
 
-// Result (error side is *Error)
+// Result (error side is Error trait object)
 let ok = Result[Int].Ok(42);
-let err = Result[Int].Error(box("failed"));
+let err = Result[Int].Error("failed");
 ```
 
 For complete API reference, see docs under `docs/std/`.
@@ -2284,5 +2234,4 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 
 ```koral
 public intrinsic type Int;
-public intrinsic let is_unique_mutable[T Any](r *T) Bool;
 ```
