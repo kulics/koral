@@ -210,28 +210,6 @@ let v = Point(1, 2);
 
 The compiler may use ARC and hidden storage internally for implementation, but those choices are not user-visible semantics. The language contract is about `type` vs `type mutable`, not about managed-reference syntax.
 
-#### Unsafe Pointers and Weak References
-
-Raw pointers are available for FFI and system programming:
-
-- `*unsafe T` — read-only raw pointer. Supports `*expr` dereference read.
-- `*unsafe mutable T` — mutable raw pointer. Supports `*expr` dereference read and `*expr = value` assignment.
-- `&unsafe` / `&unsafe mutable` — raw address-of operator. Requires addressable storage; literals and temporaries are rejected.
-- `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
-
-Weak references are written as `?T` and are only valid for types that satisfy the `mutable` constraint:
-
-- `downgrade(T)` produces `?T`.
-- `upgrade(?T)` returns `Option[T]`.
-
-```koral
-let p *unsafe Int = &unsafe value;
-let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
-
-let x = *p;       // raw deref read
-*mp = 42;         // raw deref write
-```
-
 ### Assignment
 
 For mutable variables, we can change their value multiple times when needed.
@@ -495,69 +473,13 @@ Rules:
 - Trailing commas are allowed for both collection and dict literals.
 - Collection literals only target built-in `List` / `Set` / `Dict`, not third-party container types.
 
-### Raw Pointer Types
-
-Raw pointers are low-level memory access for FFI and system programming:
-
-- `*unsafe T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
-- `*unsafe mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
-- `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
-
-```koral
-let p *unsafe Int = &unsafe value;
-let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
-
-let x = *p;       // Dereference read, gets 42
-*mp = 42;         // Deref assignment
-
-// let bad = &unsafe 42  // error: raw address-of needs addressable storage
-```
-
-#### Weak References
-
-Weak references don't increase the reference count and are written as `?T`. They are only valid for types that satisfy the `mutable` constraint.
-
-Use `downgrade(T)` to create `?T`, and `upgrade(?T)` to attempt upgrading back to `Option[T]`.
-
-```koral
-type mutable Node(mutable value Int);
-
-let node = Node(42);
-let weak = downgrade(node);
-let upgraded = upgrade(weak);
-```
-
-
-#### Self Type
-
-`Self` is a built-in type keyword that refers to the implementing type inside `trait` definitions, `given` blocks, and their method signatures. It is not a standalone type alias — it is resolved by the compiler to the concrete type that is implementing the trait.
-
-- Inside a `trait` definition, `Self` represents the future implementing type.
-- Inside a `given Type as Trait` block, `Self` is equivalent to `Type`.
-- `Self` can appear in method parameter types, return types, and field types within trait/given contexts.
-
-```koral
-trait Eq {
-    equals(self, other Self) Bool;
-}
-
-type Point(x Int, y Int);
-
-given Point as Eq {
-    // Here Self resolves to Point, so  is the same as .
-    equals(self, other Point) Bool = self.x == other.x and self.y == other.y;
-}
-```
-
 ### Memory Management
 
-Koral aims to provide efficient and safe memory management through declaration-site type semantics and compiler-managed layout.
+Koral's memory model is simple: the `type` / `type mutable` declaration controls all sharing and mutation semantics, and the compiler handles the rest.
 
 - **`type` (immutable types)**: No user-visible identity. Semantically values. The compiler may freely choose stack, register, inline, hidden heap, or ARC-backed layout as long as user-visible semantics are preserved.
 - **`type mutable` (mutable types)**: Shared object semantics with user-visible identity. Assignment/parameter passing shares the same object. Fields default to immutable; only explicitly declared `mutable` fields support in-place modification.
-- **Raw pointers**: `&unsafe` / `&unsafe mutable` form raw pointers only from addressable storage. These are low-level memory access for FFI and remain subject to address-stability and layout constraints.
 - **ARC as implementation detail**: The compiler may use ARC and hidden storage internally for both `type` and `type mutable`. This is not user-visible syntax. The language contract is about `type` vs `type mutable`, not about managed-reference syntax.
-- **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
 
@@ -1618,6 +1540,27 @@ Restrictions:
 
 Koral uses Traits to define shared behavior. This is similar to interfaces or type classes in other languages.
 
+### Self Type
+
+`Self` is a built-in type keyword that refers to the implementing type inside `trait` definitions, `given` blocks, and their method signatures. It is not a standalone type alias — it is resolved by the compiler to the concrete type that is implementing the trait.
+
+- Inside a `trait` definition, `Self` represents the future implementing type.
+- Inside a `given Type as Trait` block, `Self` is equivalent to `Type`.
+- `Self` can appear in method parameter types, return types, and field types within trait/given contexts.
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool;
+}
+
+type Point(x Int, y Int);
+
+given Point as Eq {
+    // Here Self resolves to Point, so `other Self` is the same as `other Point`.
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y;
+}
+```
+
 ### Defining Trait
 
 A Trait defines a set of method signatures that any implementing type must provide.
@@ -2226,6 +2169,39 @@ foreign type CFile {};
 
 // FFI struct with fields (aligned with C layout)
 foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
+```
+
+### Raw Pointers
+
+Raw pointers are low-level memory access for FFI and system programming:
+
+- `*unsafe T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
+- `*unsafe mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
+
+```koral
+let p *unsafe Int = &unsafe value;
+let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+
+let x = *p;       // Dereference read, gets 42
+*mp = 42;         // Deref assignment
+
+// let bad = &unsafe 42  // error: raw address-of needs addressable storage
+```
+
+### Weak References
+
+Weak references are used to break reference cycles in `type mutable` object graphs. They are written as `?T` and are only valid for types that satisfy the `mutable` constraint.
+
+- `downgrade(T)` produces `?T`.
+- `upgrade(?T)` returns `Option[T]`.
+
+```koral
+type mutable Node(mutable value Int);
+
+let node = Node(42);
+let weak = downgrade(node);
+let upgraded = upgrade(weak);
 ```
 
 ### Intrinsic

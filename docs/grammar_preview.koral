@@ -1,6 +1,7 @@
-﻿// ============================================================
+// ============================================================
 // Koral Language Grammar Preview (illustrative, non-normative)
 // Canonical grammar reference: docs/grammar.bnf
+// Updated for simplified type system: type / type mutable
 // ============================================================
 
 // ============================================================
@@ -22,14 +23,87 @@ using app::services { run_server };
 // FFI（外部函数接口）
 // ============================================================
 
-// 需要链接的原生库放在 koral.json / std/koral.json 的 links 中，
-// 不再使用 foreign using
+// 需要链接的原生库放在 koral.json / std/koral.json 的 links 中
 
 foreign type FILE {};
-foreign type Point(x Int, y Int);// 带字段的外部类型
+foreign type Point(x Int, y Int); // 带字段的外部类型
 
 foreign let fopen(path *unsafe UInt8, mode *unsafe UInt8) *unsafe FILE;
 foreign let fclose(file *unsafe FILE) Int32;
+
+// ============================================================
+// Raw Pointer（用于 FFI 和系统编程）
+// ============================================================
+
+// *unsafe T / *unsafe mutable T 用于 FFI 和系统编程。
+// 不再有 *T / *mutable T（托管引用）和 & / &mutable（托管取址）。
+
+let pointer_ops() Void = {
+    // *unsafe：只读原始指针
+    // - 通过 &unsafe 在可取地址存储上形成
+    // - 支持 *expr 读取，但不支持 *expr 赋值
+    // - 支持下标读取 p[i]，但不支持下标赋值
+    let val Int = 42;
+    let b *unsafe Int = &unsafe val;
+    let v = *b; // *expr 读取
+    // *b = 99           // 错误：*unsafe 不支持 *expr 赋值
+    let v0 = b[0]; // 下标读取（等价于 *(b + 0)）
+    // b[1] = 200       // 错误：*unsafe 不支持下标赋值
+
+    // *unsafe mutable：可变原始指针
+    // - 通过 &unsafe mutable 在可取地址存储上形成
+    // - 支持 *expr 读取和 *expr = value 赋值
+    // - 支持下标读取和下标赋值
+    let mp *unsafe mutable Int = alloc_memory[Int](2);
+    init_memory(mp, 100);
+    let value = *mp; // 解引用读取
+
+    let p2 = mp + 1; // 指针偏移
+    init_memory(p2, 200);
+
+    *mp = 999; // 解引用赋值（*unsafe mutable 支持）
+
+    // 下标访问（指针偏移 + 解引用）
+    let x0 = mp[0]; // 等价于 *(mp + 0)
+    let x1 = mp[1]; // 等价于 *(mp + 1)
+    mp[0] = 111; // 下标赋值（*unsafe mutable 支持）
+    mp[1] = 222;
+
+    deinit_memory(mp); // 析构（要求 *unsafe mutable）
+    deinit_memory(p2);
+    dealloc_memory(mp); // 释放内存
+
+    let np *unsafe Int = null_ptr(); // null 指针（返回 *unsafe T）
+    println(mp == null_ptr());
+
+    // *unsafe mutable T 可隐式转换为 *unsafe T；反向不允许
+    let rp *unsafe Int = mp; // OK
+};
+
+// ============================================================
+// 弱引用（?T — 用于打破 type mutable 对象的引用循环）
+// ============================================================
+
+// 弱引用使用 ?T 语法，只对满足 mutable 约束的类型合法。
+// 使用 downgrade(T) 创建 ?T，使用 upgrade(?T) 获取 Option[T]。
+
+type mutable WeakNode(mutable value Int, mutable parent ?WeakNode);
+
+let weakref_example() Void = {
+    let node = WeakNode(42);
+
+    // 降级为弱引用
+    let weak ?WeakNode = downgrade(node);
+
+    // 升级回强引用（返回 Option[T]）
+    when upgrade(weak) in {
+        .Some(r) then {
+            println(r.value);
+            r.value = 100; // OK: value 是 mutable 字段
+        },
+        .None() then println("expired"),
+    };
+};
 
 
 // ============================================================
@@ -67,11 +141,11 @@ let literals() Void = {
 
     // 整数
     let decimal Int = 123;
-    let binary  Int = 0b1010;// value: 10
-    let octal   Int = 0o755;// value: 493
-    let hex     Int = 0xFF;// value: 255
-    let sep     Int = 1_000_000;// 下划线分隔符
-    let hex_sep Int = 0xFF_FF;// value: 65535
+    let binary  Int = 0b1010; // value: 10
+    let octal   Int = 0o755; // value: 493
+    let hex     Int = 0xFF; // value: 255
+    let sep     Int = 1_000_000; // 下划线分隔符
+    let hex_sep Int = 0xFF_FF; // value: 65535
 
     // 浮点数
     let f64 Float64 = 1.23;
@@ -89,7 +163,7 @@ let literals() Void = {
     // Pair 字面量（等价于 Pair(a, b)）
     let p1 = (1, 2);
     let p2 = (true, "ok");
-    let p3 = ((1, 2), 3);// 嵌套 Pair
+    let p3 = ((1, 2), 3); // 嵌套 Pair
 
     // 布尔
     let t Bool = true;
@@ -116,10 +190,10 @@ let variables() Void = {
     z += 1;
 
     // Pair 解构绑定
-    let (a, b) = (1, 2);// 类型推断
-    let (c Int, d String) = (3, "hello");// 显式类型标注
-    let (mutable e, f) = (10, 20);// 可变绑定
-    let (_, g) = (1, 2);// 丢弃第一个元素
+    let (a, b) = (1, 2); // 类型推断
+    let (c Int, d String) = (3, "hello"); // 显式类型标注
+    let (mutable e, f) = (10, 20); // 可变绑定
+    let (_, g) = (1, 2); // 丢弃第一个元素
 
     // 丢弃返回值
     _ = some_fn();
@@ -136,47 +210,47 @@ let operators() Void = {
     not x;
 
     // 比较运算符
-    x == y;// eq
-    x <> y;// ne
-    x > y;// gt
-    x < y;// lt
-    x >= y;// ge
-    x <= y;// le
-    1 < x < 3;// chained ascending comparison
-    10 >= y > 0;// chained descending comparison
+    x == y; // eq
+    x <> y; // ne
+    x > y; // gt
+    x < y; // lt
+    x >= y; // ge
+    x <= y; // le
+    1 < x < 3; // chained ascending comparison
+    10 >= y > 0; // chained descending comparison
     // invalid: a < b > c
     // invalid: a < b == c
 
     // 算术运算符
-    x + y;// add
-    x - y;// sub
-    x * y;// mul
-    x / y;// div
-    x % y;// mod
-    -x;// unary minus
+    x + y; // add
+    x - y; // sub
+    x * y; // mul
+    x / y; // div
+    x % y; // mod
+    -x; // unary minus
 
     // 位运算符
-    x & y;// bitwise and
-    x | y;// bitwise or
-    x ^ y;// bitwise xor
-    ~x;// bitwise not
-    x << y;// left shift
-    x >> y;// right shift
+    x & y; // bitwise and
+    x | y; // bitwise or
+    x ^ y; // bitwise xor
+    ~x; // bitwise not
+    x << y; // left shift
+    x >> y; // right shift
 
     // 复合赋值运算符
     x += y;  x -= y;  x *= y;  x /= y;  x %= y;
     x &= y;  x |= y;  x ^= y;  x <<= y; x >>= y;
 
     // 范围运算符
-    let a Range[Int] = 1..5;   // 1 <= x <= 5  (closed)
-    let b Range[Int] = 1..<5;  // 1 <= x < 5   (closed-open)
-    let c Range[Int] = 1<..5;  // 1 < x <= 5   (open-closed)
-    let d Range[Int] = 1<..<5; // 1 < x < 5    (open)
-    let e Range[Int] = 1..;    // 1 <= x <= max (from)
-    let f Range[Int] = 1<..;   // 1 < x <= max  (from-open)
-    let g Range[Int] = ..5;    // min <= x <= 5 (to)
-    let h Range[Int] = ..<5;   // min <= x < 5  (to-open)
-    let i Range[Int] = ..;     // min <= x <= max (full)
+    let ra Range[Int] = 1..5;   // 1 <= x <= 5  (closed)
+    let rb Range[Int] = 1..<5;  // 1 <= x < 5   (closed-open)
+    let rc Range[Int] = 1<..5;  // 1 < x <= 5   (open-closed)
+    let rd Range[Int] = 1<..<5; // 1 < x < 5    (open)
+    let re Range[Int] = 1..;    // 1 <= x <= max (from)
+    let rf Range[Int] = 1<..;   // 1 < x <= max  (from-open)
+    let rg Range[Int] = ..5;    // min <= x <= 5 (to)
+    let rh Range[Int] = ..<5;   // min <= x < 5  (to-open)
+    let ri Range[Int] = ..;     // min <= x <= max (full)
 };
 
 
@@ -282,12 +356,12 @@ let for_binding_shapes() Void = {
 };
 
 trait Problem {
-    render(*self) String;
+    render(self) String;
 };
 
 type PreviewIoError(code Int);
 given PreviewIoError as Problem {
-    render(*self) String = "io";
+    render(self) String = "io";
 };
 
 // ============================================================
@@ -345,7 +419,7 @@ let control_flow() Void = {
     if ready() and has_permission() and feature_enabled() then run() else deny();
     if input is .Some(x) and x > 0 and validate(x) then accept(x) else reject();
 
-    // while-then（表达式）
+    // while-then（表达式，产生 Void）
     while a < b then {
         {};
     };
@@ -353,12 +427,12 @@ let control_flow() Void = {
     // while 条件逻辑组合
     while iter.next() is .Some(v) and v < 10 then println(v);
 
-    // for-in-then（表达式）
+    // for-in-then（表达式，产生 Void）
     for item in list then println(item);
     for i in 0..10 then println(i);
     for i in 0..10 then if i % 2 == 0 then println(i);
 
-    // 解构迭代（需要 enumerate 返回的元素用 pattern 解构）
+    // 解构迭代
     for (first, second) in list.enumerate() then {
         println(first);
         println(second);
@@ -376,9 +450,9 @@ let control_flow() Void = {
 
     // defer（LIFO 顺序，作用域退出前执行）
     let with_defer Func() Void = () -> {
-        defer println("C");// 最后执行
+        defer println("C"); // 最后执行
         defer println("B");
-        defer println("A");// 最先执行
+        defer println("A"); // 最先执行
         println("working");
         // 输出: working -> A -> B -> C
     };
@@ -399,26 +473,26 @@ let pattern_matching() Void = {
 
     // 所有模式类型
     when value in {
-        1           then {},// 整数字面量
-        -5          then {},// 负整数字面量
-        'a'         then {},// rune 字面量
-        "abc"       then {},// 字符串字面量
-        true        then {},// 布尔字面量
-        (a, b)      then {},// Pair 解构模式
-        ((a, b), c) then {},// 嵌套 Pair 解构模式
-        _           then {},// 通配符
-        x           then {},// 变量绑定
-        mutable x   then {},// 可变变量绑定
-        Foo(x, y)   then {},// 结构体解构
-        .Some(x)    then {},// enum case 解构
-        > 5         then {},// 比较模式（大于）
-        < 10        then {},// 比较模式（小于）
-        >= 0        then {},// 比较模式（大于等于）
-        <= 100      then {},// 比较模式（小于等于）
-        > -5        then {},// 比较模式（负数）
-        1 or 2      then {},// or 组合
-        x and > 0   then {},// and 组合（绑定 + 比较）
-        not 0       then {},// not 组合
+        1           then {}, // 整数字面量
+        -5          then {}, // 负整数字面量
+        'a'         then {}, // rune 字面量
+        "abc"       then {}, // 字符串字面量
+        true        then {}, // 布尔字面量
+        (a, b)      then {}, // Pair 解构模式
+        ((a, b), c) then {}, // 嵌套 Pair 解构模式
+        _           then {}, // 通配符
+        x           then {}, // 变量绑定
+        mutable x   then {}, // 可变变量绑定
+        Foo(x, y)   then {}, // 结构体解构
+        .Some(x)    then {}, // enum case 解构
+        > 5         then {}, // 比较模式（大于）
+        < 10        then {}, // 比较模式（小于）
+        >= 0        then {}, // 比较模式（大于等于）
+        <= 100      then {}, // 比较模式（小于等于）
+        > -5        then {}, // 比较模式（负数）
+        1 or 2      then {}, // or 组合
+        x and > 0   then {}, // and 组合（绑定 + 比较）
+        not 0       then {}, // not 组合
     };
 
     // 数值范围匹配（and 组合比较模式）
@@ -438,9 +512,10 @@ let pattern_matching() Void = {
     if a is 1 or a is 2 then {};
     if a is n and n < 2 then {};
     if a is not 2 then {};
-    let problem *Problem = box(PreviewIoError(7));
-    if problem is *PreviewIoError then println("io");
-    if problem is io *PreviewIoError then println(io.render());
+
+    // trait object 精确类型模式（直接写具体类型名，不使用 * 前缀）
+    if err is PreviewIoError then println("io");
+    if err is io PreviewIoError then println(io.render());
 
     // while is（循环模式匹配）
     let iter = list.iterator();
@@ -462,29 +537,29 @@ let pattern_matching() Void = {
 // 结构体解构模式 (Struct Destructuring Pattern)
 // ============================================================
 
-type Point(x Int, y Int);
-type Rect(origin Point, width Int, height Int);
+type StructPoint(x Int, y Int);
+type StructRect(origin StructPoint, width Int, height Int);
 
 let struct_destructuring() Void = {
-    let r = Rect(Point(1, 2), 30, 40);
+    let r = StructRect(StructPoint(1, 2), 30, 40);
 
     // when 中解构
     when r in {
-        Rect(Point(x, y), w, h) then println(x + y + w + h),
+        StructRect(StructPoint(x, y), w, h) then println(x + y + w + h),
     };
 
     // if is 中解构
-    if r is Rect(Point(x, y), _, _) then println(x + y);
+    if r is StructRect(StructPoint(x, y), _, _) then println(x + y);
 
     // 字段通配符
     when r in {
-        Rect(_, w, h) then println(w * h),
+        StructRect(_, w, h) then println(w * h),
     };
 
     // 字段字面量匹配
     when r in {
-        Rect(Point(0, _), _, _) then println("origin at x=0"),
-        Rect(Point(x, _), _, _) then println(x),
+        StructRect(StructPoint(0, _), _, _) then println("origin at x=0"),
+        StructRect(StructPoint(x, _), _, _) then println(x),
     };
 };
 
@@ -493,8 +568,8 @@ let struct_destructuring() Void = {
 // 类型系统 (Type System)
 // ============================================================
 
-// 结构体（积类型）
-type Button(width Int, height Int, label String);
+// 不可变结构体（type）—— 语义上是值，编译器决定布局
+type MyButton(width Int, height Int, label String);
 
 // 带访问修饰符的字段
 type Image(
@@ -503,17 +578,19 @@ type Image(
     public  source String,
 );
 
-// 可变字段
-type Counter(mutable count Int);
+// 可变类型（type mutable）—— 共享对象语义
+// 字段默认不可变，只有显式声明 mutable 的字段可原地修改
+type mutable Counter(mutable count Int);
 
-// enum（和类型 / 枚举）
+// enum（和类型 / 枚举）—— 始终使用 type，不支持 mutable
+// 递归类型：编译器自动插入隐藏间接层，不需要显式指针 break edge
 type TreeNode {
     Empty(),
-    Node(value Int, left *TreeNode, right *TreeNode),
+    Node(value Int, left TreeNode, right TreeNode),
 };
 
 // 泛型 enum（ADT）
-type Option[T Any] {
+type OptionDemo[T Any] {
     Some(value T),
     None(),
 };
@@ -521,142 +598,50 @@ type Option[T Any] {
 // 类型别名
 type Byte    = UInt8;
 type Meters  = Int;
-type Coord   = Point;
+type Coord   = StructPoint;
 
-// 泛型结构体
-type Table[T Any](mutable data T);
+// 泛型可变结构体
+type mutable GenericTable[T Any](mutable data T);
 
 
 // ============================================================
-// 类型修饰符：* / *mutable / *unsafe / *unsafe mutable / ?* / ?*mutable
+// type 与 type mutable 语义对比
 // ============================================================
 
-let type_modifiers() Void = {
-    // *：只读受管理引用
-    // - 可通过普通 & 形成（左值或右值均可；右值会物化托管存储，产出 *T）
-    // - 也可通过 box() 创建（返回 *mutable T，可隐式宽化为 *T）
-    // - 成员访问自动解引用（对结构体/枚举类型）
-    // - *expr 读取值，但不支持 *expr 赋值（* 是只读引用）
-    let local Int = 7;
-    let borrowed *Int = &local;// let 绑定 → *T
-    let temp_ref *Int = &42;// 右值也可形成托管 *T
-    let a *Int = box(42);// box() 返回 *mutable T，可隐式宽化为 *T
-    println(*a);// 显式解引用读取
-    let point_ref *Point = box(Point(10, 20));
-    println(point_ref.x);// 对结构体做成员访问时自动解引用
-    // *a = 99           // 错误：* 不支持解引用赋值
+let type_mutable_demo() Void = {
+    // type（不可变值类型）—— 没有共享可变身份
+    let p1 = StructPoint(1, 2);
+    let p2 = p1;
+    // p1 / p2 是不可变类型，编译器可自由选择布局策略
 
-    // *mutable：可变受管理引用
-    // - 可通过可变左值上的 &mutable 形成（产出 *mutable T）
-    // - &mutable 仍然要求可写左值；不能直接对右值使用
-    // - box() 返回 *mutable T
-    // - 支持 *expr 读取和 *expr = value 赋值
-    // - *mutable T 可隐式转换为 *T（丢弃写权限），反向不允许
-    let mutable local2 Int = 7;
-    let mut_borrowed *mutable Int = &mutable local2;// let mutable 绑定 → *mutable T
-    let owned *mutable Int = box(42);// box() 返回 *mutable T
-    println(*owned);// *expr 读取
-    *owned = 99;// *expr 赋值（*mutable 支持）
+    // type mutable（可变共享对象）—— 赋值传递同一对象的句柄
+    let c1 = Counter(0);
+    let c2 = c1;
+    c2.count = 5;
+    // c1.count 也是 5，因为 c1 / c2 共享同一个 Counter 对象
 
-    // *unsafe：只读原始指针
-    // - 通过 &unsafe 在可取地址存储上形成
-    // - 支持 *expr 读取，但不支持 *expr 赋值
-    // - 支持下标读取 p[i]，但不支持下标赋值
-    // - 支持指针算术（+ / -）
-    // - 支持直接字段访问 p.field，但不做隐式 pointee 方法查找
-    let b *unsafe Int = &unsafe a;
-    let value = *b;// *expr 读取
-    // *b = 99           // 错误：*unsafe 不支持 *expr 赋值
-    let v0 = b[0];// 下标读取（等价于 *(b + 0)）
-    // b[1] = 200           // 错误：*unsafe 不支持下标赋值
-
-    // *unsafe mutable：可变原始指针
-    // - 可通过 &unsafe mutable 在可取地址存储上形成
-    // - 支持 *expr 读取和 *expr = value 赋值
-    // - 支持下标读取和下标赋值（指针偏移语义）
-    // - 支持指针算术（+ / -）
-    let mp *unsafe mutable Int = alloc_memory[Int](2);
-    *mp = 99;// *expr 赋值
-    mp[0] = 111;// 下标赋值（等价于 *(mp + 0) = 111）
-    mp[1] = 222;// 下标赋值（等价于 *(mp + 1) = 222）
-
-    // ?* / ?*mutable：弱引用（不增加引用计数）
-    // ?*T 是只读弱引用，?*mutable T 是可变弱引用
-    let c ?*Int = downgrade(a);// *T → ?*T
-    let d ?*mutable Int = downgrade_mutable(owned);// *mutable T → ?*mutable T
-
-    // 类型注解中使用
-    let f Func(*Int) Void = (x) -> println(*x);
+    // let mutable 只控制变量绑定是否可重赋值，与类型无关
+    let mutable c3 = Counter(10);
+    c3.count = 20; // OK: Counter 是 type mutable，count 是 mutable 字段
+    c3 = Counter(30); // OK: 变量绑定是 mutable 的
 };
 
+
 // ============================================================
-// 堆分配 (Heap Allocation)
+// Self 类型
 // ============================================================
 
-let heap_allocation() Void = {
-    // box() 将值分配到堆上，返回 *mutable
-    let r *mutable Int = box(42);
-    let p *mutable Point = box(Point(10, 20));
-    println(p.x);// 成员访问自动解引用
-    println(p.y);// 另一侧字段同样可直接访问
-    *r = 100;// *mutable 支持 *expr 赋值
+// Self 是内置类型关键字，在 trait / given 中引用实现类型。
+// - trait 内：Self 代表未来的实现类型
+// - given Type as Trait 内：Self 等价于 Type
+
+trait SelfEq {
+    equals(self, other Self) Bool;
 };
 
-// ============================================================
-// ?* 弱引用
-// ============================================================
-
-let weakref_example() Void = {
-    let strong *mutable Int = box(42);
-
-    // 降级为可变弱引用（*mutable → ?*mutable）
-    let weak ?*mutable Int = downgrade_mutable(strong);
-
-    // 升级回可变强引用（?*mutable T → Option[*mutable T]）
-    when upgrade_mutable(weak) in {
-        .Some(r) then {
-            println(*r);
-            *r = 100;// *mutable 支持赋值
-        },
-        .None() then println("expired"),
-    };
-
-    // 只读版本：*T → ?*T → Option[*T]
-    let ro *Int = strong;// *mutable 隐式宽化为 *
-    let ro_weak ?*Int = downgrade(ro);
-    when upgrade(ro_weak) in {
-        .Some(r) then println(*r),
-        .None()    then println("expired"),
-    };
-};
-
-// ============================================================
-// 指针操作 (Raw Pointer Operations)
-// ============================================================
-
-let pointer_ops() Void = {
-    let p *unsafe mutable Int = alloc_memory[Int](2);// 分配 2 个 Int 的内存，返回 *unsafe mutable
-
-    init_memory(p, 100);// 初始化（要求 *unsafe mutable）
-    let value = *p;// 解引用读取
-
-    let p2 = p + 1;// 指针偏移
-    init_memory(p2, 200);
-
-    *p = 999;// 解引用赋值（*unsafe mutable 支持）
-
-    // 下标访问（指针偏移 + 解引用）
-    let v0 = p[0];// 等价于 *(p + 0)
-    let v1 = p[1];// 等价于 *(p + 1)
-    p[0] = 111;// 下标赋值（*unsafe mutable 支持）
-    p[1] = 222;
-
-    deinit_memory(p);// 析构（要求 *unsafe mutable）
-    deinit_memory(p2);
-    dealloc_memory(p);// 释放内存
-
-    let np *unsafe Int = null_ptr();// null 指针（返回 *unsafe T）
-    println(p == null_ptr());
+given StructPoint as SelfEq {
+    // 此处 Self 解析为 StructPoint
+    equals(self, other StructPoint) Bool = self.x == other.x and self.y == other.y;
 };
 
 
@@ -664,28 +649,23 @@ let pointer_ops() Void = {
 // trait（特征 / 接口）
 // ============================================================
 
-// 基本 trait
-trait Eq {
-    equals(self, other Self) Bool;
-};
-
-// trait 继承（单继承）
-trait Ord Eq {
+// 基本 trait —— receiver 统一使用 self，不再有 *self / *mutable self
+trait Ord {
     compare(self, other Self) Int;
 };
 
 // trait 继承（多继承，and 连接）
-trait ToString {
-    to_string(*self) String;
+trait MyToString {
+    to_string(self) String;
 };
 
-trait PrettyPrint ToString and Eq {
+trait PrettyPrint MyToString and SelfEq {
     pretty(self) String;
 };
 
 // 泛型 trait
 trait Iterator[T Any] {
-    next(*mutable self) Option[T];
+    next(self) Option[T];
 };
 
 // ============================================================
@@ -700,7 +680,7 @@ given Foo {
 };
 
 // 实现 trait
-given Foo as Eq {
+given Foo as SelfEq {
     equals(self, other Foo) Bool = self.value == other.value;
 };
 
@@ -709,17 +689,15 @@ given Foo as Ord {
 };
 
 // 泛型 given
-type Table[T Any](mutable data T);
-
-given[T Any] Table[T] {
-    set_data(*mutable self, d T) Void = {
+given[T Any] GenericTable[T] {
+    set_data(self, d T) Void = {
         self.data = d;
     };
 };
 
 // 泛型 given 实现 trait
-given[T Eq] Table[T] as Eq {
-    equals(self, other Table[T]) Bool = self.data.equals(other.data);
+given[T SelfEq] GenericTable[T] as SelfEq {
+    equals(self, other GenericTable[T]) Bool = self.data.equals(other.data);
 };
 
 // ============================================================
@@ -727,17 +705,10 @@ given[T Eq] Table[T] as Eq {
 // ============================================================
 
 // Koral 通过 Trait 实现算术/比较类操作符重载。
-// 常见映射：
-// +  -> Add[R]
-// -  -> Sub[R] / Neg
-// *  -> Mul[R]
-// /  -> Div[R]
-// %  -> Rem[R]
-// == / <> -> Eq
-// < / > / <= / >= -> Ord
-// 同方向链式顺序比较（如 a < b < c）只是上述比较操作的语法糖。
-// 编译器会降成相邻两段比较，并保证单次求值与短路；它不会引入新的 Trait。
-// [] / []= 是内建语义，仅支持 String / List / Deque / pointer
+// + -> Add[R] / - -> Sub[R], Neg / * -> Mul[R] / / -> Div[R] / % -> Rem[R]
+// == / <> -> Eq / < > <= >= -> Ord
+// 同方向链式顺序比较（如 a < b < c）只是比较操作的语法糖。
+// [] / []= 是内建语义，仅支持 String / List / Deque / *unsafe / *unsafe mutable
 // 位运算与移位目前仍是内建操作，不通过公开 Trait 自定义。
 
 type Vec2(x Int, y Int);
@@ -780,8 +751,8 @@ let builtin_subscript() Void = {
     list[1] = 99;
 
     let text = "abc";
-    let b UInt8 = text[1];
-    println(b);
+    let bt UInt8 = text[1];
+    println(bt);
 
     let p *unsafe mutable Int = alloc_memory[Int](2);
     p[0] = list[0];
@@ -794,39 +765,55 @@ let builtin_subscript() Void = {
 // trait object（特征对象，动态分发）
 // ============================================================
 
-trait Shape {
-    area(*self) Float64;
-    reset(*mutable self) Void;
+// trait object 直接使用 trait 名作为类型。
+// 不再需要 *Trait / *mutable Trait / box() / Object 标记 trait。
+// 任意普通 trait 都可以作为 trait object 目标，只要满足 object safety。
+
+trait Drawable {
+    draw(self) String;
 };
 
-type Circle(mutable radius Float64);
-given Circle as Shape {
-    area(*self) Float64 = 3.14159 * self.radius * self.radius;
-    reset(*mutable self) Void = {
-        self.radius = 0.0;
-    };
+type mutable ShapeCircle(mutable radius Float64);
+given ShapeCircle as Drawable {
+    draw(self) String = "Drawing circle";
 };
 
 let trait_object_example() Void = {
-    // *TraitName / *mutable TraitName 类型 + box() = 动态分发
-    let s *Shape = box(Circle(5.0));
-    let ms *mutable Shape = box(Circle(6.0));
-    println(s.area());
-    ms.reset();
-    println(ms.area());
+    // trait object 直接写 trait 名
+    let shape Drawable = ShapeCircle(5.0);
+    println(shape.draw());
 
-    // 接受 trait * 参数的函数值
-    let print_area Func(*Shape) Void = (shape *Shape) -> println(shape.area());
-    print_area(s);
+    // 接受 trait 参数的函数
+    let print_drawable(d Drawable) Void = println(d.draw());
+    print_drawable(ShapeCircle(10.0));
 
-    let problem *Problem = box(PreviewIoError(7));
-    if problem is *PreviewIoError then println("io exact");
+    // trait object 精确类型模式（直接写具体类型名，不使用 * 前缀）
+    let problem Problem = PreviewIoError(7);
+    if problem is PreviewIoError then println("io exact");
     when problem in {
-        io *PreviewIoError then println(io.render()),
+        io PreviewIoError then println(io.render()),
         _ then println("other"),
     };
 };
 
+// ============================================================
+// trait object 对象安全性
+// ============================================================
+
+// 只有满足以下条件的 trait 才能用作 trait object：
+// - 方法不能有泛型参数
+// - receiver 使用 self
+// - 方法参数和返回值中不能出现未擦除的 Self
+
+// 对象安全 —— 可以用作 trait object
+trait ErrorTrait {
+    message(self) String;
+}
+
+// 不是对象安全 —— 不能用作 trait object（Self 出现在参数中）
+// trait Eq {
+//     equals(self, other Self) Bool;
+// }
 
 // ============================================================
 // 泛型 (Generics)
@@ -840,11 +827,11 @@ let sort_and_dedup[T Eq and Ord](list List[T]) List[T] = {};
 
 // 泛型类型实例化
 let generics_usage() Void = {
-    let t = Table[Int](42);// 显式类型参数
-    let t2 = Table(42);// 推断类型参数
+    let t = GenericTable[Int](42); // 显式类型参数
+    let t2 = GenericTable(42); // 推断类型参数
 
-    add[Int](1, 2);// 显式泛型函数调用
-    add(1, 2);// 推断泛型函数调用
+    add[Int](1, 2); // 显式泛型函数调用
+    add(1, 2); // 推断泛型函数调用
 };
 
 // ============================================================
@@ -901,8 +888,8 @@ let option_chaining() Void = {
     let none = Option[Int].None();
 
     // or else：解包，None 时使用默认值
-    let value  = opt  or else 0;// 42
-    let value2 = none or else 0;// 0
+    let val  = opt  or else 0; // 42
+    let val2 = none or else 0; // 0
 
     // or else + 提前返回（自定义错误处理）
     let default_option Func(Option[Int]) Int = (o Option[Int]) Int -> {
@@ -911,13 +898,13 @@ let option_chaining() Void = {
     };
 
     // and then：值变换（Some 时执行，None 时透传）
-    let doubled = opt and then it * 2;// Some(84)
-    let chained = opt and then it + 1 and then it * 3;// Some(129)
+    let doubled = opt and then it * 2; // Some(84)
+    let chained = opt and then it + 1 and then it * 3; // Some(129)
 
     // and then + 自动 flatten（monadic bind）
     let safe_div Func(Int, Int) Option[Int] = (x Int, y Int) Option[Int] ->
         if y == 0 then .None() else .Some(x / y);
-    let result = opt and then safe_div(it, 10);// Option[Option[T]] -> Option[T]
+    let result = opt and then safe_div(it, 10); // Option[Option[T]] -> Option[T]
 
     // Result 的 or else 错误传播
     let double_result Func(Result[Int]) Result[Int] = (res Result[Int]) Result[Int] -> {
@@ -939,20 +926,20 @@ let option_chaining() Void = {
 //   - Option 传播只能用在返回 Option 的函数中
 
 let read_config(path String) Result[Config] = {
-    let text = read_text_file(path) or return;// Result 传播
+    let text = read_text_file(path) or return; // Result 传播
     let parsed = parse_json(text) or return;
     return .Ok(parsed);
 };
 
 let find_user(id Int) Option[User] = {
-    let entry = lookup_table(id) or return;// Option 传播
+    let entry = lookup_table(id) or return; // Option 传播
     let user = entry.to_user() or return;
     return .Some(user);
 };
 
 // or return + and then 组合
 let doubled_value(res Result[Int]) Result[Int] = {
-    let value = (res and then it * 2) or return;// 先 transform，再传播
+    let value = (res and then it * 2) or return; // 先 transform，再传播
     return .Ok(value + 1);
 };
 
@@ -990,17 +977,17 @@ let with_custom_handling(path String) Result[String] = {
 public  let public_fn()    Void = {};
 package_private let package_fn() Void = {};
 module_private let private_fn()   Void = {};
-let module_private_fn() Void = {};// 默认 module_private
+let module_private_fn() Void = {}; // 默认 module_private
 
-public type PublicType(
-    public           x Int,// 所有 package / module 可见
-    package_private  y Int,// 同一 package 内各 module 可见
-    module_private   z Int,// 仅当前 module 可见
-    file_private     w Int,// 仅当前文件可见
-                     k Int,// 字段默认 public
+public type AccessType(
+    public           x Int, // 所有 package / module 可见
+    package_private  y Int, // 同一 package 内各 module 可见
+    module_private   z Int, // 仅当前 module 可见
+    file_private     w Int, // 仅当前文件可见
+                     k Int, // 字段默认 public
 );
 
-given PublicType {
+given AccessType {
     public           get_x(self) Int = self.x;
     package_private  package_helper(self) Int = self.y;
     module_private   helper(self) Int = self.w;
@@ -1013,30 +1000,42 @@ given PublicType {
 // ============================================================
 
 let collections() Void = {
-    // List（动态数组）
+    // List（动态数组，type mutable）
     let list List[Int] = [1, 2, 3, 4, 5];
-    println(list[0]);// 下标访问
+    println(list[0]); // 下标访问
 
-    // Dict（键值对）
+    // Dict（键值对，type mutable）
     let dict Dict[String, Bool] = ["a": true, "b": false];
     println(dict);
+
+    // Set（集合，type mutable）
+    let s Set[Int] = [1, 2, 3];
+
+    // 空字面量需要显式类型上下文
+    let empty_list List[Int] = [];
+    let empty_dict Dict[String, Int] = [];
 };
+
 
 // ============================================================
 // 自定义析构 (drop)
 // ============================================================
 
-type Resource(id Int);
+// drop(self) 的表面签名和普通方法一致，但由编译器在对象生命周期终点自动调用。
+// self 在析构上下文中是只读访问视图。
+// Drop 实现类型必然是 ARC-backed 的对象语义。
 
-given Resource as Drop {
-    drop(source *unsafe mutable Self) Void = {
+type MyResource(id Int);
+
+given MyResource as Drop {
+    drop(self) Void = {
         print("dropping resource ");
-        println(source.id);
+        println(self.id);
     };
 };
 
 let drop_example() Void = {
-    let r = Resource(1);
+    let r = MyResource(1);
     // r 在作用域结束时自动调用 drop
     // defer 在 drop 之前执行
     defer println("deferred cleanup");

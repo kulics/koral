@@ -201,44 +201,6 @@ let (_, g) = (1, 2);                   // 丢弃第一个元素
 
 编译器会直接从 Pair 值中移动字段到目标变量，避免不必要的拷贝和析构开销。
 
-#### Unsafe Pointer 与取址（`&unsafe`）
-
-Koral 不再提供安全托管引用（`*T`、`*mutable T`）和取址操作（`&`、`&mutable`、`box()`）。数据共享通过 `type` / `type mutable` 的声明语义实现。
-
-低层地址操作保留为 `&unsafe` / `&unsafe mutable`，用于 FFI 与系统编程场景：
-
-- `&unsafe` / `&unsafe mutable` 要求可取地址的存储，因此字面量和临时值会被拒绝。
-- `&unsafe` 产生 `*unsafe T`（只读 raw pointer）。
-- `&unsafe mutable` 产生 `*unsafe mutable T`（可变 raw pointer）。
-
-指针类型区分只读和可变：
-
-- `*unsafe T` — 只读 raw pointer。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值。
-- `*unsafe mutable T` — 可变 raw pointer。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
-- `*unsafe mutable T` 可隐式转换为 `*unsafe T`；反向转换不允许。
-
-```koral
-let x = 10;
-let p *unsafe Int = &unsafe x;
-
-let mutable y = 42;
-let mp *unsafe mutable Int = &unsafe mutable y;
-*mp = 100;
-
-// let raw_bad = &unsafe 42  // 错误：raw 取址需要可取地址存储
-```
-
-方法接收者统一使用 `self`，不再有 `*self` / `*mutable self`：
-
-```koral
-type mutable Counter(mutable value Int);
-given Counter {
-    public get(self) Int = self.value;
-}
-let c = Counter(10);
-c.get();                      // OK：self 接受 Counter
-```
-
 ### 赋值
 
 对于可变变量，我们可以在需要的时候多次改变它的值。
@@ -516,72 +478,14 @@ let empty List[Int] = [];             // 空字面量必须有类型上下文
 - 集合字面量和 Dict 字面量都支持尾随逗号。
 - 集合字面量仅支持内置 `List` / `Set` / `Dict`，不支持第三方容器类型。
 
-### 指针类型 (Pointer)
-
-Koral 通过 `type` / `type mutable` 的声明语义实现数据共享，不再使用安全托管引用（`*T`、`*mutable T`）。低层地址操作保留为 `&unsafe` / `&unsafe mutable`，用于 FFI 与系统编程。
-
-- `*unsafe T` — 只读 raw pointer。支持 `*expr` 解引用读取，但不支持 `*expr = value` 赋值。
-- `*unsafe mutable T` — 可变 raw pointer。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
-- `*unsafe mutable T` 可隐式转换为 `*unsafe T`；反向转换不允许。
-
-`*unsafe T` / `*unsafe mutable T` 仅表示底层 raw pointer 视图，编译器仍然必须满足稳定布局和地址稳定性要求。
-
-```koral
-let x = 42;
-let p *unsafe Int = &unsafe x;
-
-let mutable n = 10;
-let mp *unsafe mutable Int = &unsafe mutable n;
-*mp = 100;               // 解引用赋值
-
-let rp *unsafe Int = mp;  // *unsafe mutable -> *unsafe 隐式转换
-```
-
-#### 弱引用
-
-弱引用改为显式能力约束：只有满足 `mutable` 约束的类型才允许 `?T`。运行时仍然会带 weak count，但这个能力必须通过约束显式声明，而不是通过 `Weak` 标记 trait 表达。
-
-```koral
-let downgrade[T mutable](value T) ?T = ...
-let upgrade[T mutable](value ?T) Option[T] = ...
-
-type mutable Node(mutable parent ?Node);
-```
-
-这里的 `?T` 不再与旧的 `?*T` / `?*mutable T` 混用；`mutable` 约束表示该类型允许进入 weak graph 语义。
-
-
-#### Self 类型
-
-`Self` 是一个内置类型关键字，用于在 `trait` 定义、`given` 块及其方法签名中引用实现类型。它不是独立的类型别名——由编译器解析为正在实现 trait 的具体类型。
-
-- 在 `trait` 定义内部，`Self` 代表未来的实现类型。
-- 在 `given Type as Trait` 块内部，`Self` 等价于 `Type`。
-- `Self` 可以出现在 trait/given 上下文中的方法参数类型、返回类型和字段类型中。
-
-```koral
-trait Eq {
-    equals(self, other Self) Bool;
-}
-
-type Point(x Int, y Int);
-
-given Point as Eq {
-    // 此处 Self 解析为 Point，因此 `other Self` 等同于 `other Point`。
-    equals(self, other Point) Bool = self.x == other.x and self.y == other.y;
-}
-```
-
 ### 内存管理
 
-Koral 的内存管理基于声明处二分模型（`type` / `type mutable`），由编译器接管布局与所有权细节。
+Koral 的内存模型非常简洁：`type` / `type mutable` 声明控制所有共享和可变性语义，其余细节由编译器处理。
 
 - **不可变类型（`type`）**：默认情况下，Koral 中的类型（如 `Int`、结构体）没有用户可见的 identity。赋值或传参时，编译器可自由选择栈值、寄存器、隐藏共享 backing 等实现策略，用户无需关心。
 - **可变类型（`type mutable`）**：引入共享对象 identity。赋值 / 传参传递的是同一个对象的共享句柄。只有字段被显式声明为 `mutable` 时才允许原地修改。
-- **raw pointer**：`&unsafe` / `&unsafe mutable` 只从可取地址存储创建 raw pointer，用于 FFI 与系统编程。它们属于低层内存访问能力，仍受地址稳定性和布局稳定性约束。
 - **ARC 实现层细节**：编译器仍可能在内部使用 ARC / hidden storage，但这些都不是用户可见语法。语言协议围绕 `type` / `type mutable` 和字段级 `mutable` 展开。
 - **显式 `clone()`**：`type mutable` 的容器和共享对象不使用 COW 语义。独立副本需要通过显式 `clone()` 创建。
-- **所有权转移（Move Semantics）**：对于 `type` 类型，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
 
@@ -1662,6 +1566,27 @@ file_private type InternalId = Int;  // 仅文件内可见
 
 Koral 采用 Trait（特征）来定义共享的行为。这类似于其他语言中的接口（Interface）或类型类（Type Class）。
 
+### Self 类型
+
+`Self` 是一个内置类型关键字，用于在 `trait` 定义、`given` 块及其方法签名中引用实现类型。它不是独立的类型别名——由编译器解析为正在实现 trait 的具体类型。
+
+- 在 `trait` 定义内部，`Self` 代表未来的实现类型。
+- 在 `given Type as Trait` 块内部，`Self` 等价于 `Type`。
+- `Self` 可以出现在 trait/given 上下文中的方法参数类型、返回类型和字段类型中。
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool;
+}
+
+type Point(x Int, y Int);
+
+given Point as Eq {
+    // 此处 Self 解析为 Point，因此 `other Self` 等同于 `other Point`。
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y;
+}
+```
+
 ### 定义 Trait
 
 Trait 定义了一组方法签名，任何实现了该 Trait 的类型都必须提供这些方法的具体实现。
@@ -2279,6 +2204,39 @@ foreign type CFile {};
 
 // 带字段的 FFI 结构体（与 C 布局对齐）
 foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
+```
+
+### Raw Pointer
+
+Raw pointer 是用于 FFI 和系统编程的底层内存访问手段：
+
+- `*unsafe T` — 只读 raw pointer。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值或 `p[i]` 赋值。
+- `*unsafe mutable T` — 可变 raw pointer。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
+- `*unsafe mutable T` 可隐式转换为 `*unsafe T`；反向转换不允许。
+
+```koral
+let p *unsafe Int = &unsafe value;
+let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+
+let x = *p;       // 解引用读取
+*mp = 42;         // 解引用赋值
+
+// let bad = &unsafe 42  // 错误：raw 取址需要可取地址存储
+```
+
+### 弱引用
+
+弱引用用于打破 `type mutable` 对象图中的引用循环。使用 `?T` 语法，只对满足 `mutable` 约束的类型合法。
+
+- `downgrade(T)` 产生 `?T`。
+- `upgrade(?T)` 返回 `Option[T]`。
+
+```koral
+type mutable Node(mutable value Int);
+
+let node = Node(42);
+let weak = downgrade(node);
+let upgraded = upgrade(weak);
 ```
 
 ### Intrinsic

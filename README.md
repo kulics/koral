@@ -177,7 +177,7 @@ let result = list.iterator();
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func(Int, Int) Int` — `(Int, Int) -> Int`
-- Type mutability: `type` (immutable value semantics), `type mutable` (shared object semantics); Weak references: `?T` (requires mutable constraint); Raw pointers: `*unsafe T`, `*unsafe mutable T` (FFI)
+- Type mutability: `type` (immutable value semantics), `type mutable` (shared object semantics)
 
 ### Control Flow
 
@@ -225,9 +225,7 @@ let result = list.iterator();
 
 - `type` values are immutable. The compiler decides the internal layout.
 - `type mutable` values are mutable shared objects.
-- Weak references (`?T`) break reference cycles. They require a `mutable` constraint on the target type.
 - `defer` for deterministic resource cleanup.
-- Raw pointers (`*unsafe T`, `*unsafe mutable T`) are available for FFI and low-level interop.
 
 ```koral
 // Immutable value — compiler decides representation.
@@ -237,13 +235,6 @@ let p = Point(1, 2);
 type mutable Counter(mutable count Int);
 let c = Counter(0);
 c.count = c.count + 1;
-
-// Weak reference to a mutable object.
-let weak ?Counter = downgrade(c);
-when upgrade(weak) in {
-    .Some(r) then println(r.count),
-    .None() then println("expired"),
-};
 ```
 
 ### Module System
@@ -272,6 +263,8 @@ Module rules summary:
 - `foreign let` for binding C functions
 - `foreign type` for opaque or layout-compatible C types
 - Native library linking is configured in `koral.json` / `std/koral.json` via `links`, not via source syntax
+- Raw pointers: `*unsafe T` (read-only), `*unsafe mutable T` (read-write); formed with `&unsafe` / `&unsafe mutable`
+- Weak references: `?T` (requires `mutable` constraint); `downgrade(T)` / `upgrade(?T)`
 
 ## Standard Library Overview
 
