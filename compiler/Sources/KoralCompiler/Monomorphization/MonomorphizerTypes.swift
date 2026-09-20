@@ -72,7 +72,7 @@ extension Monomorphizer {
         
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName, isMutable: template.isMutable)
         let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 
@@ -87,11 +87,8 @@ extension Monomorphizer {
             
             for param in template.parameters {
                 var fieldType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-                if fieldType == placeholder {
-                    throw SemanticError.invalidOperation(
-                        op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)",
-                        type1: param.name, type2: "")
-                }
+                // Allow direct recursion in generic structs — the compiler will
+                // automatically insert hidden indirect layers for recursive types.
                 // Resolve any nested genericStruct/genericEnum types
                 // This ensures types like List<T ref> get instantiated
                 fieldType = resolveParameterizedType(fieldType, visited: [])
@@ -103,15 +100,16 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: templateName, isMutable: template.isMutable)
         let specificType = Type.structure(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
         
         // Force instantiate Drop trait method if it exists for this type
         if let methods = input.genericTemplates.extensionMethods[templateName] {
+            let stdDropDefId = input.genericTemplates.traits["Drop"]?.defId
             for entry in methods {
-                if entry.conformanceTraitName == "Drop" && entry.method.name == "drop" {
+                if entry.conformanceTraitDefId == stdDropDefId && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
                         structureName: templateName,
@@ -194,11 +192,8 @@ extension Monomorphizer {
                 var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
                 for p in c.parameters {
                     var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
-                    if resolved == placeholder {
-                        throw SemanticError.invalidOperation(
-                            op: "Direct recursion in generic enum \(layoutName) not allowed (use ref)",
-                            type1: p.name, type2: "")
-                    }
+                    // Allow direct recursion in generic enums — the compiler will
+                    // automatically insert hidden indirect layers for recursive types.
                     // Resolve any nested genericStruct/genericEnum types
                     // This ensures types like List<Expr ref> get instantiated
                     resolved = resolveParameterizedType(resolved, visited: [])
@@ -219,8 +214,9 @@ extension Monomorphizer {
 
         // Force instantiate Drop trait method if it exists
         if let methods = input.genericTemplates.extensionMethods[templateName] {
+            let stdDropDefId = input.genericTemplates.traits["Drop"]?.defId
             for entry in methods {
-                if entry.conformanceTraitName == "Drop" && entry.method.name == "drop" {
+                if entry.conformanceTraitDefId == stdDropDefId && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
                         structureName: templateName,

@@ -1,6 +1,6 @@
 # The Koral Programming Language
 
-Koral is an experimental compiled language that uses a **simplified type system** (`type` / `type mutable`) combined with **Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
+Koral is an experimental compiled language that uses a **simplified type system** (`type` / `type mutable`). It targets C to deliver predictable, high-performance compilation without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
 
 This repository contains the compiler, standard library, formatter, language documentation, and sample projects.
 
@@ -12,20 +12,18 @@ Reference note:
 - For syntax-sensitive details, use `docs/grammar.bnf` together with the language reference in `docs/document.md` and `docs/document-zh.md`.
 - When implementation and docs drift, resolve the mismatch by updating the implementation and/or the documents so they converge.
 
-## The Core Idea: `type` / `type mutable` + ARC
+## The Core Idea: `type` / `type mutable`
 
 Koral's type system distinguishes between two kinds of composite types:
 
-- **`type`** (immutable): An immutable value type. The compiler is free to choose the most efficient representation—inline on the stack, in registers, or elided entirely. Fields cannot be mutated after construction.
-- **`type mutable`** (mutable): A shared mutable object. Instances live on the heap and carry ARC metadata. Fields are immutable by default; individual fields can be declared `mutable` to allow in-place mutation through shared references.
-
-ARC (Automatic Reference Counting) is the runtime mechanism that manages `type mutable` lifetimes. It is an implementation detail and is not exposed to the programmer—there is no `retain`, `release`, or `box()` to write by hand.
+- **`type`** (immutable): An immutable value type. The compiler decides the internal layout. Fields cannot be mutated after construction.
+- **`type mutable`** (mutable): A mutable object type with shared semantics. Fields are immutable by default; individual fields can be declared `mutable` to allow in-place mutation through shared references.
 
 ```koral
-// Immutable value type — compiler chooses layout freely.
+// Immutable value type — compiler decides layout.
 type Point(x Int, y Int);
 
-// Mutable shared object — heap-allocated, ARC-managed.
+// Mutable shared object.
 type mutable Counter(mutable count Int);
 
 let p = Point(1, 2);
@@ -35,7 +33,7 @@ c.count = c.count + 1;  // in-place mutation through shared reference
 
 ## Language Highlights
 
-- **No GC, No Manual `free`**: Automatic memory management based on `type` / `type mutable` semantics and ARC.
+- **No GC, No Manual `free`**: Automatic memory management based on `type` / `type mutable` semantics.
 - **Expression-Oriented Control Flow**: `if`, `when`, `while`, and `for` share the same expression surface syntax; `if` and `when` may produce branch values, while `while` and `for` always produce `Void`.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
 - **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
@@ -225,17 +223,17 @@ let result = list.iterator();
 
 ### Memory Management
 
-- `type` values are immutable and may be stack-allocated, register-promoted, or elided by the compiler. No ARC overhead is incurred.
-- `type mutable` values are heap-allocated shared objects managed by ARC. ARC is an implementation detail—there is no manual `retain`/`release`.
+- `type` values are immutable. The compiler decides the internal layout.
+- `type mutable` values are mutable shared objects.
 - Weak references (`?T`) break reference cycles. They require a `mutable` constraint on the target type.
 - `defer` for deterministic resource cleanup.
-- Raw pointers (`*unsafe T`, `*unsafe mutable T`) are available for FFI and low-level interop; they bypass ARC and must be managed manually.
+- Raw pointers (`*unsafe T`, `*unsafe mutable T`) are available for FFI and low-level interop.
 
 ```koral
 // Immutable value — compiler decides representation.
 let p = Point(1, 2);
 
-// Mutable shared object — ARC-managed on the heap.
+// Mutable shared object.
 type mutable Counter(mutable count Int);
 let c = Counter(0);
 c.count = c.count + 1;
@@ -244,8 +242,8 @@ c.count = c.count + 1;
 let weak ?Counter = downgrade(c);
 when upgrade(weak) in {
     .Some(r) then println(r.count),
-    .None    then println("expired"),
-}
+    .None() then println("expired"),
+};
 ```
 
 ### Module System

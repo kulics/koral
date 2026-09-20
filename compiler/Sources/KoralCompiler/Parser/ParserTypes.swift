@@ -5,15 +5,14 @@
 extension Parser {
 
   private enum TypeModifierPrefix {
-    case reference(mutable: Bool)
     case pointer(mutable: Bool)
-    case weakReference(mutable: Bool)
+    case weakReference
   }
 
 
   private func isTypeStart(_ token: Token) -> Bool {
     switch token {
-    case .selfTypeKeyword, .questionMark, .multiply, .identifier:
+    case .selfTypeKeyword, .multiply, .questionMark, .identifier:
       return true
     default:
       return false
@@ -21,12 +20,10 @@ extension Parser {
   }
   private func wrapType(_ base: TypeNode, with prefix: TypeModifierPrefix) -> TypeNode {
     switch prefix {
-    case .reference(let mutable):
-      return .reference(base, mutable: mutable)
     case .pointer(let mutable):
       return .pointer(base, mutable: mutable)
-    case .weakReference(let mutable):
-      return .weakReference(base, mutable: mutable)
+    case .weakReference:
+      return .weakReference(base, mutable: false)
     }
   }
 
@@ -36,37 +33,24 @@ extension Parser {
     while true {
       if currentToken === .questionMark {
         try match(.questionMark)
-        guard currentToken === .multiply else {
-          throw ParserError.unexpectedToken(
-            span: currentSpan,
-            got: currentToken.description,
-            expected: "'*' after '?'"
-          )
-        }
-        try match(.multiply)
-        let mutable = currentToken === .mutableKeyword
-        if mutable {
-          try match(.mutableKeyword)
-        }
-        prefixes.append(.weakReference(mutable: mutable))
+        prefixes.append(.weakReference)
         continue
       }
       if currentToken === .multiply {
         try match(.multiply)
-        if currentToken === .unsafeKeyword {
-          try match(.unsafeKeyword)
-          let mutable = currentToken === .mutableKeyword
-          if mutable {
-            try match(.mutableKeyword)
-          }
-          prefixes.append(.pointer(mutable: mutable))
-          continue
+        guard currentToken === .unsafeKeyword else {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: "*",
+            expected: "managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'"
+          )
         }
+        try match(.unsafeKeyword)
         let mutable = currentToken === .mutableKeyword
         if mutable {
           try match(.mutableKeyword)
         }
-        prefixes.append(.reference(mutable: mutable))
+        prefixes.append(.pointer(mutable: mutable))
         continue
       }
       break
@@ -162,7 +146,7 @@ extension Parser {
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
   /// - Function types: Func(ParamType1, ParamType2) ReturnType
-  /// - U2 reference types: *T, *mutable T, ?*T, *unsafe T
+  /// - Raw pointer types: *unsafe T, *unsafe mutable T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {

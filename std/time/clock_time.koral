@@ -29,16 +29,16 @@ given ClockTime {
     /// Returns Error if any field is out of range.
     public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) Result[ClockTime] = {
         if hour < 0 or hour > 23 then {
-            return Result[ClockTime].Error(box("invalid time: hour out of range"));
+            return Result[ClockTime].Error("invalid time: hour out of range");
         };
         if minute < 0 or minute > 59 then {
-            return Result[ClockTime].Error(box("invalid time: minute out of range"));
+            return Result[ClockTime].Error("invalid time: minute out of range");
         };
         if second < 0 or second > 59 then {
-            return Result[ClockTime].Error(box("invalid time: second out of range"));
+            return Result[ClockTime].Error("invalid time: second out of range");
         };
         if nanosecond < 0 or nanosecond > 999_999_999 then {
-            return Result[ClockTime].Error(box("invalid time: nanoseconds out of range"));
+            return Result[ClockTime].Error("invalid time: nanoseconds out of range");
         };
         let mutable total = hour(Int64) * 3_600_000_000_000(Int64);
         total = total + minute(Int64) * 60_000_000_000(Int64);
@@ -128,13 +128,13 @@ given ClockTime as Ord {
 given ClockTime as ToString {
 
     /// Formats as ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
-    public to_string(*self) String = {
-        let mutable result = String.new();
-        push_padded(&mutable result, self.hour(), 2);
+    public to_string(self) String = {
+        let mutable result = StringBuilder.new();
+        push_padded(result, self.hour(), 2);
         result.push_byte(':');
-        push_padded(&mutable result, self.minute(), 2);
+        push_padded(result, self.minute(), 2);
         result.push_byte(':');
-        push_padded(&mutable result, self.second(), 2);
+        push_padded(result, self.second(), 2);
         let ns = self.nanosecond();
         if ns > 0 then {
             result.push_byte('.');
@@ -154,7 +154,7 @@ given ClockTime as ToString {
             if count >= 9 and digits < 100000000 then { result.push_byte('0');};
             result.push_string(digits.to_string());
         };
-        return result;
+        return result.to_string();
     };
 };
 
@@ -164,28 +164,28 @@ given ClockTime as Parseable {
     public parse(s String) Result[ClockTime] = {
         let len = s.count()(Int);
         if len < 8 then {
-            return Result[ClockTime].Error(box("invalid time: expected HH:MM:SS"));
+            return Result[ClockTime].Error("invalid time: expected HH:MM:SS");
         };
         let hr = parse_digits(s, 0, 2);
-        if hr.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit hour"));};
-        if s[2] <> 58(UInt8) then { return Result[ClockTime].Error(box("invalid time: expected ':' after hour"));};
+        if hr.value < 0 then { return Result[ClockTime].Error("invalid time: expected 2-digit hour");};
+        if s[2] <> 58(UInt8) then { return Result[ClockTime].Error("invalid time: expected ':' after hour");};
         let mi = parse_digits(s, 3, 2);
-        if mi.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit minute"));};
-        if s[5] <> 58(UInt8) then { return Result[ClockTime].Error(box("invalid time: expected ':' after minute"));};
+        if mi.value < 0 then { return Result[ClockTime].Error("invalid time: expected 2-digit minute");};
+        if s[5] <> 58(UInt8) then { return Result[ClockTime].Error("invalid time: expected ':' after minute");};
         let se = parse_digits(s, 6, 2);
-        if se.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit second"));};
+        if se.value < 0 then { return Result[ClockTime].Error("invalid time: expected 2-digit second");};
 
         let mutable pos = 8;
         let mutable nanos = 0;
         if pos < len and s[pos(UInt)] == 46(UInt8) then {
             pos = pos + 1;
             let frac = parse_frac_digits(s, pos);
-            if frac.value < 0 then { return Result[ClockTime].Error(box("invalid time: invalid fractional seconds"));};
+            if frac.value < 0 then { return Result[ClockTime].Error("invalid time: invalid fractional seconds");};
             nanos = frac.value;
             pos = frac.pos;
         };
         if pos <> len then {
-            return Result[ClockTime].Error(box("invalid time: unexpected trailing characters"));
+            return Result[ClockTime].Error("invalid time: unexpected trailing characters");
         };
         return ClockTime.new_full(hour: hr.value, minute: mi.value, second: se.value, nanosecond: nanos);
     };

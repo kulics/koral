@@ -514,6 +514,13 @@ extension TypeChecker {
         typeArgs: traitArgs,
         methodInfo: methodTemplate
       )
+      receiverMethodDispatchByDefId[resolved.defId] = ReceiverMethodDispatchInfo(
+        methodDefId: resolved.defId,
+        methodName: name,
+        owner: .extensionTemplate(ownerName: traitName),
+        conformanceTraitName: traitName,
+        conformanceTraitDefId: traits[traitName]?.defId
+      )
       traitMatchedSymbols.append(resolved)
     }
 
@@ -582,16 +589,41 @@ extension TypeChecker {
     if let checkedReturnType = methodInfo.checkedReturnType,
        let checkedParameters = methodInfo.checkedParameters {
       let returnType = SemaUtils.substituteType(checkedReturnType, substitution: substitution, context: context)
-      let params = checkedParameters.map { param in
-        let paramType = SemaUtils.substituteType(param.type, substitution: substitution, context: context)
-        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+      let receiverMutable = isMutableNominalReceiverType(baseType)
+      let params = checkedParameters.enumerated().map { index, param in
+        let paramName = index < method.parameters.count ? method.parameters[index].name : ""
+        let resolvedParamType = SemaUtils.substituteType(param.type, substitution: substitution, context: context)
+        let paramType = adjustReceiverParameterType(
+          paramName: paramName,
+          resolvedType: resolvedParamType,
+          receiverMutable: receiverMutable
+        )
+        return Parameter(
+          type: paramType,
+          kind: passKindForResolvedParameter(
+            paramName: paramName,
+            type: paramType,
+            receiverMutable: receiverMutable)
+        )
       }
       functionType = Type.function(parameters: params, returns: returnType)
     } else {
       let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
+      let receiverMutable = isMutableNominalReceiverType(baseType)
       let params = try method.parameters.map { param -> Parameter in
-        let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
-        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+        let resolvedParamType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
+        let paramType = adjustReceiverParameterType(
+          paramName: param.name,
+          resolvedType: resolvedParamType,
+          receiverMutable: receiverMutable
+        )
+        return Parameter(
+          type: paramType,
+          kind: passKindForResolvedParameter(
+            paramName: param.name,
+            type: paramType,
+            receiverMutable: receiverMutable)
+        )
       }
       functionType = Type.function(parameters: params, returns: returnType)
     }
@@ -623,7 +655,9 @@ extension TypeChecker {
       methodSymbol,
       parameters: method.parameters,
       declaredName: method.name,
-      owner: .extensionTemplate(ownerName: templateName)
+      owner: .extensionTemplate(ownerName: templateName),
+      conformanceTraitName: methodInfo.conformanceTraitName,
+      conformanceTraitDefId: methodInfo.conformanceTraitDefId
     )
     return methodSymbol
   }
@@ -656,9 +690,21 @@ extension TypeChecker {
     // Resolve function type with explicit substitution to avoid scope shadowing
     // by genericParameters with the same name (e.g., method-level T).
     let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
+    let receiverMutable = isMutableNominalReceiverType(baseType)
     let params = try method.parameters.map { param -> Parameter in
-      let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
-      return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+      let resolvedParamType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
+      let paramType = adjustReceiverParameterType(
+        paramName: param.name,
+        resolvedType: resolvedParamType,
+        receiverMutable: receiverMutable
+      )
+      return Parameter(
+        type: paramType,
+        kind: passKindForResolvedParameter(
+          paramName: param.name,
+          type: paramType,
+          receiverMutable: receiverMutable)
+      )
     }
     let functionType = Type.function(parameters: params, returns: returnType)
     
@@ -822,11 +868,29 @@ extension TypeChecker {
       for (paramName, paramType) in substitution {
         try currentScope.defineType(paramName, type: paramType)
       }
+      let receiverMutable = isMutableNominalReceiverType(baseType)
+      let selfBindingType = adjustReceiverParameterType(
+        paramName: "self",
+        resolvedType: baseType,
+        receiverMutable: receiverMutable
+      )
+      currentScope.define("self", selfBindingType, mutable: receiverMutable)
       
       let returnType = try resolveTypeNode(method.returnType)
       let params = try method.parameters.map { param -> Parameter in
-        let paramType = try resolveTypeNode(param.type)
-        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+        let resolvedParamType = try resolveTypeNode(param.type)
+        let paramType = adjustReceiverParameterType(
+          paramName: param.name,
+          resolvedType: resolvedParamType,
+          receiverMutable: receiverMutable
+        )
+        return Parameter(
+          type: paramType,
+          kind: passKindForResolvedParameter(
+            paramName: param.name,
+            type: paramType,
+            receiverMutable: receiverMutable)
+        )
       }
       
       return Type.function(parameters: params, returns: returnType)
@@ -1115,33 +1179,6 @@ extension TypeChecker {
     return call
   }
 
-  func resolveSubscriptReference(
-    base: TypedExpressionNode,
-    args: [TypedExpressionNode]
-  ) throws -> TypedExpressionNode {
-    return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: false)
-  }
-
-  func resolveBuiltinSubscriptAsReference(
-    base: TypedExpressionNode,
-    args: [TypedExpressionNode],
-    mutable: Bool
-  ) throws -> TypedExpressionNode {
-    switch resolveBuiltinSubscriptKind(baseType: base.type) {
-    case .string:
-      throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
-    case .dict, .list, .deque:
-      let helperName = mutable ? "__index_mut_ref" : "__index_ref"
-      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: helperName)
-    case .pointer:
-      return try resolveSubscript(base: base, args: args, expectedType: mutable ? .mutableReference(inner: .void) : .reference(inner: .void))
-    case .none:
-      throw SemanticError(.generic(
-        "subscript is only supported for String, List, Deque, Dict, and pointer types"
-      ), span: currentSpan)
-    }
-  }
-
   func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], expectedType: Type? = nil) throws
     -> TypedExpressionNode
   {
@@ -1197,10 +1234,13 @@ extension TypeChecker {
 
     if let expectedType {
       switch expectedType {
-      case .reference:
-        return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: false)
-      case .mutableReference:
-        return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: true)
+      case .reference, .mutableReference:
+        switch builtinKind {
+        case .pointer:
+          break
+        case .string, .list, .deque, .dict:
+          throw SemanticError(.generic("Collection subscript results are values, not addressable references"), span: currentSpan)
+        }
       default:
         break
       }
@@ -1229,34 +1269,12 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let methodIndex = try vtableMethodIndex(traitName: traitName, methodName: methodName)
 
-    let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
+    // For trait object method calls, the receiver is passed as-is to the vtable dispatch.
+    // The vtable wrapper handles the conversion from trait object to concrete type internally.
+    // Do NOT coerce the receiver through the normal chain (which would create a deref expression
+    // that breaks the trait object dispatch in codegen).
+    let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)? = nil
     var finalBase = base
-    if let firstParam = params.first {
-      let prepared = try prepareReceiverBase(finalBase, expectedType: firstParam.type, methodName: methodName)
-      finalBase = prepared.base
-      materializedReceiver = prepared.binding
-      if finalBase.type != firstParam.type {
-        let coercedBase = try coerceLiteral(finalBase, to: firstParam.type)
-        if coercedBase.type == firstParam.type {
-          finalBase = coercedBase
-        } else if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
-          finalBase = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitDeref
-        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // ref mutable -> ref widening
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: firstParam.type.description,
-            got: finalBase.type.description
-          )
-        }
-      }
-    } else {
-      materializedReceiver = nil
-    }
 
     // Type-check arguments (skip self parameter)
     var typedArguments: [TypedExpressionNode] = []

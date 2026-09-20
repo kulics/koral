@@ -40,7 +40,7 @@ given Regex {
         defer dealloc_memory(error_len_out);
 
         let rc = __koral_regex_compile(
-            pattern.storage.data, c_flags,
+            pattern.data, c_flags,
             handle_out,
             error_buf, 256,
             error_len_out
@@ -50,7 +50,7 @@ given Regex {
             let err_len = *error_len_out;
             let msg = String.from_utf8_ptr(error_buf, err_len(UInt));
             return when msg in {
-                .Ok(msg) then .Error(box(msg)),
+                .Ok(msg) then .Error(msg),
                 .Error(e) then .Error(e),
             };
         };
@@ -60,8 +60,7 @@ given Regex {
         // 计算捕获组数量：扫描 pattern 中未转义的 '('
         let groups = Regex.count_groups(pattern);
 
-        let storage = box(RegexStorage(handle, pattern, groups));
-        return .Ok(Regex(storage));
+        return .Ok(Regex(handle, pattern, groups));
     };
 
     // 计算正则表达式中的捕获组数量
@@ -91,14 +90,14 @@ given Regex {
 given Regex {
 
     // 最快路径：不捕获任何 group，只测试是否匹配
-    public matches(*self, text String) Bool = {
+    public matches(self, text String) Bool = {
         let starts = alloc_memory[Int32](1);
         let ends = alloc_memory[Int32](1);
         defer dealloc_memory(starts);
         defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
-            self.storage.handle, text.storage.data, 0,
+            self.handle, text.data, 0,
             1, starts, ends
         );
 
@@ -106,18 +105,18 @@ given Regex {
     };
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
-    public find(*self, text String) Option[Match] =
+    public find(self, text String) Option[Match] =
         Regex.find_at(self, text, 0);
 
     // 从指定偏移开始查找（内部方法，仅 $0）
-    find_at(*self, text String, offset UInt) Option[Match] = {
+    find_at(self, text String, offset UInt) Option[Match] = {
         let starts = alloc_memory[Int32](1);
         let ends = alloc_memory[Int32](1);
         defer dealloc_memory(starts);
         defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
-            self.storage.handle, text.storage.data, offset(Int32),
+            self.handle, text.data, offset(Int32),
             1, starts, ends
         );
 
@@ -138,23 +137,23 @@ given Regex {
 
 given Regex {
 
-    public find_all(*self, text String) MatchIterator =
-        MatchIterator(*self, text, 0);
+    public find_all(self, text String) MatchIterator =
+        MatchIterator(self, text, 0);
 
     // 完整路径：捕获所有 group
-    public captures(*self, text String) Option[Captures] =
+    public captures(self, text String) Option[Captures] =
         Regex.captures_at(self, text, 0);
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
-    captures_at(*self, text String, offset UInt) Option[Captures] = {
-        let max_groups = (self.storage.groups + 1)(Int32);// +1 for $0
+    captures_at(self, text String, offset UInt) Option[Captures] = {
+        let max_groups = (self.groups + 1)(Int32);// +1 for $0
         let starts = alloc_memory[Int32](max_groups(UInt));
         let ends = alloc_memory[Int32](max_groups(UInt));
         defer dealloc_memory(starts);
         defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
-            self.storage.handle, text.storage.data, offset(Int32),
+            self.handle, text.data, offset(Int32),
             max_groups, starts, ends
         );
 
@@ -172,8 +171,8 @@ given Regex {
         return Option[Captures].Some(Captures(text, start_list, end_list));
     };
 
-    public captures_all(*self, text String) CapturesIterator =
-        CapturesIterator(*self, text, 0);
+    public captures_all(self, text String) CapturesIterator =
+        CapturesIterator(self, text, 0);
 };
 
 // ============================================================================
@@ -182,13 +181,13 @@ given Regex {
 
 given Regex {
 
-    public replace(*self, text String, with: String) String = {
+    public replace(self, text String, with: String) String = {
         when self.captures(text) in {
             .None() then {
                 return text;
             },
             .Some(c) then {
-                let mutable result = String.new();
+                let mutable result = StringBuilder.new();
                 if c.start() > 0 then {
                     result.push_string(text.substring(0..<c.start()));
                 };
@@ -196,13 +195,13 @@ given Regex {
                 if c.end() < text.count() then {
                     result.push_string(text.substring(c.end()..));
                 };
-                return result;
+                return result.to_string();
             },
         };
     };
 
-    public replace_all(*self, text String, with: String) String = {
-        let mutable result = String.new();
+    public replace_all(self, text String, with: String) String = {
+        let mutable result = StringBuilder.new();
         let mutable offset UInt = 0;
         let text_len = text.count();
         let mutable had_match = false;
@@ -233,12 +232,12 @@ given Regex {
             };
         };
 
-        return if not had_match then text else result;
+        return if not had_match then text else result.to_string();
     };
 
     // 展开替换字符串中的 $0..$9 反向引用
     expand_replacement(replacement String, c Captures) String = {
-        let mutable result = String.new();
+        let mutable result = StringBuilder.new();
         let mutable i UInt = 0;
         let len = replacement.count();
 
@@ -265,7 +264,7 @@ given Regex {
             i += 1;
         };
 
-        return result;
+        return result.to_string();
     };
 };
 
@@ -275,6 +274,6 @@ given Regex {
 
 given Regex {
 
-    public split(*self, text String) RegexSplitIterator =
-    RegexSplitIterator(*self, text, 0, false);
+    public split(self, text String) RegexSplitIterator =
+    RegexSplitIterator(self, text, 0, false);
 };

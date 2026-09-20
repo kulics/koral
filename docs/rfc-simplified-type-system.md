@@ -201,6 +201,23 @@ c2.value = 5;
 | `let` | 绑定不可重赋值；字段全部不可变 | 绑定不可重赋值；仅显式 `mutable` 字段可改 |
 | `let mutable` | 绑定可重赋值；字段全部不可变 | 绑定可重赋值；仅显式 `mutable` 字段可改 |
 
+#### 4.5.1 嵌套字段写入语义
+
+当通过非 `mutable` 字段访问 `type mutable` 类型的值时，该值的 `mutable` 字段仍然可以写入。这与 Java/Kotlin 的语义一致：可变性是对象的属性，而不是绑定或中间字段的属性。
+
+```koral
+type mutable Inner(mutable x Int);
+type Wrap(inner Inner);
+
+let mutable w = Wrap(Inner(1));
+w.inner.x = 2;    // 合法：Inner 是 type mutable，其 mutable 字段 x 总是可写
+```
+
+规则：
+- 如果中间字段的类型是 `type mutable`，则可以通过该字段访问并写入其 `mutable` 字段
+- 如果中间字段的类型是 `type`（不可变），则不能通过该字段写入任何嵌套字段
+- 这条规则递归适用于任意深度的字段链
+
 示例：
 
 ```koral

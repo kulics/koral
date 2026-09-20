@@ -1126,10 +1126,11 @@ final class MIRFunctionCodeEmitter {
       return true
     }
 
-    // Don't copy parameters - they are borrowed values that need to be retained
-    // but not copied to a temporary
+    // Reference-like parameters can be returned by retaining their control block.
+    // Value-shape parameters with nontrivial drop semantics (for example
+    // Option[String]) must still be copied before return.
     if info.storage == .parameter {
-      return false
+      return !isReferenceLikeType(type)
     }
 
     return nonOwningLocalIDs.contains(local)
@@ -1716,6 +1717,37 @@ final class MIRFunctionCodeEmitter {
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: aggregate.type))
     }
 
+    if codeGen.usesManagedNominalRepresentation(aggregate.type) {
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(aggregate.type))
+      let payloadType = codeGen.managedPayloadTypeName(for: aggregate.type)
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType)));\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(codeGen.nominalTypeCName(aggregate.type))_payload_drop;\n")
+      let payloadExpr = "((struct \(payloadType)*)\(expression).ptr)"
+      for ((value, emission), member) in zip(zip(aggregate.fields, fieldEmissions), members) {
+        let fieldName = sanitizeCIdentifier(member.name)
+        codeGen.addIndent()
+        codeGen.emitCopyOrMove(
+          type: member.type,
+          source: emission.expression,
+          dest: "\(payloadExpr)->\(fieldName)",
+          isLvalue: shouldCopyBorrowedAggregateField(value)
+        )
+        consumeMovedSource(value)
+        emitCleanups(residualCleanups(for: emission, consumedExpression: true))
+      }
+      return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: aggregate.type))
+    }
+
     let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(aggregate.type))
     for ((value, emission), member) in zip(zip(aggregate.fields, fieldEmissions), members) {
       let fieldName = sanitizeCIdentifier(member.name)
@@ -1742,12 +1774,51 @@ final class MIRFunctionCodeEmitter {
       fatalError("Unknown enum case \(construction.caseName) in MIR codegen")
     }
 
+    let caseInfo = cases[caseIndex]
+    let fieldEmissions = construction.arguments.map { emitValue($0) }
+    if codeGen.usesManagedNominalRepresentation(construction.type) {
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(construction.type))
+      let payloadType = codeGen.managedPayloadTypeName(for: construction.type)
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType)));\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(codeGen.nominalTypeCName(construction.type))_payload_drop;\n")
+      let payloadExpr = "((struct \(payloadType)*)\(expression).ptr)"
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(payloadExpr)->tag = \(caseIndex);\n")
+      let memberBase = "\(payloadExpr)->data.\(sanitizeCIdentifier(construction.caseName))"
+      var emissionIndex = 0
+      for parameter in caseInfo.parameters {
+        if parameter.type == .void {
+          continue
+        }
+        let emission = fieldEmissions[emissionIndex]
+        let fieldName = sanitizeCIdentifier(parameter.name)
+        codeGen.addIndent()
+        codeGen.emitCopyOrMove(
+          type: parameter.type,
+          source: emission.expression,
+          dest: "\(memberBase).\(fieldName)",
+          isLvalue: shouldCopyBorrowedAggregateField(construction.arguments[emissionIndex])
+        )
+        consumeMovedSource(construction.arguments[emissionIndex])
+        emitCleanups(residualCleanups(for: emission, consumedExpression: true))
+        emissionIndex += 1
+      }
+      return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: construction.type))
+    }
+
     let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(construction.type))
     codeGen.addIndent()
     codeGen.appendToBuffer("\(expression).tag = \(caseIndex);\n")
-
-    let caseInfo = cases[caseIndex]
-    let fieldEmissions = construction.arguments.map { emitValue($0) }
     let memberBase = "\(expression).data.\(sanitizeCIdentifier(construction.caseName))"
     var emissionIndex = 0
     for parameter in caseInfo.parameters {
@@ -1773,7 +1844,14 @@ final class MIRFunctionCodeEmitter {
 
   private func emitEnumTag(_ tag: MIREnumTag) -> MIRValueEmission {
     let subject = emitValue(tag.subject, sourceMode: true)
-    let expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(.int), initExpr: "\(subject.expression).tag")
+    let tagExpr: String
+    if codeGen.usesManagedNominalRepresentation(tag.enumType) {
+      let payloadType = codeGen.managedPayloadTypeName(for: tag.enumType)
+      tagExpr = "((struct \(payloadType)*)\(subject.expression).ptr)->tag"
+    } else {
+      tagExpr = "\(subject.expression).tag"
+    }
+    let expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(.int), initExpr: tagExpr)
     emitCleanups(subject.cleanups)
     return MIRValueEmission(expression: expression, cleanups: [])
   }
@@ -2040,7 +2118,8 @@ final class MIRFunctionCodeEmitter {
          .downgradeMutRef(let value, let resultType):
       let valueEmission = emitValue(value, sourceMode: true)
       let expression: String
-      switch resolver.type(of: value) ?? .void {
+      let valueType = resolver.type(of: value) ?? .void
+      switch valueType {
       case .reference(let inner) where isTraitObjectType(inner),
            .mutableReference(let inner) where isTraitObjectType(inner),
            .borrowedReference(let inner) where isTraitObjectType(inner),
@@ -2054,7 +2133,12 @@ final class MIRFunctionCodeEmitter {
         codeGen.addIndent()
         codeGen.appendToBuffer("\(expression).vtable = \(valueEmission.expression).vtable;\n")
       default:
-        expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(resultType), initExpr: "__koral_downgrade_ref(\(valueEmission.expression))")
+        // For managed nominals (type mutable / has Drop), wrap value as __koral_Ref
+        let needsWrap = codeGen.usesManagedNominalRepresentation(valueType)
+        let refExpr = needsWrap
+          ? "(struct __koral_Ref){\(valueEmission.expression).ptr, \(valueEmission.expression).control}"
+          : valueEmission.expression
+        expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(resultType), initExpr: "__koral_downgrade_ref(\(refExpr))")
       }
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
@@ -2098,7 +2182,21 @@ final class MIRFunctionCodeEmitter {
           codeGen.addIndent()
           codeGen.appendToBuffer("\(expression).tag = 1;\n")
           codeGen.addIndent()
-          codeGen.appendToBuffer("\(expression).data.Some.value = \(upgraded);\n")
+          // For managed nominals, assign fields individually since C type names differ
+          let valueType = resolver.type(of: value) ?? .void
+          var needsFieldWiseAssign = false
+          if case .weakReference(let inner) = valueType {
+            needsFieldWiseAssign = codeGen.usesManagedNominalRepresentation(inner)
+          } else if case .mutableWeakReference(let inner) = valueType {
+            needsFieldWiseAssign = codeGen.usesManagedNominalRepresentation(inner)
+          }
+          if needsFieldWiseAssign {
+            codeGen.appendToBuffer("\(expression).data.Some.value.ptr = \(upgraded).ptr;\n")
+            codeGen.addIndent()
+            codeGen.appendToBuffer("\(expression).data.Some.value.control = \(upgraded).control;\n")
+          } else {
+            codeGen.appendToBuffer("\(expression).data.Some.value = \(upgraded);\n")
+          }
         }
         codeGen.addIndent()
         codeGen.appendToBuffer("} else {\n")
@@ -2114,6 +2212,7 @@ final class MIRFunctionCodeEmitter {
 
     case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
       let valueEmission = emitValue(value, sourceMode: true)
+      // DEBUG
       let concreteTypeCName = codeGen.concreteTypeCIdentifier(concreteType) ?? codeGen.cTypeName(concreteType)
       let vtableName = codeGen.vtableInstanceName(
         concreteTypeCName: concreteTypeCName,
@@ -2130,12 +2229,26 @@ final class MIRFunctionCodeEmitter {
     case .traitObjectDowncast(let value, let resultType):
       let valueEmission = emitValue(value, sourceMode: true)
       let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(expression).ptr = \(valueEmission.expression).ptr;\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(expression).control = \(valueEmission.expression).control;\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("if (\(expression).control) { __koral_retain(\(expression).control); }\n")
+      if codeGen.usesManagedNominalRepresentation(resultType) {
+        // Managed nominal type: copy ptr/control fields
+        codeGen.addIndent()
+        codeGen.appendToBuffer("\(expression).ptr = \(valueEmission.expression).ptr;\n")
+        codeGen.addIndent()
+        codeGen.appendToBuffer("\(expression).control = \(valueEmission.expression).control;\n")
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if (\(expression).control) { __koral_retain(\(expression).control); }\n")
+      } else {
+        // Plain type: extract concrete value from trait object's ptr field
+        let concreteCType = codeGen.cTypeName(resultType)
+        codeGen.addIndent()
+        codeGen.appendToBuffer("\(expression) = *(\(concreteCType)*)\(valueEmission.expression).ptr;\n")
+        // Retain the trait object's control for lifetime management
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if (\(valueEmission.expression).control) { __koral_retain(\(valueEmission.expression).control); }\n")
+        // Release after copy (the trait object still owns its copy)
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if (\(valueEmission.expression).control) { __koral_release(\(valueEmission.expression).control); }\n")
+      }
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
 
@@ -2300,12 +2413,22 @@ final class MIRFunctionCodeEmitter {
       let baseType = resolver.type(of: base) ?? .void
       let memberName = sanitizeCIdentifier(codeGen.context.getName(field.defId) ?? "field")
       switch baseType {
+      case _ where codeGen.usesManagedNominalRepresentation(baseType):
+        let payloadType = codeGen.managedPayloadTypeName(for: baseType)
+        let path = "((struct \(payloadType)*)\(baseAccess.path).ptr)->\(memberName)"
+        return MIRPlaceAccess(path: path, control: "\(baseAccess.path).control", cleanups: baseAccess.cleanups)
       case .reference(let inner), .mutableReference(let inner),
            .borrowedReference(let inner), .mutableBorrowedReference(let inner):
         let path = "((\(codeGen.cTypeName(inner))*)\(baseAccess.path).ptr)->\(memberName)"
         return MIRPlaceAccess(path: path, control: "\(baseAccess.path).control", cleanups: baseAccess.cleanups)
-      case .pointer, .mutablePointer:
-        let path = "\(baseAccess.path)->\(memberName)"
+      case .pointer(let pointee), .mutablePointer(let pointee):
+        let path: String
+        if codeGen.usesManagedNominalRepresentation(pointee) {
+          let payloadType = codeGen.managedPayloadTypeName(for: pointee)
+          path = "((struct \(payloadType)*)\(baseAccess.path)->ptr)->\(memberName)"
+        } else {
+          path = "\(baseAccess.path)->\(memberName)"
+        }
         return MIRPlaceAccess(path: path, control: "NULL", cleanups: baseAccess.cleanups)
       default:
         let path = "\(baseAccess.path).\(memberName)"
@@ -2313,15 +2436,31 @@ final class MIRFunctionCodeEmitter {
       }
     case .enumPayload(let base, let caseName, let fieldName, _, _):
       let baseAccess = emitPlaceAccess(base)
-      let path = "\(baseAccess.path).data.\(sanitizeCIdentifier(caseName)).\(sanitizeCIdentifier(fieldName))"
+      let baseType = resolver.type(of: base) ?? .void
+      let path: String
+      if codeGen.usesManagedNominalRepresentation(baseType) {
+        let payloadType = codeGen.managedPayloadTypeName(for: baseType)
+        path = "((struct \(payloadType)*)\(baseAccess.path).ptr)->data.\(sanitizeCIdentifier(caseName)).\(sanitizeCIdentifier(fieldName))"
+      } else {
+        path = "\(baseAccess.path).data.\(sanitizeCIdentifier(caseName)).\(sanitizeCIdentifier(fieldName))"
+      }
       return MIRPlaceAccess(path: path, control: baseAccess.control, cleanups: baseAccess.cleanups)
     case .deref(let base, let pointee):
       let baseEmission = emitValue(base, sourceMode: true)
       let baseType = resolver.type(of: base) ?? .void
       switch baseType {
-      case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
+      case .reference(let inner), .mutableReference(let inner),
+           .borrowedReference(let inner), .mutableBorrowedReference(let inner):
+        // Check if the inner type is a trait object — if so, treat as flat struct
+        if case .traitObject = inner {
+          return MIRPlaceAccess(path: baseEmission.expression, control: "\(baseEmission.expression).control", cleanups: baseEmission.cleanups)
+        }
         let path = "(*(\(codeGen.cTypeName(pointee))*)\(baseEmission.expression).ptr)"
         return MIRPlaceAccess(path: path, control: "\(baseEmission.expression).control", cleanups: baseEmission.cleanups)
+      case .traitObject:
+        // Trait object surface types are represented as a fat-ref value.
+        // Deref on this path should treat the value itself as the pointee view.
+        return MIRPlaceAccess(path: baseEmission.expression, control: "\(baseEmission.expression).control", cleanups: baseEmission.cleanups)
       case .pointer, .mutablePointer:
         let path = "(*(\(codeGen.cTypeName(pointee))*)\(baseEmission.expression))"
         return MIRPlaceAccess(path: path, control: "NULL", cleanups: baseEmission.cleanups)

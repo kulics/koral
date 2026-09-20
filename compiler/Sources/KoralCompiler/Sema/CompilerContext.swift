@@ -203,6 +203,169 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isGenericInstantiation(defId)
     }
 
+    public func isTypeMutable(_ defId: DefId) -> Bool {
+        defIdMap.isStructMutable(defId)
+    }
+
+    public func isGenericStructTemplateMutable(_ defId: DefId) -> Bool {
+        defIdMap.getGenericStructTemplateInfo(defId)?.isMutable ?? false
+    }
+
+    public func setExplicitDrop(_ defId: DefId) {
+        defIdMap.setExplicitDrop(defId)
+    }
+
+    public func hasExplicitDrop(_ defId: DefId) -> Bool {
+        if defIdMap.hasExplicitDrop(defId) {
+            return true
+        }
+        if let templateName = defIdMap.getTemplateName(defId) {
+            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(templateName),
+               defIdMap.hasExplicitDrop(templateDefId) {
+                return true
+            }
+            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(templateName),
+               defIdMap.hasExplicitDrop(templateDefId) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public enum NominalLayoutKind {
+        case value
+        case managed
+    }
+
+    public func nominalLayoutKind(for type: Type) -> NominalLayoutKind {
+        return requiresManagedNominalLayout(for: type) ? .managed : .value
+    }
+
+    private func requiresManagedNominalLayout(for type: Type) -> Bool {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64, .bool, .void, .never,
+             .function, .reference, .mutableReference, .borrowedReference,
+             .mutableBorrowedReference, .pointer, .mutablePointer,
+             .weakReference, .mutableWeakReference, .genericParameter,
+             .module, .typeVariable, .traitObject:
+            return false
+
+        case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+            return requiresManagedNominalLayout(for: defId)
+
+        case .genericStruct(let template, let args):
+            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
+               (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
+                return true
+            }
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
+                return requiresManagedNominalLayout(for: defId)
+            }
+            return false
+
+        case .genericEnum(let template, let args):
+            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
+               defIdMap.hasExplicitDrop(templateDefId) {
+                return true
+            }
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
+                return requiresManagedNominalLayout(for: defId)
+            }
+            return false
+        }
+    }
+
+    private func requiresManagedNominalLayout(for defId: DefId) -> Bool {
+        if isTypeMutable(defId) || hasExplicitDrop(defId) {
+            return true
+        }
+
+        var path: Set<DefId> = [defId]
+        return containsNominalValueCycle(current: defId, target: defId, path: &path)
+    }
+
+    private func containsNominalValueCycle(current: DefId, target: DefId, path: inout Set<DefId>) -> Bool {
+        for dependency in directNominalValueDependencies(of: current) {
+            if dependency == target {
+                return true
+            }
+            if path.contains(dependency) {
+                continue
+            }
+            path.insert(dependency)
+            if containsNominalValueCycle(current: dependency, target: target, path: &path) {
+                return true
+            }
+            path.remove(dependency)
+        }
+        return false
+    }
+
+    private func directNominalValueDependencies(of defId: DefId) -> [DefId] {
+        if isTypeMutable(defId) || hasExplicitDrop(defId) {
+            return []
+        }
+
+        if let members = getStructMembers(defId) {
+            var result: [DefId] = []
+            for member in members {
+                result.append(contentsOf: directNominalValueDependencies(in: member.type))
+            }
+            return result
+        }
+
+        if let cases = getEnumCases(defId) {
+            var result: [DefId] = []
+            for enumCase in cases {
+                for param in enumCase.parameters {
+                    result.append(contentsOf: directNominalValueDependencies(in: param.type))
+                }
+            }
+            return result
+        }
+
+        return []
+    }
+
+    private func directNominalValueDependencies(in type: Type) -> [DefId] {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64, .bool, .void, .never,
+             .function, .reference, .mutableReference, .borrowedReference,
+             .mutableBorrowedReference, .pointer, .mutablePointer,
+             .weakReference, .mutableWeakReference, .genericParameter,
+             .module, .typeVariable, .traitObject:
+            return []
+        case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+            return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
+        case .genericStruct(let template, let args):
+            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
+               (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
+                return []
+            }
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
+                return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
+            }
+            return []
+        case .genericEnum(let template, let args):
+            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
+               defIdMap.hasExplicitDrop(templateDefId) {
+                return []
+            }
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
+                return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
+            }
+            return []
+        }
+    }
+
     public func getTypeArguments(_ defId: DefId) -> [Type]? {
         defIdMap.getTypeArguments(defId)
     }
@@ -222,15 +385,25 @@ public final class CompilerContext: @unchecked Sendable {
         members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
         isGenericInstantiation: Bool,
         typeArguments: [Type]?,
-        templateName: String? = nil
+        templateName: String? = nil,
+        isMutable: Bool = false
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
+        let inheritedTemplateMutability: Bool
+        if let resolvedTemplateName,
+           let templateDefId = defIdMap.lookupGenericStructTemplateDefId(resolvedTemplateName) {
+            inheritedTemplateMutability = isGenericStructTemplateMutable(templateDefId)
+        } else {
+            inheritedTemplateMutability = false
+        }
+        let resolvedIsMutable = isMutable || defIdMap.isStructMutable(defId) || inheritedTemplateMutability
         defIdMap.addStructInfo(
             defId: defId,
             members: members,
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
-            templateName: resolvedTemplateName
+            templateName: resolvedTemplateName,
+            isMutable: resolvedIsMutable
         )
     }
 

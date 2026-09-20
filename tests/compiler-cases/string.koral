@@ -20,68 +20,82 @@ let test_literal_basics() Void = {
 };
 
 let test_push() Void = {
-    let mutable s = "a";
+    let mutable s = StringBuilder.new();
+    s.push_string("a");
     let b UInt8 = 98;// 'b'
     s.push_byte(b);
-    assert(s.count() == 2, "push count");
-    assert(s[1] == b, "push byte");
+    assert(s.to_string() == "ab", "push byte");
 };
 
 let test_push_string() Void = {
-    let mutable s = "ab";
+    let mutable s = StringBuilder.new();
+    s.push_string("ab");
     let t = "XYZ";
     let z UInt8 = 90;// 'Z'
     s.push_string(t);
-    assert(s.count() == 5, "push string count");
-    assert(s[4] == z, "push string byte");
+    assert(s.to_string().count() == 5, "push string count");
+    assert(s.to_string()[4] == z, "push string byte");
 };
 
 let test_push_string_self_alias() Void = {
-    let mutable s = "ab";
-    s.push_string(s);
-    assert(s == "abab", "push_string self alias");
+    let mutable s = StringBuilder.new();
+    s.push_string("ab");
+    let snapshot = s.to_string();
+    s.push_string(snapshot);
+    assert(s.to_string() == "abab", "push_string self alias");
 };
 
 let test_push_substring_self_alias() Void = {
-    let mutable s = "abcd";
-    s.push_substring(s, 1..<3);
-    assert(s == "abcdbc", "push_substring self alias");
+    let mutable s = StringBuilder.new();
+    s.push_string("abcd");
+    let snapshot = s.to_string();
+    s.push_substring(snapshot, 1..<3);
+    assert(s.to_string() == "abcdbc", "push_substring self alias");
 };
 
 let test_push_int_string() Void = {
-    let mutable s = "value: ";
+    let mutable s = StringBuilder.new();
+    s.push_string("value: ");
     s.push_string(42.to_string());
-    assert(s == "value: 42", "push int via to_string");
+    assert(s.to_string() == "value: 42", "push int via to_string");
 };
 
 let test_push_uint_string() Void = {
-    let mutable s = "count: ";
+    let mutable s = StringBuilder.new();
+    s.push_string("count: ");
     s.push_string((100(UInt)).to_string());
-    assert(s == "count: 100", "push uint via to_string");
+    assert(s.to_string() == "count: 100", "push uint via to_string");
 };
 
 let test_push_bool_string() Void = {
-    let mutable s = "flag: ";
+    let mutable s = StringBuilder.new();
+    s.push_string("flag: ");
     s.push_string(true.to_string());
-    assert(s == "flag: true", "push bool true via to_string");
-    
-    let mutable s2 = "flag: ";
+    assert(s.to_string() == "flag: true", "push bool true via to_string");
+
+    let mutable s2 = StringBuilder.new();
+    s2.push_string("flag: ");
     s2.push_string(false.to_string());
-    assert(s2 == "flag: false", "push bool false via to_string");
+    assert(s2.to_string() == "flag: false", "push bool false via to_string");
 };
 
 let test_copy_on_write() Void = {
-    let mutable a = "hi";
-    let b = a;// Copy should share storage
-    let bang UInt8 = 33;// '!'
+    // String is value type: let b = a creates independent copy
+    let a = "hi";
+    let b = a;
     let h UInt8 = 104;// 'h'
 
-    a.push_byte(bang);
+    // Mutate via StringBuilder (String itself is immutable)
+    let mutable sb = StringBuilder.new();
+    sb.push_string(a);
+    let bang UInt8 = 33;// '!'
+    sb.push_byte(bang);
+    let a_mutated = sb.to_string();
 
-    assert(a.count() == 3, "a mutated count");
-    assert(a[2] == bang, "a mutated byte");
+    assert(a_mutated.count() == 3, "a mutated count");
+    assert(a_mutated[2] == bang, "a mutated byte");
 
-    // Original copy remains unchanged
+    // Original copy remains unchanged (value semantics)
     assert(b.count() == 2, "b preserved count");
     assert(b[0] == h, "b preserved byte");
 };

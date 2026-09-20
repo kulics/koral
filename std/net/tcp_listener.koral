@@ -6,32 +6,17 @@ using std { .. };
 // Access via: using Std.Net
 // ============================================================================
 
-// ============================================================================
-// TcpListenerStorage Type (internal)
-// ============================================================================
+public type TcpListener(file_private fd_raw Int64);
 
-/// Internal storage holding the socket file descriptor.
-/// Responsible for closing the fd via drop when the last reference is released.
-file_private type TcpListenerStorage(fd Int64);
+given TcpListener as Drop {
 
-given TcpListenerStorage as Drop {
-
-    /// Automatically close the socket when TcpListenerStorage is dropped.
-    drop(source *unsafe mutable Self) Void = {
-        if source.fd >= 0 then {
-            __koral_socket_close(source.fd);
+    /// Automatically close the socket when TcpListener is dropped.
+    drop(self) Void = {
+        if self.fd_raw >= 0 then {
+            __koral_socket_close(self.fd_raw);
         };
     };
 };
-
-// ============================================================================
-// TcpListener Type
-// ============================================================================
-
-/// TCP listener type.
-/// Internally holds a TcpListenerStorage *, shared via reference counting.
-/// The socket is automatically closed when the last reference is released.
-public type TcpListener(file_private storage * TcpListenerStorage);
 
 // ============================================================================
 // TcpListener Methods
@@ -39,7 +24,7 @@ public type TcpListener(file_private storage * TcpListenerStorage);
 given TcpListener {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(*self) Int = self.storage.fd(Int);
+    public fd(self) Int = self.fd_raw(Int);
 
     /// Bind to a socket address and start listening.
     /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
@@ -48,7 +33,7 @@ given TcpListener {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
-                return Result[TcpListener].Error(box("invalid socket address"));
+                return Result[TcpListener].Error("invalid socket address");
             },
         };
         // Determine address family from SocketAddr
@@ -59,7 +44,7 @@ given TcpListener {
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol);
         if fd < 0 then {
-              return Result[TcpListener].Error(box(last_error_message()));
+              return Result[TcpListener].Error(last_error_message());
         };
 
         // Set SO_REUSEADDR: level=1 (SOL_SOCKET), optname=2 (SO_REUSEADDR)
@@ -73,7 +58,7 @@ given TcpListener {
         let setsock_result = __koral_socket_setsockopt(fd, __koral_const_SOL_SOCKET(), __koral_const_SO_REUSEADDR(), opt_buf, 4(UInt32));
         if setsock_result <> 0 then {
             __koral_socket_close(fd);
-              return Result[TcpListener].Error(box(last_error_message()));
+              return Result[TcpListener].Error(last_error_message());
         };
 
         // Bind to address
@@ -82,23 +67,22 @@ given TcpListener {
         let bind_result = __koral_socket_bind(fd, addr_bytes.borrow_ptr(), addr_len);
         if bind_result <> 0 then {
             __koral_socket_close(fd);
-              return Result[TcpListener].Error(box(last_error_message()));
+              return Result[TcpListener].Error(last_error_message());
         };
 
         // Listen with backlog=128
         let listen_result = __koral_socket_listen(fd, 128(Int32));
         if listen_result <> 0 then {
             __koral_socket_close(fd);
-              return Result[TcpListener].Error(box(last_error_message()));
+              return Result[TcpListener].Error(last_error_message());
         };
 
-        let storage = box(TcpListenerStorage(fd));
-        return Result[TcpListener].Ok(TcpListener(storage));
+        return Result[TcpListener].Ok(TcpListener(fd));
     };
 
     /// Accept a connection. Blocks until a client connects.
     /// Returns a Pair of (TcpSocket, SocketAddr) on success.
-    public accept(*self) Result[Pair[TcpSocket, SocketAddr]] = {
+    public accept(self) Result[Pair[TcpSocket, SocketAddr]] = {
         // Allocate a 128-byte buffer for the peer address
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
@@ -107,9 +91,9 @@ given TcpListener {
         };
         let mutable addr_len UInt32 = 128(UInt32);
 
-        let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, &unsafe addr_len);
+        let new_fd = __koral_socket_accept(self.fd_raw, addr_buf, &unsafe addr_len);
         if new_fd < 0 then {
-            return Result[Pair[TcpSocket, SocketAddr]].Error(box(last_error_message()));
+            return Result[Pair[TcpSocket, SocketAddr]].Error(last_error_message());
         };
 
         // Parse the sockaddr bytes into a SocketAddr
@@ -126,14 +110,14 @@ given TcpListener {
                 return Result[Pair[TcpSocket, SocketAddr]].Error(e);
             },
             .Ok(peer_addr) then {
-                let sock = TcpSocket(box(TcpSocketStorage(new_fd)));
+                let sock = TcpSocket(new_fd);
                 return Result[Pair[TcpSocket, SocketAddr]].Ok(Pair[TcpSocket, SocketAddr](sock, peer_addr));
             },
         };
     };
 
     /// Get the local address this listener is bound to.
-    public local_addr(*self) Result[SocketAddr] = {
+    public local_addr(self) Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
         for i in 0(UInt)..<128(UInt) then {
@@ -141,9 +125,9 @@ given TcpListener {
         };
         let mutable addr_len UInt32 = 128(UInt32);
 
-        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, &unsafe addr_len);
+        let result = __koral_socket_getsockname(self.fd_raw, addr_buf, &unsafe addr_len);
         if result <> 0 then {
-              return Result[SocketAddr].Error(box(last_error_message()));
+              return Result[SocketAddr].Error(last_error_message());
         };
 
         // Parse the sockaddr bytes into a SocketAddr

@@ -46,16 +46,16 @@ given SocketAddr {
         SocketAddr(IpAddr.V6(addr), port);
 
     /// Return the IP address.
-    public ip(*self) IpAddr = self.addr;
+    public ip(self) IpAddr = self.addr;
 
     /// Return the port number.
-    public port(*self) UInt16 = self.port_num;
+    public port(self) UInt16 = self.port_num;
 
     /// Check if this is an IPv4 socket address.
-    public is_ipv4(*self) Bool = self.addr.is_ipv4();
+    public is_ipv4(self) Bool = self.addr.is_ipv4();
 
     /// Check if this is an IPv6 socket address.
-    public is_ipv6(*self) Bool = self.addr.is_ipv6();
+    public is_ipv6(self) Bool = self.addr.is_ipv6();
 
     /// Parse an IPv6 socket address in "[ip]:port" format.
     file_private parse_ipv6_socket_addr(s String, len UInt) Result[SocketAddr] = {
@@ -72,15 +72,15 @@ given SocketAddr {
 
         when close_bracket in {
             .None() then {
-                return Result[SocketAddr].Error(box("invalid socket address"));
+                return Result[SocketAddr].Error("invalid socket address");
             },
             .Some(cb) then {
                 // Must have "]:port" after the closing bracket
                 if cb + 1 >= len or s[cb + 1] <> ':' then {
-                    return Result[SocketAddr].Error(box("invalid socket address"));
+                    return Result[SocketAddr].Error("invalid socket address");
                 };
                 if cb + 2 >= len then {
-                    return Result[SocketAddr].Error(box("invalid socket address"));
+                    return Result[SocketAddr].Error("invalid socket address");
                 };
 
                 // Extract IPv6 part (between '[' and ']')
@@ -88,7 +88,7 @@ given SocketAddr {
                 let ip_result = Ipv6Addr.parse(ip_str);
                 when ip_result in {
                     .Error(_) then {
-                        return Result[SocketAddr].Error(box("invalid socket address"));
+                        return Result[SocketAddr].Error("invalid socket address");
                     },
                     .Ok(ipv6) then {
                         // Extract port part
@@ -112,11 +112,11 @@ given SocketAddr {
     file_private parse_port(s String, start UInt, end UInt) Result[UInt16] = {
         let digit_count = end - start;
         if digit_count == 0 then {
-            return Result[UInt16].Error(box("invalid socket address"));
+            return Result[UInt16].Error("invalid socket address");
         };
         // Reject leading zeros (except single "0")
         if digit_count > 1 and s[start] == '0' then {
-            return Result[UInt16].Error(box("invalid socket address"));
+            return Result[UInt16].Error("invalid socket address");
         };
 
         let mutable value UInt = 0;
@@ -124,11 +124,11 @@ given SocketAddr {
         while i < end then {
             let b = s[i];
             if b < '0' or b > '9' then {
-                return Result[UInt16].Error(box("invalid socket address"));
+                return Result[UInt16].Error("invalid socket address");
             };
             value = value * 10 + (b - '0')(UInt);
             if value > 65535 then {
-                return Result[UInt16].Error(box("invalid socket address"));
+                return Result[UInt16].Error("invalid socket address");
             };
             i += 1;
         };
@@ -151,7 +151,7 @@ given SocketAddr {
     ///   [4..7]  = sin6_flowinfo (zeros)
     ///   [8..23] = sin6_addr (16 bytes, network byte order)
     ///   [24..27] = sin6_scope_id (zeros)
-    public to_sockaddr_bytes(*self) List[UInt8] = {
+    public to_sockaddr_bytes(self) List[UInt8] = {
         when self.addr in {
             .V4(v4) then {
                 let mutable buf = List[UInt8].with_capacity(16);
@@ -218,7 +218,7 @@ given SocketAddr {
     public from_sockaddr_bytes(buf List[UInt8]) Result[SocketAddr] = {
         let len = buf.count();
         if len < 2 then {
-            return Result[SocketAddr].Error(box("invalid sockaddr: too short"));
+            return Result[SocketAddr].Error("invalid sockaddr: too short");
         };
 
         let family = buf[0](UInt) + (buf[1](UInt) << 8);
@@ -227,7 +227,7 @@ given SocketAddr {
         let af_inet = __koral_const_AF_INET()(UInt);
         if family == af_inet then {
             if len < 8 then {
-                return Result[SocketAddr].Error(box("invalid sockaddr_in: too short"));
+                return Result[SocketAddr].Error("invalid sockaddr_in: too short");
             };
             // Port: bytes [2..3] in network byte order (big-endian)
             let port = ((buf[2](UInt) << 8) + buf[3](UInt))(UInt16);
@@ -240,7 +240,7 @@ given SocketAddr {
         let af_inet6 = __koral_const_AF_INET6()(UInt);
         if family == af_inet6 or family == 10 or family == 23 or family == 30 then {
             if len < 24 then {
-                return Result[SocketAddr].Error(box("invalid sockaddr_in6: too short"));
+                return Result[SocketAddr].Error("invalid sockaddr_in6: too short");
             };
             // Port: bytes [2..3] in network byte order (big-endian)
             let port = ((buf[2](UInt) << 8) + buf[3](UInt))(UInt16);
@@ -257,7 +257,7 @@ given SocketAddr {
             return Result[SocketAddr].Ok(SocketAddr(IpAddr.V6(ipv6), port));
         };
 
-        return Result[SocketAddr].Error(box("invalid sockaddr: unknown address family"));
+        return Result[SocketAddr].Error("invalid sockaddr: unknown address family");
     };
 };
 
@@ -265,8 +265,8 @@ given SocketAddr as ToString {
 
     /// Convert to string representation.
     /// IPv4: "ip:port", IPv6: "[ip]:port"
-    public to_string(*self) String = {
-        let mutable s = String.new();
+    public to_string(self) String = {
+        let mutable s = StringBuilder.new();
         when self.addr in {
             .V4(v4) then {
                 s.push_string(v4.to_string());
@@ -281,7 +281,7 @@ given SocketAddr as ToString {
                 s.push_string(self.port_num(UInt).to_string());
             },
         };
-        return s;
+        return s.to_string();
     };
 };
 
@@ -293,7 +293,7 @@ given SocketAddr as Parseable {
     public parse(s String) Result[Self] = {
         let len = s.count();
         if len == 0 then {
-            return Result[SocketAddr].Error(box("invalid socket address"));
+            return Result[SocketAddr].Error("invalid socket address");
         };
 
         // Check if this is an IPv6 address (starts with '[')
@@ -315,18 +315,18 @@ given SocketAddr as Parseable {
 
         when colon_pos in {
             .None() then {
-                return Result[SocketAddr].Error(box("invalid socket address"));
+                return Result[SocketAddr].Error("invalid socket address");
             },
             .Some(cp) then {
                 if cp == 0 or cp == len - 1 then {
-                    return Result[SocketAddr].Error(box("invalid socket address"));
+                    return Result[SocketAddr].Error("invalid socket address");
                 };
                 // Extract IP part
                 let ip_str = s.substring(0..<cp);
                 let ip_result = Ipv4Addr.parse(ip_str);
                 when ip_result in {
                     .Error(_) then {
-                        return Result[SocketAddr].Error(box("invalid socket address"));
+                        return Result[SocketAddr].Error("invalid socket address");
                     },
                     .Ok(ipv4) then {
                         // Extract port part

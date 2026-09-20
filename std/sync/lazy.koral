@@ -12,33 +12,26 @@ using std { .. };
 // the cached value.
 // ============================================================================
 
-file_private type LazyStorage[T Any](
-    state AtomicInt,
-    mutex Mutex,
-    func Func() T,
-    mutable value Option[T],
-);
-
-public type Lazy[T Any](file_private storage *mutable LazyStorage[T]);
+public type mutable Lazy[T Any](file_private state AtomicInt, file_private mutex Mutex, file_private func Func() T, file_private mutable value Option[T]);
 
 given[T Any] Lazy[T] {
     public new(f Func() T) Lazy[T] =
-        Lazy[T](box(LazyStorage[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None())));
+        Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None());
 
-    public get(*self) T = {
-        if self.storage.state.load() == 1 then {
-            return self.storage.value.unwrap();
+    public get(self) T = {
+        if self.state.load() == 1 then {
+            return self.value.unwrap();
         };
-        self.storage.mutex.lock();
-        defer self.storage.mutex.unlock();
-        if self.storage.state.load() == 0 then {
-            let result = self.storage.func();
-            self.storage.value = Option[T].Some(result);
-            self.storage.state.store(1);
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if self.state.load() == 0 then {
+            let result = self.func();
+            self.value = Option[T].Some(result);
+            self.state.store(1);
         };
-        return self.storage.value.unwrap();
+        return self.value.unwrap();
     };
 
-    public is_initialized(*self) Bool =
-        self.storage.state.load() == 1;
+    public is_initialized(self) Bool =
+        self.state.load() == 1;
 };

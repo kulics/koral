@@ -263,7 +263,8 @@ extension Monomorphizer {
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    let inheritedMutable = context.defIdMap.lookupGenericStructTemplateDefId(template).map { context.isGenericStructTemplateMutable($0) } ?? false
+                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs, templateName: template, isMutable: inheritedMutable)
                     return .structure(defId: defId)
                 }
             }
@@ -365,7 +366,7 @@ extension Monomorphizer {
             }
             let isGeneric = context.isGenericInstantiation(defId) ?? false
             let typeArgs = context.getTypeArguments(defId)
-            context.updateStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            context.updateStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs, isMutable: context.isTypeMutable(defId))
             resolvedStructEnumDefIds.insert(defId.id)
             return .structure(defId: defId)
             
@@ -490,6 +491,7 @@ extension Monomorphizer {
             let resolvedType = resolveParameterizedType(type)
             let resolvedTrait: TypedTraitConformance? = trait.map {
                 TypedTraitConformance(
+                    traitDefId: $0.traitDefId,
                     traitName: $0.traitName,
                     traitTypeArgs: $0.traitTypeArgs.map { resolveParameterizedType($0) }
                 )
@@ -528,7 +530,8 @@ extension Monomorphizer {
                         methodDefId: remappedIdentifier.defId,
                         methodName: dispatchInfo.methodName,
                         owner: dispatchInfo.owner,
-                        conformanceTraitName: dispatchInfo.conformanceTraitName
+                        conformanceTraitName: dispatchInfo.conformanceTraitName,
+                        conformanceTraitDefId: dispatchInfo.conformanceTraitDefId
                     )
                 }
 
@@ -1332,6 +1335,11 @@ extension Monomorphizer {
                 isGenericInstantiation = false
             }
             
+            let expectedMethodType = Type.function(
+                parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                returns: resolvedReturnType
+            )
+
             // Build emitted method symbol name from type scope + method logical name.
             // For instantiated generic types, emittedTypeScopeName already includes type args.
             let specializedMethodSymbolName: String
@@ -1358,7 +1366,8 @@ extension Monomorphizer {
             if let concreteMethod = try? lookupConcreteMethodSymbol(
                 on: resolvedBaseType,
                 name: methodName,
-                methodTypeArgs: resolvedMethodTypeArgs
+                methodTypeArgs: resolvedMethodTypeArgs,
+                expectedMethodType: expectedMethodType
             ) {
                 let functionType = resolveParameterizedType(concreteMethod.type)
                 let callee: TypedExpressionNode = .variable(
@@ -1393,12 +1402,9 @@ extension Monomorphizer {
                     }
                 }
             }
-            
+
             // Create the function type for the callee
-            let functionType = Type.function(
-                parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                returns: resolvedReturnType
-            )
+            let functionType = expectedMethodType
             
             // Create callee from the specialized emitted symbol name.
             let callee: TypedExpressionNode = .variable(

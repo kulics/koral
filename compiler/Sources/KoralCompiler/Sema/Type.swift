@@ -238,6 +238,16 @@ public indirect enum Type: CustomStringConvertible {
     }
   }
 
+  /// Returns whether this nominal type was declared as `type mutable`.
+  public func isTypeMutable(in context: CompilerContext) -> Bool {
+    switch self {
+    case .structure(let defId):
+      return context.isTypeMutable(defId)
+    default:
+      return false
+    }
+  }
+
   /// 获取字段列表（struct）
   public func structMembers(in context: CompilerContext) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
     if case .structure(let defId) = self {

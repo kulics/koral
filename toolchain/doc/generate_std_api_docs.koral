@@ -4,7 +4,7 @@ type Decl(lines List[String]);
 
 type TraitBlock(header Decl, methods List[Decl]);
 
-type ParsedApi(
+type mutable ParsedApi(
     mutable free_functions List[Decl],
     mutable traits List[TraitBlock],
     mutable types List[Decl],
@@ -294,7 +294,7 @@ let extract_block(lines List[String], start UInt) ExtractBlockResult = {
 };
 
 let starts_with_any_public_let(line String) Bool =
-    line.starts_with("public let") or line.starts_with("public foreign let");
+    line.starts_with("public let") or line.starts_with("public foreign let") or line.starts_with("public intrinsic let");
 
 let looks_like_method_signature(line String) Bool = {
     if line.is_empty() then {
@@ -477,7 +477,7 @@ let extract_type_api(lines List[String], start UInt) ExtractTypeResult = {
 
 let split_top_level_commas(text String) List[String] = {
     let mutable parts = List[String].new();
-    let mutable current = String.new();
+    let mutable current = StringBuilder.new();
     let mutable paren Int = 0;
     let mutable bracket Int = 0;
     let mutable brace Int = 0;
@@ -516,18 +516,18 @@ let split_top_level_commas(text String) List[String] = {
         };
 
         if ch == ',' and paren == 0 and bracket == 0 and brace == 0 then {
-            let part = trim(current);
+            let part = trim(current.to_string());
             if not part.is_empty() then {
                 parts.push(part);
             };
-            current = String.new();
+            current = StringBuilder.new();
             continue;
         };
 
         current.push_byte(ch);
     };
 
-    let tail = trim(current);
+    let tail = trim(current.to_string());
     if not tail.is_empty() then {
         parts.push(tail);
     };
@@ -577,7 +577,7 @@ let sanitize_type_declaration(decl Decl) Decl = {
 
     let joined = decl.lines.join_to_string("\n");
     let mutable line = trim(joined);
-    if not line.starts_with("public type") then {
+    if not line.starts_with("public type") and not line.starts_with("public intrinsic type") then {
         return decl;
     };
     if line.ends_with(";") then {
@@ -704,7 +704,7 @@ let parse_public_api(file_path Path) ParsedApi = {
                 continue;
             };
 
-            if cleaned.starts_with("public type") then {
+            if cleaned.starts_with("public type") or cleaned.starts_with("public intrinsic type") then {
                 let type_api = extract_type_api(lines, i);
                 types.push(type_api.declaration);
                 i = type_api.end + 1;
@@ -788,12 +788,12 @@ let to_pascal_case(s String) String = {
 };
 
 let segments_to_pascal_key(segments List[String]) String = {
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     for i in 0..<segments.count() then {
         if i > 0 then { out.push_byte('.');};
         out.push_string(to_pascal_case(segments[i]));
     };
-    return out;
+    return out.to_string();
 };
 
 let module_key_for_source(source Path, std_root Path) String = {
@@ -816,7 +816,7 @@ let module_key_for_source(source Path, std_root Path) String = {
 
 let module_name_from_key(key String) String = key;
 
-let append_declarations(lines *mutable List[String], declarations List[Decl]) Void = {
+let append_declarations(lines List[String], declarations List[Decl]) Void = {
     for idx in 0..<declarations.count() then {
         let decl = declarations[idx];
         let mutable li UInt = 0;
@@ -839,7 +839,7 @@ let append_declarations(lines *mutable List[String], declarations List[Decl]) Vo
     };
 };
 
-let append_traits_or_givens(lines *mutable List[String], blocks List[TraitBlock]) Void = {
+let append_traits_or_givens(lines List[String], blocks List[TraitBlock]) Void = {
     for idx in 0..<blocks.count() then {
         let block = blocks[idx];
         for line in block.header.lines then {
@@ -883,7 +883,7 @@ let last_segment(key String) String =
         .None() then key,
     };
 
-let merge_parsed(target *mutable ParsedApi, parsed ParsedApi) Void = {
+let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
     for item in parsed.free_functions then {
         target.free_functions.push(item);
     };
@@ -920,7 +920,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
 
     for source_str in ordered_sources then {
         let parsed = parse_public_api(source_str.into_path());
-        merge_parsed(&mutable parsed_all, parsed);
+        merge_parsed(parsed_all, parsed);
     };
 
     let mutable sanitized_types = List[Decl].new();
@@ -938,7 +938,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Free Functions");
     if parsed_all.free_functions.count() > 0 then {
         lines.push("```koral");
-        append_declarations(&mutable lines, parsed_all.free_functions);
+        append_declarations(lines, parsed_all.free_functions);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -948,7 +948,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Traits");
     if parsed_all.traits.count() > 0 then {
         lines.push("```koral");
-        append_traits_or_givens(&mutable lines, parsed_all.traits);
+        append_traits_or_givens(lines, parsed_all.traits);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -958,7 +958,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Types");
     if sanitized_types.count() > 0 then {
         lines.push("```koral");
-        append_declarations(&mutable lines, sanitized_types);
+        append_declarations(lines, sanitized_types);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -968,7 +968,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Given Implementations");
     if parsed_all.givens.count() > 0 then {
         lines.push("```koral");
-        append_traits_or_givens(&mutable lines, parsed_all.givens);
+        append_traits_or_givens(lines, parsed_all.givens);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -1037,7 +1037,7 @@ let find_repo_root() Result[Path] = {
         steps += 1;
     };
 
-    return Result[Path].Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."));
+    return Result[Path].Error("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly.");
 };
 
 let main() Void = {

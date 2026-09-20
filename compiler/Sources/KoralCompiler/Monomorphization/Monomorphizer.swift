@@ -224,7 +224,8 @@ public class Monomorphizer {
                 methodDefId: copied.defId,
                 methodName: dispatchInfo.methodName,
                 owner: dispatchInfo.owner,
-                conformanceTraitName: dispatchInfo.conformanceTraitName
+                conformanceTraitName: dispatchInfo.conformanceTraitName,
+                conformanceTraitDefId: dispatchInfo.conformanceTraitDefId
             )
         }
         return copied

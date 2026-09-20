@@ -9,7 +9,7 @@ let expect_some_uint(opt Option[UInt], v UInt, msg String) Void = {
 
 let test_capacity_and_empty() Void = {
     let s = "abc";
-    assert(s.capacity() >= s.count(), "capacity");
+    assert(s.count() == 3, "count");
     let e = String.new();
     assert(e.count() == 0, "empty count");
     assert(e.is_empty(), "empty flag");
@@ -18,7 +18,6 @@ let test_capacity_and_empty() Void = {
 let test_new_constructor() Void = {
     let s = String.new();
     assert(s.count() == 0, "new count");
-    assert(s.capacity() > 0, "new has capacity");
     assert(s.is_empty(), "new is empty");
 };
 
@@ -55,11 +54,10 @@ let test_find_contains_replace_repeat() Void = {
 let test_ascii_checks() Void = {
     let s = "azAZ09";
     assert(s.is_ascii(), "ascii");
-    let mutable ws = " \t";// space and tab
+    let ws = " \t";// space and tab
     assert(ws.is_ascii_whitespace(), "blank yes");
-    let a UInt8 = 97;// 'a'
-    ws.push_byte(a);
-    assert(not ws.is_ascii_whitespace(), "blank no");
+    let ws2 = " \ta";
+    assert(not ws2.is_ascii_whitespace(), "blank no");
 };
 
 let test_slice_and_trim_prefix_suffix() Void = {
@@ -77,36 +75,49 @@ let test_slice_and_trim_prefix_suffix() Void = {
 
 let test_split_whitespace() Void = {
     let s = "  a  bc d  ";
-    let mutable acc = String.new();
+    let mutable acc = StringBuilder.new();
     let mutable first = true;
     for part in s.split_ascii_whitespace() then {
         if not first then { acc.push_byte(',');};// comma
         first = false;
         acc.push_string(part);
     };
-    assert(acc == "a,bc,d", "split ascii whitespace");
+    assert(acc.to_string() == "a,bc,d", "split ascii whitespace");
 };
 
 let test_split_sep_and_lines() Void = {
     let s = "a--b--";
-    let mutable parts = String.new();
+    let mutable parts = StringBuilder.new();
     let mutable first = true;
     for p in s.split("--") then {
         if not first then { parts.push_byte(':');};// ':'
         first = false;
         parts.push_string(p);
     };
-    assert(parts == "a:b:", "split sep includes trailing empty");
+    assert(parts.to_string() == "a:b:", "split sep includes trailing empty");
 
     let l = "x\ny\n";
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     let mutable firstLine = true;
     for line in l.lines() then {
         if not firstLine then { out.push_byte(';');};// ';'
         firstLine = false;
         out.push_string(line);
     };
-    assert(out == "x;y", "lines split");
+    assert(out.to_string() == "x;y", "lines split");
+};
+
+let test_string_builder_snapshot() Void = {
+    let mutable sb = StringBuilder.with_capacity(8);
+    sb.push_string("ab");
+    sb.push_byte('c');
+    let first = sb.to_string();
+    sb.push_string("!");
+    let second = sb.to_string();
+    assert(first == "abc", "builder snapshot stable");
+    assert(second == "abc!", "builder second snapshot");
+    sb.clear();
+    assert(sb.is_empty(), "builder clear");
 };
 
 let test_split_once() Void = {
@@ -196,12 +207,10 @@ let test_join_to_string() Void = {
     single.push("only");
     assert(single.join_to_string(", ") == "only", "join_to_string single");
 
-    let empty = List[String].new();
+    let mutable empty = List[String].new();
     assert(empty.join_to_string(", ") == "", "join_to_string empty");
 
     assert(names.join_to_string("") == "abc", "join_to_string no separator");
-    assert(names.iterator().join_to_string(", ") == "a, b, c", "iterator join_to_string basic");
-    assert(names.iterator().join_to_string("") == "abc", "iterator join_to_string no separator");
 };
 
 let main() Void = {
@@ -218,5 +227,6 @@ let main() Void = {
     test_rsplit_once();
     test_replace_n();
     test_join_to_string();
+    test_string_builder_snapshot();
     println("String advanced tests passed");
 };

@@ -155,7 +155,7 @@ public enum ParserError: Error {
     case .expectedArrow:
       return "Expected '->' in lambda expression"
     case .invalidReceiverParameterSyntax:
-      return "Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"
+      return "Invalid receiver parameter syntax: use 'self' only"
     case .foreignAndIntrinsicConflict:
       return "foreign and intrinsic cannot be used together"
     case .duplicateDeclarationModifier(_, let modifier):

@@ -546,21 +546,20 @@ extension Parser {
     }
     if currentToken === .ampersand {
       try match(.ampersand)
-      if currentToken === .unsafeKeyword {
-        try match(.unsafeKeyword)
-        let mutable = currentToken === .mutableKeyword
-        if mutable {
-          try match(.mutableKeyword)
-        }
-        let expr = try parsePrefixExpression()
-        return .ptrExpression(expr, mutable: mutable)
+      guard currentToken === .unsafeKeyword else {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "managed '&' and '&mutable' are removed; use '&unsafe' or '&unsafe mutable'"
+        )
       }
+      try match(.unsafeKeyword)
       let mutable = currentToken === .mutableKeyword
       if mutable {
         try match(.mutableKeyword)
       }
       let expr = try parsePrefixExpression()
-      return .addressOfExpression(expr, mutable: mutable)
+      return .ptrExpression(expr, mutable: mutable)
     }
     if currentToken === .multiply {
       try match(.multiply)

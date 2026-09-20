@@ -283,8 +283,9 @@ extension TypeChecker {
 
   /// For subscript assignment targets, recursively infer base expressions in writable context.
   ///
-  /// If the base itself is a subscript expression, lower it through builtin
-  /// mutable pointer projection so chained writes like `a[i][j] = v` remain writable.
+  /// If the base itself is a subscript expression, only raw-pointer subscripts remain
+  /// addressable. Collection subscripts are value-based and must be rewritten through
+  /// get/set at the caller.
   private func inferWritableSubscriptBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
     if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
       let typedOuterBase = try inferWritableSubscriptBase(outerBaseExpr)
@@ -294,15 +295,13 @@ extension TypeChecker {
       case .string:
         throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
       case .dict, .list, .deque:
-        let ptrExpr = try buildBuiltinSubscriptHelperCall(
-          base: typedOuterBase,
-          args: typedOuterArgs,
-          helperName: "__index_mut_ptr"
-        )
-        guard case .mutablePointer(let valueType) = ptrExpr.type else {
-          throw SemanticError.typeMismatch(expected: "*unsafe mutable return", got: ptrExpr.type.description)
+        let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+        if isMutableNominalReceiverType(subscriptValue.type) {
+          return subscriptValue
         }
-        return .unsafeDerefExpression(expression: ptrExpr, type: valueType)
+        throw SemanticError(.generic(
+          "Collection subscript results are values and cannot be used as writable base addresses"
+        ), span: currentSpan)
       case .pointer:
         return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
       case .none:
@@ -532,15 +531,19 @@ extension TypeChecker {
             baseStoredExpr = typedBase
             baseStoredType = typedBase.type
           default:
-            if !isAddressableForReference(typedBase) {
+            if isMutableNominalReceiverType(typedBase.type) {
+              baseStoredExpr = typedBase
+              baseStoredType = typedBase.type
+            } else if !isAddressableForReference(typedBase) {
               throw SemanticError.invalidOperation(
                 op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+            } else {
+              let baseRefType: Type = canTakeMutableReference(to: typedBase)
+                ? .mutableReference(inner: typedBase.type)
+                : .reference(inner: typedBase.type)
+              baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
+              baseStoredType = baseRefType
             }
-            let baseRefType: Type = canTakeMutableReference(to: typedBase)
-              ? .mutableReference(inner: typedBase.type)
-              : .reference(inner: typedBase.type)
-            baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
-            baseStoredType = baseRefType
           }
           let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseStoredType)
           var stmts: [TypedStatementNode] = [
@@ -718,15 +721,19 @@ extension TypeChecker {
           baseStoredExpr = typedBase
           baseStoredType = typedBase.type
         default:
-          if !isAddressableForReference(typedBase) {
+          if isMutableNominalReceiverType(typedBase.type) {
+            baseStoredExpr = typedBase
+            baseStoredType = typedBase.type
+          } else if !isAddressableForReference(typedBase) {
             throw SemanticError.invalidOperation(
               op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+          } else {
+            let baseRefType: Type = canTakeMutableReference(to: typedBase)
+              ? .mutableReference(inner: typedBase.type)
+              : .reference(inner: typedBase.type)
+            baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
+            baseStoredType = baseRefType
           }
-          let baseRefType: Type = canTakeMutableReference(to: typedBase)
-            ? .mutableReference(inner: typedBase.type)
-            : .reference(inner: typedBase.type)
-          baseStoredExpr = .referenceExpression(expression: typedBase, type: baseRefType)
-          baseStoredType = baseRefType
         }
         let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseStoredType)
         var stmts: [TypedStatementNode] = [

@@ -9,7 +9,7 @@ using std::io { .. };
 // Core Type Definitions
 // ============================================================================
 
-public type FormatOptions(
+public type mutable FormatOptions(
     mutable number_lines Bool,
     mutable number_nonblank Bool,
     mutable squeeze_blank Bool,
@@ -18,7 +18,7 @@ public type FormatOptions(
     mutable show_nonprinting Bool,
 );
 
-public type Config(
+public type mutable Config(
     mutable format_options FormatOptions,
     mutable input_files List[String],
     mutable show_help Bool,
@@ -63,7 +63,7 @@ file_private let show_version() Void = {
 // Argument Parsing
 // ============================================================================
 
-file_private let apply_flag(config *mutable Config, arg String) Result[Void] = {
+file_private let apply_flag(config Config, arg String) Result[Void] = {
     when arg in {
         "-n" then {
             config.format_options.number_lines = true;
@@ -117,7 +117,7 @@ file_private let apply_flag(config *mutable Config, arg String) Result[Void] = {
         },
         _ then {
             if arg.starts_with("-") and arg <> "-" then {
-                return Result[Void].Error(box(arg));
+                return Result[Void].Error(arg);
             };
             config.input_files.push(arg);
         },
@@ -134,7 +134,7 @@ file_private let parse_args(args List[String]) Result[Config] = {
     );
     
     for i in 1..<args.count() then {
-        let _ = apply_flag(&mutable config, args[i]) or return;
+        let _ = apply_flag(config, args[i]) or return;
     };
     
     if config.format_options.number_nonblank then {
@@ -148,7 +148,7 @@ file_private let parse_args(args List[String]) Result[Config] = {
 // Formatting
 // ============================================================================
 
-public type Formatter(
+public type mutable Formatter(
     options FormatOptions,
     mutable line_number Int,
     mutable last_was_blank Bool,
@@ -159,20 +159,20 @@ given Formatter {
         return Formatter(options, 1, false);
     };
 
-    file_private should_render_special_chars(*self) Bool =
+    file_private should_render_special_chars(self) Bool =
         self.options.show_nonprinting or self.options.show_tabs or self.options.show_ends;
 
-    file_private should_number_line(*self, is_blank Bool) Bool =
+    file_private should_number_line(self, is_blank Bool) Bool =
         self.options.number_lines or (self.options.number_nonblank and not is_blank);
 
-    file_private line_prefix(*mutable self) String = {
+    file_private line_prefix(self) String = {
         let num_str = self.line_number.to_string();
         let padding = if num_str.count() >= 6 then "" else " ".repeat(6 - num_str.count());
         self.line_number += 1;
         return "\(padding)\(num_str)\t";
     };
     
-    public format_line(*mutable self, line String) Option[String] = {
+    public format_line(self, line String) Option[String] = {
         let is_blank = self.is_blank_line(line);
         if self.options.squeeze_blank and is_blank and self.last_was_blank then {
             self.last_was_blank = is_blank;
@@ -194,13 +194,13 @@ given Formatter {
         return Option[String].Some(result);
     };
 
-    file_private is_blank_line(*self, line String) Bool = {
+    file_private is_blank_line(self, line String) Bool = {
         return line.is_empty() or line == "\n" or line == "\r\n";
     };
     
     // Apply special character transformations
-    file_private apply_special_chars(*self, line String) String = {
-        let mutable result = String.new();
+    file_private apply_special_chars(self, line String) String = {
+        let mutable result = StringBuilder.new();
         
         for i in 0..<line.count() then {
             let byte_val = line[i];
@@ -227,7 +227,7 @@ given Formatter {
             };
         };
         
-        return result;
+        return result.to_string();
     };
 };
 
@@ -235,14 +235,14 @@ given Formatter {
 // File Processing
 // ============================================================================
 
-file_private let emit_formatted_line(formatter *mutable Formatter, line String) Void = {
+file_private let emit_formatted_line(formatter Formatter, line String) Void = {
     when formatter.format_line(line) in {
         .Some(formatted) then print(formatted),
         .None() then {},
     };
 };
 
-file_private let process_file(file_path String, formatter *mutable Formatter) Bool = {
+file_private let process_file(file_path String, formatter Formatter) Bool = {
     let file = open_file(file_path.into_path(), OpenMode.Read()) or else {
         eprintln("cat: \(file_path): \(it.message())");
         return true;
@@ -263,7 +263,7 @@ file_private let process_file(file_path String, formatter *mutable Formatter) Bo
     return false;
 };
 
-file_private let process_stdin(formatter *mutable Formatter) Bool = {
+file_private let process_stdin(formatter Formatter) Bool = {
     while true then {
         let line = scanln() or else { return false;};
         emit_formatted_line(formatter, line + "\n");
@@ -272,7 +272,7 @@ file_private let process_stdin(formatter *mutable Formatter) Bool = {
     return false;
 };
 
-file_private let process_all_inputs(sources List[InputSource], formatter *mutable Formatter) Int = {
+file_private let process_all_inputs(sources List[InputSource], formatter Formatter) Int = {
     let mutable had_error = false;
     
     for source in sources then {
@@ -324,5 +324,5 @@ public let main() Int = {
     };
 
     let mutable formatter = Formatter.new(config.format_options);
-    return process_all_inputs(sources, &mutable formatter);
+    return process_all_inputs(sources, formatter);
 };

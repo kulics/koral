@@ -210,6 +210,44 @@ extension Monomorphizer {
         return copySymbolPreservingDefId(symbol)
     }
 
+    private func resolvedConcreteTraitInfo(
+        on selfType: Type,
+        method: Symbol
+    ) -> TypedTraitConformance? {
+        guard let dispatchInfo = receiverMethodDispatch[method.defId],
+              let traitDefId = dispatchInfo.conformanceTraitDefId else {
+            return nil
+        }
+
+        guard case .extensionTemplate? = dispatchInfo.owner else {
+            return nil
+        }
+
+        let resolvedSelfType = resolveParameterizedType(selfType)
+        let typeName: String? = {
+            switch resolvedSelfType {
+            case .structure(let defId), .`enum`(let defId):
+                return context.getName(defId)
+            case .int, .int8, .int16, .int32, .int64,
+                 .uint, .uint8, .uint16, .uint32, .uint64,
+                 .float32, .float64,
+                 .bool:
+                return resolvedSelfType.description
+            default:
+                return nil
+            }
+        }()
+
+        guard let typeName,
+              let entry = extensionMethods[typeName]?[dispatchInfo.methodName],
+              let trait = entry.trait,
+              trait.traitDefId == traitDefId else {
+            return nil
+        }
+
+        return trait
+    }
+
     internal func lookupConcreteMethodSymbol(
         on selfType: Type,
         method: Symbol,
@@ -217,6 +255,16 @@ extension Monomorphizer {
         expectedMethodType: Type? = nil
     ) throws -> Symbol? {
         let methodName = resolvedReceiverMethodName(method)
+        if let traitInfo = resolvedConcreteTraitInfo(on: selfType, method: method),
+           let traitResolved = try instantiateTraitEntryMethod(
+            baseType: selfType,
+            traitInfo: traitInfo,
+            methodName: methodName,
+            methodTypeArgs: methodTypeArgs,
+            expectedMethodType: expectedMethodType
+           ) {
+            return traitResolved
+        }
         return try lookupConcreteMethodSymbol(
             on: selfType,
             name: methodName,
@@ -451,6 +499,41 @@ extension Monomorphizer {
             return baseType
         }
     }
+
+    private func registerInstantiatedExtensionMethodLookup(
+        baseType: Type,
+        structureName: String,
+        methodBaseName: String,
+        generatedSymbol: Symbol,
+        conformanceTraitName: String?,
+        conformanceTraitDefId: DefId?
+    ) {
+        let baseTypeName: String?
+        switch baseType {
+        case .structure(let defId): baseTypeName = context.getName(defId)
+        case .`enum`(let defId):     baseTypeName = context.getName(defId)
+        default:                    baseTypeName = nil
+        }
+        let concreteLookupTypeName = baseTypeName ?? structureName
+
+        if receiverMethodDispatch[generatedSymbol.defId] == nil {
+            receiverMethodDispatch[generatedSymbol.defId] = ReceiverMethodDispatchInfo(
+                methodDefId: generatedSymbol.defId,
+                methodName: methodBaseName,
+                owner: .concreteType(typeName: concreteLookupTypeName),
+                conformanceTraitName: conformanceTraitName,
+                conformanceTraitDefId: conformanceTraitDefId
+            )
+        }
+
+        let lookupKey = "\(concreteLookupTypeName).\(methodBaseName)"
+        extensionMethodDefIds[lookupKey] = generatedSymbol.defId
+
+        if structureName != concreteLookupTypeName {
+            let templateKey = "\(structureName).\(methodBaseName)"
+            extensionMethodDefIds[templateKey] = generatedSymbol.defId
+        }
+    }
     
     /// Instantiates an extension method from a method entry.
     internal func instantiateExtensionMethodFromEntry(
@@ -514,6 +597,14 @@ extension Monomorphizer {
         
         // Check cache
         if let cachedSymbol = instantiatedFunctionSymbols[key] {
+            registerInstantiatedExtensionMethodLookup(
+                baseType: baseType,
+                structureName: structureName,
+                methodBaseName: methodBaseName,
+                generatedSymbol: cachedSymbol,
+                conformanceTraitName: methodInfo.conformanceTraitName,
+                conformanceTraitDefId: methodInfo.conformanceTraitDefId
+            )
             return copySymbolPreservingDefId(cachedSymbol)
         }
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
@@ -523,6 +614,14 @@ extension Monomorphizer {
                 kind: .function
             )
             instantiatedFunctionSymbols[key] = cachedSymbol
+            registerInstantiatedExtensionMethodLookup(
+                baseType: baseType,
+                structureName: structureName,
+                methodBaseName: methodBaseName,
+                generatedSymbol: cachedSymbol,
+                conformanceTraitName: methodInfo.conformanceTraitName,
+                conformanceTraitDefId: methodInfo.conformanceTraitDefId
+            )
             return copySymbolPreservingDefId(cachedSymbol)
         }
         
@@ -622,36 +721,15 @@ extension Monomorphizer {
             )
         }
 
-        let baseTypeName: String?
-        switch baseType {
-        case .structure(let defId): baseTypeName = context.getName(defId)
-        case .`enum`(let defId):     baseTypeName = context.getName(defId)
-        default:                    baseTypeName = nil
-        }
-        let concreteLookupTypeName = baseTypeName ?? structureName
-
         instantiatedFunctionSymbols[key] = generatedSymbol
-        if receiverMethodDispatch[generatedSymbol.defId] == nil {
-            receiverMethodDispatch[generatedSymbol.defId] = ReceiverMethodDispatchInfo(
-                methodDefId: generatedSymbol.defId,
-                methodName: methodBaseName,
-                owner: .concreteType(typeName: concreteLookupTypeName),
-                conformanceTraitName: methodInfo.conformanceTraitName
-            )
-        }
-
-        // Register structured lookup: baseType name + method name -> DefId
-        // This keeps buildStaticMethodLookup DefId-driven from instantiation metadata.
-        let lookupKey = "\(concreteLookupTypeName).\(methodBaseName)"
-        extensionMethodDefIds[lookupKey] = generatedSymbol.defId
-
-        // Only register template-name aliases for non-generic receivers.
-        // Generic instantiations must stay keyed by concrete layout names
-        // to avoid cross-instantiation collisions (e.g. List_U8 vs List_String).
-        if genericArgs.isEmpty, structureName != concreteLookupTypeName {
-            let templateKey = "\(structureName).\(methodBaseName)"
-            extensionMethodDefIds[templateKey] = generatedSymbol.defId
-        }
+        registerInstantiatedExtensionMethodLookup(
+            baseType: baseType,
+            structureName: structureName,
+            methodBaseName: methodBaseName,
+            generatedSymbol: generatedSymbol,
+            conformanceTraitName: methodInfo.conformanceTraitName,
+            conformanceTraitDefId: methodInfo.conformanceTraitDefId
+        )
 
         return copySymbolPreservingDefId(generatedSymbol)
     }
@@ -739,6 +817,10 @@ extension Monomorphizer {
     // MARK: - Method Lookup
     
     /// Looks up a concrete method symbol on a type.
+    ///
+    /// NOTE: The auto-deref fallback (`.reference`/`.mutableReference` → inner type)
+    /// handles compiler-internal reference types produced by managed nominal layout,
+    /// NOT user-written *T syntax (which is removed).
     internal func lookupConcreteMethodSymbol(
         on selfType: Type,
         name: String,
@@ -1042,6 +1124,13 @@ extension Monomorphizer {
                     )
                 }
             }
+            if let matched = lookupInstantiatedExtensionMethodSymbol(
+                baseType: selfType,
+                methodName: name,
+                expectedMethodType: expectedMethodType
+            ) {
+                return copySymbolPreservingDefId(matched)
+            }
             if let traitTargetCandidate = try lookupTraitTargetExtensionMethod(
                 on: selfType,
                 name: name,
@@ -1166,6 +1255,13 @@ extension Monomorphizer {
                         span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
                     )
                 }
+            }
+            if let matched = lookupInstantiatedExtensionMethodSymbol(
+                baseType: selfType,
+                methodName: name,
+                expectedMethodType: expectedMethodType
+            ) {
+                return copySymbolPreservingDefId(matched)
             }
             if let traitTargetCandidate = try lookupTraitTargetExtensionMethod(
                 on: selfType,
@@ -1852,7 +1948,7 @@ extension Monomorphizer {
                 ) else {
                     continue
                 }
-                if selected.conformanceTraitName == traitInfo.traitName {
+                if selected.conformanceTraitDefId == traitInfo.traitDefId {
                     return selected
                 }
             }

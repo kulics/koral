@@ -100,12 +100,17 @@ public class RecursiveTypeChecker {
         case .reference, .pointer, .weakReference, .mutableReference, .mutablePointer, .mutableWeakReference:
             // ref/ptr/weakref 是固定大小的指针，不会导致无限大小
             return false
-        case .structure, .`enum`:
-            // 直接的 struct/enum 类型是值类型边
-            return true
-        case .genericStruct, .genericEnum:
-            // 泛型实例化也是值类型边
-            return true
+        case .structure(let defId):
+            return context.nominalLayoutKind(for: .structure(defId: defId)) == .value
+        case .`enum`:
+            return context.nominalLayoutKind(for: type) == .value
+        case .genericStruct(let templateName, _):
+            if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName) {
+                return context.isGenericStructTemplateMutable(templateDefId) == false
+            }
+            return false
+        case .genericEnum:
+            return context.nominalLayoutKind(for: type) == .value
         default:
             // 基本类型、函数类型等不是值类型边
             return false
@@ -120,11 +125,30 @@ public class RecursiveTypeChecker {
             // ref/ptr/weakref 打破循环，不继续追踪
             return []
         case .structure(let defId):
+            if context.nominalLayoutKind(for: type) == .managed {
+                return []
+            }
             return [defId]
         case .`enum`(let defId):
+            if context.nominalLayoutKind(for: type) == .managed {
+                return []
+            }
             return [defId]
-        case .genericStruct(_, let args), .genericEnum(_, let args):
-            // 对于泛型类型，检查类型参数中的值类型依赖
+        case .genericStruct(let templateName, let args):
+            if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
+               context.isGenericStructTemplateMutable(templateDefId) {
+                return []
+            }
+            // 对于值语义泛型结构，检查类型参数中的值类型依赖
+            var result: [DefId] = []
+            for arg in args {
+                result.append(contentsOf: extractValueTypeDefIds(from: arg))
+            }
+            return result
+        case .genericEnum(_, let args):
+            if context.nominalLayoutKind(for: type) == .managed {
+                return []
+            }
             var result: [DefId] = []
             for arg in args {
                 result.append(contentsOf: extractValueTypeDefIds(from: arg))

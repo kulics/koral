@@ -5,7 +5,7 @@
 // ============================================================================
 
 // ============================================================================
-// Set Storage and Type Definition
+// Set Type Definition
 // ============================================================================
 type SetBucket[T Hash] {
     Empty(),
@@ -13,25 +13,19 @@ type SetBucket[T Hash] {
     Deleted(),
 };
 
-module_private type SetStorage[T Hash](
-    mutable buckets *unsafe mutable SetBucket[T],
-    mutable count UInt,
-    mutable capacity UInt,
-);
+public type mutable Set[T Hash](module_private mutable buckets *unsafe mutable SetBucket[T], module_private mutable size UInt, module_private mutable capacity UInt);
 
-given[T Hash] SetStorage[T] as Drop {
+given[T Hash] Set[T] as Drop {
 
-    drop(source *unsafe mutable Self) Void = {
-        for i in 0..<source.capacity then {
-            deinit_memory(source.buckets + i);
+    drop(self) Void = {
+        for i in 0..<self.capacity then {
+            deinit_memory(self.buckets + i);
         };
-        dealloc_memory(source.buckets);
+        dealloc_memory(self.buckets);
     };
 };
 
-public type Set[T Hash](module_private mutable storage *mutable SetStorage[T]);
-
-public type SetIterator[T Hash](module_private storage * SetStorage[T], module_private mutable index UInt);
+public type mutable SetIterator[T Hash](module_private source Set[T], module_private mutable index UInt);
 
 // ============================================================================
 // Set Methods
@@ -44,8 +38,7 @@ given[T Hash] Set[T] {
         for i in 0..<capacity then {
             init_memory(buckets + i, SetBucket[T].Empty());
         };
-        let storage = box(SetStorage[T](buckets, 0, capacity));
-        return Set[T](storage);
+        return Set[T](buckets, 0, capacity);
     };
 
     public with_capacity(capacity UInt) Self = {
@@ -55,33 +48,19 @@ given[T Hash] Set[T] {
         for i in 0..<cap then {
             init_memory(buckets + i, SetBucket[T].Empty());
         };
-        let storage = box(SetStorage[T](buckets, 0, cap));
-        return Set[T](storage);
+        return Set[T](buckets, 0, cap);
     };
 
-    public count(*self) UInt = self.storage.count;
-
-    file_private ensure_unique(*mutable self) Void = {
-        if not is_unique_mutable(&unsafe self.storage) then {
-            let old = self.storage;
-            let new_buckets = alloc_memory[SetBucket[T]](old.capacity);
-            for i in 0..<old.capacity then {
-                let bucket = old.buckets[i];
-                init_memory(new_buckets + i, bucket);
-            };
-            let new_storage = box(SetStorage[T](new_buckets, old.count, old.capacity));
-            self.storage = new_storage;
-        };
-    };
+    public count(self) UInt = self.size;
 
     // Using when for bucket handling
-    file_private find_slot(*self, value T) Option[UInt] = {
+    file_private find_slot(self, value T) Option[UInt] = {
         let h = value.hash();
-        let mutable idx = h % self.storage.capacity;
+        let mutable idx = h % self.capacity;
         let mutable first_deleted = Option[UInt].None();
         let mutable probes UInt = 0;
-        while probes < self.storage.capacity then {
-            let bucket = self.storage.buckets[idx];
+        while probes < self.capacity then {
+            let bucket = self.buckets[idx];
             when bucket in {
                 .Empty() then {
                     when first_deleted in {
@@ -107,23 +86,23 @@ given[T Hash] Set[T] {
                     };
                 },
             };
-            idx = (idx + 1) % self.storage.capacity;
+            idx = (idx + 1) % self.capacity;
             probes += 1;
         };
         return first_deleted;
     };
 
-    file_private rehash(*mutable self) Void = {
-        let old_cap = self.storage.capacity;
-        let old_buckets = self.storage.buckets;
+    file_private rehash(self) Void = {
+        let old_cap = self.capacity;
+        let old_buckets = self.buckets;
         let new_cap = old_cap * 2(UInt);
         let new_buckets = alloc_memory[SetBucket[T]](new_cap);
         for i in 0..<new_cap then {
             init_memory(new_buckets + i, SetBucket[T].Empty());
         };
-        self.storage.buckets = new_buckets;
-        self.storage.capacity = new_cap;
-        self.storage.count = 0;
+        self.buckets = new_buckets;
+        self.capacity = new_cap;
+        self.size = 0;
         for i in 0..<old_cap then {
             let bucket = take_memory(old_buckets + i);
             when bucket in {
@@ -136,13 +115,12 @@ given[T Hash] Set[T] {
         dealloc_memory(old_buckets);
     };
 
-    public insert(*mutable self, value T) Void = {
+    public insert(self, value T) Void = {
         let _ = self.try_insert(value);
     };
 
-    public try_insert(*mutable self, value T) Bool = {
-        self.ensure_unique();
-        if self.storage.count * 2 >= self.storage.capacity then {
+    public try_insert(self, value T) Bool = {
+        if self.size * 2 >= self.capacity then {
             self.rehash();
         };
         when self.find_slot(value) in {
@@ -150,14 +128,14 @@ given[T Hash] Set[T] {
                 panic("Set insert failed");
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx];
+                let bucket = self.buckets[idx];
                 when bucket in {
                     .Occupied(_) then {
                         return false;
                     },
                     .Empty() or .Deleted() then {
-                        self.storage.buckets[idx] = SetBucket[T].Occupied(value);
-                        self.storage.count = self.storage.count + 1;
+                        self.buckets[idx] = SetBucket[T].Occupied(value);
+                        self.size = self.size + 1;
                         return true;
                     },
                 };
@@ -165,19 +143,19 @@ given[T Hash] Set[T] {
         };
     };
 
-    public insert_set(*mutable self, other Set[T]) Void = {
+    public insert_set(self, other Set[T]) Void = {
         for v in other then {
             self.insert(v);
         };
     };
 
-    public contains(*self, value T) Bool = {
+    public contains(self, value T) Bool = {
         when self.find_slot(value) in {
             .None() then {
                 return false;
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx];
+                let bucket = self.buckets[idx];
                 return when bucket in {
                     .Occupied(_) then true,
                     _ then false,
@@ -186,22 +164,21 @@ given[T Hash] Set[T] {
         };
     };
 
-    public remove(*mutable self, value T) Void = {
+    public remove(self, value T) Void = {
         let _ = self.try_remove(value);
     };
 
-    public try_remove(*mutable self, value T) Bool = {
-        self.ensure_unique();
+    public try_remove(self, value T) Bool = {
         when self.find_slot(value) in {
             .None() then {
                 return false;
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx];
+                let bucket = self.buckets[idx];
                 return when bucket in {
                     .Occupied(_) then {
-                        self.storage.buckets[idx] = SetBucket[T].Deleted();
-                        self.storage.count = self.storage.count - 1;
+                        self.buckets[idx] = SetBucket[T].Deleted();
+                        self.size = self.size - 1;
                         return true;
                     },
                     _ then false,
@@ -210,9 +187,9 @@ given[T Hash] Set[T] {
         };
     };
 
-    public is_empty(*self) Bool = self.storage.count == 0;
+    public is_empty(self) Bool = self.size == 0;
 
-    public is_subset_of(*self, other Set[T]) Bool = {
+    public is_subset_of(self, other Set[T]) Bool = {
         for v in self then {
             if not other.contains(v) then {
                 return false;
@@ -221,26 +198,24 @@ given[T Hash] Set[T] {
         return true;
     };
 
-    public is_superset_of(*self, other Set[T]) Bool = other.is_subset_of(*self);
+    public is_superset_of(self, other Set[T]) Bool = other.is_subset_of(self);
 
-    public clear(*mutable self) Void = {
-        self.ensure_unique();
-        for i in 0..<self.storage.capacity then {
-            self.storage.buckets[i] = SetBucket[T].Empty();
+    public clear(self) Void = {
+        for i in 0..<self.capacity then {
+            self.buckets[i] = SetBucket[T].Empty();
         };
-        self.storage.count = 0;
+        self.size = 0;
     };
 
     // Retains only elements satisfying the predicate. O(n).
-    public retain(*mutable self, predicate Func(T) Bool) Void = {
-        self.ensure_unique();
-        for i in 0..<self.storage.capacity then {
-            let bucket = self.storage.buckets[i];
+    public retain(self, predicate Func(T) Bool) Void = {
+        for i in 0..<self.capacity then {
+            let bucket = self.buckets[i];
             when bucket in {
                 .Occupied(v) then {
                     if not predicate(v) then {
-                        self.storage.buckets[i] = SetBucket[T].Deleted();
-                        self.storage.count = self.storage.count - 1;
+                        self.buckets[i] = SetBucket[T].Deleted();
+                        self.size = self.size - 1;
                     };
                 },
                 _ then {},
@@ -249,7 +224,7 @@ given[T Hash] Set[T] {
     };
 
     // Using while is pattern matching for iterator loops
-    public union(*self, other Set[T]) Set[T] = {
+    public union(self, other Set[T]) Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             result.insert(v);
@@ -260,7 +235,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public intersection(*self, other Set[T]) Set[T] = {
+    public intersection(self, other Set[T]) Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if other.contains(v) then {
@@ -270,7 +245,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public difference(*self, other Set[T]) Set[T] = {
+    public difference(self, other Set[T]) Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if not other.contains(v) then {
@@ -280,7 +255,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public symmetric_difference(*self, other Set[T]) Set[T] = {
+    public symmetric_difference(self, other Set[T]) Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if not other.contains(v) then {
@@ -304,7 +279,7 @@ given[T Hash] Set[T] as Default {
 
 given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
 
-    public iterator(*self) SetIterator[T] = SetIterator[T](self.storage, 0);
+    public iterator(self) SetIterator[T] = SetIterator[T](self, 0);
 };
 
 // ============================================================================
@@ -312,9 +287,9 @@ given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
 // ============================================================================
 given[T Hash] SetIterator[T] as Iterator[T] {
 
-    public next(*mutable self) Option[T] = {
-        while self.index < self.storage.capacity then {
-            let bucket = self.storage.buckets[self.index];
+    public next(self) Option[T] = {
+        while self.index < self.source.capacity then {
+            let bucket = self.source.buckets[self.index];
             self.index = self.index + 1;
             when bucket in {
                 .Occupied(v) then {

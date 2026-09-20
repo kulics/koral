@@ -1115,7 +1115,7 @@ let label = when score in {
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair 解构模式：`(a, b)`（等价于 `Pair(a, b)` 模式）
-- 枚举模式：`.Some(v)`, `.None`
+- 枚举模式：`.Some(v)`, `.None()`
 - 逻辑模式：`pattern and pattern`, `pattern or pattern`, `not pattern`
 
 ```koral

@@ -1,12 +1,12 @@
 // 表达式求值器 - Evaluator 核心功能
 using std::math { .. };
 
-public type Evaluator(mutable env Environment);
+public type mutable Evaluator(mutable env Environment);
 
 given Evaluator {
     public new() Self = Evaluator(Environment.new());
 
-    public eval(*mutable self, expr * Expr) Result[Value] = when *expr in {
+    public eval(self, expr Expr) Result[Value] = when expr in {
         .Number(v) then Result.Ok(v),
         .Variable(name) then self.eval_variable(name),
         .BinaryOp(op, left, right) then self.eval_binary(op, left, right),
@@ -15,18 +15,18 @@ given Evaluator {
         .Assignment(name, value) then self.eval_assignment(name, value),
     };
 
-    file_private eval_variable(*self, name String) Result[Value] = when self.env.get(name) in {
+    file_private eval_variable(self, name String) Result[Value] = when self.env.get(name) in {
         .Some(v) then Result.Ok(v),
-        .None() then Result.Error(box("Undefined variable: \(name)")),
+        .None() then Result.Error("Undefined variable: \(name)"),
     };
 
-    file_private eval_binary(*mutable self, op BinaryOperator, left * Expr, right * Expr) Result[Value] = {
+    file_private eval_binary(self, op BinaryOperator, left Expr, right Expr) Result[Value] = {
         let lv = self.eval(left) or return;
         let rv = self.eval(right) or return;
         return self.apply_binary_op(op, lv, rv);
     };
 
-    file_private apply_binary_op(*self, op BinaryOperator, left Value, right Value) Result[Value] = {
+    file_private apply_binary_op(self, op BinaryOperator, left Value, right Value) Result[Value] = {
         return when op in {
             .Add() then self.value_add(left, right),
             .Sub() then self.value_sub(left, right),
@@ -38,21 +38,21 @@ given Evaluator {
     };
 
     // 加法
-    file_private value_add(*self, left Value, right Value) Result[Value] =
+    file_private value_add(self, left Value, right Value) Result[Value] =
         Result.Ok(left.numeric_binary(right, (a, b) -> Value.IntVal(a + b), (a, b) -> Value.FloatVal(a + b)));
 
     // 减法
-    file_private value_sub(*self, left Value, right Value) Result[Value] =
+    file_private value_sub(self, left Value, right Value) Result[Value] =
         Result.Ok(left.numeric_binary(right, (a, b) -> Value.IntVal(a - b), (a, b) -> Value.FloatVal(a - b)));
 
     // 乘法
-    file_private value_mul(*self, left Value, right Value) Result[Value] =
+    file_private value_mul(self, left Value, right Value) Result[Value] =
         Result.Ok(left.numeric_binary(right, (a, b) -> Value.IntVal(a * b), (a, b) -> Value.FloatVal(a * b)));
 
     // 除法
-    file_private value_div(*self, left Value, right Value) Result[Value] = {
+    file_private value_div(self, left Value, right Value) Result[Value] = {
         if right.to_float() == 0.0 then {
-            return .Error(box("Division by zero"));
+            return .Error("Division by zero");
         };
         if left.int_pair(right) is .Some(pair) then {
             if pair.first % pair.second == 0 then {
@@ -64,9 +64,9 @@ given Evaluator {
     };
 
     // 取模
-    file_private value_mod(*self, left Value, right Value) Result[Value] = {
+    file_private value_mod(self, left Value, right Value) Result[Value] = {
         if right.to_float() == 0.0 then {
-            return .Error(box("Modulo by zero"));
+            return .Error("Modulo by zero");
         };
         if left.int_pair(right) is .Some(pair) then {
             return .Ok(Value.IntVal(pair.first % pair.second));
@@ -75,7 +75,7 @@ given Evaluator {
     };
 
     // 幂运算
-    file_private value_pow(*self, left Value, right Value) Result[Value] = {
+    file_private value_pow(self, left Value, right Value) Result[Value] = {
         let base = left.to_float();
         let exponent = right.to_float();
         let result = base.pow(exponent);
@@ -89,7 +89,7 @@ given Evaluator {
     };
 
     // 一元运算
-    file_private eval_unary(*mutable self, op UnaryOperator, operand * Expr) Result[Value] = {
+    file_private eval_unary(self, op UnaryOperator, operand Expr) Result[Value] = {
         let v = self.eval(operand) or return;
         return when op in {
             .Neg() then Result.Ok(v.unary_numeric((x) -> Value.IntVal(0 - x), (x) -> Value.FloatVal(0.0 - x))),
@@ -97,7 +97,7 @@ given Evaluator {
     };
 
     // 函数调用
-    file_private eval_call(*mutable self, name String, args List[* Expr]) Result[Value] = {
+    file_private eval_call(self, name String, args List[Expr]) Result[Value] = {
         let mutable evaluated_args = List[Value].new();
         for arg in args then {
             let v = self.eval(arg) or return;
@@ -107,13 +107,12 @@ given Evaluator {
     };
 
     // 赋值
-    file_private eval_assignment(*mutable self, name String, value * Expr) Result[Value] = {
+    file_private eval_assignment(self, name String, value Expr) Result[Value] = {
         let v = self.eval(value) or return;
         self.env.set(name, v);
         return .Ok(v);
     };
 
-    public get_env(*self) * Environment = &self.env;
-    public clear_env(*mutable self) Void = self.env.clear();
-    public list_vars(*self) Void = self.env.list_vars();
+    public clear_env(self) Void = self.env.clear();
+    public list_vars(self) Void = self.env.list_vars();
 };

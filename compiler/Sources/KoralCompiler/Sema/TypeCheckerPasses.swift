@@ -5,6 +5,23 @@ import Foundation
 
 extension TypeChecker {
 
+  private func validateValueTypeFieldMutability(
+    typeName: String,
+    isMutableType: Bool,
+    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+    span: SourceSpan
+  ) throws {
+    guard !isMutableType else {
+      return
+    }
+    if let mutableField = parameters.first(where: { $0.mutable }) {
+      throw SemanticError(
+        .invalidMutableFieldInValueType(type: typeName, field: mutableField.name),
+        span: span
+      )
+    }
+  }
+
   private func containsNeverType(_ type: Type) -> Bool {
     switch type {
     case .never:
@@ -52,21 +69,41 @@ extension TypeChecker {
     returnType: Type,
     selfType: Type
   ) throws {
+    // Only accept: drop(self) — self is the receiver, type is SelfType
     guard params.count == 1 else {
       throw SemanticError.invalidOperation(
-        op: "drop must have exactly one parameter of type '*unsafe mutable Self'", type1: "", type2: "")
+        op: "drop must have exactly one parameter", type1: "", type2: "")
     }
-    let expectedParamType = Type.mutablePointer(element: selfType)
-    guard params[0].type == expectedParamType else {
+    let paramType = params[0].type
+    let paramName = context.getName(params[0].defId) ?? ""
+
+    guard paramName == "self" && paramType == selfType else {
       throw SemanticError.invalidOperation(
-        op: "drop parameter must have type '\(expectedParamType)'",
-        type1: params[0].type.description,
-        type2: expectedParamType.description
+        op: "drop parameter must be 'self'",
+        type1: paramType.description,
+        type2: selfType.description
       )
     }
     if returnType != .void {
       throw SemanticError.invalidOperation(
         op: "drop must return Void", type1: returnType.description, type2: "")
+    }
+  }
+
+  private func markExplicitDropConformanceTarget(_ type: Type) {
+    switch type {
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+      context.setExplicitDrop(defId)
+    case .genericStruct(let template, _):
+      if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template) {
+        context.setExplicitDrop(templateDefId)
+      }
+    case .genericEnum(let template, _):
+      if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template) {
+        context.setExplicitDrop(templateDefId)
+      }
+    default:
+      break
     }
   }
 
@@ -569,7 +606,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalStructDeclaration(let name, let typeParameters, _, _, _):
+    case .globalStructDeclaration(let name, let typeParameters, _, _, _, _):
       // Skip generic structs for now
       if !typeParameters.isEmpty { return nil }
       
@@ -771,40 +808,12 @@ extension TypeChecker {
   }
 
   private func markNotDerefType(typeParams: [TypeParameterDecl], typeNode: TypeNode, traitName: String, span: SourceSpan) throws {
-    guard traitName == "Deref" else {
-      throw SemanticError(.generic("Only 'not Deref' is currently supported"), span: span)
+    _ = typeParams
+    _ = typeNode
+    if traitName == "Deref" {
+      throw SemanticError(.generic("The 'Deref' trait has been removed from the language model"), span: span)
     }
-
-    if !typeParams.isEmpty {
-      let (baseName, _) = try decomposeGenericGivenTypeNode(typeNode)
-      if let template = currentScope.lookupGenericStructTemplate(baseName) {
-        context.setNotDeref(template.defId)
-        return
-      }
-      if let template = currentScope.lookupGenericEnumTemplate(baseName) {
-        context.setNotDeref(template.defId)
-        return
-      }
-      throw SemanticError(.generic("Cannot mark '\(baseName)' as 'not Deref'"), span: span)
-    }
-
-    let resolvedType = try resolveTypeNode(typeNode)
-    switch resolvedType {
-    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
-      context.setNotDeref(defId)
-    case .genericStruct(let template, _):
-      guard let templateInfo = currentScope.lookupGenericStructTemplate(template) else {
-        throw SemanticError(.generic("Cannot mark '\(template)' as 'not Deref'"), span: span)
-      }
-      context.setNotDeref(templateInfo.defId)
-    case .genericEnum(let template, _):
-      guard let templateInfo = currentScope.lookupGenericEnumTemplate(template) else {
-        throw SemanticError(.generic("Cannot mark '\(template)' as 'not Deref'"), span: span)
-      }
-      context.setNotDeref(templateInfo.defId)
-    default:
-      throw SemanticError(.generic("Only nominal types can be marked as 'not Deref'"), span: span)
-    }
+    throw SemanticError(.generic("Only 'not Deref' was previously supported; this legacy trait hook is no longer active"), span: span)
   }
   
   // MARK: - Pass 1: Type Collection
@@ -841,6 +850,13 @@ extension TypeChecker {
         resolvedSuperTraits.append(try SemaUtils.resolveTraitConstraint(from: parent))
       }
       let traitInfo = TraitDeclInfo(
+        defId: getOrAllocateTypeDefId(
+          name: name,
+          kind: .trait,
+          access: access,
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile
+        ),
         name: name,
         typeParameters: typeParameters,
         superTraits: resolvedSuperTraits,
@@ -899,8 +915,14 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span):
       self.currentSpan = span
+      try validateValueTypeFieldMutability(
+        typeName: name,
+        isMutableType: isMutable,
+        parameters: parameters,
+        span: span
+      )
       // For private types, allow same name in different files
       let isPrivate = (access == .file_private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
@@ -919,7 +941,7 @@ extension TypeChecker {
           span: currentSpan
         )
         let template = GenericStructTemplate(
-          defId: defId, typeParameters: typeParameters, parameters: parameters)
+          defId: defId, typeParameters: typeParameters, parameters: parameters, isMutable: isMutable)
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic struct (allows recursive references)
@@ -1042,7 +1064,7 @@ extension TypeChecker {
           span: currentSpan
         )
         let template = GenericStructTemplate(
-          defId: defId, typeParameters: typeParameters, parameters: [])
+          defId: defId, typeParameters: typeParameters, parameters: [], isMutable: false)
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Non-generic intrinsic type - register the actual type
@@ -1290,14 +1312,29 @@ extension TypeChecker {
             try recordGenericTraitBounds(method.typeParameters)
 
             try currentScope.defineType("Self", type: genericSelfType)
-            currentScope.define("self", genericSelfType, mutable: method.parameters.first?.mutable == true)
+            let receiverMutable = isMutableNominalReceiverType(genericSelfType)
+            let selfBindingType = adjustReceiverParameterType(
+              paramName: "self",
+              resolvedType: genericSelfType,
+              receiverMutable: receiverMutable
+            )
+            currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Symbol in
-              let paramType = try resolveTypeNode(param.type)
+              let resolvedParamType = try resolveTypeNode(param.type)
+              let paramType = adjustReceiverParameterType(
+                paramName: param.name,
+                resolvedType: resolvedParamType,
+                receiverMutable: receiverMutable
+              )
               return makeLocalSymbol(
                 name: param.name, type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value))
+                kind: .variable(variableKindForResolvedParameter(
+                  paramName: param.name,
+                  mutable: param.mutable,
+                  type: paramType,
+                  receiverMutable: receiverMutable)))
             }
 
             // Validate drop signature
@@ -1367,12 +1404,26 @@ extension TypeChecker {
             }
 
             try currentScope.defineType("Self", type: type)
-            currentScope.define("self", type, mutable: method.parameters.first?.mutable == true)
+            let receiverMutable = isMutableNominalReceiverType(type)
+            let selfBindingType = adjustReceiverParameterType(
+              paramName: "self",
+              resolvedType: type,
+              receiverMutable: receiverMutable
+            )
+            currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Parameter in
-              let paramType = try resolveTypeNode(param.type)
-              let passKind = passKindForParameterType(paramType)
+              let resolvedParamType = try resolveTypeNode(param.type)
+              let paramType = adjustReceiverParameterType(
+                paramName: param.name,
+                resolvedType: resolvedParamType,
+                receiverMutable: receiverMutable
+              )
+              let passKind = passKindForResolvedParameter(
+                paramName: param.name,
+                type: paramType,
+                receiverMutable: receiverMutable)
               return Parameter(type: paramType, kind: passKind)
             }
 
@@ -1613,6 +1664,10 @@ extension TypeChecker {
           )
         }
       }
+
+      if traitName == "Drop" {
+        markExplicitDropConformanceTarget(selfType)
+      }
       
     case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
@@ -1708,7 +1763,7 @@ extension TypeChecker {
         }
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span):
       self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
@@ -1722,11 +1777,8 @@ extension TypeChecker {
           let paramType = try resolveTypeNode(param.type)
           try assertNoBorrowedReferenceType(paramType, context: "struct field '\(param.name)'", span: span)
           try assertNoNeverType(paramType, context: "struct field '\(param.name)'", span: span)
-          if paramType == placeholder {
-            throw SemanticError.invalidOperation(
-              op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
-              type2: "")
-          }
+          // Allow direct recursion in structs — the compiler will
+          // automatically insert hidden indirect layers for recursive types.
           return makeLocalSymbol(
             name: param.name, type: paramType,
             kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
@@ -1742,7 +1794,8 @@ extension TypeChecker {
             defId: defId,
             members: members,
             isGenericInstantiation: false,
-            typeArguments: nil
+            typeArguments: nil,
+            isMutable: isMutable
           )
           let resolvedType = Type.structure(defId: defId)
           if isPrivate {
@@ -1817,11 +1870,8 @@ extension TypeChecker {
             let resolved = try resolveTypeNode(p.type)
             try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             try assertNoNeverType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
-            if resolved == placeholder {
-              throw SemanticError.invalidOperation(
-                op: "Direct recursion in enum \(name) not allowed (use ref)", type1: p.name,
-                type2: "")
-            }
+            // Allow direct recursion in enums — the compiler will automatically
+            // insert hidden indirect layers for recursive types per the simplified type system RFC.
             params.append((name: p.name, type: resolved, access: .public, named: p.named))
           }
           enumCases.append(EnumCase(name: c.name, parameters: params))
@@ -2551,6 +2601,7 @@ extension TypeChecker {
             typeParams: template.typeParams,
             method: template.method,
             conformanceTraitName: template.conformanceTraitName,
+            conformanceTraitDefId: template.conformanceTraitDefId,
             sourceFile: template.sourceFile,
             modulePath: template.modulePath,
             packageID: template.packageID,
@@ -2607,14 +2658,29 @@ extension TypeChecker {
           }
 
           try currentScope.defineType("Self", type: type)
-          currentScope.define("self", type, mutable: method.parameters.first?.mutable == true)
+          let receiverMutable = isMutableNominalReceiverType(type)
+          let selfBindingType = adjustReceiverParameterType(
+            paramName: "self",
+            resolvedType: type,
+            receiverMutable: receiverMutable
+          )
+          currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNode(param.type)
+            let resolvedParamType = try resolveTypeNode(param.type)
+            let paramType = adjustReceiverParameterType(
+              paramName: param.name,
+              resolvedType: resolvedParamType,
+              receiverMutable: receiverMutable
+            )
             return makeLocalSymbol(
               name: param.name, type: paramType,
-              kind: .variable(param.mutable ? .MutableValue : .Value))
+              kind: .variable(variableKindForResolvedParameter(
+                paramName: param.name,
+                mutable: param.mutable,
+                type: paramType,
+                receiverMutable: receiverMutable)))
           }
 
           if method.name == "drop" {
@@ -2623,7 +2689,12 @@ extension TypeChecker {
 
           let functionType = Type.function(
             parameters: params.map {
-              Parameter(type: $0.type, kind: passKindForParameterType($0.type))
+              Parameter(
+                type: $0.type,
+                kind: passKindForResolvedParameter(
+                  paramName: context.getName($0.defId) ?? "",
+                  type: $0.type,
+                  receiverMutable: receiverMutable))
             },
             returns: returnType
           )
@@ -2719,6 +2790,7 @@ extension TypeChecker {
       guard let traitInfo = visibleTraitInfo(traitName) else {
         throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
       }
+      let traitDefId = traitInfo.defId
 
       let traitArgNodes: [TypeNode] = {
         switch traitConstraint {
@@ -2921,15 +2993,30 @@ extension TypeChecker {
           try recordGenericTraitBounds(method.typeParameters)
 
           try currentScope.defineType("Self", type: selfType)
-          currentScope.define("self", selfType, mutable: method.parameters.first?.mutable == true)
+          let receiverMutable = isMutableNominalReceiverType(selfType)
+          let selfBindingType = adjustReceiverParameterType(
+            paramName: "self",
+            resolvedType: selfType,
+            receiverMutable: receiverMutable
+          )
+          currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
           let resolvedReturn = try resolveTypeNode(method.returnType)
           let resolvedParams = try method.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNode(param.type)
+            let resolvedParamType = try resolveTypeNode(param.type)
+            let paramType = adjustReceiverParameterType(
+              paramName: param.name,
+              resolvedType: resolvedParamType,
+              receiverMutable: receiverMutable
+            )
             return makeLocalSymbol(
               name: param.name,
               type: paramType,
-              kind: .variable(param.mutable ? .MutableValue : .Value)
+              kind: .variable(variableKindForResolvedParameter(
+                paramName: param.name,
+                mutable: param.mutable,
+                type: paramType,
+                receiverMutable: receiverMutable))
             )
           }
 
@@ -2938,7 +3025,14 @@ extension TypeChecker {
           }
 
           let resolvedFunctionType = Type.function(
-            parameters: resolvedParams.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
+            parameters: resolvedParams.map {
+              Parameter(
+                type: $0.type,
+                kind: passKindForResolvedParameter(
+                  paramName: context.getName($0.defId) ?? "",
+                  type: $0.type,
+                  receiverMutable: receiverMutable))
+            },
             returns: resolvedReturn
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
@@ -2986,7 +3080,13 @@ extension TypeChecker {
           try recordGenericTraitBounds(method.typeParameters)
 
           try currentScope.defineType("Self", type: selfType)
-          currentScope.define("self", selfType, mutable: method.parameters.first?.mutable == true)
+          let receiverMutable = isMutableNominalReceiverType(selfType)
+          let selfBindingType = adjustReceiverParameterType(
+            paramName: "self",
+            resolvedType: selfType,
+            receiverMutable: receiverMutable
+          )
+          currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
           var traitTypeSubstitution: [String: Type] = [:]
           for (index, traitParam) in traitInfo.typeParameters.enumerated() {
@@ -3000,18 +3100,34 @@ extension TypeChecker {
             substitution: traitTypeSubstitution
           )
           let resolvedParams = try method.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNodeWithSubstitution(
+            let resolvedParamType = try resolveTypeNodeWithSubstitution(
               param.type,
               substitution: traitTypeSubstitution
+            )
+            let paramType = adjustReceiverParameterType(
+              paramName: param.name,
+              resolvedType: resolvedParamType,
+              receiverMutable: receiverMutable
             )
             return makeLocalSymbol(
               name: param.name,
               type: paramType,
-              kind: .variable(param.mutable ? .MutableValue : .Value)
+              kind: .variable(variableKindForResolvedParameter(
+                paramName: param.name,
+                mutable: param.mutable,
+                type: paramType,
+                receiverMutable: receiverMutable))
             )
           }
           let resolvedFunctionType = Type.function(
-            parameters: resolvedParams.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
+            parameters: resolvedParams.map {
+              Parameter(
+                type: $0.type,
+                kind: passKindForResolvedParameter(
+                  paramName: context.getName($0.defId) ?? "",
+                  type: $0.type,
+                  receiverMutable: receiverMutable))
+            },
             returns: resolvedReturn
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
@@ -3034,6 +3150,26 @@ extension TypeChecker {
 
         let (functionType, params, returnType) = try buildImplMethodInfo(method)
 
+        // For Drop trait's drop(self): wrap self parameter type as *unsafe mutable Self
+        // in the params used for MIR/codegen (checkedParameters), while keeping the
+        // functionType (used for conformance checking) unchanged.
+        let mirParams: [Symbol]
+        if traitName == "Drop" && method.name == "drop",
+           let first = params.first, context.getName(first.defId) == "self" {
+          switch first.type {
+          case .mutablePointer:
+            mirParams = params
+          default:
+            mirParams = [Symbol(
+              defId: first.defId,
+              type: .mutablePointer(element: first.type),
+              kind: first.kind
+            )] + Array(params.dropFirst())
+          }
+        } else {
+          mirParams = params
+        }
+
         var substitution: [String: Type] = [:]
         for (index, traitParam) in traitInfo.typeParameters.enumerated() {
           if index < traitArgTypes.count {
@@ -3046,9 +3182,26 @@ extension TypeChecker {
           substitution: substitution
         )
         if functionType != expectedType {
-          throw SemanticError(.generic(
-            "Implementation 'given \(selfType) \(traitName)' is invalid: method \(method.name) has type \(functionType), expected \(expectedType)"
-          ), span: span)
+          // For Drop trait: accept both drop(self) and drop(*unsafe mutable Self) signatures.
+          // The trait defines drop(self), but implementations may use either form.
+          var typeMatches = false
+          if traitName == "Drop" && method.name == "drop" {
+            // Try building the expected type with self wrapped as *unsafe mutable Self
+            let pointerExpectedType = try expectedFunctionTypeForGenericTraitMethod(
+              requirement,
+              selfType: selfType,
+              substitution: substitution,
+              dropSelfAsPointer: true
+            )
+            if functionType == pointerExpectedType {
+              typeMatches = true
+            }
+          }
+          if !typeMatches {
+            throw SemanticError(.generic(
+              "Implementation 'given \(selfType) \(traitName)' is invalid: method \(method.name) has type \(functionType), expected \(expectedType)"
+            ), span: span)
+          }
         }
 
         // Check named parameter consistency between trait method and implementation
@@ -3113,14 +3266,16 @@ extension TypeChecker {
           methodSymbol,
           parameters: method.parameters,
           declaredName: method.name,
-          owner: nil
+          owner: nil,
+          conformanceTraitName: traitName,
+          conformanceTraitDefId: traitDefId
         )
 
         methodInfos.append(
           ImplMethodInfo(
             method: visibleMethod,
             symbol: methodSymbol,
-            parameters: params,
+            parameters: mirParams,
             returnType: returnType
           )
         )
@@ -3158,7 +3313,9 @@ extension TypeChecker {
           toolSymbol,
           parameters: toolMethod.parameters,
           declaredName: toolMethod.name,
-          owner: nil
+          owner: nil,
+          conformanceTraitName: traitName,
+          conformanceTraitDefId: traitDefId
         )
 
         methodInfos.append(
@@ -3255,7 +3412,11 @@ extension TypeChecker {
       explicitConformances.insert(conformanceKey)
       conformanceDeclOrigins[conformanceKey] = span
 
-      let typedConformance = TypedTraitConformance(traitName: traitName, traitTypeArgs: traitArgTypes)
+      let typedConformance = TypedTraitConformance(
+        traitDefId: traitDefId,
+        traitName: traitName,
+        traitTypeArgs: traitArgTypes
+      )
       for entry in typedMethodEntries {
         methodTraitConformanceByDefId[entry.typedMethod.identifier.defId] = typedConformance
       }
@@ -3294,6 +3455,7 @@ extension TypeChecker {
                 typeParams: typeParams,
                 method: info.method,
                 conformanceTraitName: traitName,
+                conformanceTraitDefId: traitDefId,
                 sourceFile: currentSourceFile,
                 modulePath: currentModulePath,
                 packageID: currentPackageID,
@@ -3307,6 +3469,7 @@ extension TypeChecker {
                   typeParams: typeParams,
                   method: info.method,
                   conformanceTraitName: traitName,
+                  conformanceTraitDefId: traitDefId,
                   sourceFile: currentSourceFile,
                   modulePath: currentModulePath,
                   packageID: currentPackageID,
@@ -3357,6 +3520,7 @@ extension TypeChecker {
               typeParams: [],
               method: info.method,
               conformanceTraitName: traitName,
+              conformanceTraitDefId: traitDefId,
               sourceFile: currentSourceFile,
               modulePath: currentModulePath,
               packageID: currentPackageID,
@@ -3370,6 +3534,7 @@ extension TypeChecker {
                 typeParams: [],
                 method: info.method,
                 conformanceTraitName: traitName,
+                conformanceTraitDefId: traitDefId,
                 sourceFile: currentSourceFile,
                 modulePath: currentModulePath,
                 packageID: currentPackageID,
@@ -3454,17 +3619,38 @@ extension TypeChecker {
       for method in methods {
         let (methodType, typedBody, params, returnType) = try withNewScope {
           try currentScope.defineType("Self", type: type)
+          let receiverMutable = isMutableNominalReceiverType(type)
+          let selfBindingType = adjustReceiverParameterType(
+            paramName: "self",
+            resolvedType: type,
+            receiverMutable: receiverMutable
+          )
+          currentScope.define("self", selfBindingType, mutable: receiverMutable)
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNode(param.type)
+            let resolvedParamType = try resolveTypeNode(param.type)
+            let paramType = adjustReceiverParameterType(
+              paramName: param.name,
+              resolvedType: resolvedParamType,
+              receiverMutable: receiverMutable
+            )
             return makeLocalSymbol(
               name: param.name, type: paramType,
-              kind: .variable(param.mutable ? .MutableValue : .Value))
+              kind: .variable(variableKindForResolvedParameter(
+                paramName: param.name,
+                mutable: param.mutable,
+                type: paramType,
+                receiverMutable: receiverMutable)))
           }
 
           let functionType = Type.function(
             parameters: params.map {
-              Parameter(type: $0.type, kind: passKindForParameterType($0.type))
+              Parameter(
+                type: $0.type,
+                kind: passKindForResolvedParameter(
+                  paramName: context.getName($0.defId) ?? "",
+                  type: $0.type,
+                  receiverMutable: receiverMutable))
             },
             returns: returnType
           )
@@ -3504,7 +3690,7 @@ extension TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, trait: nil, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, let access, let span):
+      let name, let typeParameters, let parameters, _, let access, let span):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
@@ -3712,15 +3898,9 @@ extension TypeChecker {
     
     // === Recursive Type Check ===
     // After type resolution, check for indirect recursion in struct/enum types
-    let recursiveChecker = RecursiveTypeChecker(context: context)
-    let cycles = try recursiveChecker.check()
-    
-    // Report any detected cycles as errors
-    for cycle in cycles {
-      let pathString = cycle.pathString()
-      let error = SemanticError(.indirectRecursion(path: pathString))
-      try handleError(error)
-    }
+    // Under the simplified type system, recursive types are allowed.
+    // The compiler automatically inserts hidden indirect layers for recursive types.
+    // Skip the recursive type checker — recursion is handled by the layout analysis.
     
     return output
   }

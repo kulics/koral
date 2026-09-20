@@ -373,8 +373,11 @@ final class MIRVerifier {
         if case .traitObject = inner {
           try fail(function, "trait object downcast intrinsic result type must be a concrete reference")
         }
+      case .structure, .enum, .genericStruct, .genericEnum:
+        // New syntax: bare concrete type (no * prefix) — valid downcast result
+        break
       default:
-        try fail(function, "trait object downcast intrinsic result is not a managed reference: \(context.getDebugName(resultType))")
+        try fail(function, "trait object downcast intrinsic result is not a valid type: \(context.getDebugName(resultType))")
       }
     case .makeRef(let ptr, let owner, _),
          .makeMutRef(let ptr, let owner, _),

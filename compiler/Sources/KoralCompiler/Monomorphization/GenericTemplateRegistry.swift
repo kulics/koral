@@ -4,6 +4,9 @@
 
 /// Information about a trait declaration, used for trait conformance checking.
 public struct TraitDeclInfo {
+    /// Stable definition identity for this trait.
+    public let defId: DefId
+
     /// The name of the trait
     public let name: String
     
@@ -24,6 +27,7 @@ public struct TraitDeclInfo {
     
     /// Creates a new trait declaration info.
     public init(
+        defId: DefId,
         name: String,
         typeParameters: [TypeParameterDecl] = [],
         superTraits: [TraitConstraint],
@@ -31,6 +35,7 @@ public struct TraitDeclInfo {
         access: AccessModifier,
         modulePath: [String] = []
     ) {
+        self.defId = defId
         self.name = name
         self.typeParameters = typeParameters
         self.superTraits = superTraits
@@ -46,6 +51,7 @@ public struct GenericExtensionMethodTemplate {
     public let typeParams: [TypeParameterDecl]
     public let method: MethodDeclaration
     public let conformanceTraitName: String?
+    public let conformanceTraitDefId: DefId?
     public let sourceFile: String
     public let modulePath: [String]
     public let packageID: String
@@ -59,6 +65,7 @@ public struct GenericExtensionMethodTemplate {
         typeParams: [TypeParameterDecl],
         method: MethodDeclaration,
         conformanceTraitName: String? = nil,
+        conformanceTraitDefId: DefId? = nil,
         sourceFile: String = "",
         modulePath: [String] = [],
         packageID: String = "",
@@ -69,6 +76,7 @@ public struct GenericExtensionMethodTemplate {
         self.typeParams = typeParams
         self.method = method
         self.conformanceTraitName = conformanceTraitName
+        self.conformanceTraitDefId = conformanceTraitDefId
         self.sourceFile = sourceFile
         self.modulePath = modulePath
         self.packageID = packageID
@@ -88,17 +96,20 @@ public struct ReceiverMethodDispatchInfo: Hashable {
     public let methodName: String
     public let owner: ReceiverMethodOwner?
     public let conformanceTraitName: String?
+    public let conformanceTraitDefId: DefId?
 
     public init(
         methodDefId: DefId,
         methodName: String,
         owner: ReceiverMethodOwner?,
-        conformanceTraitName: String? = nil
+        conformanceTraitName: String? = nil,
+        conformanceTraitDefId: DefId? = nil
     ) {
         self.methodDefId = methodDefId
         self.methodName = methodName
         self.owner = owner
         self.conformanceTraitName = conformanceTraitName
+        self.conformanceTraitDefId = conformanceTraitDefId
     }
 }
 

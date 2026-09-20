@@ -164,6 +164,7 @@ public indirect enum GlobalNode {
     name: String,
     typeParameters: [TypeParameterDecl],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+    isMutable: Bool,
     access: AccessModifier,
     span: SourceSpan
   )
@@ -242,7 +243,7 @@ extension GlobalNode {
       return span
     case .foreignFunctionDeclaration(_, _, _, _, let span):
       return span
-    case .globalStructDeclaration(_, _, _, _, let span):
+    case .globalStructDeclaration(_, _, _, _, _, let span):
       return span
     case .globalEnumDeclaration(_, _, _, _, let span):
       return span

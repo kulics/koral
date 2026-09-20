@@ -7,28 +7,26 @@ using std { .. };
 // Write strategy: data goes into internal list; auto-flush when list is full.
 // ============================================================================
 
-file_private type BufWriterStorage[W Writer](inner W, mutable buf List[UInt8], cap UInt);
-
-public type BufWriter[W Writer](file_private storage *mutable BufWriterStorage[W]);
+public type mutable BufWriter[W Writer](file_private inner W, file_private mutable buf List[UInt8], file_private cap UInt);
 
 given[W Writer] BufWriter[W] {
 
     // --- Static constructors ---
 
     public new(w W) BufWriter[W] =
-        BufWriter[W](box(BufWriterStorage[W](w, List[UInt8].with_capacity(4096), 4096)));
+        BufWriter[W](w, List[UInt8].with_capacity(4096), 4096);
 
     public with_capacity(cap UInt, w W) BufWriter[W] = {
         if cap == 0 then {
             panic("BufWriter.with_capacity: zero capacity");
         };
-        return BufWriter[W](box(BufWriterStorage[W](w, List[UInt8].with_capacity(cap), cap)));
+        return BufWriter[W](w, List[UInt8].with_capacity(cap), cap);
     };
 
     // --- Instance methods ---
 
-    public write_byte(*self, b UInt8) Result[Void] = {
-        if self.storage.buf.count() >= self.storage.cap then {
+    public write_byte(self, b UInt8) Result[Void] = {
+        if self.buf.count() >= self.cap then {
             let flush_result = self.flush();
             when flush_result in {
                 .Ok(_) then {},
@@ -37,11 +35,11 @@ given[W Writer] BufWriter[W] {
                 },
             };
         };
-        self.storage.buf.push(b);
+        self.buf.push(b);
         return Result[Void].Ok({});
     };
 
-    public write_string(*self, s String) Result[Void] = {
+    public write_string(self, s String) Result[Void] = {
         let bytes = s.to_bytes();
         let result = self.write(from: bytes, span: ..);
         when result in {
@@ -54,7 +52,7 @@ given[W Writer] BufWriter[W] {
         };
     };
 
-    public write_line(*self, s String) Result[Void] = {
+    public write_line(self, s String) Result[Void] = {
         let result = self.write_string(s);
         when result in {
             .Ok(_) then {
@@ -66,7 +64,7 @@ given[W Writer] BufWriter[W] {
         };
     };
 
-    public write_rune(*self, r Rune) Result[Void] = {
+    public write_rune(self, r Rune) Result[Void] = {
         let cp = r.to_uint32();
         // 1-byte ASCII
         if cp < 128 then {
@@ -162,7 +160,7 @@ given[W Writer] BufWriter[W] {
 given[W Writer] BufWriter[W] as Writer {
 
     // Writes data from src[range] into internal buffer. Auto-flushes when full.
-    public write(*self, from: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public write(self, from: List[UInt8], span: Range[UInt]) Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -171,13 +169,13 @@ given[W Writer] BufWriter[W] as Writer {
             return Result[UInt].Ok(0);
         };
 
-        let remaining_cap = self.storage.cap - self.storage.buf.count();
+        let remaining_cap = self.cap - self.buf.count();
         if available <= remaining_cap then {
-            self.storage.buf.push_sublist(from, start..<end);
+            self.buf.push_sublist(from, start..<end);
             return Result[UInt].Ok(available);
         };
 
-        if self.storage.buf.count() > 0 then {
+        if self.buf.count() > 0 then {
             when self.flush() in {
                 .Ok(_) then {},
                 .Error(e) then {
@@ -186,13 +184,13 @@ given[W Writer] BufWriter[W] as Writer {
             };
         };
 
-        let new_remaining = self.storage.cap - self.storage.buf.count();
+        let new_remaining = self.cap - self.buf.count();
         if available <= new_remaining then {
-            self.storage.buf.push_sublist(from, start..<end);
+            self.buf.push_sublist(from, start..<end);
             return Result[UInt].Ok(available);
         };
 
-        let direct_result = self.storage.inner.write_all(from: from, span: start..<end);
+        let direct_result = self.inner.write_all(from, start..<end);
         when direct_result in {
             .Ok(_) then {
                 return Result[UInt].Ok(available);
@@ -204,46 +202,46 @@ given[W Writer] BufWriter[W] as Writer {
     };
 
     // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
-    public flush(*self) Result[Void] = {
-        let total = self.storage.buf.count();
+    public flush(self) Result[Void] = {
+        let total = self.buf.count();
         if total == 0 then {
             return Result[Void].Ok({});
         };
 
         let mutable start UInt = 0;
         while start < total then {
-            when self.storage.inner.write(from: self.storage.buf, span: start..<total) in {
+            when self.inner.write(self.buf, start..<total) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return Result[Void].Error(box(IoError.WriteZero()));
+                        return Result[Void].Error(IoError.WriteZero());
                     };
                     start += n;
                 },
                 .Error(e) then {
                     if start > 0 then {
-                        let remain = self.storage.buf.sublist(start..<total);
-                        self.storage.buf.clear();
-                        self.storage.buf.push_list(remain);
+                        let remain = self.buf.sublist(start..<total);
+                        self.buf.clear();
+                        self.buf.push_list(remain);
                     };
                     return Result[Void].Error(e);
                 },
             };
         };
 
-        self.storage.buf.clear();
+        self.buf.clear();
         return Result[Void].Ok({});
     };
 };
 
 given[W Writer and Seeker] BufWriter[W] as Seeker {
 
-    public seek(*self, pos SeekOrigin) Result[UInt64] = {
+    public seek(self, pos SeekOrigin) Result[UInt64] = {
         when self.flush() in {
             .Ok(_) then {},
             .Error(e) then {
                 return Result[UInt64].Error(e);
             },
         };
-        return self.storage.inner.seek(pos);
+        return self.inner.seek(pos);
     };
 };

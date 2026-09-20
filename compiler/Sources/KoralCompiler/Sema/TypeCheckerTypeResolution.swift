@@ -266,7 +266,13 @@ extension TypeChecker {
         return t
       }
       if visibleTraitInfo(name) != nil {
-        throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
       }
       if let importError = explicitImportErrorForUnresolvedType(name) {
         throw importError
@@ -359,6 +365,15 @@ extension TypeChecker {
         
         // Return parameterized type instead of instantiating
         return .genericEnum(template: base, args: resolvedArgs)
+      } else if visibleTraitInfo(base) != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       } else {
         throw SemanticError.undefinedType(base)
       }
@@ -402,6 +417,15 @@ extension TypeChecker {
       if let template = currentScope.lookupGenericEnumTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
         return .genericEnum(template: base, args: resolvedArgs)
+      }
+      if visibleTraitInfo(base) != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
       }
       
       // Conservative default to generic struct if template is unresolved (diagnosed later)
@@ -460,16 +484,23 @@ extension TypeChecker {
           if case .genericParameter(let argName) = args[i] {
             // Check if the generic parameter has the required trait bound
             let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == traitName }) ?? false
-            if traitName != "Any" && !hasRequiredBound {
+            if traitName != "Any" && traitName != "mutable" && !hasRequiredBound {
               let ctx = "checking constraint \(param.name): \(traitName)"
               throw SemanticError(.generic(
                 "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"
               ), span: currentSpan)
             }
-            // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
+            // If bounds exist and contain the trait (or trait is Any/mutable), constraint is satisfied
             continue
           }
-          
+
+          // 'mutable' constraint: type must be declared as 'type mutable'
+          if traitName == "mutable" {
+            let ctx = "checking constraint \(param.name): mutable"
+            try enforceMutableConstraint(args[i], context: ctx)
+            continue
+          }
+
           let ctx = "checking constraint \(param.name): \(traitName)"
           try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
           
@@ -552,33 +583,42 @@ extension TypeChecker {
     return traitInfo
   }
 
+  /// Checks that a type satisfies the 'mutable' constraint — i.e., it is declared as 'type mutable'.
+  private func enforceMutableConstraint(_ type: Type, context: String? = nil) throws {
+    let satisfied: Bool
+    switch type {
+    case .structure(let defId):
+      satisfied = context_isTypeMutable(defId)
+    case .genericStruct(let templateName, _):
+      if let defId = defIdMap.lookupGenericStructTemplateDefId(templateName) {
+        satisfied = context_isTypeMutable(defId)
+      } else {
+        satisfied = false
+      }
+    case .genericParameter:
+      // Generic parameters with 'mutable' bound are checked at call sites
+      return
+    default:
+      satisfied = false
+    }
+    if !satisfied {
+      let ctx = context.map { " (\($0))" } ?? ""
+      throw SemanticError(.generic(
+        "Type '\(type)' does not satisfy the 'mutable' constraint\(ctx). Only types declared with 'type mutable' can be used as weak references."
+      ), span: currentSpan)
+    }
+  }
+
+  private func context_isTypeMutable(_ defId: DefId) -> Bool {
+    return context.isTypeMutable(defId) || context.isGenericStructTemplateMutable(defId)
+  }
+
   private func enforceTraitConformance(
     _ selfType: Type,
     traitRef: CanonicalTraitRef,
     context: String? = nil
   ) throws {
     if traitRef.traitName == "Any" {
-      return
-    }
-
-    if traitRef.traitName == "Deref" {
-      if case .traitObject = selfType {
-        throw SemanticError(.generic(
-          "Trait object type '\(selfType)' does not satisfy 'Deref' constraint"
-        ), span: currentSpan)
-      }
-      if case .opaque = selfType {
-        throw SemanticError(.generic(
-          "Opaque type '\(selfType)' does not satisfy 'Deref' constraint"
-        ), span: currentSpan)
-      }
-      if case .genericParameter(let paramName) = selfType, !hasTraitBound(paramName, "Deref") {
-        var msg = "Type \(selfType) does not explicitly implement trait Deref"
-        if let context {
-          msg += " (\(context))"
-        }
-        throw SemanticError(.generic(msg), span: currentSpan)
-      }
       return
     }
 
@@ -609,7 +649,7 @@ extension TypeChecker {
     _ = try validateCanonicalTraitRef(traitRef)
 
     if let innerType = typeModifierInnerType(selfType) {
-      if case .genericParameter = innerType, traitRef.traitName != "Deref" {
+      if case .genericParameter = innerType {
         traitConformanceCache[cacheKey] = true
         return
       }
@@ -684,25 +724,45 @@ extension TypeChecker {
   func expectedFunctionTypeForGenericTraitMethod(
     _ method: TraitMethodSignature,
     selfType: Type,
-    substitution: [String: Type]
+    substitution: [String: Type],
+    dropSelfAsPointer: Bool = false
   ) throws -> Type {
     return try withNewScope {
       // Bind Self type
       try currentScope.defineType("Self", type: selfType)
-      
+
       // Bind trait type parameters
       for (name, type) in substitution {
         try currentScope.defineType(name, type: type)
       }
-      
+
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
         currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
       }
 
       let params: [Parameter] = try method.parameters.map { param in
-        let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: passKindForParameterType(t))
+        var resolvedType = try resolveTypeNode(param.type)
+        // For Drop trait: optionally wrap self as *unsafe mutable Self
+        if dropSelfAsPointer && param.name == "self" {
+          resolvedType = .mutablePointer(element: resolvedType)
+        }
+        let t = adjustReceiverParameterType(
+          paramName: param.name,
+          resolvedType: resolvedType,
+          receiverMutable: isMutableNominalReceiverType(selfType)
+        )
+        // When dropSelfAsPointer, self is a raw pointer, not a receiver reference
+        let passKind: PassKind
+        if dropSelfAsPointer && param.name == "self" {
+          passKind = .byVal
+        } else {
+          passKind = passKindForResolvedParameter(
+            paramName: param.name,
+            type: t,
+            receiverMutable: isMutableNominalReceiverType(selfType))
+        }
+        return Parameter(type: t, kind: passKind)
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)
@@ -897,8 +957,11 @@ extension TypeChecker {
       return expr
     }
 
-    // Get the concrete type from the source — only T ref can convert to trait object
+    // Get the concrete type from the source.
+    // If needed, materialize a temporary and take an implicit reference so value expressions
+    // can be erased to trait objects without user-facing managed ref syntax.
     let concreteType: Type
+    let sourceForConversion: TypedExpressionNode
     switch expr.type {
     case .reference(let inner):
       if expectsMutableReference {
@@ -906,12 +969,56 @@ extension TypeChecker {
       }
       if case .traitObject = inner { return expr } // trait object → trait object: not supported
       concreteType = inner
+      sourceForConversion = expr
     case .mutableReference(let inner):
       if case .traitObject = inner { return expr } // trait object → trait object: not supported
       concreteType = inner
+      sourceForConversion = expr
     default:
-      // Value types cannot be directly converted to trait object — must use T ref
-      return expr
+      if expectsMutableReference {
+        if expr.valueCategory == .lvalue, canTakeMutableReference(to: expr) {
+          concreteType = expr.type
+          sourceForConversion = .referenceExpression(
+            expression: expr,
+            type: .mutableReference(inner: expr.type)
+          )
+        } else {
+          return expr
+        }
+      } else if expr.valueCategory == .lvalue {
+        concreteType = expr.type
+        sourceForConversion = .referenceExpression(
+          expression: expr,
+          type: .reference(inner: expr.type)
+        )
+      } else {
+        let tempSymbol = nextSynthSymbol(prefix: "trait_obj_src", type: expr.type)
+        let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
+        let tempRef: TypedExpressionNode = .referenceExpression(
+          expression: tempVar,
+          type: .reference(inner: expr.type)
+        )
+
+        if traitTypeArgs.isEmpty {
+          if case .genericParameter(let paramName) = expr.type,
+             hasTraitBound(paramName, traitName) {
+            // Bound generic parameters can be erased directly to the trait object.
+          } else {
+            try enforceTraitConformance(expr.type, traitName: traitName)
+          }
+        } else {
+          try enforceGenericTraitConformance(expr.type, traitName: traitName, traitTypeArgs: traitTypeArgs, context: nil)
+        }
+
+        let conversion: TypedExpressionNode = .traitObjectConversion(
+          inner: tempRef,
+          traitName: traitName,
+          traitTypeArgs: traitTypeArgs,
+          concreteType: expr.type,
+          type: expected
+        )
+        return .makeLetBlock(identifier: tempSymbol, value: expr, body: conversion, type: expected)
+      }
     }
 
     // Check trait conformance (with type args if generic trait)
@@ -927,7 +1034,7 @@ extension TypeChecker {
     }
 
     return .traitObjectConversion(
-      inner: expr,
+      inner: sourceForConversion,
       traitName: traitName,
       traitTypeArgs: traitTypeArgs,
       concreteType: concreteType,

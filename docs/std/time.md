@@ -58,7 +58,7 @@ given ClockTime as Ord {
 };
 
 given ClockTime as ToString {
-    public to_string(*self) String;
+    public to_string(self) String;
 };
 
 given ClockTime as Parseable {
@@ -96,7 +96,7 @@ given Date as Ord {
 };
 
 given Date as ToString {
-    public to_string(*self) String;
+    public to_string(self) String;
 };
 
 given Date as Parseable {
@@ -104,8 +104,8 @@ given Date as Parseable {
 };
 
 given TimeZone {
-    public name(*self) String;
-    public offset_at(*self, datetime DateTime) Duration;
+    public name(self) String;
+    public offset_at(self, datetime DateTime) Duration;
 };
 
 given DateTime {
@@ -119,25 +119,25 @@ given DateTime {
 };
 
 given DateTime {
-    public year(*self) Int;
-    public month(*self) Int;
-    public day(*self) Int;
-    public hour(*self) Int;
-    public minute(*self) Int;
-    public second(*self) Int;
-    public timezone(*self) TimeZone;
-    public date(*self) Date;
-    public time(*self) ClockTime;
-    public weekday(*self) Int;
+    public year(self) Int;
+    public month(self) Int;
+    public day(self) Int;
+    public hour(self) Int;
+    public minute(self) Int;
+    public second(self) Int;
+    public timezone(self) TimeZone;
+    public date(self) Date;
+    public time(self) ClockTime;
+    public weekday(self) Int;
 };
 
 given DateTime {
-    public to_unix_timestamp(*self) Duration;
-    public to_unix_seconds(*self) Int64;
-    public in_timezone(*self, timezone TimeZone) DateTime;
-    public in_utc(*self) DateTime;
-    public in_local(*self) DateTime;
-    public elapsed(*self) Duration;
+    public to_unix_timestamp(self) Duration;
+    public to_unix_seconds(self) Int64;
+    public in_timezone(self, timezone TimeZone) DateTime;
+    public in_utc(self) DateTime;
+    public in_local(self) DateTime;
+    public elapsed(self) Duration;
 };
 
 given DateTime as Add[Duration] {
@@ -149,7 +149,7 @@ given DateTime as Sub[Duration] {
 };
 
 given DateTime {
-    public duration_to(*self, other DateTime) Duration;
+    public duration_to(self, other DateTime) Duration;
 };
 
 given DateTime as Eq {
@@ -161,7 +161,7 @@ given DateTime as Ord {
 };
 
 given DateTime as ToString {
-    public to_string(*self) String;
+    public to_string(self) String;
 };
 
 given DateTime as Parseable {

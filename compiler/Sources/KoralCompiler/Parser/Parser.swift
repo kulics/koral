@@ -399,7 +399,7 @@ public class Parser {
   func canStartTypeSyntax() -> Bool {
     switch currentToken {
     case .selfTypeKeyword, .leftBracket,
-         .ampersand, .multiply, .questionMark:
+         .multiply:
       return true
     case .identifier:
       return true

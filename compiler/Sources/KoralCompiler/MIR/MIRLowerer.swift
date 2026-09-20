@@ -52,10 +52,36 @@ final class MIRLowerer {
         globals.append(.given(type: type, trait: trait, methods: methods.map(\.identifier)))
         guard !context.containsGenericParameter(type) else { continue }
         for method in methods where shouldLowerFunction(identifier: method.identifier) {
+          // For Drop trait's drop(self): wrap self parameter type as *unsafe mutable Self
+          // so the generated C function matches __koral_TypeName_drop(struct TypeName* self).
+          // If the parameter is already *unsafe mutable Self (old syntax), keep as-is.
+          // We preserve the original defId so body references to 'self' still resolve.
+          let params: [Symbol]
+          let isDropMethod = (trait?.traitName == "Drop")
+            && (context.getName(method.identifier.defId) == "drop")
+          if isDropMethod, let first = method.parameters.first,
+             context.getName(first.defId) == "self" {
+            switch first.type {
+            case .mutablePointer:
+              // Already *unsafe mutable Self (old syntax) — keep as-is
+              params = method.parameters
+            default:
+              // drop(self) — wrap self type as *unsafe mutable Self for C calling convention
+              // Keep the same defId so body field access still resolves 'self'
+              let pointerSelf = Symbol(
+                defId: first.defId,
+                type: .mutablePointer(element: first.type),
+                kind: first.kind
+              )
+              params = [pointerSelf] + Array(method.parameters.dropFirst())
+            }
+          } else {
+            params = method.parameters
+          }
           functions.append(
             lowerFunction(
               identifier: method.identifier,
-              parameters: method.parameters,
+              parameters: params,
               body: method.body,
               kind: .given(type: type, trait: trait)
             )
@@ -73,10 +99,9 @@ final class MIRLowerer {
       staticMethodLookup: program.staticMethodLookup,
       traits: program.traits,
       conformanceWitnesses: program.conformanceWitnesses,
-      receiverMethodDispatch: program.receiverMethodDispatch,
-      escapeSummaries: [:]
+      receiverMethodDispatch: program.receiverMethodDispatch
     )
-    return MIRReferenceAllocationPromoter(program: loweredProgram).promote()
+    return loweredProgram
   }
 
   private func sortedVTableRequests() -> [VtableRequest] {
@@ -851,10 +876,18 @@ private final class MIRFunctionBuilder {
     case .traitMethodPlaceholder(let traitName, let methodName, _, _, _):
       fatalError("Unsupported trait method placeholder reached MIR lowering: \(traitName).\(methodName)")
     case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+      let loweredInner: MIRValue
+      if case .referenceExpression(let sourceExpr, let refType) = inner,
+         let place = lowerPlace(sourceExpr) {
+        let allocation: MIRReferenceAllocation = ownershipUse(for: inner) == .move ? .heapOwnedMove : .heapOwned
+        loweredInner = .ref(place, kind: referenceKind(for: refType), allocation: allocation)
+      } else {
+        loweredInner = lowerValue(inner)
+      }
       let result = materialize(
         .traitObjectConversion(
           MIRTraitObjectConversion(
-            inner: lowerValue(inner),
+            inner: loweredInner,
             sourceOwnership: ownershipUse(for: inner),
             traitName: traitName,
             traitTypeArguments: traitTypeArgs,
@@ -2458,6 +2491,9 @@ private final class MIRFunctionBuilder {
     switch targetType {
     case .reference(let concreteType), .mutableReference(let concreteType):
       return (traitName, traitTypeArguments, concreteType)
+    // New syntax: bare concrete type (no * prefix)
+    case .structure, .enum, .genericStruct, .genericEnum:
+      return (traitName, traitTypeArguments, targetType)
     default:
       return nil
     }
@@ -3052,6 +3088,9 @@ private final class MIRFunctionBuilder {
     if case .methodReference(let base, let method, _, _, _) = callee,
        !context.containsGenericParameter(callee.type),
        let callableMethod = concreteMethodSymbol(method: method, calleeType: callee.type, resultType: type) {
+      let _methodName = context.getName(method.defId) ?? ""
+      if _methodName == "count" || _methodName == "fold" {
+      }
       var argumentValues: [MIRValue] = [lowerMethodReceiverArgument(base, method: callableMethod)]
       argumentValues.reserveCapacity(arguments.count + 1)
       let methodType: Type
@@ -3336,6 +3375,11 @@ private final class MIRFunctionBuilder {
     argumentOwnerships: [MIROwnershipUse],
     type: Type
   ) -> MIRExprResult? {
+    if case .function(let sym) = callee {
+      let n = context.getName(sym.defId) ?? ""
+      if n == "count" || n == "fold" {
+      }
+    }
     let value = MIRValue.call(MIRCall(
       callee: callee,
       arguments: arguments,
@@ -3545,7 +3589,9 @@ private final class MIRFunctionBuilder {
       default:
         basePlace = lowerPlace(source)
       }
-      guard var place = basePlace else { return nil }
+      guard var place = basePlace else {
+        return lowerMaterializedMemberPathPlace(expression)
+      }
       for field in path {
         place = .field(base: place, field: field)
       }

@@ -31,11 +31,11 @@ public type Match;
 
 public type Captures;
 
-public type MatchIterator;
+public type mutable MatchIterator;
 
-public type CapturesIterator;
+public type mutable CapturesIterator;
 
-public type RegexSplitIterator;
+public type mutable RegexSplitIterator;
 ```
 
 ## Given Implementations
@@ -190,23 +190,23 @@ given Regex {
 };
 
 given Regex {
-    public matches(*self, text String) Bool;
-    public find(*self, text String) Option[Match];
+    public matches(self, text String) Bool;
+    public find(self, text String) Option[Match];
 };
 
 given Regex {
-    public find_all(*self, text String) MatchIterator;
-    public captures(*self, text String) Option[Captures];
-    public captures_all(*self, text String) CapturesIterator;
+    public find_all(self, text String) MatchIterator;
+    public captures(self, text String) Option[Captures];
+    public captures_all(self, text String) CapturesIterator;
 };
 
 given Regex {
-    public replace(*self, text String, with: String) String;
-    public replace_all(*self, text String, with: String) String;
+    public replace(self, text String, with: String) String;
+    public replace_all(self, text String, with: String) String;
 };
 
 given Regex {
-    public split(*self, text String) RegexSplitIterator;
+    public split(self, text String) RegexSplitIterator;
 };
 
 given RegexFlag {
@@ -218,35 +218,35 @@ given RegexFlag {
 };
 
 given Regex {
-    public pattern(*self) String;
-    public group_count(*self) UInt;
+    public pattern(self) String;
+    public group_count(self) UInt;
 };
 
 given Match {
-    public text(*self) String;
-    public start(*self) UInt;
-    public end(*self) UInt;
+    public text(self) String;
+    public start(self) UInt;
+    public end(self) UInt;
 };
 
 given Captures {
-    public text(*self) String;
-    public start(*self) UInt;
-    public end(*self) UInt;
-    public group_count(*self) UInt;
-    public group(*self, index UInt) Option[String];
-    public group_start(*self, index UInt) Option[UInt];
-    public group_end(*self, index UInt) Option[UInt];
+    public text(self) String;
+    public start(self) UInt;
+    public end(self) UInt;
+    public group_count(self) UInt;
+    public group(self, index UInt) Option[String];
+    public group_start(self, index UInt) Option[UInt];
+    public group_end(self, index UInt) Option[UInt];
 };
 
 given MatchIterator as Iterator[Match] {
-    public next(*mutable self) Option[Match];
+    public next(self) Option[Match];
 };
 
 given CapturesIterator as Iterator[Captures] {
-    public next(*mutable self) Option[Captures];
+    public next(self) Option[Captures];
 };
 
 given RegexSplitIterator as Iterator[String] {
-    public next(*mutable self) Option[String];
+    public next(self) Option[String];
 };
 ```

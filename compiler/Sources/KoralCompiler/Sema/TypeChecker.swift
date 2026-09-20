@@ -135,7 +135,7 @@ public class TypeChecker {
   var extensionMethods: [String: [String: Symbol]] = [:]
   // TypeName -> MethodName -> [TraitName]: tracks which traits provide extension methods for ambiguity detection
   var extensionMethodTraitSources: [String: [String: [String]]] = [:]
-  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `*self` / `*mutable self`.
+  // DefId.id set for methods declared with receiver syntax: first parameter must be `self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
@@ -372,7 +372,9 @@ public class TypeChecker {
     _ symbol: Symbol,
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     declaredName: String? = nil,
-    owner: ReceiverMethodOwner? = nil
+    owner: ReceiverMethodOwner? = nil,
+    conformanceTraitName: String? = nil,
+    conformanceTraitDefId: DefId? = nil
   ) {
     // Store named parameter info for call-site validation
     functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
@@ -389,7 +391,8 @@ public class TypeChecker {
         methodDefId: symbol.defId,
         methodName: resolvedName,
         owner: owner,
-        conformanceTraitName: nil
+        conformanceTraitName: conformanceTraitName,
+        conformanceTraitDefId: conformanceTraitDefId
       )
     } else {
       receiverStyleMethodDefIds.remove(symbol.defId.id)
@@ -399,6 +402,78 @@ public class TypeChecker {
 
   func isReceiverStyleMethod(_ symbol: Symbol) -> Bool {
     receiverStyleMethodDefIds.contains(symbol.defId.id)
+  }
+
+  func isMutableNominalReceiverType(_ type: Type) -> Bool {
+    switch type {
+    case .structure(let defId):
+      return context.isTypeMutable(defId)
+    case .genericStruct(let templateName, _):
+      if currentScope.lookupGenericStructTemplate(templateName)?.isMutable == true {
+        return true
+      }
+      let unqualifiedName = templateName.split(separator: ":").last.map(String.init)
+      if let unqualifiedName,
+         currentScope.lookupGenericStructTemplate(unqualifiedName)?.isMutable == true {
+        return true
+      }
+      if let resolvedType = currentScope.lookupType(templateName),
+         case .structure(let defId) = resolvedType {
+        return context.isTypeMutable(defId)
+      }
+      if let unqualifiedName,
+         let resolvedType = currentScope.lookupType(unqualifiedName),
+         case .structure(let defId) = resolvedType {
+        return context.isTypeMutable(defId)
+      }
+      return false
+    default:
+      return false
+    }
+  }
+
+  func adjustReceiverParameterType(
+    paramName: String,
+    resolvedType: Type,
+    receiverMutable: Bool
+  ) -> Type {
+    _ = receiverMutable
+    _ = paramName
+    return resolvedType
+  }
+
+  func passKindForResolvedParameter(
+    paramName: String,
+    type: Type,
+    receiverMutable: Bool
+  ) -> PassKind {
+    if paramName == "self" && receiverMutable {
+      return .byMutRef
+    }
+    return passKindForParameterType(type)
+  }
+
+  func variableKindForResolvedParameter(
+    paramName: String,
+    mutable: Bool,
+    type: Type,
+    receiverMutable: Bool
+  ) -> VariableKind {
+    if paramName == "self" && receiverMutable {
+      return .MutableValue
+    }
+    return variableKindForParameter(mutable: mutable, type: type)
+  }
+
+  func variableKindForParameter(mutable: Bool, type: Type) -> VariableKind {
+    switch passKindForParameterType(type) {
+    case .byMutRef:
+      return .MutableReference
+    case .byRef:
+      return .Reference
+    case .byVal:
+      return mutable ? .MutableValue : .Value
+    }
   }
 
   // MARK: - Conformance Key Canonicalization

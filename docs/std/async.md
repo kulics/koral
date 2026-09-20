@@ -19,13 +19,13 @@ public let available_parallelism() UInt;
 
 ## Types
 ```koral
-public type Task;
+public type mutable Task;
 
-public type Thread;
+public type mutable Thread;
 
-public type Timer;
+public type mutable Timer;
 
-public type Ticker;
+public type mutable Ticker;
 ```
 
 ## Given Implementations
@@ -38,23 +38,23 @@ given Task {
 };
 
 given Thread {
-    public wait(*self) Result[Void];
-    public detach(*self) Void;
-    public id(*self) UInt64;
-    public name(*self) Option[String];
+    public wait(self) Result[Void];
+    public detach(self) Void;
+    public id(self) UInt64;
+    public name(self) Option[String];
 };
 
 given Timer {
     public new(d Duration) Timer;
-    public wait(*self) Void;
-    public reset(*self, d Duration) Void;
-    public cancel(*self) Void;
+    public wait(self) Void;
+    public reset(self, d Duration) Void;
+    public cancel(self) Void;
 };
 
 given Ticker {
     public new(interval Duration) Ticker;
-    public wait(*self) Void;
-    public reset(*self, interval Duration) Void;
-    public cancel(*self) Void;
+    public wait(self) Void;
+    public reset(self, interval Duration) Void;
+    public cancel(self) Void;
 };
 ```

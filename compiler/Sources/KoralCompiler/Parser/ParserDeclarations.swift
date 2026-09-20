@@ -13,22 +13,11 @@ extension Parser {
 
   private func parseSelfReceiverType() throws -> TypeNode {
     if currentToken === .multiply {
-      try match(.multiply)
-      let sawMut = currentToken === .mutableKeyword
-      if sawMut {
-        try match(.mutableKeyword)
-      }
-      guard currentToken === .selfKeyword else {
-        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
-      }
-      try match(.selfKeyword)
-      if currentToken === .colon {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
-      }
-      if currentToken !== .comma && currentToken !== .rightParen {
-        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
-      }
-      return .reference(.inferredSelf, mutable: sawMut)
+      throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+    }
+
+    guard currentToken === .selfKeyword else {
+      throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
     }
 
     try match(.selfKeyword)
@@ -120,6 +109,14 @@ extension Parser {
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
 
+      // New declaration-site mutability: type mutable Name { ... }
+      // Only nominal types are mutable; enums and aliases remain non-mutable.
+      var isNominalMutable = false
+      if currentToken === .mutableKeyword {
+        try match(.mutableKeyword)
+        isNominalMutable = true
+      }
+
       // Check for optional C name: foreign type "cname" Name(...)
       var cname: String? = nil
       if isForeign, case .string(let cnameValue) = currentToken {
@@ -160,11 +157,23 @@ extension Parser {
         )
       }
 
+      if isNominalMutable && isIntrinsic {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: "Intrinsic type cannot be marked mutable"
+        )
+      }
       if isForeign {
         return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan)
       }
       return try parseStructDeclaration(
-        name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, span: startSpan)
+        name,
+        typeParams: typeParams,
+        access: access,
+        isIntrinsic: isIntrinsic,
+        isMutable: isNominalMutable,
+        span: startSpan
+      )
     } else if currentToken === .givenKeyword {
       if explicitAccess != nil {
         throw ParserError.unexpectedToken(
@@ -237,9 +246,18 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
+      var selfMutable = false
+      if currentToken === .mutableKeyword {
+        let nextToken = lexer.peekNextToken()
+        if nextToken === .selfKeyword || nextToken === .multiply {
+          selfMutable = true
+          try match(.mutableKeyword)
+        }
+      }
+
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -349,9 +367,18 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
+      var selfMutable = false
+      if currentToken === .mutableKeyword {
+        let nextToken = lexer.peekNextToken()
+        if nextToken === .selfKeyword || nextToken === .multiply {
+          selfMutable = true
+          try match(.mutableKeyword)
+        }
+      }
+
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -464,9 +491,18 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
+      var selfMutable = false
+      if currentToken === .mutableKeyword {
+        let nextToken = lexer.peekNextToken()
+        if nextToken === .selfKeyword || nextToken === .multiply {
+          selfMutable = true
+          try match(.mutableKeyword)
+        }
+      }
+
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -688,6 +724,10 @@ extension Parser {
   }
 
   private func parseTraitConstraint() throws -> TypeNode {
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
+      return .identifier("mutable")
+    }
     // Trait constraints now share the full type surface, including postfix generics.
     if canStartTypeSyntax() {
       return try parseType()
@@ -895,7 +935,7 @@ extension Parser {
   /// Parse type declaration
   private func parseStructDeclaration(
     _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, span: SourceSpan
+    isIntrinsic: Bool, isMutable: Bool = false, span: SourceSpan
   ) throws -> GlobalNode {
     if isIntrinsic {
       if currentToken === .leftParen {
@@ -964,6 +1004,7 @@ extension Parser {
       name: name,
       typeParameters: typeParams,
       parameters: parameters,
+      isMutable: isMutable,
       access: access,
       span: span
     )

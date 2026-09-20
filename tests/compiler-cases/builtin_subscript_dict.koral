@@ -2,7 +2,7 @@
 
 using std { .. };
 
-type Point(mutable x Int, mutable y Int);
+type mutable Point(mutable x Int, mutable y Int);
 
 let main() Void = {
     // === Subscript write: update only (insert via insert()) ===
@@ -31,7 +31,7 @@ let main() Void = {
     sd["hello"] = 999;
     assert(sd["hello"] == 999, "string key update hello");
 
-    // === COW: copy dict, write to copy, original unchanged ===
+    // === shared aliases: updates are visible through both names ===
     let mutable original = Dict[Int, String].new();
     original.insert(1, "a");
     original.insert(2, "b");
@@ -40,9 +40,9 @@ let main() Void = {
     copy.insert(3, "c");
     copy[1] = "A";
 
-    assert(original.count() == 2, "original count unchanged after copy write");
-    assert(original.get(1).unwrap() == "a", "original[1] unchanged");
-    assert(not original.contains_key(3), "original not contains_key 3");
+    assert(original.count() == 3, "original count reflects shared insert");
+    assert(original.get(1).unwrap() == "A", "original[1] reflects shared update");
+    assert(original.contains_key(3), "original contains_key 3 after shared insert");
     assert(copy.count() == 3, "copy count after write");
     assert(copy.get(1).unwrap() == "A", "copy[1] modified");
     assert(copy.contains_key(3), "copy contains_key 3");
@@ -57,23 +57,14 @@ let main() Void = {
     ca[1] *= 2;
     assert(ca[1] == 24, "compound mul assignment");
 
-    // === Deep update: struct field via subscript ===
+    // === Deep update: mutable-type field via subscript ===
     let mutable points = Dict[Int, Point].new();
     points.insert(1, Point(10, 20));
     points[1].y = 77;
     assert(points[1].x == 10, "deep update keeps x");
     assert(points[1].y == 77, "deep update stores new y");
 
-    // === Ref escape: reference survives dict mutation ===
-    let mutable m = Dict[Int, Int].new();
-    m.insert(0, 41);
-    let r = &m[0];
-    m = Dict[Int, Int].new();
-    m.insert(0, 2);
-    assert(*r == 41, "* escape keeps old value");
-    assert(m[0] == 2, "new dict has new value");
-
-    // === Subscript method call: d[key].push(v) via __index_mut_ptr ===
+    // === Subscript method call on mutable-type dict element ===
     let mutable dl = Dict[String, List[Int]].new();
     dl.insert("x", List[Int].new());
     dl["x"].push(42);
@@ -82,7 +73,7 @@ let main() Void = {
     assert(dl["x"][0] == 42, "dict subscript push value 0");
     assert(dl["x"][1] == 99, "dict subscript push value 1");
 
-    // === List subscript method call: xs[i].push(v) via __index_mut_ptr ===
+    // === Subscript method call on mutable-type list element ===
     let mutable xs = List[List[Int]].new();
     xs.push(List[Int].new());
     xs[0].push(7);

@@ -29,9 +29,13 @@ extension TypeChecker {
       }
       try validateTraitObjectPatternConcreteType(inner, span: span)
       return .mutableReference(inner: inner)
+    // New syntax: bare concrete type (no * prefix)
+    case .structure, .enum, .genericStruct, .genericEnum:
+      try validateTraitObjectPatternConcreteType(resolvedTarget, span: span)
+      return resolvedTarget
     default:
       throw SemanticError(.generic(
-        "Trait object type pattern must be '*Type' or '*mutable Type', got '\(resolvedTarget)'"
+        "Trait object type pattern must be a concrete type name or a trait name, got '\(resolvedTarget)'"
       ), span: span)
     }
   }

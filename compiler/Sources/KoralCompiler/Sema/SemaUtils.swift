@@ -132,9 +132,9 @@ public enum SemaUtils {
     
     /// Checks if a trait name is a built-in trait that doesn't require explicit method implementations.
     /// - Parameter name: The trait name to check
-    /// - Returns: true if the trait is a built-in trait (Any, Copy, or Deref)
+    /// - Returns: true if the trait is a built-in trait in the current model
     public static func isBuiltinTrait(_ name: String) -> Bool {
-        return name == "Any" || name == "Copy" || name == "Deref"
+        return name == "Any" || name == "mutable"
     }
     
     // MARK: - Trait Method Flattening

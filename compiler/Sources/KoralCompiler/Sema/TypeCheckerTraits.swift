@@ -496,8 +496,19 @@ extension TypeChecker {
       }
 
       let params: [Parameter] = try method.parameters.map { param in
-        let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: passKindForParameterType(t))
+        let resolvedType = try resolveTypeNode(param.type)
+        let t = adjustReceiverParameterType(
+          paramName: param.name,
+          resolvedType: resolvedType,
+          receiverMutable: isMutableNominalReceiverType(normalizedSelfType)
+        )
+        return Parameter(
+          type: t,
+          kind: passKindForResolvedParameter(
+            paramName: param.name,
+            type: t,
+            receiverMutable: isMutableNominalReceiverType(normalizedSelfType))
+        )
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)
@@ -591,7 +602,7 @@ extension TypeChecker {
       if let receiver = method.parameters.first, receiver.name == "self",
          !isObjectSafeReceiverType(receiver.type)
       {
-        reasons.append("method '\(name)' receiver must be '*self' or '*mutable self'")
+        reasons.append("method '\(name)' receiver must be 'self'")
       }
 
       // Rule 2: Self must not appear in parameter types (except receiver) or return type
@@ -641,9 +652,9 @@ extension TypeChecker {
 
   private func isObjectSafeReceiverType(_ node: TypeNode) -> Bool {
     switch node {
-    case .reference(.inferredSelf, _):
+    case .inferredSelf:
       return true
-    case .reference(.identifier(let name), _):
+    case .identifier(let name):
       return name == "Self"
     default:
       return false
@@ -777,7 +788,13 @@ extension TypeChecker {
 
       let params: [Parameter] = try method.parameters.map { param in
         let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: passKindForParameterType(t))
+        return Parameter(
+          type: t,
+          kind: passKindForResolvedParameter(
+            paramName: param.name,
+            type: t,
+            receiverMutable: isMutableNominalReceiverType(selfType))
+        )
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)

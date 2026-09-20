@@ -37,10 +37,10 @@ public type Path(file_private _path String);
 given Path {
 
     /// 判断路径是否为空
-    public is_empty(*self) Bool = self._path.is_empty();
+    public is_empty(self) Bool = self._path.is_empty();
 
     /// 判断是否为绝对路径
-    public is_absolute(*self) Bool = {
+    public is_absolute(self) Bool = {
         if self._path.is_empty() then {
             return false;
         };
@@ -60,29 +60,29 @@ given Path {
     };
 
     /// 拼接路径组件，返回新 Path
-    public join[T IntoPath](*self, path T) Path = {
+    public join[T IntoPath](self, path T) Path = {
         let p = path.into_path();
         if self._path.is_empty() then {
             return p;
         };
         if p._path.is_empty() then {
-            return *self;
+            return self;
         };
         if p.is_absolute() then {
             return p;
         };
-        let mutable result = String.new();
+        let mutable result = StringBuilder.new();
         result.push_string(self._path);
         let sep = path_separator();
         if not self._path.ends_with("/") and not self._path.ends_with("\\") then {
             result.push_string(sep);
         };
         result.push_string(p._path);
-        return Path(result);
+        return Path(result.to_string());
     };
 
     /// 返回父目录路径
-    public dir_name(*self) Path = {
+    public dir_name(self) Path = {
         if self._path.is_empty() then {
             return Path(".");
         };
@@ -110,7 +110,7 @@ given Path {
     };
 
     /// 返回最后一个路径组件名称
-    public base_name(*self) String = {
+    public base_name(self) String = {
         if self._path.is_empty() then {
             return ".";
         };
@@ -135,7 +135,7 @@ given Path {
     };
 
     /// 返回文件扩展名（包含点号，如 ".txt"；无扩展名返回空字符串）
-    public ext_name(*self) String = {
+    public ext_name(self) String = {
         let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
             return "";
@@ -154,7 +154,7 @@ given Path {
     };
 
     /// 返回文件名去掉扩展名后的部分（如 "file.txt" → "file"，"archive.tar.gz" → "archive.tar"）
-    public stem_name(*self) String = {
+    public stem_name(self) String = {
         let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
             return name;
@@ -167,7 +167,7 @@ given Path {
     };
 
     /// 返回替换了扩展名的新 Path
-    public with_ext_name(*self, ext String) Path = {
+    public with_ext_name(self, ext String) Path = {
         let bname = self.base_name();
         let old_ext = self.ext_name();
         let stem = if old_ext.is_empty() then bname else bname.substring(0..<(bname.count() - old_ext.count()));
@@ -176,24 +176,24 @@ given Path {
     };
 
     /// 返回替换了最后一个组件名称的新 Path
-    public with_base_name(*self, name String) Path =
+    public with_base_name(self, name String) Path =
         if self.dir_name().to_string() == "." then Path(name) else self.dir_name().join(name);
 
     /// 规范化路径（解析 . 和 .. 组件）
-    public normalize(*self) Path = {
+    public normalize(self) Path = {
         let buf_size = self._path.count() + 1;
         let buf = alloc_memory[UInt8](buf_size);
         defer dealloc_memory(buf);
-        let len = __koral_normalize_path(self._path.storage.data, buf, buf_size);
+        let len = __koral_normalize_path(self._path.data, buf, buf_size);
         let result = String.from_utf8_ptr_unchecked(buf, len(UInt));
         return Path(result);
     };
 
     /// 将路径拆分为组件列表
-    public components(*self) List[String] = split_path_components(self._path);
+    public components(self) List[String] = split_path_components(self._path);
 
     /// 判断路径是否以指定前缀开头（按组件匹配）
-    public starts_with(*self, prefix Path) Bool = {
+    public starts_with(self, prefix Path) Bool = {
         let self_parts = self.components();
         let prefix_parts = prefix.components();
         if prefix_parts.count() > self_parts.count() then {
@@ -208,7 +208,7 @@ given Path {
     };
 
     /// 判断路径是否以指定后缀结尾（按组件匹配）
-    public ends_with(*self, suffix Path) Bool = {
+    public ends_with(self, suffix Path) Bool = {
         let self_parts = self.components();
         let suffix_parts = suffix.components();
         if suffix_parts.count() > self_parts.count() then {
@@ -224,13 +224,13 @@ given Path {
     };
 
     /// 计算相对于 base 的相对路径
-    public relative_to[T IntoPath](*self, base T) Result[Path] = {
+    public relative_to[T IntoPath](self, base T) Result[Path] = {
         let b = base.into_path();
         if self._path.is_empty() then {
-            return Result[Path].Error(box("target path is empty"));
+            return Result[Path].Error("target path is empty");
         };
         if b._path.is_empty() then {
-            return Result[Path].Error(box("base path is empty"));
+            return Result[Path].Error("base path is empty");
         };
 
         let norm_self = self.normalize();
@@ -252,7 +252,7 @@ given Path {
             common += 1;
         };
 
-        let mutable result = String.new();
+        let mutable result = StringBuilder.new();
         for i in common..<base_len then {
             if not result.is_empty() then {
                 result.push_byte('/');
@@ -267,7 +267,7 @@ given Path {
             result.push_string(self_parts[j]);
         };
 
-        return if result.is_empty() then .Ok(Path(".")) else .Ok(Path(result));
+        return if result.is_empty() then .Ok(Path(".")) else .Ok(Path(result.to_string()));
     };
 };
 
@@ -278,17 +278,17 @@ given Path {
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator() String = {
     let sep = __koral_path_separator();
-    let mutable s = String.new();
+    let mutable s = StringBuilder.new();
     s.push_byte(sep);
-    return s;
+    return s.to_string();
 };
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator() String = {
     let sep = __koral_path_list_separator();
-    let mutable s = String.new();
+    let mutable s = StringBuilder.new();
     s.push_byte(sep);
-    return s;
+    return s.to_string();
 };
 
 
@@ -334,5 +334,5 @@ given Path as Hash {
 
 given Path as ToString {
 
-    public to_string(*self) String = self._path;
+    public to_string(self) String = self._path;
 };

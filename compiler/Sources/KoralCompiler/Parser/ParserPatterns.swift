@@ -186,6 +186,15 @@ extension Parser {
         let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
         return .traitObjectTypeBinding(name: name, mutable: false, targetType: targetType, span: span)
       }
+
+      // Type pattern binding without *: name TypeName (new syntax)
+      // Check if next token is a type identifier (starts with uppercase)
+      if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
+        try match(.identifier(typeName))
+        let targetNode = TypeNode.identifier(typeName)
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return .traitObjectTypeBinding(name: name, mutable: false, targetType: targetNode, span: span)
+      }
       
       // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
       if currentToken === .leftParen, isValidTypeName(name) {
@@ -199,10 +208,17 @@ extension Parser {
         return .structPattern(typeName: name, elements: args, span: startSpan)
       }
 
+      // Bare type name pattern (no binding): e.g., `err is ProbeIoError`
+      if isValidTypeName(name) {
+        let targetNode = TypeNode.identifier(name)
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return .traitObjectTypeBinding(name: "_", mutable: false, targetType: targetNode, span: span)
+      }
+
       if !isValidVariableName(name) {
         throw ParserError.invalidVariableName(span: startSpan, name: name)
       }
-      
+
       return .variable(name: name, mutable: false, span: startSpan)
     }
     

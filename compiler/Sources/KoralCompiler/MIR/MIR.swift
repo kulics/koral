@@ -38,25 +38,10 @@ struct MIRProgram {
   let traits: [String: TraitDeclInfo]
   let conformanceWitnesses: [String: ConformanceWitness]
   let receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo]
-  let escapeSummaries: [DefId: MIREscapeSummary]
 
   func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
     staticMethodLookup["\(typeName).\(methodName)"]
   }
-}
-
-struct MIREscapeSummary: Equatable {
-  let returningParameterIndices: Set<Int>
-  let directReferenceEscapingParameterIndices: Set<Int>
-
-  var escapingParameterIndices: Set<Int> {
-    returningParameterIndices.union(directReferenceEscapingParameterIndices)
-  }
-}
-
-struct MIRFunctionEscapeAnalysis: Equatable {
-  let escapingLocals: Set<MIRLocalID>
-  let escapingValueLocals: Set<MIRLocalID>
 }
 
 enum MIRGlobal {

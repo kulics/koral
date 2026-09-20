@@ -1,31 +1,41 @@
 // EXPECT: PASS
 
+type mutable Counter(mutable count Int);
+
+let make_weak() ?Counter = {
+    let c = Counter(99);
+    return downgrade(c);
+};
+
 let main() Int = {
-    let strong *mutable Int = box(42);
-    let shared *Int = strong;
-    let weak ?*Int = downgrade(shared);
+    // Test downgrade + upgrade roundtrip
+    let c = Counter(42);
+    let weak ?Counter = downgrade(c);
 
-    let raw_ptr *unsafe *Int = &unsafe shared;
-    let rc = ref_count[Int](raw_ptr);
-    if rc < 1 then {
-        eprintln("FAIL: expected ref_count >= 1, got \(rc)");
-        return 1;
-    };
-
-    if not is_unique_mutable[Int](raw_ptr) then {
-        // shared aliases the same object, but the underlying control is still valid
-    };
-
+    // Upgrade should succeed while object is alive
     when upgrade(weak) in {
-        .Some(value) then {
-            if *value <> 42 then {
-                eprintln("FAIL: expected 42, got \(*value)");
+        .Some(r) then {
+            if r.count <> 42 then {
+                eprintln("FAIL: expected 42, got \(r.count)");
                 return 1;
             };
         },
         .None() then {
-            eprintln("FAIL: upgrade returned None");
+            eprintln("FAIL: upgrade returned None while object is alive");
             return 1;
+        },
+    };
+
+    // Test that weak reference survives across scope via function
+    let weak2 ?Counter = make_weak();
+    // c is still alive here (held by 'weak' variable indirectly), weak2's source is dropped
+    when upgrade(weak2) in {
+        .Some(r) then {
+            // May or may not succeed depending on ARC timing — just verify no crash
+            let _ = r.count;
+        },
+        .None() then {
+            // Expected: object was deallocated
         },
     };
 

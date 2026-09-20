@@ -12,66 +12,48 @@ using std { .. };
 foreign let __koral_thread_join(handle *unsafe UInt8) Int32;
 foreign let __koral_thread_detach(handle *unsafe UInt8) Void;
 
-// ============================================================================
-// ThreadStorage (internal)
-// ============================================================================
-type ThreadStorage(
-    handle *unsafe UInt8,
-    thread_id UInt64,
-    thread_name Option[String],
-    mutable waited Bool,
-    mutable detached Bool,
-);
+public type mutable Thread(module_private handle *unsafe UInt8, module_private thread_id UInt64, module_private thread_name Option[String], module_private mutable waited Bool, module_private mutable detached Bool);
 
-given ThreadStorage as Drop {
+given Thread as Drop {
 
-    drop(source *unsafe mutable Self) Void = {
-        if not source.waited and not source.detached then {
-            __koral_thread_detach(source.handle);
+    drop(self) Void = {
+        if not self.waited and not self.detached then {
+            __koral_thread_detach(self.handle);
         };
     };
 };
-
-// ============================================================================
-// Thread — OS thread handle
-// ============================================================================
-
-/// OS thread handle. Manages thread lifetime (wait/detach).
-/// Created by Task.spawn() or run_task(), not constructed directly.
-/// Auto-detaches on drop if not waited/detached.
-public type Thread(module_private storage *mutable ThreadStorage);
 
 given Thread {
 
     /// Block until the thread finishes.
     /// Returns Error if already waited or detached.
-    public wait(*self) Result[Void] = {
-        if self.storage.waited then {
-            return Result[Void].Error(box("thread already waited"));
+    public wait(self) Result[Void] = {
+        if self.waited then {
+            return Result[Void].Error("thread already waited");
         };
-        if self.storage.detached then {
-            return Result[Void].Error(box("thread already detached"));
+        if self.detached then {
+            return Result[Void].Error("thread already detached");
         };
-        let result = __koral_thread_join(self.storage.handle);
-        self.storage.waited = true;
+        let result = __koral_thread_join(self.handle);
+        self.waited = true;
         if result <> 0 then {
-            return Result[Void].Error(box("failed to wait thread"));
+            return Result[Void].Error("failed to wait thread");
         };
         return Result[Void].Ok({});
     };
 
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
-    public detach(*self) Void = {
-        if self.storage.waited or self.storage.detached then {
+    public detach(self) Void = {
+        if self.waited or self.detached then {
             return;
         };
-        __koral_thread_detach(self.storage.handle);
-        self.storage.detached = true;
+        __koral_thread_detach(self.handle);
+        self.detached = true;
     };
 
     /// Get the thread ID.
-    public id(*self) UInt64 = self.storage.thread_id;
+    public id(self) UInt64 = self.thread_id;
 
     /// Get the thread name.
-    public name(*self) Option[String] = self.storage.thread_name;
+    public name(self) Option[String] = self.thread_name;
 };

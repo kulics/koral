@@ -2,6 +2,7 @@ public struct GenericStructTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
   public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
+  public let isMutable: Bool
 
   public func name(in map: DefIdMap) -> String? {
     return map.getName(defId)
@@ -572,7 +573,8 @@ public class UnifiedScope {
     }
     let info = DefIdMap.GenericStructTemplateInfo(
       typeParameters: template.typeParameters,
-      parameters: template.parameters
+      parameters: template.parameters,
+      isMutable: template.isMutable
     )
     map.registerGenericStructTemplate(name: name, defId: template.defId, info: info)
   }
@@ -610,7 +612,7 @@ public class UnifiedScope {
           let info = map.getGenericStructTemplateInfo(defId) else {
       return parent?.lookupGenericStructTemplate(name)
     }
-    return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters)
+    return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters, isMutable: info.isMutable)
   }
 
   public func lookupGenericEnumTemplate(_ name: String) -> GenericEnumTemplate? {
@@ -645,7 +647,7 @@ public class UnifiedScope {
     if let map = defIdMap {
       for (name, defId) in map.genericStructTemplatesSnapshot() {
         if let info = map.getGenericStructTemplateInfo(defId) {
-          result[name] = GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters)
+          result[name] = GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters, isMutable: info.isMutable)
         }
       }
     }

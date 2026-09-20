@@ -12,7 +12,7 @@ using std::text { Parseable };
 // ============================================================================
 // Internal Parser State
 // ============================================================================
-type JsonParser(
+type mutable JsonParser(
     input String,
     mutable pos UInt,
     len UInt,
@@ -29,12 +29,12 @@ given JsonParser {
 
     // --- Error construction ---
 
-    make_error(*self, msg String) Result[JsonValue] =
-        Result[JsonValue].Error(box(JsonError(msg, self.pos)));
+    make_error(self, msg String) Result[JsonValue] =
+        Result[JsonValue].Error(JsonError(msg, self.pos));
 
     // --- Whitespace handling ---
 
-    skip_whitespace(*mutable self) Void = {
+    skip_whitespace(self) Void = {
         while self.pos < self.len then {
             let b = self.input[self.pos];
             if b == ' ' or b == '\t' or b == '\n' or b == '\r' then {
@@ -47,35 +47,35 @@ given JsonParser {
 
     // --- Byte-level access ---
 
-    peek(*self) Option[UInt8] = {
+    peek(self) Option[UInt8] = {
         return if self.pos < self.len then .Some(self.input[self.pos]) else .None();
     };
 
-    advance(*mutable self) UInt8 = {
+    advance(self) UInt8 = {
         let b = self.input[self.pos];
         self.pos += 1;
         return b;
     };
 
-    expect_char(*mutable self, expected UInt8) Result[JsonValue] = {
+    expect_char(self, expected UInt8) Result[JsonValue] = {
         if self.pos >= self.len then { return self.make_error("unexpected end of input");};
         let b = self.input[self.pos];
         if b == expected then {
             self.pos += 1;
             return .Ok(JsonValue.Null());
         };
-        let mutable msg = String.new();
+        let mutable msg = StringBuilder.new();
         msg.push_string("expected '");
         msg.push_byte(expected);
         msg.push_string("', found '");
         msg.push_byte(b);
         msg.push_byte('\'');
-        return self.make_error(msg);
+        return self.make_error(msg.to_string());
     };
 
     // --- Literal parsing ---
 
-    parse_null(*mutable self) Result[JsonValue] = {
+    parse_null(self) Result[JsonValue] = {
         if self.pos + 4 > self.len then {
             return self.make_error("unexpected end of input");
         };
@@ -86,7 +86,7 @@ given JsonParser {
         return self.make_error("expected 'null'");
     };
 
-    parse_true(*mutable self) Result[JsonValue] = {
+    parse_true(self) Result[JsonValue] = {
         if self.pos + 4 > self.len then {
             return self.make_error("unexpected end of input");
         };
@@ -97,7 +97,7 @@ given JsonParser {
         return self.make_error("expected 'true'");
     };
 
-    parse_false(*mutable self) Result[JsonValue] = {
+    parse_false(self) Result[JsonValue] = {
         if self.pos + 5 > self.len then {
             return self.make_error("unexpected end of input");
         };
@@ -110,16 +110,16 @@ given JsonParser {
 
     // --- String error construction ---
 
-    make_string_error(*self, msg String) Result[String] =
-        Result[String].Error(box(JsonError(msg, self.pos)));
+    make_string_error(self, msg String) Result[String] =
+        Result[String].Error(JsonError(msg, self.pos));
 
     // --- Hex digit parsing ---
 
-    parse_hex4(*mutable self) Result[UInt] = {
+    parse_hex4(self) Result[UInt] = {
         let mutable value UInt = 0;
         for _ in 0..<4 then {
             if self.pos >= self.len then {
-                return .Error(box(JsonError("invalid unicode escape", self.pos)));
+                return .Error(JsonError("invalid unicode escape", self.pos));
             };
             let b = self.input[self.pos];
             let digit = if b >= '0' and b <= '9' then {
@@ -129,7 +129,7 @@ given JsonParser {
             } else if b >= 'A' and b <= 'F' then {
                 yield (b - 'A')(UInt) + 10;
             } else {
-                return .Error(box(JsonError("invalid unicode escape", self.pos)));
+                return .Error(JsonError("invalid unicode escape", self.pos));
             };
             value = value * 16 + digit;
             self.pos += 1;
@@ -139,7 +139,7 @@ given JsonParser {
 
     // --- UTF-8 encoding helper ---
 
-    encode_utf8(*self, cp UInt, result *mutable String) Void = {
+    encode_utf8(self, cp UInt, result StringBuilder) Void = {
         if cp < 128 then {
             result.push_byte(cp(UInt8));
         } else if cp < 2048 then {
@@ -159,21 +159,21 @@ given JsonParser {
 
     // --- String parsing ---
 
-    parse_string_raw(*mutable self) Result[String] = {
+    parse_string_raw(self) Result[String] = {
         // Expect opening quote
         if self.pos >= self.len then {
             return self.make_string_error("unexpected end of input");
         };
         if self.input[self.pos] <> '"' then {
-            let mutable msg = String.new();
+            let mutable msg = StringBuilder.new();
             msg.push_string("expected '\"', found '");
             msg.push_byte(self.input[self.pos]);
             msg.push_byte('\'');
-            return self.make_string_error(msg);
+            return self.make_string_error(msg.to_string());
         };
         self.pos += 1;
 
-        let mutable result = String.new();
+        let mutable result = StringBuilder.new();
 
         while self.pos < self.len then {
             let b = self.input[self.pos];
@@ -181,7 +181,7 @@ given JsonParser {
             // Closing quote
             if b == '"' then {
                 self.pos += 1;
-                return .Ok(result);
+                return .Ok(result.to_string());
             };
 
             // Escape sequence
@@ -235,21 +235,21 @@ given JsonParser {
                         };
                         // Combine surrogate pair: (high - 0xD800) * 0x400 + (low - 0xDC00) + 0x10000
                         let combined = (cp - 55296) * 1024 + (low - 56320) + 65536;
-                        self.encode_utf8(combined, &mutable result);
+                        self.encode_utf8(combined, result);
                     } else if cp >= 56320 and cp <= 57343 then {
                         // Lone low surrogate — invalid
                         self.pos = escape_pos;
                         return self.make_string_error("invalid unicode escape");
                     } else {
-                        self.encode_utf8(cp, &mutable result);
+                        self.encode_utf8(cp, result);
                     };
                 } else {
                     self.pos = escape_pos;
-                    let mutable msg = String.new();
+                    let mutable msg = StringBuilder.new();
                     msg.push_string("invalid escape sequence '\\");
                     msg.push_byte(esc);
                     msg.push_byte('\'');
-                    return self.make_string_error(msg);
+                    return self.make_string_error(msg.to_string());
                 };
             } else if b < 32(UInt8) then {
                 // Control characters are not allowed unescaped
@@ -265,13 +265,13 @@ given JsonParser {
         return self.make_string_error("unexpected end of input");
     };
 
-    parse_string(*mutable self) Result[JsonValue] = {
+    parse_string(self) Result[JsonValue] = {
         return .Ok(JsonValue.String(self.parse_string_raw() or return));
     };
 
     // --- Array parsing ---
 
-    parse_array(*mutable self) Result[JsonValue] = {
+    parse_array(self) Result[JsonValue] = {
         // Expect opening '['
         if self.pos >= self.len or self.input[self.pos] <> '[' then {
             return self.make_error("expected '['");
@@ -283,16 +283,16 @@ given JsonParser {
         // Empty array
         if self.pos < self.len and self.input[self.pos] == ']' then {
             self.pos += 1;
-            let empty List[* JsonValue] = [];
+            let empty List[JsonValue] = [];
             return .Ok(JsonValue.Array(empty));
         };
 
-        let mutable elements List[* JsonValue] = [];
+        let mutable elements List[JsonValue] = [];
 
         while true then {
             // Parse element
             let value = self.parse_value() or return;
-            elements.push(box(value));
+            elements.push(value);
 
             self.skip_whitespace();
 
@@ -317,7 +317,7 @@ given JsonParser {
 
     // --- Object parsing ---
 
-    parse_object(*mutable self) Result[JsonValue] = {
+    parse_object(self) Result[JsonValue] = {
         // Expect opening '{'
         if self.pos >= self.len or self.input[self.pos] <> '{' then {
             return self.make_error("expected '{'");
@@ -329,11 +329,11 @@ given JsonParser {
         // Empty object
         if self.pos < self.len and self.input[self.pos] == '}' then {
             self.pos += 1;
-            let empty Dict[String, * JsonValue] = [];
+            let empty Dict[String, JsonValue] = [];
             return .Ok(JsonValue.Object(empty));
         };
 
-        let mutable entries Dict[String, * JsonValue] = [];
+        let mutable entries Dict[String, JsonValue] = [];
 
         while true then {
             // Parse key (must be a string)
@@ -356,7 +356,7 @@ given JsonParser {
             let value = self.parse_value() or return;
 
             // Insert key-value pair (duplicate keys: later value overwrites)
-            entries.insert(key, box(value));
+            entries.insert(key, value);
 
             self.skip_whitespace();
 
@@ -381,7 +381,7 @@ given JsonParser {
 
     // --- Number parsing ---
 
-    parse_number(*mutable self) Result[JsonValue] = {
+    parse_number(self) Result[JsonValue] = {
         let start = self.pos;
 
         // Optional leading minus
@@ -467,7 +467,7 @@ given JsonParser {
 
     // --- Top-level value dispatch ---
 
-    parse_value(*mutable self) Result[JsonValue] = {
+    parse_value(self) Result[JsonValue] = {
         self.skip_whitespace();
         when self.peek() in {
             .None() then { return self.make_error("unexpected end of input");},
@@ -481,11 +481,11 @@ given JsonParser {
                 if b == '-' or (b >= '0' and b <= '9') then {
                     return self.parse_number();
                 };
-                let mutable msg = String.new();
+                let mutable msg = StringBuilder.new();
                 msg.push_string("unexpected character '");
                 msg.push_byte(b);
                 msg.push_byte('\'');
-                return self.make_error(msg);
+                return self.make_error(msg.to_string());
             },
         };
     };
@@ -503,8 +503,7 @@ given JsonValue as Parseable {
         };
         parser.skip_whitespace();
         if parser.pos < parser.len then {
-            return .Error(box(JsonError("trailing characters after JSON value", parser.pos)));
-        };
+            return .Error(JsonError("trailing characters after JSON value", parser.pos));        };
         return .Ok(value);
     };
 };

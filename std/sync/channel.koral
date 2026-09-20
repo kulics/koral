@@ -15,7 +15,7 @@ using std { .. };
 // ============================================================================
 
 // channel internal shared storage
-file_private type ChannelStorage[T Any](
+file_private type mutable ChannelStorage[T Any](
     mutex Mutex,
     not_empty MutexCondvar,// notify consumer: new message available
     not_full MutexCondvar,// notify producer: space available
@@ -25,103 +25,93 @@ file_private type ChannelStorage[T Any](
     mutable receiver_closed Bool,// all RecvChannels have been dropped
 );
 
-// ============================================================================
-// SendChannelStorage / RecvChannelStorage (tracks last-holder close semantics)
-// ============================================================================
+public type SendChannel[T Any](file_private channel ChannelStorage[T]);
 
-file_private type SendChannelStorage[T Any](channel *mutable ChannelStorage[T]);
-
-given[T Any] SendChannelStorage[T] as Drop {
-    drop(source *unsafe mutable Self) Void = {
-        source.channel.mutex.lock();
-        defer source.channel.mutex.unlock();
-        source.channel.sender_closed = true;
-        source.channel.not_empty.notify_all();
+given[T Any] SendChannel[T] as Drop {
+    drop(self) Void = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        channel.sender_closed = true;
+        channel.not_empty.notify_all();
     };
 };
 
-file_private type RecvChannelStorage[T Any](channel *mutable ChannelStorage[T]);
+public type RecvChannel[T Any](file_private channel ChannelStorage[T]);
 
-given[T Any] RecvChannelStorage[T] as Drop {
-    drop(source *unsafe mutable Self) Void = {
-        source.channel.mutex.lock();
-        defer source.channel.mutex.unlock();
-        source.channel.receiver_closed = true;
-        source.channel.not_full.notify_all();
+given[T Any] RecvChannel[T] as Drop {
+    drop(self) Void = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        channel.receiver_closed = true;
+        channel.not_full.notify_all();
     };
 };
-
-// ============================================================================
-// SendChannel Type
-// ============================================================================
-
-public type SendChannel[T Any](file_private storage *mutable SendChannelStorage[T]);
 
 given[T Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
-    public send(*self, value T) Result[Void] = {
-        self.storage.channel.mutex.lock();
-        defer self.storage.channel.mutex.unlock();
-        while self.storage.channel.queue.count() >= self.storage.channel.capacity and not self.storage.channel.receiver_closed then {
-            self.storage.channel.not_full.wait();
+    public send(self, value T) Result[Void] = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        while channel.queue.count() >= channel.capacity and not channel.receiver_closed then {
+            channel.not_full.wait();
         };
-        if self.storage.channel.receiver_closed then {
-            return Result[Void].Error(box("channel closed"));
+        if channel.receiver_closed then {
+            return Result[Void].Error("channel closed");
         };
-        self.storage.channel.queue.push(value);
-        self.storage.channel.not_empty.notify();
+        channel.queue.push(value);
+        channel.not_empty.notify();
         return Result[Void].Ok({});
     };
 
     /// 非阻塞发送
-    public try_send(*self, value T) Result[Bool] = {
-        self.storage.channel.mutex.lock();
-        defer self.storage.channel.mutex.unlock();
-        if self.storage.channel.receiver_closed then {
-            return Result[Bool].Error(box("channel closed"));
+    public try_send(self, value T) Result[Bool] = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        if channel.receiver_closed then {
+            return Result[Bool].Error("channel closed");
         };
-        if self.storage.channel.queue.count() >= self.storage.channel.capacity then {
+        if channel.queue.count() >= channel.capacity then {
             return Result[Bool].Ok(false);
         };
-        self.storage.channel.queue.push(value);
-        self.storage.channel.not_empty.notify();
+        channel.queue.push(value);
+        channel.not_empty.notify();
         return Result[Bool].Ok(true);
     };
 };
 
-// ============================================================================
-// RecvChannel Type
-// ============================================================================
-
-public type RecvChannel[T Any](file_private storage *mutable RecvChannelStorage[T]);
-
 given[T Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
-    public recv(*self) Result[T] = {
-        self.storage.channel.mutex.lock();
-        defer self.storage.channel.mutex.unlock();
-        while self.storage.channel.queue.is_empty() and not self.storage.channel.sender_closed then {
-            self.storage.channel.not_empty.wait();
+    public recv(self) Result[T] = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        while channel.queue.is_empty() and not channel.sender_closed then {
+            channel.not_empty.wait();
         };
-        if not self.storage.channel.queue.is_empty() then {
-            let value = self.storage.channel.queue.take_at(0);
-            self.storage.channel.not_full.notify();
+        if not channel.queue.is_empty() then {
+            let value = channel.queue.take_at(0);
+            channel.not_full.notify();
             return Result[T].Ok(value);
         };
-        return Result[T].Error(box("channel closed"));
+        return Result[T].Error("channel closed");
     };
 
     /// 非阻塞接收
-    public try_recv(*self) Result[Option[T]] = {
-        self.storage.channel.mutex.lock();
-        defer self.storage.channel.mutex.unlock();
-        if not self.storage.channel.queue.is_empty() then {
-            let value = self.storage.channel.queue.take_at(0);
-            self.storage.channel.not_full.notify();
+    public try_recv(self) Result[Option[T]] = {
+        let channel = self.channel;
+        channel.mutex.lock();
+        defer channel.mutex.unlock();
+        if not channel.queue.is_empty() then {
+            let value = channel.queue.take_at(0);
+            channel.not_full.notify();
             return Result[Option[T]].Ok(Option[T].Some(value));
         };
-        if self.storage.channel.sender_closed then {
-            return Result[Option[T]].Error(box("channel closed"));
+        if channel.sender_closed then {
+            return Result[Option[T]].Error("channel closed");
         };
         return Result[Option[T]].Ok(Option[T].None());
     };
@@ -137,13 +127,13 @@ public let make_channel[T Any](capacity UInt) Pair[SendChannel[T], RecvChannel[T
     let mu = Mutex.new();
     let not_empty = mu.condvar();
     let not_full = mu.condvar();
-    let storage = box(ChannelStorage[T](
+    let storage = ChannelStorage[T](
         mu, not_empty, not_full,
         List[T].new(),
         capacity,
         false, false
-    ));
-    let sender = SendChannel[T](box(SendChannelStorage[T](storage)));
-    let receiver = RecvChannel[T](box(RecvChannelStorage[T](storage)));
+    );
+    let sender = SendChannel[T](storage);
+    let receiver = RecvChannel[T](storage);
     return Pair[SendChannel[T], RecvChannel[T]](sender, receiver);
 };

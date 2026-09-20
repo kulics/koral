@@ -236,13 +236,16 @@ public class DefIdMap {
     public struct GenericStructTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
         public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
+        public let isMutable: Bool
 
         public init(
             typeParameters: [TypeParameterDecl],
-            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
+            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+            isMutable: Bool = false
         ) {
             self.typeParameters = typeParameters
             self.parameters = parameters
+            self.isMutable = isMutable
         }
     }
 
@@ -319,17 +322,20 @@ public class DefIdMap {
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
+        public let isMutable: Bool
 
         public init(
             members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
-            templateName: String? = nil
+            templateName: String? = nil,
+            isMutable: Bool = false
         ) {
             self.members = members
             self.isGenericInstantiation = isGenericInstantiation
             self.typeArguments = typeArguments
             self.templateName = templateName
+            self.isMutable = isMutable
         }
     }
 
@@ -401,6 +407,9 @@ public class DefIdMap {
 
     /// 标记禁止 `.val` 解引用的类型
     private var notDerefTypes: Set<UInt64> = []
+
+    /// 显式实现 Drop 的 nominal / template DefId
+    private var explicitDropTypes: Set<UInt64> = []
     
     // MARK: - 初始化
     
@@ -415,6 +424,7 @@ public class DefIdMap {
         enumInfoMap.removeAll()
         foreignStructFields.removeAll()
         notDerefTypes.removeAll()
+        explicitDropTypes.removeAll()
     }
     
     // MARK: - 公共方法
@@ -748,13 +758,15 @@ public class DefIdMap {
         members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
-        templateName: String? = nil
+        templateName: String? = nil,
+        isMutable: Bool = false
     ) {
         structInfoMap[defId.id] = StructTypeInfo(
             members: members,
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
-            templateName: templateName
+            templateName: templateName,
+            isMutable: isMutable
         )
     }
 
@@ -809,6 +821,14 @@ public class DefIdMap {
         return notDerefTypes.contains(defId.id)
     }
 
+    public func setExplicitDrop(_ defId: DefId) {
+        explicitDropTypes.insert(defId.id)
+    }
+
+    public func hasExplicitDrop(_ defId: DefId) -> Bool {
+        return explicitDropTypes.contains(defId.id)
+    }
+
     public func setCname(_ defId: DefId, _ cname: String) {
         cnameMap[defId.id] = cname
     }
@@ -825,6 +845,10 @@ public class DefIdMap {
             return info.isGenericInstantiation
         }
         return nil
+    }
+
+    public func isStructMutable(_ defId: DefId) -> Bool {
+        return structInfoMap[defId.id]?.isMutable ?? false
     }
 
     public func getTypeArguments(_ defId: DefId) -> [Type]? {

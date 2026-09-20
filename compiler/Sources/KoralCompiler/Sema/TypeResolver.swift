@@ -183,7 +183,7 @@ public class TypeResolver: CompilerPass {
         case .givenNotTraitDeclaration:
             return
             
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span):
             try resolveStructSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -629,7 +629,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, _, let access, _):
+        case .globalStructDeclaration(let name, let typeParameters, _, _, let access, _):
             // 跳过泛型结构体
             if !typeParameters.isEmpty { return nil }
             

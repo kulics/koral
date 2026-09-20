@@ -1077,7 +1077,7 @@ Supported patterns include:
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
-- Enum case patterns: `.Some(v)`, `.None`
+- Enum case patterns: `.Some(v)`, `.None()`
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
 ```koral

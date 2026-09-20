@@ -158,7 +158,7 @@ public class NameCollector: CompilerPass {
                 isStdLib: isStdLib
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span):
             try collectStructDefinition(
                 name: name,
                 typeParameters: typeParameters,

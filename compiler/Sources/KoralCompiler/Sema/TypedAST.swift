@@ -123,10 +123,12 @@ public indirect enum TypedProgram {
 }
 
 public struct TypedTraitConformance {
+  public let traitDefId: DefId
   public let traitName: String
   public let traitTypeArgs: [Type]
 
-  public init(traitName: String, traitTypeArgs: [Type]) {
+  public init(traitDefId: DefId, traitName: String, traitTypeArgs: [Type]) {
+    self.traitDefId = traitDefId
     self.traitName = traitName
     self.traitTypeArgs = traitTypeArgs
   }

@@ -45,6 +45,47 @@ public class CodeGen {
     }
   }
 
+  private func declarationType(_ declaration: TypeDeclaration) -> Type? {
+    switch declaration {
+    case .structure(let identifier, _, _):
+      return identifier.type
+    case .`enum`(let identifier, _, _):
+      return identifier.type
+    case .foreignStructure:
+      return nil
+    }
+  }
+
+  private func generateTypeForwardDeclarations(_ declarations: [TypeDeclaration]) {
+    for decl in declarations {
+      switch decl {
+      case .structure(_, _, let name):
+        buffer += "struct \(name);\n"
+        buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n"
+        buffer += "void __koral_\(name)_drop(struct \(name)* self);\n"
+      case .`enum`(_, _, let name):
+        buffer += "struct \(name);\n"
+        buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n"
+        buffer += "void __koral_\(name)_drop(struct \(name)* self);\n"
+      case .foreignStructure(_, _, let name):
+        buffer += "struct \(name);\n"
+      }
+    }
+    buffer += "\n"
+  }
+
+  private func generateManagedNominalWrapperDeclarations(_ declarations: [TypeDeclaration]) {
+    for decl in declarations {
+      guard let type = declarationType(decl), usesManagedNominalRepresentation(type) else {
+        continue
+      }
+      buffer += "struct \(decl.name) {\n"
+      buffer += "    void* ptr;\n"
+      buffer += "    void* control;\n"
+      buffer += "};\n\n"
+    }
+  }
+
   init(
     mirProgram: MIRProgram,
     context: CompilerContext
@@ -207,6 +248,11 @@ public class CodeGen {
   }
 
   func cIdentifier(for symbol: Symbol) -> String {
+    let symName = context.getName(symbol.defId) ?? ""
+    if symName == "count" || symName == "fold" {
+      let key = defIdKey(symbol.defId)
+      let mapped = cIdentifierByDefId[key]
+    }
     let isGlobalSymbol: Bool
     switch symbol.kind {
     case .function, .type, .module:
@@ -281,8 +327,32 @@ public class CodeGen {
   
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .`enum`, .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .function, .weakReference, .mutableWeakReference, .traitObject:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .function, .weakReference, .mutableWeakReference, .traitObject:
       return true
+    case .structure, .`enum`:
+      return hasNontrivialNominalDrop(type)
+    default:
+      return false
+    }
+  }
+
+  func usesManagedNominalRepresentation(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .`enum`, .genericStruct, .genericEnum:
+      return context.nominalLayoutKind(for: type) == .managed
+    default:
+      return false
+    }
+  }
+
+  func managedPayloadTypeName(for type: Type) -> String {
+    return "__koral_payload_\(nominalTypeCName(type))"
+  }
+
+  private func requiresCompleteNominalDefinition(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .`enum`, .genericStruct, .genericEnum:
+      return !usesManagedNominalRepresentation(type)
     default:
       return false
     }
@@ -381,7 +451,10 @@ public class CodeGen {
   private func dependencies(for declaration: TypeDeclaration, available: Set<String>) -> Set<String> {
     var deps: Set<String> = []
 
-    func recordDependency(from type: Type, selfName: String) {
+    func recordDirectTypeDependency(_ type: Type, selfName: String) {
+      guard requiresCompleteNominalDefinition(type) else {
+        return
+      }
       switch type {
       case .structure(let defId):
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
@@ -393,6 +466,129 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
+      case .genericStruct(let template, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+      case .genericEnum(let template, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+      default:
+        break
+      }
+    }
+
+    func recordDependency(from type: Type, selfName: String) {
+      switch type {
+      case .structure(let defId):
+        guard requiresCompleteNominalDefinition(type) else { break }
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+      case .`enum`(let defId):
+        guard requiresCompleteNominalDefinition(type) else { break }
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+      case .genericStruct(let template, let args):
+        guard requiresCompleteNominalDefinition(type) else { break }
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+        for arg in args {
+          switch arg {
+          case .structure(let defId):
+            let argName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .`enum`(let defId):
+            let argName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .genericStruct(let nestedTemplate, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .genericEnum(let nestedTemplate, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          default:
+            break
+          }
+        }
+      case .genericEnum(let template, let args):
+        guard requiresCompleteNominalDefinition(type) else { break }
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        if typeName != selfName && available.contains(typeName) {
+          deps.insert(typeName)
+        }
+        for arg in args {
+          switch arg {
+          case .structure(let defId):
+            let argName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .`enum`(let defId):
+            let argName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .genericStruct(let nestedTemplate, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          case .genericEnum(let nestedTemplate, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+            if argName != selfName && available.contains(argName) {
+              deps.insert(argName)
+            }
+          default:
+            break
+          }
+        }
+      case .pointer(let inner), .mutablePointer(let inner):
+        guard requiresCompleteNominalDefinition(inner) else { break }
+        switch inner {
+        case .structure(let defId):
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          if typeName != selfName && available.contains(typeName) {
+            deps.insert(typeName)
+          }
+        case .`enum`(let defId):
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+          if typeName != selfName && available.contains(typeName) {
+            deps.insert(typeName)
+          }
+        case .genericStruct(let template, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+          if typeName != selfName && available.contains(typeName) {
+            deps.insert(typeName)
+          }
+        case .genericEnum(let template, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+          if typeName != selfName && available.contains(typeName) {
+            deps.insert(typeName)
+          }
+        default:
+          break
+        }
+      case .reference, .mutableReference,
+           .borrowedReference, .mutableBorrowedReference,
+           .weakReference, .mutableWeakReference:
+        break
       default:
         break
       }
@@ -403,10 +599,20 @@ public class CodeGen {
       for param in parameters {
         recordDependency(from: param.type, selfName: selfName)
       }
+      if let selfDefId = declarationIdentifierDefId(declaration) {
+        for arg in context.getTypeArguments(selfDefId) ?? [] {
+          recordDirectTypeDependency(arg, selfName: selfName)
+        }
+      }
     case .`enum`(_, let cases, let selfName):
       for c in cases {
         for param in c.parameters {
           recordDependency(from: param.type, selfName: selfName)
+        }
+      }
+      if let selfDefId = declarationIdentifierDefId(declaration) {
+        for arg in context.getTypeArguments(selfDefId) ?? [] {
+          recordDirectTypeDependency(arg, selfName: selfName)
         }
       }
     case .foreignStructure(_, let fields, let selfName):
@@ -416,6 +622,17 @@ public class CodeGen {
     }
 
     return deps
+  }
+
+  private func declarationIdentifierDefId(_ declaration: TypeDeclaration) -> DefId? {
+    switch declaration {
+    case .structure(let identifier, _, _):
+      return identifier.defId
+    case .enum(let identifier, _, _):
+      return identifier.defId
+    case .foreignStructure(let identifier, _, _):
+      return identifier.defId
+    }
   }
 
   private func sortTypeDeclarations(_ declarations: [TypeDeclaration]) -> [TypeDeclaration] {
@@ -474,6 +691,9 @@ public class CodeGen {
 
   private func generateProgram() {
     let globals = mirProgram.globals
+    let declarations = sortTypeDeclarations(collectTypeDeclarations(globals))
+    generateTypeForwardDeclarations(declarations)
+    generateManagedNominalWrapperDeclarations(declarations)
 
     for global in globals {
       if case .function(let identifier, _, .global) = global,
@@ -509,7 +729,7 @@ public class CodeGen {
       buffer += "\n"
     }
 
-    for decl in sortTypeDeclarations(collectTypeDeclarations(globals)) {
+    for decl in declarations {
       switch decl {
       case .structure(let identifier, let parameters, _):
         generateTypeDeclaration(identifier, parameters)
@@ -779,6 +999,58 @@ public class CodeGen {
     return TypeHandlerRegistry.shared.generateConcreteCTypeName(type)
   }
 
+  func nominalTypeCName(_ type: Type) -> String {
+    switch type {
+    case .structure(let defId):
+      return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+    case .`enum`(let defId):
+      return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+    case .genericStruct(let template, let args):
+      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+    case .genericEnum(let template, let args):
+      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+    default:
+      return cTypeName(type)
+    }
+  }
+
+  private func hasNontrivialNominalDrop(_ type: Type) -> Bool {
+    if usesManagedNominalRepresentation(type) {
+      return true
+    }
+    let cName = nominalTypeCName(type)
+    if getUserDefinedDrop(for: cName) != nil { return true }
+
+    // Recursively check if any field/case-payload has nontrivial drop
+    switch type {
+    case .structure(let defId):
+      if let members = context.getStructMembers(defId) {
+        for member in members where needsDrop(member.type) { return true }
+      }
+    case .genericStruct(let template, _):
+      if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template),
+         let members = context.getStructMembers(templateDefId) {
+        for member in members where needsDrop(member.type) { return true }
+      }
+    case .`enum`(let defId):
+      if let cases = context.getEnumCases(defId) {
+        for c in cases {
+          for param in c.parameters where needsDrop(param.type) { return true }
+        }
+      }
+    case .genericEnum(let template, _):
+      if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template),
+         let cases = context.getEnumCases(templateDefId) {
+        for c in cases {
+          for param in c.parameters where needsDrop(param.type) { return true }
+        }
+      }
+    default:
+      break
+    }
+    return false
+  }
+
   func appendIndentedCode(_ code: String, indent: String) {
     let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
@@ -815,7 +1087,6 @@ public class CodeGen {
 
   func generateStringLiteral(_ value: String, type: Type) -> String {
     let bytesVar = nextTemp() + "_bytes"
-    let storageVar = nextTemp() + "_storage"
     let utf8Bytes = Array(value.utf8)
     var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
     if !byteLiterals.isEmpty {
@@ -826,24 +1097,47 @@ public class CodeGen {
     buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
 
     guard case .structure(let stringDefId) = type,
-          let stringMembers = context.getStructMembers(stringDefId),
-          let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
-      fatalError("String literal requires String.storage: ref StringStorage")
+          let stringMembers = context.getStructMembers(stringDefId) else {
+      fatalError("String literal requires flattened String(data, len) layout")
     }
-    let storageType: Type
-    switch storageMember.type {
-    case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType),
-         .borrowedReference(let resolvedStorageType), .mutableBorrowedReference(let resolvedStorageType):
-      storageType = resolvedStorageType
-    default:
-      fatalError("String literal requires String.storage: ref StringStorage")
+    let hasData = stringMembers.contains(where: { $0.name == "data" })
+    let hasLen = stringMembers.contains(where: { $0.name == "len" })
+    guard hasData, hasLen else {
+      fatalError("String literal requires flattened String(data, len) layout")
     }
-    let storageCType = cTypeName(storageType)
+
+    let dataVar = nextTemp() + "_data"
     addIndent()
-    buffer += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
+    buffer += "uint8_t* \(dataVar) = (uint8_t*)malloc(\(utf8Bytes.count + 1));\n"
+    addIndent()
+    buffer += "memcpy(\(dataVar), \(bytesVar), \(utf8Bytes.count + 1));\n"
 
     let cType = cTypeName(type)
-    return nextTempWithInit(cType: cType, initExpr: "(\(cType)){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } }")
+    if usesManagedNominalRepresentation(type) {
+      let resultVar = nextTemp()
+      let payloadType = managedPayloadTypeName(for: type)
+      let nominalName = nominalTypeCName(type)
+      addIndent()
+      buffer += "\(cType) \(resultVar);\n"
+      addIndent()
+      buffer += "\(resultVar).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType)));\n"
+      addIndent()
+      buffer += "\(resultVar).ptr = (char*)\(resultVar).control + sizeof(struct __koral_Control);\n"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(resultVar).control)->strong_count = 1;\n"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(resultVar).control)->weak_count = 0;\n"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(resultVar).control)->ptr = \(resultVar).ptr;\n"
+      addIndent()
+      buffer += "((struct __koral_Control*)\(resultVar).control)->dtor = (__koral_Dtor)__koral_\(nominalName)_payload_drop;\n"
+      addIndent()
+      buffer += "((struct \(payloadType)*)\(resultVar).ptr)->data = \(dataVar);\n"
+      addIndent()
+      buffer += "((struct \(payloadType)*)\(resultVar).ptr)->len = \(utf8Bytes.count);\n"
+      return resultVar
+    }
+    return nextTempWithInit(cType: cType, initExpr: "(\(cType)){ \(dataVar), \(utf8Bytes.count) }")
   }
 
   // MARK: - Unified Copy/Move Helpers
@@ -993,10 +1287,11 @@ public class CodeGen {
       return traitInfo.modulePath == ["Std"]
     }
 
-    func isStdDropTraitName(_ traitName: String?) -> Bool {
-      guard let traitName, traitName == "Drop" else { return false }
+    func isStdDropTraitDefId(_ traitDefId: DefId?) -> Bool {
+      guard let traitDefId else { return false }
+      guard let traitName = context.getName(traitDefId), traitName == "Drop" else { return false }
       guard let traitInfo = mirProgram.traits[traitName] else { return false }
-      return traitInfo.modulePath == ["Std"]
+      return traitInfo.defId == traitDefId && traitInfo.modulePath == ["Std"]
     }
 
     func dropOwnerTypeName(_ type: Type) -> String? {
@@ -1028,7 +1323,7 @@ public class CodeGen {
       if case .function(let identifier, _, _) = node,
          let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
          dispatch.methodName == "drop",
-         isStdDropTraitName(dispatch.conformanceTraitName),
+        isStdDropTraitDefId(dispatch.conformanceTraitDefId),
          case .concreteType(let ownerTypeName) = dispatch.owner {
         let access = context.getAccess(identifier.defId) ?? .module_private
         let sourceFile = context.getSourceFile(identifier.defId)

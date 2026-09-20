@@ -10,63 +10,57 @@ using std { .. };
 // unlatch() removes one, and when all latches are removed the gate opens.
 // ============================================================================
 
-file_private type LatchGateStorage(
-    mutex Mutex,
-    condvar MutexCondvar,
-    mutable counter UInt,
-);
-
-public type LatchGate(file_private storage *mutable LatchGateStorage);
+public type mutable LatchGate(file_private mutex Mutex, file_private condvar MutexCondvar, file_private mutable counter UInt);
 
 given LatchGate {
 
     public new(count UInt) LatchGate = {
         let mu = Mutex.new();
         let cv = mu.condvar();
-        return LatchGate(box(LatchGateStorage(mu, cv, count)));
+        return LatchGate(mu, cv, count);
     };
 
-    public latch(*self, count UInt) Void = {
-        self.storage.mutex.lock();
-        defer self.storage.mutex.unlock();
-        self.storage.counter = self.storage.counter + count;
+    public latch(self, count UInt) Void = {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.counter = self.counter + count;
     };
 
-    public unlatch(*self) Void = {
-        self.storage.mutex.lock();
-        if self.storage.counter == 0 then {
-            self.storage.mutex.unlock();
+    public unlatch(self) Void = {
+        self.mutex.lock();
+        if self.counter == 0 then {
+            self.mutex.unlock();
             panic("LatchGate.unlatch: counter already zero");
         };
-        defer self.storage.mutex.unlock();
-        self.storage.counter = self.storage.counter - 1;
-        if self.storage.counter == 0 then {
-            self.storage.condvar.notify_all();
+        defer self.mutex.unlock();
+        self.counter = self.counter - 1;
+        if self.counter == 0 then {
+            self.condvar.notify_all();
         };
     };
 
-    public unlatch_and_wait(*self) Void = {
-        self.storage.mutex.lock();
-        if self.storage.counter == 0 then {
-            self.storage.mutex.unlock();
+    public unlatch_and_wait(self) Void = {
+        self.mutex.lock();
+        if self.counter == 0 then {
+            self.mutex.unlock();
             panic("LatchGate.unlatch_and_wait: counter already zero");
         };
-        defer self.storage.mutex.unlock();
-        self.storage.counter = self.storage.counter - 1;
-        if self.storage.counter == 0 then {
-            self.storage.condvar.notify_all();
+        defer self.mutex.unlock();
+        self.counter = self.counter - 1;
+        if self.counter == 0 then {
+            self.condvar.notify_all();
             return;
         };
-        while self.storage.counter > 0 then {
-            self.storage.condvar.wait();
+        while self.counter > 0 then {
+            self.condvar.wait();
         };
     };
 
-    public wait(*self) Void = {
-        self.storage.mutex.lock();
-        defer self.storage.mutex.unlock();
-        while self.storage.counter > 0 then {
-            self.storage.condvar.wait();
+    public wait(self) Void = {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        while self.counter > 0 then {
+            self.condvar.wait();
         };
     };
 };

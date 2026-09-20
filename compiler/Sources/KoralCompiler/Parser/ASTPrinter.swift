@@ -58,9 +58,10 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, _):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, _):
       print("\(indent)StructDeclaration \(name)")
       print("\(indent)  Access: \(access)")
+      print("\(indent)  NominalMutable: \(isMutable)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }

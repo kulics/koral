@@ -315,7 +315,8 @@ public class StructHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
-        return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
+        let baseName = qualifiedName.hasPrefix("struct ") ? String(qualifiedName.dropFirst("struct ".count)) : qualifiedName
+        return "\(dest) = __koral_\(baseName)_copy(&\(source));"
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
@@ -323,7 +324,8 @@ public class StructHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop(&(\(value)));"
+        let baseName = qualifiedName.hasPrefix("struct ") ? String(qualifiedName.dropFirst("struct ".count)) : qualifiedName
+        return "__koral_\(baseName)_drop(&(\(value)));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -451,7 +453,8 @@ public class EnumHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
-        return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
+        let baseName = qualifiedName.hasPrefix("struct ") ? String(qualifiedName.dropFirst("struct ".count)) : qualifiedName
+        return "\(dest) = __koral_\(baseName)_copy(&\(source));"
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
@@ -459,7 +462,8 @@ public class EnumHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop(&(\(value)));"
+        let baseName = qualifiedName.hasPrefix("struct ") ? String(qualifiedName.dropFirst("struct ".count)) : qualifiedName
+        return "__koral_\(baseName)_drop(&(\(value)));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
