@@ -560,12 +560,8 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
-    case .traitQualificationExpression(let base, let trait):
-      print("\(indent)TraitQualificationExpression: as \(trait)")
-      print("\(indent)  Base:")
-      withIndent {
-        printExpression(base)
-      }
+    case .traitQualificationExpression(let type, let trait):
+      print("\(indent)TraitQualificationExpression: \(type)(\(trait))")
 
     case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
@@ -587,12 +583,8 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedMethodCall(let base, let trait, let methodName, let arguments):
-      print("\(indent)QualifiedMethodCall: (base as \(trait)).\(methodName)")
-      print("\(indent)  Base:")
-      withIndent {
-        printExpression(base)
-      }
+    case .qualifiedMethodCall(let type, let trait, let methodName, let arguments):
+      print("\(indent)QualifiedMethodCall: \(type)(\(trait)).\(methodName)")
       print("\(indent)  Arguments:")
       withIndent {
         withIndent {
@@ -606,13 +598,9 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedGenericMethodCall(let base, let trait, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let type, let trait, let methodTypeArgs, let methodName, let arguments):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
-      print("\(indent)QualifiedGenericMethodCall: (base as \(trait)).\(methodName)[\(typeArgsStr)]")
-      print("\(indent)  Base:")
-      withIndent {
-        printExpression(base)
-      }
+      print("\(indent)QualifiedGenericMethodCall: \(type)(\(trait)).\(methodName)[\(typeArgsStr)]")
       print("\(indent)  Arguments:")
       withIndent {
         withIndent {

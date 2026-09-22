@@ -2153,24 +2153,24 @@ extension TypeChecker {
         "Trait qualification must be followed by a method call"
       ), span: currentSpan)
 
-    case .qualifiedMethodCall(let baseExpr, let traitType, let methodName, let arguments):
+    case .qualifiedMethodCall(let typeNode, let traitType, let methodName, let arguments):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
       return try inferQualifiedMethodCallExpression(
-        baseExpr: baseExpr,
+        typeNode: typeNode,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: nil,
         callArgs: arguments
       )
 
-    case .qualifiedGenericMethodCall(let baseExpr, let traitType, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let typeNode, let traitType, let methodTypeArgs, let methodName, let arguments):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
       return try inferQualifiedMethodCallExpression(
-        baseExpr: baseExpr,
+        typeNode: typeNode,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
@@ -3255,79 +3255,149 @@ extension TypeChecker {
     return (traitName, traitTypeArgs)
   }
 
+  /// The trait's method signature for `Self = selfType`, resolving the method
+  /// from the trait's tool methods first and then its declared methods.
+  private func qualifiedTraitMethodType(
+    traitName: String,
+    traitTypeArgs: [Type],
+    methodName: String,
+    selfType: Type,
+    methodTypeArgs: [Type]?
+  ) throws -> (parameters: [(name: String, named: Bool)], functionType: Type) {
+    // Bind the trait's own type parameters (e.g. `T` in `MyEq[T]`) so method
+    // signatures mentioning them resolve against the invocation's trait args.
+    return try withNewScope {
+      if let info = traitInfo(traitName, modulePath: currentModulePath) {
+        for (index, typeParam) in info.typeParameters.enumerated() where index < traitTypeArgs.count {
+          try currentScope.defineType(typeParam.name, type: traitTypeArgs[index])
+        }
+      }
+      return try resolveQualifiedTraitMethodType(
+        traitName: traitName,
+        traitTypeArgs: traitTypeArgs,
+        methodName: methodName,
+        selfType: selfType,
+        methodTypeArgs: methodTypeArgs
+      )
+    }
+  }
+
+  private func resolveQualifiedTraitMethodType(
+    traitName: String,
+    traitTypeArgs: [Type],
+    methodName: String,
+    selfType: Type,
+    methodTypeArgs: [Type]?
+  ) throws -> (parameters: [(name: String, named: Bool)], functionType: Type) {
+    func substitute(_ functionType: Type, typeParams: [TypeParameterDecl]) throws -> Type {
+      guard let methodTypeArgs, !methodTypeArgs.isEmpty else { return functionType }
+      var substitution: [String: Type] = [:]
+      for (typeParam, arg) in zip(typeParams, methodTypeArgs) {
+        substitution[typeParam.name] = arg
+      }
+      return SemaUtils.substituteType(functionType, substitution: substitution, context: context)
+    }
+
+    if let tool = try flattenedTraitToolMethods(traitName)[methodName] {
+      let functionType = try substitute(
+        expectedFunctionTypeForToolMethod(tool, selfType: selfType),
+        typeParams: tool.typeParameters
+      )
+      return (tool.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+    }
+
+    // `given[T] Trait[T] { ... }` tool methods register as generic extension
+    // templates on the trait rather than as trait tool blocks.
+    if let ext = genericExtensionMethods[traitName]?.first(where: { $0.method.name == methodName }) {
+      let functionType = try substitute(
+        expectedFunctionTypeForToolMethod(ext.method, selfType: selfType),
+        typeParams: ext.method.typeParameters
+      )
+      return (ext.method.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+    }
+
+    let methods = try flattenedTraitMethods(traitName)
+    guard let sig = methods[methodName] else {
+      throw SemanticError(.generic(
+        "Qualified method '\(methodName)' is not provided by trait '\(traitName)'"
+      ), span: currentSpan)
+    }
+    let functionType = try substitute(
+      expectedFunctionTypeForTraitMethod(
+        sig,
+        selfType: selfType,
+        traitInfo: traitInfo(traitName, modulePath: currentModulePath),
+        traitTypeArgs: traitTypeArgs
+      ),
+      typeParams: sig.typeParameters
+    )
+    return (sig.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+  }
+
+  /// Fully qualified call `Type(Trait).method(args...)`, conceptually Rust's
+  /// `<Type as Trait>::method(args...)`.
+  ///
+  /// The written form is the same for instance and static trait methods: the
+  /// receiver of an instance method is simply the first call argument, so no
+  /// separate static/instance spelling exists.
   func inferQualifiedMethodCallExpression(
-    baseExpr: ExpressionNode,
+    typeNode: TypeNode,
     traitType: TypeNode,
     methodName: String,
     methodTypeArgs: [TypeNode]?,
     callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     let (traitName, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
+    let selfType = try resolveTypeNode(typeNode)
+    let resolvedMethodTypeArgs = try methodTypeArgs.map { try $0.map { try resolveTypeNode($0) } }
 
-    // Generic qualified call delegates to existing generic method-call pipeline.
-    // Trait qualification is primarily a disambiguation syntax.
-    if let methodTypeArgs, !methodTypeArgs.isEmpty {
-      return try inferGenericMethodCallExpression(
-        baseExpr: baseExpr,
-        methodTypeArgs: methodTypeArgs,
-        methodName: methodName,
-        callArgs: callArgs
+    let declared = try qualifiedTraitMethodType(
+      traitName: traitName,
+      traitTypeArgs: traitTypeArgs,
+      methodName: methodName,
+      selfType: selfType,
+      methodTypeArgs: resolvedMethodTypeArgs
+    )
+    guard case .function(let params, let returns) = declared.functionType else {
+      throw SemanticError(.generic(
+        "Expected function type for qualified method '\(methodName)'"
+      ), span: currentSpan)
+    }
+    let hasSelf = declared.parameters.first?.name == "self"
+
+    // Plan every argument — the receiver of an instance method is just the
+    // method's first parameter.
+    let paramMeta = callParamMeta(from: declared.parameters, argumentCount: params.count)
+    let arguments = try planCallArgumentExpressions(
+      callArgs,
+      paramNames: paramMeta.names,
+      paramIsNamed: paramMeta.isNamed,
+      callDescription: methodName,
+      defaultsKeyPrefix: methodName
+    )
+    if arguments.count != params.count {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName,
+        expected: params.count,
+        got: arguments.count
       )
     }
 
-    // Static qualified call: (T as Trait).method(...)
-    if case .identifier(let baseName) = baseExpr,
-       let baseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile),
-       let methodSym = extensionMethods[baseName]?[methodName] {
-      guard case .function(let params, let returnType) = methodSym.type else {
-        throw SemanticError(.generic("Expected function type for static qualified method"), span: currentSpan)
-      }
-      let paramMeta = methodCallParamMeta(
-        ownerTypeName: baseName,
-        methodName: methodName,
-        fallbackDefId: methodSym.defId,
-        argumentCount: params.count
-      )
-      let arguments = try planCallArgumentExpressions(
-        callArgs,
-        paramNames: paramMeta.names,
-        paramIsNamed: paramMeta.isNamed,
-        callDescription: methodName,
-        defaultsKeyPrefix: methodName
-      )
-      if arguments.count != params.count {
-        throw SemanticError.invalidArgumentCount(
-          function: methodName,
-          expected: params.count,
-          got: arguments.count
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params) {
+      var typedArg = try inferTypedExpression(arg)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        throw SemanticError.typeMismatch(
+          expected: param.type.description,
+          got: typedArg.type.description
         )
       }
-      var typedArguments: [TypedExpressionNode] = []
-      for (arg, param) in zip(arguments, params) {
-        var typedArg = try inferTypedExpression(arg)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
-        if typedArg.type != param.type {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
-        typedArguments.append(typedArg)
-      }
-      return .staticMethodCall(
-        baseType: baseType,
-        methodName: methodName,
-        typeArgs: traitTypeArgs,
-        methodTypeArgs: [],
-        arguments: typedArguments,
-        type: returnType
-      )
+      typedArguments.append(typedArg)
     }
 
-    let typedBase = try inferTypedExpression(baseExpr)
-
-    // Qualified call on generic parameter via trait bound.
-    if case .genericParameter(let paramName) = typedBase.type {
+    // A generic parameter receiver dispatches through the trait's vtable.
+    if case .genericParameter(let paramName) = selfType {
       let hasBound = traitTypeArgs.isEmpty
         ? hasTraitBound(paramName, traitName)
         : hasTraitBound(paramName, traitName: traitName, traitTypeArgs: traitTypeArgs)
@@ -3337,97 +3407,32 @@ extension TypeChecker {
           "Type parameter '\(paramName)' does not have trait bound '\(requiredTrait)'"
         ), span: currentSpan)
       }
-      let methods = try flattenedTraitToolMethods(traitName)
-      guard let method = methods[methodName], method.parameters.first?.name == "self" else {
+      guard hasSelf, let receiver = typedArguments.first else {
         throw SemanticError(.generic(
-          "Qualified method '\(methodName)' not found in trait tool methods of '\(traitName)'"
+          "Qualified method '\(methodName)' on type parameter '\(paramName)' requires a receiver argument"
         ), span: currentSpan)
       }
-      let expectedType = try expectedFunctionTypeForToolMethod(method, selfType: typedBase.type)
-      guard case .function(let params, let returns) = expectedType else {
-        throw SemanticError(.generic("Expected function type for qualified method"), span: currentSpan)
-      }
-      let toolMeta = method.parameters.map { (name: $0.name, named: $0.named) }
-      let toolCallMeta: (names: [String], isNamed: [Bool]) = {
-        var meta = toolMeta
-        if meta.count == params.count - 1 + 1 && meta.first?.name == "self" {
-          meta = Array(meta.dropFirst())
-        }
-        if meta.count != params.count - 1 {
-          meta = (0..<(params.count - 1)).map { (name: "arg\($0)", named: false) }
-        }
-        return (meta.map { $0.name }, meta.map { $0.named })
-      }()
-      let arguments = try planCallArgumentExpressions(
-        callArgs,
-        paramNames: toolCallMeta.names,
-        paramIsNamed: toolCallMeta.isNamed,
-        callDescription: methodName,
-        defaultsKeyPrefix: methodName
-      )
-      if arguments.count != params.count - 1 {
-        throw SemanticError.invalidArgumentCount(
-          function: methodName,
-          expected: params.count - 1,
-          got: arguments.count
-        )
-      }
-      var typedArguments: [TypedExpressionNode] = []
-      for (arg, param) in zip(arguments, params.dropFirst()) {
-        var typedArg = try inferTypedExpression(arg)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
-        if typedArg.type != param.type {
-          throw SemanticError.typeMismatch(expected: param.type.description, got: typedArg.type.description)
-        }
-        typedArguments.append(typedArg)
-      }
-      recordTraitPlaceholderInstantiation(baseType: typedBase.type, methodName: methodName, methodTypeArgs: [])
+      recordTraitPlaceholderInstantiation(
+        baseType: selfType, methodName: methodName, methodTypeArgs: resolvedMethodTypeArgs ?? [])
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
         methodName: methodName,
-        base: typedBase,
-        methodTypeArgs: [],
-        type: expectedType
+        base: receiver,
+        methodTypeArgs: resolvedMethodTypeArgs ?? [],
+        type: declared.functionType
       )
-      return .call(callee: callee, arguments: typedArguments, type: returns)
+      return .call(callee: callee, arguments: Array(typedArguments.dropFirst()), type: returns)
     }
 
-    // Instance qualified call on concrete methods.
-    let concreteTypeName: String? = {
-      switch typedBase.type {
-      case .structure(let defId), .`enum`(let defId):
-        return context.getName(defId)
-      case .int, .int8, .int16, .int32, .int64,
-           .uint, .uint8, .uint16, .uint32, .uint64,
-           .float32, .float64, .bool:
-        return typedBase.type.description
-      default:
-        return nil
-      }
-    }()
-
-    if let concreteTypeName,
-       let methodSym = extensionMethods[concreteTypeName]?[methodName] {
-      return try inferMethodCall(
-        base: typedBase,
-        method: methodSym,
-        methodType: methodSym.type,
-        callArgs: callArgs
-      )
-    }
-
-    if let methodSym = try lookupConcreteMethodSymbol(on: typedBase.type, name: methodName) {
-      return try inferMethodCall(
-        base: typedBase,
-        method: methodSym,
-        methodType: methodSym.type,
-        callArgs: callArgs
-      )
-    }
-
-    throw SemanticError(.generic(
-      "Qualified method '\(methodName)' from trait '\(traitName)' is not available on receiver"
-    ), span: currentSpan)
+    // Concrete type: a direct call to `Type`'s implementation of `Trait.method`.
+    return .staticMethodCall(
+      baseType: selfType,
+      methodName: methodName,
+      typeArgs: [],
+      methodTypeArgs: resolvedMethodTypeArgs ?? [],
+      arguments: typedArguments,
+      type: returns
+    )
   }
 
   

@@ -106,6 +106,44 @@ extension Parser {
     }
   }
 
+  /// The left-hand type of a Rust-style qualified path `Type(Trait)`, or nil
+  /// when `expr` is not a (possibly generic) type name.
+  private func qualifiedPathBaseType(of expr: ExpressionNode) -> TypeNode? {
+    switch expr {
+    case .identifier(let name):
+      return isValidTypeName(name) ? .identifier(name) : nil
+    case .genericInstantiation(let name, let typeArgs):
+      return .generic(base: name, args: typeArgs)
+    default:
+      return nil
+    }
+  }
+
+  /// Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
+  /// Returns nil (restoring the parser position) when this is not a trait ref.
+  private func tryParseQualifiedTraitRef() throws -> TypeNode? {
+    guard currentToken === .leftParen else { return nil }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    do {
+      try match(.leftParen)
+      guard case .identifier(let traitName) = currentToken, isValidTypeName(traitName) else {
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+      }
+      let trait = try parseType()
+      guard currentToken === .rightParen else {
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+      }
+      try match(.rightParen)
+      return trait
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return nil
+    }
+  }
+
   private func tryParsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode? {
     guard currentToken === .leftParen else { return nil }
 
@@ -586,7 +624,7 @@ extension Parser {
         let bareMethodTypeArgs = hasBareMethodTypeArguments()
         let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
 
-        if case .traitQualificationExpression(let qualifiedBase, let traitType) = expr {
+        if case .traitQualificationExpression(let qualifiedType, let traitType) = expr {
           guard currentToken === .leftParen else {
             throw ParserError.unexpectedToken(
               span: currentSpan,
@@ -598,14 +636,14 @@ extension Parser {
           try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
           if methodTypeArgs.isEmpty {
             expr = .qualifiedMethodCall(
-              base: qualifiedBase,
+              type: qualifiedType,
               trait: traitType,
               methodName: member,
               arguments: arguments
             )
           } else {
             expr = .qualifiedGenericMethodCall(
-              base: qualifiedBase,
+              type: qualifiedType,
               trait: traitType,
               methodTypeArgs: methodTypeArgs,
               methodName: member,
@@ -693,7 +731,12 @@ extension Parser {
           expr = .memberPath(base: expr, path: [member])
         }
       } else if currentToken === .leftParen {
-        if let castExpr = try tryParsePostfixCastSuffix(base: expr) {
+        // Rust-style qualified path `Type(Trait)`: the base must be a type name
+        // and the parenthesized part must be a trait reference.
+        if let qualifiedType = qualifiedPathBaseType(of: expr),
+           let traitRef = try tryParseQualifiedTraitRef() {
+          expr = .traitQualificationExpression(type: qualifiedType, trait: traitRef)
+        } else if let castExpr = try tryParsePostfixCastSuffix(base: expr) {
           expr = castExpr
         } else {
           expr = try parseCall(expr)
@@ -1154,12 +1197,6 @@ extension Parser {
         let second = try expression()
         try match(.rightParen)
         return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
-      }
-      if currentToken === .asKeyword {
-        try match(.asKeyword)
-        let trait = try parseType()
-        try match(.rightParen)
-        return .traitQualificationExpression(base: first, trait: trait)
       }
       try match(.rightParen)
       return first

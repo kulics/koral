@@ -300,8 +300,9 @@ extension TypeChecker {
     case .memberPath(let base, _):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
 
-    case .traitQualificationExpression(let base, _):
-      try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
+    case .traitQualificationExpression:
+      // The left side is a type, not an expression — nothing to capture.
+      return
       
     case .subscriptExpression(let base, let arguments):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
@@ -381,16 +382,15 @@ extension TypeChecker {
         }
       }
 
-    case .qualifiedMethodCall(let base, _, _, let arguments):
-      try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
+    case .qualifiedMethodCall(_, _, _, let arguments):
+      // The receiver (if any) is an ordinary argument below.
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)
         }
       }
 
-    case .qualifiedGenericMethodCall(let base, _, _, _, let arguments):
-      try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
+    case .qualifiedGenericMethodCall(_, _, _, _, let arguments):
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)

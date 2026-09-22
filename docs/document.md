@@ -775,7 +775,7 @@ It must be used inside a function whose return kind matches the propagated value
 
 Operator precedence from high to low:
 
-1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
+1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified paths `Type(Trait)`, generic method suffixes
 2. Prefix / Control flow: unary `-`, `~`, dereference `*`, raw address-of `&unsafe`, `&unsafe mutable`; `if`, `while`, `for`, `when`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
@@ -1755,23 +1755,32 @@ Tool methods are available in:
 - Trait object contexts
 - Concrete types that explicitly implement the trait
 
-#### Qualified disambiguation calls
+#### Fully qualified calls
 
-When multiple candidates conflict, use explicit qualified calls:
+When multiple candidates conflict, use a fully qualified call. The form is
+conceptually Rust's qualified path `<Type as Trait>::method`:
 
-- Instance method: `(object as TraitName).method(...)`
-- Static method: `(Type as TraitName).method(value, ...)`
-- Generic instance trait: `(object as TraitName[Args...]).method(...)`
-- Generic static trait: `(Type as TraitName[Args...]).method(value, ...)`
-- Generic method type args still appear on the method: `(object as TraitName).method[TypeArgs...](...)`
+- `Type(TraitName).method(...)` selects `TraitName`'s method on `Type`
+- Generic traits carry their arguments in the qualification: `Type(TraitName[Args...]).method(...)`
+- Generic method type args still appear on the method: `Type(TraitName).method[TypeArgs...](...)`
 
-For generic methods, the trait qualification wraps the receiver before method type arguments.
+There is a single written form. The receiver of an instance method is simply the
+first call argument, so instance and static trait methods are spelled the same
+way:
+
+```
+Type(TraitName).method(receiver, ...)   // instance method
+Type(TraitName).static_method(...)      // static trait method
+```
+
+For generic methods, the trait qualification wraps the type before method type
+arguments.
 
 #### Override and conflict rules
 
 - Tool methods are non-override by default.
 - Inherent type methods win over trait tool methods.
-- If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly. You must disambiguate explicitly using trait qualification: `(value as TraitName).method(...)`.
+- If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly. You must disambiguate explicitly with a fully qualified call: `Type(TraitName).method(value, ...)`.
 - If two traits define the same method and one inherits from the other, the child trait's implementation takes precedence (no ambiguity).
 - `given Trait` cannot define a method with the same name/signature as a requirement of that trait.
 

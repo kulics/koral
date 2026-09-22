@@ -521,19 +521,21 @@ public indirect enum ExpressionNode {
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
-  /// Trait-qualified receiver expression used only as an intermediate parser node.
-  /// It must be followed by `.method(...)` or `.[Type]method(...)` to form a qualified call.
-  case traitQualificationExpression(base: ExpressionNode, trait: TypeNode)
+  /// Rust-style fully qualified path `Type(Trait[Args])`, used only as an
+  /// intermediate parser node. It must be followed by `.method(...)` or
+  /// `.method[TypeArgs](...)`. The receiver of an instance method is passed as
+  /// the first call argument.
+  case traitQualificationExpression(type: TypeNode, trait: TypeNode)
   /// Generic method call with explicit type arguments: obj.[Type]method(args)
   /// - base: The object expression
   /// - methodTypeArgs: The explicit type arguments for the method
   /// - methodName: The method name
   /// - arguments: The method arguments
   case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
-  /// Qualified instance/static method call: (base as Trait[Args]).method(args)
-  case qualifiedMethodCall(base: ExpressionNode, trait: TypeNode, methodName: String, arguments: [CallArg])
-  /// Qualified generic method call: (base as Trait[Args]).method[Type](args)
-  case qualifiedGenericMethodCall(base: ExpressionNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
+  /// Fully qualified method call: Type(Trait[Args]).method(args)
+  case qualifiedMethodCall(type: TypeNode, trait: TypeNode, methodName: String, arguments: [CallArg])
+  /// Fully qualified generic method call: Type(Trait[Args]).method[TypeArgs](args)
+  case qualifiedGenericMethodCall(type: TypeNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
   case genericInstantiation(base: String, args: [TypeNode])
   /// Collection literal: [e1, e2, ...]
   case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)

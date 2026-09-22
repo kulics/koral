@@ -137,6 +137,12 @@ given Bot as Greet {
 }
 
 let g Greet = Bot("K-9");  // trait object
+
+// Fully qualified call (Rust-style `<Type as Trait>::method`) selects the
+// trait's method explicitly. The receiver of an instance method is the first
+// argument, so instance and static trait methods share one form.
+let bot = Bot("R2");
+println(Bot(Greet).greet(bot));
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -201,6 +207,7 @@ let result = list.iterator();
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
 - Trait objects for runtime polymorphism: `Greet`
+- Fully qualified calls: `Type(Trait).method(receiver, ...)` — Rust-style qualified path, with the receiver as the first argument
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Neg`, `Mul`, `Div`, `Rem`, `Eq`, `Ord`)
 
 ### Functions and Lambdas

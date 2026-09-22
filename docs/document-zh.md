@@ -805,7 +805,7 @@ let load_port(path String) Result[Int] = {
 
 操作符优先级从高到低如下：
 
-1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 限定/泛型方法后缀
+1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 限定路径 `Type(Trait)`, 泛型方法后缀
 2. 前缀 / 控制流: 一元 `-`, `~`，解引用 `*`，以及取址 `&unsafe`、`&unsafe mutable`；`if`、`while`、`for`、`when`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
@@ -1799,15 +1799,22 @@ given[T Ord] Iterator[T] {
 - trait object 上下文
 - 已显式实现该 Trait 的具体类型
 
-#### 显式消歧调用
+#### 完全限定调用
 
-当出现同名候选冲突时，可使用限定调用：
+当出现同名候选冲突时，可使用完全限定调用。写法等价于 Rust 的限定路径
+`<Type as Trait>::method`：
 
-- 实例方法：`(object as TraitName).method(...)`
-- 静态方法：`(Type as TraitName).method(value, ...)`
-- 泛型 trait 实例方法：`(object as TraitName[Args...]).method(...)`
-- 泛型 trait 静态方法：`(Type as TraitName[Args...]).method(value, ...)`
-- 泛型方法类型参数仍写在方法名后：`(object as TraitName).method[TypeArgs...](...)`
+- `Type(TraitName).method(...)` 选取 `Type` 上 `TraitName` 的方法
+- 泛型 trait 的实参写在限定里：`Type(TraitName[Args...]).method(...)`
+- 泛型方法的类型参数仍写在方法名后：`Type(TraitName).method[TypeArgs...](...)`
+
+写法只有一种：实例方法的 receiver 就是第一个实参，因此实例方法与静态
+trait 方法的写法完全一致：
+
+```
+Type(TraitName).method(receiver, ...)   // 实例方法
+Type(TraitName).static_method(...)      // 静态 trait 方法
+```
 
 其中泛型方法要求先写 trait 限定，再写方法类型参数。
 
@@ -1815,7 +1822,7 @@ given[T Ord] Iterator[T] {
 
 - 工具方法默认不可覆盖其他候选。
 - 类型自身方法优先于工具方法。
-- 如果多个 trait 工具来源提供同名同签名方法，Koral 不会隐式选择；必须使用 trait 限定显式消歧，例如 `(value as TraitName).method(...)`。
+- 如果多个 trait 工具来源提供同名同签名方法，Koral 不会隐式选择；必须使用完全限定调用显式消歧，例如 `Type(TraitName).method(value, ...)`。
 - 如果两个 trait 都定义了同名方法，且其中一个继承自另一个，则子 trait 的实现优先，不会形成歧义。
 - `given Trait` 中不允许与该 trait requirement 同名同签名的方法。
 
