@@ -213,7 +213,7 @@ let result = list.iterator();
 ### Functions and Lambdas
 
 - Top-level and generic functions
-- Call labels and defaults: positional parameters are passed without labels (`Point(1, 2)`), named parameters (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Constructors, free functions, methods and static methods all follow the same rules
+- Call labels and defaults: the declaration fixes the call shape with no optional-label form — a positional parameter (`name Type`) is passed by position and never by label, a named parameter (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Constructors, free functions, methods and static methods all follow the same rules
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)

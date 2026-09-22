@@ -80,7 +80,7 @@ extension TypeChecker {
           throw SemanticError(.generic("Unknown named argument '\(label)' for '\(callDescription)'"), span: currentSpan)
         }
         guard paramIsNamed[fieldIndex] else {
-          throw SemanticError(.generic("Positional argument provided for named field '\(label)'"), span: currentSpan)
+          throw SemanticError(.generic("Parameter '\(label)' is positional and cannot be passed by label"), span: currentSpan)
         }
         if orderedCallArgs[fieldIndex] != nil {
           throw SemanticError(.generic("Duplicate argument '\(label)'"), span: currentSpan)
@@ -96,6 +96,11 @@ extension TypeChecker {
           positionalIndex += 1
         }
         guard positionalIndex < paramNames.count else {
+          // Every remaining parameter is named-only, so this argument can only
+          // have been meant for one of them.
+          if let required = paramNames.indices.firstIndex(where: { paramIsNamed[$0] && orderedCallArgs[$0] == nil }) {
+            throw SemanticError(.generic("Named parameter '\(paramNames[required])' must be passed by label"), span: currentSpan)
+          }
           throw SemanticError(.generic("Too many positional arguments in call to '\(callDescription)'"), span: currentSpan)
         }
         orderedCallArgs[positionalIndex] = arg
@@ -279,6 +284,9 @@ extension TypeChecker {
           positionalIndex += 1
         }
         guard positionalIndex < fieldNames.count else {
+          if let required = fieldNames.indices.firstIndex(where: { fieldIsNamed[$0] && orderedArgs[$0] == nil }) {
+            throw SemanticError(.generic("Named pattern field '\(fieldNames[required])' must be matched by label"), span: currentSpan)
+          }
           throw SemanticError(.generic("Too many positional pattern arguments for '\(patternDescription)'"), span: currentSpan)
         }
         orderedArgs[positionalIndex] = arg
