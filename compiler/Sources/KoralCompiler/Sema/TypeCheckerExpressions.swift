@@ -75,7 +75,7 @@ extension TypeChecker {
     switch type {
     case .structure(let defId):
       satisfied = context.isTypeMutable(defId)
-    case .genericStruct(let templateName, _):
+    case .genericStruct(let templateName, _, _):
       if let defId = context.defIdMap.lookupGenericStructTemplateDefId(templateName) {
         satisfied = context.isTypeMutable(defId) || context.isGenericStructTemplateMutable(defId)
       } else {
@@ -285,9 +285,9 @@ extension TypeChecker {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       return defId
-    case .genericStruct(let template, _):
+    case .genericStruct(let template, _, _):
       return currentScope.lookupGenericStructTemplate(template)?.defId
-    case .genericEnum(let template, _):
+    case .genericEnum(let template, _, _):
       return currentScope.lookupGenericEnumTemplate(template)?.defId
     default:
       return nil
@@ -331,12 +331,12 @@ extension TypeChecker {
         parameters: parameters.map { Parameter(type: canonicalizedTypeForComparison($0.type), kind: $0.kind) },
         returns: canonicalizedTypeForComparison(returns)
       )
-    case .genericStruct(let template, let args):
-      return .genericStruct(template: template, args: args.map { canonicalizedTypeForComparison($0) })
-    case .genericEnum(let template, let args):
-      return .genericEnum(template: template, args: args.map { canonicalizedTypeForComparison($0) })
-    case .traitObject(let traitName, let typeArgs):
-      return .traitObject(traitName: traitName, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
+    case .genericStruct(let template, let defId, let args):
+      return .genericStruct(template: template, templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
+    case .genericEnum(let template, let defId, let args):
+      return .genericEnum(template: template, templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
+    case .traitObject(let traitName, let defId, let typeArgs):
+      return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
     default:
       return type
     }
@@ -344,14 +344,14 @@ extension TypeChecker {
 
   func nominalInstantiationMatchesGeneric(_ nominal: Type, genericCandidate: Type) -> Bool {
     switch (canonicalizedTypeForComparison(nominal), canonicalizedTypeForComparison(genericCandidate)) {
-    case (.structure(let defId), .genericStruct(let templateName, let typeArgs)):
+    case (.structure(let defId), .genericStruct(let templateName, _, let typeArgs)):
       guard context.getTemplateName(defId) == templateName,
             let actualArgs = context.getTypeArguments(defId),
             actualArgs.count == typeArgs.count else {
         return false
       }
       return zip(actualArgs, typeArgs).allSatisfy { typesEquivalentForComparison($0, $1) }
-    case (.`enum`(let defId), .genericEnum(let templateName, let typeArgs)):
+    case (.`enum`(let defId), .genericEnum(let templateName, _, let typeArgs)):
       guard context.getTemplateName(defId) == templateName,
             let actualArgs = context.getTypeArguments(defId),
             actualArgs.count == typeArgs.count else {
@@ -806,57 +806,57 @@ extension TypeChecker {
     .blockExpression(statements: [.break(span: span)])
   }
 
-  func createBranchBreakTarget(
-    kind: BranchBreakTargetKind,
+  func createYieldTarget(
+    kind: YieldTargetKind,
     span: SourceSpan,
     preferredType: Type?
-  ) -> BranchBreakTargetId {
-    let id = BranchBreakTargetId(rawValue: nextBranchBreakTargetId)
-    nextBranchBreakTargetId += 1
+  ) -> YieldTargetId {
+    let id = YieldTargetId(rawValue: nextYieldTargetId)
+    nextYieldTargetId += 1
     exitableConstructStack.append(.branch)
-    branchBreakTargets.append(BranchBreakTarget(
+    yieldTargets.append(YieldTarget(
       id: id,
       kind: kind,
       span: span,
       preferredType: preferredType,
       resultType: nil,
-      didExplicitBranchBreak: false,
+      didExplicitYield: false,
       constructStackDepthAtCreation: exitableConstructStack.count
     ))
     return id
   }
 
-  func activeBranchBreakTargetIndex(_ id: BranchBreakTargetId? = nil) -> Int? {
+  func activeYieldTargetIndex(_ id: YieldTargetId? = nil) -> Int? {
     if let id {
-      return branchBreakTargets.lastIndex(where: { $0.id == id })
+      return yieldTargets.lastIndex(where: { $0.id == id })
     }
-    guard !branchBreakTargets.isEmpty else { return nil }
-    return branchBreakTargets.count - 1
+    guard !yieldTargets.isEmpty else { return nil }
+    return yieldTargets.count - 1
   }
 
-  func activeBranchBreakTarget(_ id: BranchBreakTargetId? = nil) -> BranchBreakTarget? {
-    guard let index = activeBranchBreakTargetIndex(id) else { return nil }
-    return branchBreakTargets[index]
+  func activeYieldTarget(_ id: YieldTargetId? = nil) -> YieldTarget? {
+    guard let index = activeYieldTargetIndex(id) else { return nil }
+    return yieldTargets[index]
   }
 
-  func expectedTypeForBranchBreakTarget(_ id: BranchBreakTargetId?, fallback: Type?) -> Type? {
-    guard let target = activeBranchBreakTarget(id) else { return fallback }
+  func expectedTypeForYieldTarget(_ id: YieldTargetId?, fallback: Type?) -> Type? {
+    guard let target = activeYieldTarget(id) else { return fallback }
     return target.resultType ?? target.preferredType ?? fallback
   }
 
-  func markExplicitBranchBreak(on id: BranchBreakTargetId) {
-    guard let index = activeBranchBreakTargetIndex(id) else {
-      fatalError("markExplicitBranchBreak called for inactive branch-break target")
+  func markExplicitYield(on id: YieldTargetId) {
+    guard let index = activeYieldTargetIndex(id) else {
+      fatalError("markExplicitYield called for inactive yield target")
     }
-    branchBreakTargets[index].didExplicitBranchBreak = true
+    yieldTargets[index].didExplicitYield = true
   }
 
-  func popBranchBreakTarget(_ id: BranchBreakTargetId) -> BranchBreakTarget {
-    guard let popped = branchBreakTargets.popLast() else {
-      fatalError("branch-break target stack underflow")
+  func popYieldTarget(_ id: YieldTargetId) -> YieldTarget {
+    guard let popped = yieldTargets.popLast() else {
+      fatalError("yield target stack underflow")
     }
     guard popped.id == id else {
-      fatalError("branch-break target stack mismatch")
+      fatalError("yield target stack mismatch")
     }
     if !exitableConstructStack.isEmpty {
       exitableConstructStack.removeLast()
@@ -881,31 +881,31 @@ extension TypeChecker {
     throw SemanticError.typeMismatch(expected: current.description, got: incoming.description)
   }
 
-  func mergeBranchBreakTargetResult(type: Type, span: SourceSpan) throws {
-    guard !branchBreakTargets.isEmpty else {
-      fatalError("mergeBranchBreakTargetResult called without an active branch-break target")
+  func mergeYieldTargetResult(type: Type, span: SourceSpan) throws {
+    guard !yieldTargets.isEmpty else {
+      fatalError("mergeYieldTargetResult called without an active yield target")
     }
-    let index = branchBreakTargets.count - 1
-    let current = branchBreakTargets[index]
+    let index = yieldTargets.count - 1
+    let current = yieldTargets[index]
     let preferredBaseType: Type? = {
       guard let preferredType = current.preferredType else { return nil }
       return context.containsGenericParameter(preferredType) ? nil : preferredType
     }()
     let baseType = current.resultType ?? preferredBaseType
     let merged = try mergeBranchResultTypes(baseType, type, span: span)
-    branchBreakTargets[index].resultType = merged
+    yieldTargets[index].resultType = merged
   }
 
   func mergeBranchContribution(_ expr: TypedExpressionNode, span: SourceSpan) throws {
-    guard !branchBreakTargets.isEmpty else { return }
+    guard !yieldTargets.isEmpty else { return }
     switch expr {
     case .blockExpression:
       if expr.type == .void {
-        try mergeBranchBreakTargetResult(type: .void, span: span)
+        try mergeYieldTargetResult(type: .void, span: span)
       }
     default:
       if expr.type != .never {
-        try mergeBranchBreakTargetResult(type: expr.type, span: span)
+        try mergeYieldTargetResult(type: expr.type, span: span)
       }
     }
   }
@@ -963,12 +963,12 @@ extension TypeChecker {
     throw SemanticError.typeMismatch(expected: expectedType.description, got: normalized.type.description)
   }
 
-  func materializeExplicitBranchBreakBlockValue(
+  func materializeExplicitYieldBlockValue(
     _ expr: TypedExpressionNode,
     resultType: Type,
-    didExplicitBranchBreak: Bool
+    didExplicitYield: Bool
   ) -> TypedExpressionNode {
-    guard didExplicitBranchBreak,
+    guard didExplicitYield,
           resultType != .void,
           resultType != .never,
           case .blockExpression(let statements, _) = expr else {
@@ -976,7 +976,7 @@ extension TypeChecker {
     }
     // Internal lowering helper: preserve source-level "blocks do not produce
     // values" while still letting desugarings such as `or else` / `and then`
-    // Carry the explicit break-with-value result as an ordinary typed expression.
+    // Carry the explicit yield result as an ordinary typed expression.
     return .blockExpression(statements: statements, type: resultType)
   }
 
@@ -1005,7 +1005,7 @@ extension TypeChecker {
   ) throws -> (TypedExpressionNode, TypedExpressionNode?, Type) {
     guard var typedElse = elseBranch else {
       // Single-branch if must have Void or Never type in the then branch.
-      // This prevents misuse of break-with-value in a single-branch if, where the user
+      // This prevents misuse of yield in a single-branch if, where the user
       // might expect it to produce a value but the expression always has
       // type Void (since there is no else branch to merge with).
       if thenBranch.type != .void && thenBranch.type != .never {
@@ -1205,8 +1205,8 @@ extension TypeChecker {
     }
 
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
-    let targetId: BranchBreakTargetId? = (usage != .statement && elseBranch != nil)
-      ? createBranchBreakTarget(kind: .ifPatternExpression, span: subject.span, preferredType: expectedType)
+    let targetId: YieldTargetId? = (usage != .statement && elseBranch != nil)
+      ? createYieldTarget(kind: .ifPatternExpression, span: subject.span, preferredType: expectedType)
       : nil
 
     let branchUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
@@ -1218,13 +1218,13 @@ extension TypeChecker {
       }
       return try normalizeBranchExpression(
         try thenBuilder(branchUsage),
-        expectedType: expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
+        expectedType: expectedTypeForYieldTarget(targetId, fallback: expectedType)
       )
     }
 
     let typedElse: TypedExpressionNode?
     if let elseBranch {
-      var elseExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
+      var elseExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
       if elseExpectedType == nil,
          typedThen.type != .never,
          isImplicitMemberContextType(typedThen.type),
@@ -1248,11 +1248,11 @@ extension TypeChecker {
 
     let resultType: Type
     if let targetId {
-      guard let targetState = activeBranchBreakTarget(targetId) else {
-        fatalError("if-pattern branch-break target disappeared before completion")
+      guard let targetState = activeYieldTarget(targetId) else {
+        fatalError("if-pattern yield target disappeared before completion")
       }
-      if !targetState.didExplicitBranchBreak {
-        _ = popBranchBreakTarget(targetId)
+      if !targetState.didExplicitYield {
+        _ = popYieldTarget(targetId)
         let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
           thenBranch: typedThen,
           elseBranch: typedElse,
@@ -1274,7 +1274,7 @@ extension TypeChecker {
         try mergeBranchContribution(typedElse, span: elseBranch?.span ?? subject.span)
       }
 
-      let target = popBranchBreakTarget(targetId)
+      let target = popYieldTarget(targetId)
       resultType = target.resultType ?? ((typedThen.type == .never && typedElse?.type == .never) ? .never : .void)
     } else {
       let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
@@ -1671,9 +1671,9 @@ extension TypeChecker {
         }
       }
 
-      let targetId: BranchBreakTargetId? = usage == .statement
+      let targetId: YieldTargetId? = usage == .statement
         ? nil
-        : createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: expectedType)
+        : createYieldTarget(kind: .whenExpression, span: span, preferredType: expectedType)
 
       var typedCases: [TypedMatchCase] = []
       var sawFallthrough = false
@@ -1689,7 +1689,7 @@ extension TypeChecker {
             }
           }
           // Use the current target's evolving type, if any, for subsequent arms.
-          var branchExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
+          var branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
           if branchExpectedType == nil,
              branchNeedsExpectedTypeForImplicitMember(c.body) {
             branchExpectedType = runningExpectedType
@@ -1718,7 +1718,7 @@ extension TypeChecker {
         }
         if typedCase.body.type != .never,
            isImplicitMemberContextType(typedCase.body.type),
-           activeBranchBreakTarget(targetId)?.didExplicitBranchBreak != true {
+           activeYieldTarget(targetId)?.didExplicitYield != true {
           runningExpectedType = try mergeBranchResultTypes(runningExpectedType, typedCase.body.type, span: c.body.span)
         }
         typedCases.append(typedCase)
@@ -1738,11 +1738,11 @@ extension TypeChecker {
       
       let resultType: Type
       if let targetId {
-        if activeBranchBreakTarget(targetId)?.didExplicitBranchBreak == true {
+        if activeYieldTarget(targetId)?.didExplicitYield == true {
           for (typedCase, sourceCase) in zip(typedCases, cases) {
             try mergeBranchContribution(typedCase.body, span: sourceCase.body.span)
           }
-          let target = popBranchBreakTarget(targetId)
+          let target = popYieldTarget(targetId)
           if let mergedType = target.resultType {
             resultType = mergedType
           } else if allNever {
@@ -1759,7 +1759,7 @@ extension TypeChecker {
             expectedType: expectedType
           )
           typedCases = mergedCases
-          _ = popBranchBreakTarget(targetId)
+          _ = popYieldTarget(targetId)
           resultType = mergedType
         }
       } else {
@@ -1925,14 +1925,14 @@ extension TypeChecker {
         )
       }
 
-      let targetId = createBranchBreakTarget(kind: .ifExpression, span: expr.span, preferredType: expectedType)
-      let branchExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
+      let targetId = createYieldTarget(kind: .ifExpression, span: expr.span, preferredType: expectedType)
+      let branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
       let typedThen = try normalizeBranchExpression(
         try inferTypedExpression(thenBranch, expectedType: branchExpectedType, usage: .branchBody(target: targetId)),
         expectedType: branchExpectedType
       )
 
-      var nextExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
+      var nextExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
       if nextExpectedType == nil,
          typedThen.type != .never,
          isImplicitMemberContextType(typedThen.type),
@@ -1943,11 +1943,11 @@ extension TypeChecker {
         try inferTypedExpression(elseBranch, expectedType: nextExpectedType, usage: .branchBody(target: targetId)),
         expectedType: nextExpectedType
       )
-      guard let targetState = activeBranchBreakTarget(targetId) else {
-        fatalError("if-expression branch-break target disappeared before completion")
+      guard let targetState = activeYieldTarget(targetId) else {
+        fatalError("if-expression yield target disappeared before completion")
       }
-      if !targetState.didExplicitBranchBreak {
-        _ = popBranchBreakTarget(targetId)
+      if !targetState.didExplicitYield {
+        _ = popYieldTarget(targetId)
         return try buildTypedIfExpression(
           condition: typedCondition,
           thenBranch: typedThen,
@@ -1959,7 +1959,7 @@ extension TypeChecker {
       try mergeBranchContribution(typedThen, span: thenBranch.span)
       try mergeBranchContribution(typedElse, span: elseBranch.span)
 
-      let target = popBranchBreakTarget(targetId)
+      let target = popYieldTarget(targetId)
       let resultType = target.resultType ?? ((typedThen.type == .never && typedElse.type == .never) ? .never : .void)
       return .ifExpression(
         condition: typedCondition,
@@ -2145,7 +2145,7 @@ extension TypeChecker {
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
         methodName: methodName,
-        arguments: arguments.compactMap { $0.expression }
+        callArgs: arguments
       )
 
     case .traitQualificationExpression:
@@ -2162,7 +2162,7 @@ extension TypeChecker {
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: nil,
-        arguments: arguments.compactMap { $0.expression }
+        callArgs: arguments
       )
 
     case .qualifiedGenericMethodCall(let baseExpr, let traitType, let methodTypeArgs, let methodName, let arguments):
@@ -2174,7 +2174,7 @@ extension TypeChecker {
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
-        arguments: arguments.compactMap { $0.expression }
+        callArgs: arguments
       )
 
     case .memberPath(let baseExpr, let path):
@@ -2188,7 +2188,7 @@ extension TypeChecker {
         typeName: typeName,
         typeArgs: typeArgs,
         methodName: methodName,
-        arguments: arguments.compactMap { $0.expression }
+        callArgs: arguments
       )
 
     case .forExpression(let pattern, let iterable, let body):
@@ -2471,7 +2471,7 @@ extension TypeChecker {
       return try buildWithCapacityCall(targetType: expectedType, count: 0)
     case .range(let elementType):
       // Generate Range[T].Full() enum construction
-      let rangeType = Type.genericEnum(template: "Range", args: [elementType])
+      let rangeType = genericEnumType(template: "Range", args: [elementType])
       return .enumConstruction(type: rangeType, caseName: "Full", arguments: [])
     }
   }
@@ -2492,7 +2492,7 @@ extension TypeChecker {
 
     switch target {
     case .list(let elementType):
-      let listType = Type.genericStruct(template: "List", args: [elementType])
+      let listType = genericStructType(template: "List", args: [elementType])
       return try lowerCollectionLiteral(
         targetType: listType,
         methodName: "push",
@@ -2503,7 +2503,7 @@ extension TypeChecker {
       )
 
     case .set(let elementType):
-      let setType = Type.genericStruct(template: "Set", args: [elementType])
+      let setType = genericStructType(template: "Set", args: [elementType])
       return try lowerCollectionLiteral(
         targetType: setType,
         methodName: "insert",
@@ -2551,7 +2551,7 @@ extension TypeChecker {
       valueType = try inferCommonElementType(elements: entries.map { $0.value }, span: span)
     }
 
-    let dictType = Type.genericStruct(template: "Dict", args: [keyType, valueType])
+    let dictType = genericStructType(template: "Dict", args: [keyType, valueType])
     return try lowerDictLiteral(
       targetType: dictType,
       entries: entries,
@@ -2563,7 +2563,7 @@ extension TypeChecker {
 
   private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind {
     switch type {
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       switch template {
       case "List":
         guard args.count == 1 else {
@@ -2587,7 +2587,7 @@ extension TypeChecker {
         )
       }
 
-    case .genericEnum(let template, let args):
+    case .genericEnum(let template, let defId, let args):
       switch template {
       case "Range":
         guard args.count == 1 else {
@@ -2707,7 +2707,7 @@ extension TypeChecker {
         base: .variable(identifier: temp),
         method: methodSym,
         methodType: methodSym.type,
-        arguments: [element]
+        callArgs: [CallArg(expression: element)]
       )
       statements.append(.expression(typedCall))
     }
@@ -2759,7 +2759,7 @@ extension TypeChecker {
         base: .variable(identifier: temp),
         method: methodSym,
         methodType: methodSym.type,
-        arguments: [entry.key, entry.value]
+        callArgs: [CallArg(expression: entry.key), CallArg(expression: entry.value)]
       )
       statements.append(.expression(typedCall))
     }
@@ -2774,15 +2774,15 @@ extension TypeChecker {
       typeName: typeName,
       typeArgs: typeArgs,
       methodName: "with_capacity",
-      arguments: [.integerLiteral("\(count)")]
+      callArgs: [CallArg(expression: .integerLiteral("\(count)"))]
     )
   }
 
   private func staticTypeCallParts(for type: Type) throws -> (name: String, args: [TypeNode]) {
     switch type {
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       return (template, try args.map { try toTypeNode($0) })
-    case .genericEnum(let template, let args):
+    case .genericEnum(let template, let defId, let args):
       return (template, try args.map { try toTypeNode($0) })
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
@@ -2820,9 +2820,9 @@ extension TypeChecker {
     case .weakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: false)
     case .mutableWeakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: true)
     case .genericParameter(let name): return .identifier(name)
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       return .generic(base: template, args: try args.map { try toTypeNode($0) })
-    case .genericEnum(let template, let args):
+    case .genericEnum(let template, let defId, let args):
       return .generic(base: template, args: try args.map { try toTypeNode($0) })
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
@@ -2936,7 +2936,7 @@ extension TypeChecker {
     case .`enum`(let defId):
       cases = context.getEnumCases(defId)
       
-    case .genericEnum(let templateName, let typeArgs):
+    case .genericEnum(let templateName, _, let typeArgs):
       // Look up the enum template and substitute type parameters
       guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
         return nil
@@ -3100,7 +3100,7 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .genericStruct(let templateName, let typeArgs):
+    case .genericStruct(let templateName, _, let typeArgs):
       guard let extensions = genericExtensionMethods[templateName],
             let ext = extensions.first(where: { $0.method.name == memberName }) else {
         return nil
@@ -3156,7 +3156,7 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .genericEnum(let templateName, let typeArgs):
+    case .genericEnum(let templateName, _, let typeArgs):
       guard let extensions = genericExtensionMethods[templateName],
             let ext = extensions.first(where: { $0.method.name == memberName }) else {
         return nil
@@ -3260,7 +3260,7 @@ extension TypeChecker {
     traitType: TypeNode,
     methodName: String,
     methodTypeArgs: [TypeNode]?,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     let (traitName, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
 
@@ -3271,7 +3271,7 @@ extension TypeChecker {
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
         methodName: methodName,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
 
@@ -3282,6 +3282,19 @@ extension TypeChecker {
       guard case .function(let params, let returnType) = methodSym.type else {
         throw SemanticError(.generic("Expected function type for static qualified method"), span: currentSpan)
       }
+      let paramMeta = methodCallParamMeta(
+        ownerTypeName: baseName,
+        methodName: methodName,
+        fallbackDefId: methodSym.defId,
+        argumentCount: params.count
+      )
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: paramMeta.names,
+        paramIsNamed: paramMeta.isNamed,
+        callDescription: methodName,
+        defaultsKeyPrefix: methodName
+      )
       if arguments.count != params.count {
         throw SemanticError.invalidArgumentCount(
           function: methodName,
@@ -3334,6 +3347,24 @@ extension TypeChecker {
       guard case .function(let params, let returns) = expectedType else {
         throw SemanticError(.generic("Expected function type for qualified method"), span: currentSpan)
       }
+      let toolMeta = method.parameters.map { (name: $0.name, named: $0.named) }
+      let toolCallMeta: (names: [String], isNamed: [Bool]) = {
+        var meta = toolMeta
+        if meta.count == params.count - 1 + 1 && meta.first?.name == "self" {
+          meta = Array(meta.dropFirst())
+        }
+        if meta.count != params.count - 1 {
+          meta = (0..<(params.count - 1)).map { (name: "arg\($0)", named: false) }
+        }
+        return (meta.map { $0.name }, meta.map { $0.named })
+      }()
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: toolCallMeta.names,
+        paramIsNamed: toolCallMeta.isNamed,
+        callDescription: methodName,
+        defaultsKeyPrefix: methodName
+      )
       if arguments.count != params.count - 1 {
         throw SemanticError.invalidArgumentCount(
           function: methodName,
@@ -3381,7 +3412,7 @@ extension TypeChecker {
         base: typedBase,
         method: methodSym,
         methodType: methodSym.type,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
 
@@ -3390,7 +3421,7 @@ extension TypeChecker {
         base: typedBase,
         method: methodSym,
         methodType: methodSym.type,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
 
@@ -3456,6 +3487,18 @@ extension TypeChecker {
               throw SemanticError(.generic("Expected function type for static trait method"), span: currentSpan)
             }
 
+            let traitStaticMeta = callParamMeta(
+              from: sig.parameters.map { (name: $0.name, named: $0.named) },
+              argumentCount: params.count
+            )
+            let arguments = try planCallArgumentExpressions(
+              callArgs,
+              paramNames: traitStaticMeta.names,
+              paramIsNamed: traitStaticMeta.isNamed,
+              callDescription: methodName,
+              defaultsKeyPrefix: methodName
+            )
+
             if arguments.count != params.count {
               throw SemanticError.invalidArgumentCount(
                 function: methodName,
@@ -3463,7 +3506,6 @@ extension TypeChecker {
                 got: arguments.count
               )
             }
-            try validateCallArgumentOrder(callArgs, functionName: methodName)
 
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
@@ -3560,7 +3602,7 @@ extension TypeChecker {
         }
         
         // Create parameterized type
-        let baseType = Type.genericStruct(template: baseName, args: resolvedArgs)
+        let baseType = genericStructType(template: baseName, args: resolvedArgs)
         
         // Look up static method on generic struct
         if let extensions = genericExtensionMethods[baseName] {
@@ -3636,7 +3678,7 @@ extension TypeChecker {
         }
         
         // Create parameterized type
-        let baseType = Type.genericEnum(template: baseName, args: resolvedArgs)
+        let baseType = genericEnumType(template: baseName, args: resolvedArgs)
         
         // Check if it's a enum case constructor
         var substitution: [String: Type] = [:]
@@ -3755,7 +3797,7 @@ extension TypeChecker {
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
-      case .genericEnum(let templateName, let typeArgs):
+      case .genericEnum(let templateName, _, let typeArgs):
         if let template = currentScope.lookupGenericEnumTemplate(templateName),
            let c = template.cases.first(where: { $0.name == memberName }) {
           var substitution: [String: Type] = [:]
@@ -3804,7 +3846,7 @@ extension TypeChecker {
       let memberName = path[0]
 
       if let expectedType = expectedType,
-         case .genericEnum(let expectedTemplateName, let expectedTypeArgs) = expectedType,
+         case .genericEnum(let expectedTemplateName, _, let expectedTypeArgs) = expectedType,
          expectedTemplateName == baseName {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: expectedTypeArgs)
         
@@ -3816,7 +3858,7 @@ extension TypeChecker {
           ))
         }
 
-        let type = Type.genericEnum(template: baseName, args: expectedTypeArgs)
+        let type = genericEnumType(template: baseName, args: expectedTypeArgs)
         var substitution: [String: Type] = [:]
         for (i, param) in template.typeParameters.enumerated() {
           substitution[param.name] = expectedTypeArgs[i]
@@ -3868,7 +3910,7 @@ extension TypeChecker {
         var enumName: String? = nil
         if case .`enum`(let defId) = returnType {
           enumName = context.getName(defId)
-        } else if case .genericEnum(let templateName, _) = returnType {
+        } else if case .genericEnum(let templateName, _, _) = returnType {
           enumName = templateName
         }
         
@@ -3914,7 +3956,7 @@ extension TypeChecker {
         return try inferImplicitGenericFunctionCall(
           template: template,
           name: name,
-          arguments: arguments,
+          callArgs: callArgs,
           expectedReturnType: expectedType
         )
       }
@@ -4000,7 +4042,7 @@ extension TypeChecker {
         base: base,
         method: method,
         methodType: methodType,
-        arguments: arguments,
+        callArgs: callArgs,
         expectedReturnType: expectedType
       )
     }
@@ -4012,10 +4054,22 @@ extension TypeChecker {
       guard case .function(let params, let returns) = methodType else {
         throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
       }
-      try validateCallArgumentOrder(callArgs, functionName: methodName)
-      
+
       // The first parameter is 'self' (the base), so we check remaining arguments
       let expectedArgCount = params.count - 1
+      let placeholderMethods = (try? flattenedTraitMethods(traitName)) ?? [:]
+      let placeholderMeta = callParamMeta(
+        from: placeholderMethods[methodName]?.parameters.map { (name: $0.name, named: $0.named) } ?? [],
+        argumentCount: expectedArgCount
+      )
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: placeholderMeta.names,
+        paramIsNamed: placeholderMeta.isNamed,
+        callDescription: methodName,
+        defaultsKeyPrefix: methodName
+      )
+
       if arguments.count != expectedArgCount {
         throw SemanticError.invalidArgumentCount(
           function: "trait method",
@@ -4085,14 +4139,34 @@ extension TypeChecker {
 
     // Function call
     if case .function(let params, let returns) = typedCallee.type {
+      // Free function / function value: plan labels + defaults through the
+      // unified planner using the callee's declared parameter labels.
+      let calleeDefId: DefId? = {
+        if case .variable(let symbol) = typedCallee { return symbol.defId }
+        return nil
+      }()
+      let calleeName = calleeDefId.flatMap { context.getName($0) } ?? "expression"
+      let functionMeta: (names: [String], isNamed: [Bool]) = {
+        if let calleeDefId {
+          return callArgumentParamMeta(defId: calleeDefId, argumentCount: params.count)
+        }
+        return callParamMeta(from: [], argumentCount: params.count)
+      }()
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: functionMeta.names,
+        paramIsNamed: functionMeta.isNamed,
+        callDescription: calleeName,
+        defaultsKeyPrefix: calleeName
+      )
+
       if arguments.count != params.count {
         throw SemanticError.invalidArgumentCount(
-          function: "expression",
+          function: calleeName,
           expected: params.count,
           got: arguments.count
         )
       }
-      try validateCallArgumentOrder(callArgs, functionName: "")
 
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
@@ -4208,7 +4282,7 @@ extension TypeChecker {
       )
       
       // Return parameterized type
-      let genericType = Type.genericStruct(template: base, args: resolvedArgs)
+      let genericType = genericStructType(template: base, args: resolvedArgs)
 
       return .typeConstruction(
         identifier: makeLocalSymbol(name: base, type: genericType, kind: .type),
@@ -4332,34 +4406,6 @@ extension TypeChecker {
         return .intrinsicCall(.nullPtr(resultType: resultType))
       }
 
-      if base == "is_unique_mutable" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        // Signature is ptr ref mutable T — accept any ref/ptr type, infer freely
-        let val = try inferTypedExpression(arguments[0])
-        return .intrinsicCall(.isUniqueMutable(val: val))
-      }
-
-      if base == "ref_count" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let refArg = try inferTypedExpression(arguments[0])
-        return .intrinsicCall(.refCount(ref: refArg))
-      }
 
       if base == "downgrade" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -4391,7 +4437,7 @@ extension TypeChecker {
         guard case .weakReference(let innerType) = weakArg.type else {
           throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakArg.type)"), span: currentSpan)
         }
-        let resultType: Type = .genericEnum(template: "Option", args: [innerType])
+        let resultType: Type = genericEnumType(template: "Option", args: [innerType])
         return .intrinsicCall(.upgradeRef(val: weakArg, resultType: resultType))
       }
 
@@ -4460,6 +4506,18 @@ extension TypeChecker {
         return (resolvedParams, resolvedReturn)
       }
 
+      let explicitGenericMeta = callParamMeta(
+        from: template.parameters.map { (name: $0.name, named: $0.named) },
+        argumentCount: params.count
+      )
+      let arguments = try planCallArgumentExpressions(
+        callArgs ?? arguments.map { CallArg(expression: $0) },
+        paramNames: explicitGenericMeta.names,
+        paramIsNamed: explicitGenericMeta.isNamed,
+        callDescription: base,
+        defaultsKeyPrefix: base
+      )
+
       if arguments.count != params.count {
         throw SemanticError.invalidArgumentCount(
           function: base,
@@ -4497,9 +4555,22 @@ extension TypeChecker {
   func inferImplicitGenericFunctionCall(
     template: GenericFunctionTemplate,
     name: String,
-    arguments: [ExpressionNode],
+    callArgs: [CallArg],
     expectedReturnType: Type? = nil
   ) throws -> TypedExpressionNode {
+    // Plan call arguments through the unified planner (labels + defaults).
+    let genericMeta = callParamMeta(
+      from: template.parameters.map { (name: $0.name, named: $0.named) },
+      argumentCount: template.parameters.count
+    )
+    let arguments = try planCallArgumentExpressions(
+      callArgs,
+      paramNames: genericMeta.names,
+      paramIsNamed: genericMeta.isNamed,
+      callDescription: name,
+      defaultsKeyPrefix: name
+    )
+
     if name == "null_ptr" && arguments.isEmpty {
       return .intrinsicCall(.nullPtr(resultType: .pointer(element: .void)))
     }
@@ -4549,7 +4620,7 @@ extension TypeChecker {
       if name == "upgrade" {
         switch typedArgument.type {
         case .weakReference(let innerType):
-          let resultType: Type = .genericEnum(template: "Option", args: [innerType])
+          let resultType: Type = genericEnumType(template: "Option", args: [innerType])
           return .intrinsicCall(.upgradeRef(val: typedArgument, resultType: resultType))
         default:
           throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(typedArgument.type)"), span: currentSpan)
@@ -4650,14 +4721,6 @@ extension TypeChecker {
         .moveMemory(
           dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
     }
-    if templateName == "is_unique_mutable" {
-      return .intrinsicCall(.isUniqueMutable(val: typedArguments[0]))
-    }
-
-    if templateName == "ref_count" {
-      return .intrinsicCall(.refCount(ref: typedArguments[0]))
-    }
-
     if templateName == "downgrade" {
       // downgrade takes a managed value T (must satisfy 'mutable' constraint) and produces ?T
       let refValue = typedArguments[0]
@@ -4671,7 +4734,7 @@ extension TypeChecker {
       guard case .weakReference(let innerType) = weakValue.type else {
         throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakValue.type)"), span: currentSpan)
       }
-      let resultType: Type = .genericEnum(template: "Option", args: [innerType])
+      let resultType: Type = genericEnumType(template: "Option", args: [innerType])
       return .intrinsicCall(.upgradeRef(val: weakValue, resultType: resultType))
     }
 
@@ -4717,11 +4780,29 @@ extension TypeChecker {
     base: TypedExpressionNode,
     method: Symbol,
     methodType: Type,
-    arguments: [ExpressionNode],
+    callArgs: [CallArg],
     expectedReturnType: Type? = nil
   ) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
     if case .function(let params, let returns) = method.type {
+      // Plan call arguments through the unified planner so that labels are
+      // matched against the declared parameter labels and omitted named
+      // parameters are filled from their declared defaults.
+      let argumentCount = params.count - 1
+      let paramMeta = methodCallParamMeta(
+        ownerTypeName: ownerTypeName(for: base.type),
+        methodName: methodName,
+        fallbackDefId: method.defId,
+        argumentCount: argumentCount
+      )
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: paramMeta.names,
+        paramIsNamed: paramMeta.isNamed,
+        callDescription: methodName,
+        defaultsKeyPrefix: methodName
+      )
+
       if arguments.count != params.count - 1 {
         throw SemanticError.invalidArgumentCount(
           function: methodName,
@@ -4736,7 +4817,7 @@ extension TypeChecker {
       // The base type is a trait object (or reference to one) — handle before auto-ref/deref.
       switch base.type {
       case .reference(let inner), .mutableReference(let inner):
-        if case .traitObject(let traitName, _) = inner {
+        if case .traitObject(let traitName, _, _) = inner {
           return try inferTraitObjectMethodCall(
             base: base,
             traitName: traitName,
@@ -4746,7 +4827,7 @@ extension TypeChecker {
             arguments: arguments
           )
         }
-      case .traitObject(let traitName, _):
+      case .traitObject(let traitName, _, _):
         return try inferTraitObjectMethodCall(
           base: base,
           traitName: traitName,
@@ -4943,7 +5024,7 @@ extension TypeChecker {
     baseExpr: ExpressionNode,
     methodTypeArgs: [TypeNode],
     methodName: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     if case .identifier(let typeName) = baseExpr,
        currentScope.lookup(typeName, sourceFile: currentSourceFile) == nil,
@@ -4955,7 +5036,7 @@ extension TypeChecker {
         return try inferStaticGenericMethodCallOnConcreteType(
           baseType: baseType,
           methodName: methodName,
-          arguments: arguments,
+          callArgs: callArgs,
           explicitMethodTypeArgs: resolvedMethodTypeArgs
         )
       }
@@ -4997,9 +5078,22 @@ extension TypeChecker {
     guard case .function(let params, let returns) = resolvedMethodType else {
       throw SemanticError(.generic("Expected function type for method \(methodName)"), span: currentSpan)
     }
-    
-    // Check argument count (excluding self)
+
+    // Plan call arguments through the unified planner (labels + defaults).
     let expectedArgCount = params.count - 1
+    let paramMeta = callArgumentParamMeta(
+      defId: methodResult.methodSymbol.defId,
+      argumentCount: expectedArgCount
+    )
+    let arguments = try planCallArgumentExpressions(
+      callArgs,
+      paramNames: paramMeta.names,
+      paramIsNamed: paramMeta.isNamed,
+      callDescription: methodName,
+      defaultsKeyPrefix: methodName
+    )
+
+    // Check argument count (excluding self)
     if arguments.count != expectedArgCount {
       throw SemanticError.invalidArgumentCount(
         function: methodName,
@@ -5101,12 +5195,12 @@ extension TypeChecker {
     if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       let type = canonicalizedTypeForStaticMemberLookup(rawType)
       switch type {
-      case .genericStruct(let templateName, let typeArgs):
+      case .genericStruct(let templateName, _, let typeArgs):
         let argNodes = try typeArgs.map { try toTypeNode($0) }
         if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
           return result
         }
-      case .genericEnum(let templateName, let typeArgs):
+      case .genericEnum(let templateName, _, let typeArgs):
         let argNodes = try typeArgs.map { try toTypeNode($0) }
         if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
           return result
@@ -5142,7 +5236,7 @@ extension TypeChecker {
       
       // Try to infer type arguments from currentFunctionReturnType
       if let returnType = currentFunctionReturnType,
-         case .genericEnum(let templateName, let typeArgs) = returnType,
+         case .genericEnum(let templateName, _, let typeArgs) = returnType,
          templateName == name {
         // We have a matching return type context, use its type arguments
         
@@ -5158,7 +5252,7 @@ extension TypeChecker {
           ))
         }
         
-        let type = Type.genericEnum(template: name, args: typeArgs)
+        let type = genericEnumType(template: name, args: typeArgs)
         
         // Create type substitution map
         var substitution: [String: Type] = [:]
@@ -5238,7 +5332,7 @@ extension TypeChecker {
       }
       
       // Handle genericStruct types - look up member from template
-      if !foundMember, case .genericStruct(let templateName, let typeArgs) = typeToLookup {
+      if !foundMember, case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
         if let template = currentScope.lookupGenericStructTemplate(templateName) {
           // Create type substitution map
           var substitution: [String: Type] = [:]
@@ -5464,7 +5558,7 @@ extension TypeChecker {
         ))
       }
       
-      let type = Type.genericStruct(template: baseName, args: resolvedArgs)
+      let type = genericStructType(template: baseName, args: resolvedArgs)
 
       if path.count == 1 {
         let memberName = path[0]
@@ -5511,7 +5605,7 @@ extension TypeChecker {
         ))
       }
       
-      let type = Type.genericEnum(template: baseName, args: resolvedArgs)
+      let type = genericEnumType(template: baseName, args: resolvedArgs)
 
       if path.count == 1 {
         let memberName = path[0]
@@ -5634,7 +5728,7 @@ extension TypeChecker {
     }
     
     // Handle genericStruct types
-    if case .genericStruct(let templateName, let typeArgs) = typeToLookup {
+    if case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[templateName] {
         for ext in extensions {
           if ext.method.name == memberName {
@@ -5654,7 +5748,7 @@ extension TypeChecker {
     }
     
     // Handle genericEnum types
-    if case .genericEnum(let templateName, let typeArgs) = typeToLookup {
+    if case .genericEnum(let templateName, _, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[templateName] {
         for ext in extensions {
           if ext.method.name == memberName {
@@ -5748,7 +5842,7 @@ extension TypeChecker {
 
     // Trait object method lookup: when the type is a trait object, look up the method
     // in the trait's method signatures and return a methodReference with Self replaced
-    if case .traitObject(let traitName, let traitTypeArgs) = typeToLookup {
+    if case .traitObject(let traitName, _, let traitTypeArgs) = typeToLookup {
       let methods = try flattenedTraitMethods(traitName)
       if let sig = methods[memberName] {
         // Only instance methods (with self parameter)
@@ -5757,7 +5851,7 @@ extension TypeChecker {
         }
 
         let traitInfo = visibleTraitInfo(traitName)
-        let traitObjType: Type = .traitObject(traitName: traitName, typeArgs: traitTypeArgs)
+        let traitObjType: Type = traitObjectType(traitName: traitName, typeArgs: traitTypeArgs)
 
         // Resolve the method type with Self replaced by the trait object type
         let expectedType = try expectedFunctionTypeForTraitMethod(
@@ -5802,7 +5896,7 @@ extension TypeChecker {
     typeName: String,
     typeArgs: [TypeNode],
     methodName: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     if typeName.contains(".") {
       throw SemanticError(
@@ -5816,7 +5910,7 @@ extension TypeChecker {
     if let rawType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       let canonicalType = canonicalizedTypeForStaticMemberLookup(rawType)
       switch canonicalType {
-      case .genericStruct(let templateName, let aliasArgs):
+      case .genericStruct(let templateName, _, let aliasArgs):
         if !resolvedTypeArgs.isEmpty {
           throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
         }
@@ -5828,9 +5922,9 @@ extension TypeChecker {
           typeName: templateName,
           resolvedTypeArgs: aliasArgs,
           methodName: methodName,
-          arguments: arguments
+          callArgs: callArgs
         )
-      case .genericEnum(let templateName, let aliasArgs):
+      case .genericEnum(let templateName, _, let aliasArgs):
         if !resolvedTypeArgs.isEmpty {
           throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
         }
@@ -5842,7 +5936,7 @@ extension TypeChecker {
           typeName: templateName,
           resolvedTypeArgs: aliasArgs,
           methodName: methodName,
-          arguments: arguments
+          callArgs: callArgs
         )
       default:
         break
@@ -5858,7 +5952,7 @@ extension TypeChecker {
         typeName: typeName,
         resolvedTypeArgs: resolvedTypeArgs,
         methodName: methodName,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
     
@@ -5869,7 +5963,7 @@ extension TypeChecker {
         typeName: typeName,
         resolvedTypeArgs: resolvedTypeArgs,
         methodName: methodName,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
     
@@ -5883,7 +5977,7 @@ extension TypeChecker {
         typeName: typeName,
         resolvedTypeArgs: resolvedTypeArgs,
         methodName: methodName,
-        arguments: arguments
+        callArgs: callArgs
       )
     }
 
@@ -5899,7 +5993,7 @@ extension TypeChecker {
     typeName: String,
     resolvedTypeArgs: [Type],
     methodName: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     var effectiveTypeArgs = resolvedTypeArgs
     if effectiveTypeArgs.isEmpty, !template.typeParameters.isEmpty,
@@ -5907,13 +6001,13 @@ extension TypeChecker {
         templateName: typeName,
         typeParameters: template.typeParameters,
         methodName: methodName,
-        arguments: arguments
+        arguments: callArgs.compactMap { $0.expression }
        ) {
       effectiveTypeArgs = inferred
     }
-    
+
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: effectiveTypeArgs)
-    
+
     if !effectiveTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .structType(template: template, args: effectiveTypeArgs),
@@ -5921,9 +6015,9 @@ extension TypeChecker {
         sourceFileName: currentFileName
       ))
     }
-    
-    let baseType = Type.genericStruct(template: typeName, args: effectiveTypeArgs)
-    
+
+    let baseType = genericStructType(template: typeName, args: effectiveTypeArgs)
+
     if let extensions = genericExtensionMethods[typeName] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
@@ -5931,11 +6025,23 @@ extension TypeChecker {
           let methodSym = try resolveGenericExtensionMethod(
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
-          
+
           guard case .function(let params, let returnType) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
-          
+
+          let extMeta = callParamMeta(
+            from: ext.method.parameters.map { (name: $0.name, named: $0.named) },
+            argumentCount: params.count
+          )
+          let arguments = try planCallArgumentExpressions(
+            callArgs,
+            paramNames: extMeta.names,
+            paramIsNamed: extMeta.isNamed,
+            callDescription: methodName,
+            defaultsKeyPrefix: methodName
+          )
+
           if arguments.count != params.count {
             throw SemanticError.invalidArgumentCount(
               function: methodName,
@@ -5943,13 +6049,13 @@ extension TypeChecker {
               got: arguments.count
             )
           }
-          
+
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
             let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
             typedArguments.append(typedArg)
           }
-          
+
           return .staticMethodCall(
             baseType: baseType,
             methodName: methodName,
@@ -5961,7 +6067,7 @@ extension TypeChecker {
         }
       }
     }
-    
+
     throw SemanticError.undefinedMember(methodName, typeName)
   }
   
@@ -5970,7 +6076,7 @@ extension TypeChecker {
     typeName: String,
     resolvedTypeArgs: [Type],
     methodName: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     var effectiveTypeArgs = resolvedTypeArgs
     if effectiveTypeArgs.isEmpty, !template.typeParameters.isEmpty,
@@ -5978,7 +6084,7 @@ extension TypeChecker {
         templateName: typeName,
         typeParameters: template.typeParameters,
         methodName: methodName,
-        arguments: arguments
+        arguments: callArgs.compactMap { $0.expression }
        ) {
       effectiveTypeArgs = inferred
     }
@@ -6000,7 +6106,7 @@ extension TypeChecker {
       ))
     }
     
-    let baseType = Type.genericEnum(template: typeName, args: effectiveTypeArgs)
+    let baseType = genericEnumType(template: typeName, args: effectiveTypeArgs)
     
     if let extensions = genericExtensionMethods[typeName] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
@@ -6013,7 +6119,19 @@ extension TypeChecker {
           guard case .function(let params, let returnType) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
-          
+
+          let enumExtMeta = callParamMeta(
+            from: ext.method.parameters.map { (name: $0.name, named: $0.named) },
+            argumentCount: params.count
+          )
+          let arguments = try planCallArgumentExpressions(
+            callArgs,
+            paramNames: enumExtMeta.names,
+            paramIsNamed: enumExtMeta.isNamed,
+            callDescription: methodName,
+            defaultsKeyPrefix: methodName
+          )
+
           if arguments.count != params.count {
             throw SemanticError.invalidArgumentCount(
               function: methodName,
@@ -6021,13 +6139,13 @@ extension TypeChecker {
               got: arguments.count
             )
           }
-          
+
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
             let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
             typedArguments.append(typedArg)
           }
-          
+
           return .staticMethodCall(
             baseType: baseType,
             methodName: methodName,
@@ -6063,7 +6181,7 @@ extension TypeChecker {
       }
 
       let selfArgs = ext.typeParams.map { Type.genericParameter(name: $0.name) }
-      try currentScope.defineType("Self", type: .genericStruct(template: templateName, args: selfArgs))
+      try currentScope.defineType("Self", type: genericStructType(template: templateName, args: selfArgs))
 
       return try ext.method.parameters.map { param in
         try resolveTypeNode(param.type)
@@ -6196,7 +6314,7 @@ extension TypeChecker {
     typeName: String,
     resolvedTypeArgs: [Type],
     methodName: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     if !resolvedTypeArgs.isEmpty {
       throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
@@ -6218,15 +6336,29 @@ extension TypeChecker {
         return try inferStaticGenericMethodCallOnConcreteType(
           baseType: type,
           methodName: methodName,
-          arguments: arguments,
+          callArgs: callArgs,
           explicitMethodTypeArgs: nil
         )
       }
-      
+
       guard case .function(let params, let returnType) = methodSym.type else {
         throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
       }
-      
+
+      let staticMeta = methodCallParamMeta(
+        ownerTypeName: lookupTypeName,
+        methodName: methodName,
+        fallbackDefId: methodSym.defId,
+        argumentCount: params.count
+      )
+      let arguments = try planCallArgumentExpressions(
+        callArgs,
+        paramNames: staticMeta.names,
+        paramIsNamed: staticMeta.isNamed,
+        callDescription: methodName,
+        defaultsKeyPrefix: methodName
+      )
+
       if arguments.count != params.count {
         throw SemanticError.invalidArgumentCount(
           function: methodName,
@@ -6234,13 +6366,13 @@ extension TypeChecker {
           got: arguments.count
         )
       }
-      
+
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
         typedArguments.append(typedArg)
       }
-      
+
       return .staticMethodCall(
         baseType: type,
         methodName: methodName,
@@ -6256,7 +6388,7 @@ extension TypeChecker {
       return try inferStaticGenericMethodCallOnConcreteType(
         baseType: type,
         methodName: methodName,
-        arguments: arguments,
+        callArgs: callArgs,
         explicitMethodTypeArgs: nil
       )
     }
@@ -6291,7 +6423,19 @@ extension TypeChecker {
             guard case .function(let params, let returnType) = expectedType else {
               throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
             }
-            
+
+            let sigMeta = callParamMeta(
+              from: sig.parameters.map { (name: $0.name, named: $0.named) },
+              argumentCount: params.count
+            )
+            let arguments = try planCallArgumentExpressions(
+              callArgs,
+              paramNames: sigMeta.names,
+              paramIsNamed: sigMeta.isNamed,
+              callDescription: methodName,
+              defaultsKeyPrefix: methodName
+            )
+
             if arguments.count != params.count {
               throw SemanticError.invalidArgumentCount(
                 function: methodName,
@@ -6348,7 +6492,7 @@ extension TypeChecker {
   private func inferStaticGenericMethodCallOnConcreteType(
     baseType: Type,
     methodName: String,
-    arguments: [ExpressionNode],
+    callArgs: [CallArg],
     explicitMethodTypeArgs: [Type]?
   ) throws -> TypedExpressionNode {
     let methodTypeArgs: [Type]
@@ -6358,7 +6502,7 @@ extension TypeChecker {
       methodTypeArgs = try inferStaticGenericMethodTypeArguments(
         baseType: baseType,
         methodName: methodName,
-        arguments: arguments
+        arguments: callArgs.compactMap { $0.expression }
       )
     }
 
@@ -6372,6 +6516,20 @@ extension TypeChecker {
     guard case .function(let params, let returnType) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
     }
+
+    let paramMeta = methodCallParamMeta(
+      ownerTypeName: ownerTypeName(for: baseType),
+      methodName: methodName,
+      fallbackDefId: methodResult.methodSymbol.defId,
+      argumentCount: params.count
+    )
+    let arguments = try planCallArgumentExpressions(
+      callArgs,
+      paramNames: paramMeta.names,
+      paramIsNamed: paramMeta.isNamed,
+      callDescription: methodName,
+      defaultsKeyPrefix: methodName
+    )
 
     if arguments.count != params.count {
       throw SemanticError.invalidArgumentCount(
@@ -6419,9 +6577,9 @@ extension TypeChecker {
   ) throws -> [Type] {
     let templateName: String
     switch baseType {
-    case .genericStruct(let name, _):
+    case .genericStruct(let name, _, _):
       templateName = name
-    case .genericEnum(let name, _):
+    case .genericEnum(let name, _, _):
       templateName = name
     case .structure(let defId):
       templateName = context.getName(defId) ?? ""
@@ -6614,7 +6772,7 @@ extension TypeChecker {
       base: base,
       method: method,
       methodType: methodType,
-      arguments: callArgs.compactMap { $0.expression },
+      callArgs: callArgs,
       expectedReturnType: expectedType
     )
   }
@@ -7181,7 +7339,7 @@ extension TypeChecker {
           if case .structure(let defId) = identifier.type {
             return context.isTypeMutable(defId)
           }
-          if case .genericStruct(let templateName, _) = identifier.type {
+          if case .genericStruct(let templateName, _, _) = identifier.type {
             return currentScope.lookupGenericStructTemplate(templateName)?.isMutable == true
           }
           return false
@@ -7287,7 +7445,7 @@ extension TypeChecker {
         }
         
         // Handle genericStruct types - look up member from template
-        if case .genericStruct(let templateName, let typeArgs) = typeToLookup {
+        if case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
           guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
             throw SemanticError.undefinedType(templateName)
           }
@@ -7685,7 +7843,7 @@ extension TypeChecker {
     // Extract expected element type from expectedType (e.g. [UInt]Range -> UInt)
     let expectedElementType: Type?
     if let expected = expectedType,
-       case .genericEnum(let template, let args) = expected,
+       case .genericEnum(let template, let defId, let args) = expected,
        template == "Range",
        args.count == 1 {
       expectedElementType = args[0]
@@ -7741,7 +7899,7 @@ extension TypeChecker {
     try enforceTraitConformance(elementType, traitName: "Ord")
     
     // 4. Construct Range type
-    let rangeType = Type.genericEnum(template: "Range", args: [elementType])
+    let rangeType = genericEnumType(template: "Range", args: [elementType])
     
     // 5. Determine case name and arguments
     let caseName: String
@@ -7888,7 +8046,7 @@ extension TypeChecker {
     
     // Check if return type is Option<T>
     switch returnType {
-    case .genericEnum(let template, let args) where template == "Option" && args.count == 1:
+    case .genericEnum(let template, let defId, let args) where template == "Option" && args.count == 1:
       return args[0]
     default:
       throw SemanticError(.generic(
@@ -7905,7 +8063,7 @@ extension TypeChecker {
     case .binding(let binding):
       return try typeCheckForBindingElement(binding, expectedType: elementType)
     case .pair(let first, let second, let span):
-      guard case .genericStruct(let templateName, let typeArgs) = elementType,
+      guard case .genericStruct(let templateName, _, let typeArgs) = elementType,
             templateName == "Pair",
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(expected: "Pair", got: elementType.description), span: span)
@@ -8071,7 +8229,7 @@ extension TypeChecker {
     )
     
     // The return type is [T]Option
-    let optionType = Type.genericEnum(template: "Option", args: [elementType])
+    let optionType = genericEnumType(template: "Option", args: [elementType])
     
     // Build call
     return .call(callee: methodRef, arguments: [], type: optionType)
@@ -8247,18 +8405,20 @@ extension TypeChecker {
   }
 
   /// The fixed error type for Result: `Error ref` (trait object)
-  private nonisolated(unsafe) static let resultErrorType: Type = .reference(inner: .traitObject(traitName: "Error", typeArgs: []))
+  private var resultErrorType: Type {
+    .reference(inner: traitObjectType(traitName: "Error", typeArgs: []))
+  }
 
   /// Extracts Option/Result kind from a type, or throws a diagnostic.
   private func extractOptionResultKind(
     _ type: Type, span: SourceSpan, operation: String
   ) throws -> OptionResultKind {
-    if case .genericEnum(let template, let args) = type {
+    if case .genericEnum(let template, let defId, let args) = type {
       if template == "Option", args.count == 1 {
         return .option(innerType: args[0])
       }
       if template == "Result", args.count == 1 {
-        return .result(okType: args[0], errType: Self.resultErrorType)
+        return .result(okType: args[0], errType: resultErrorType)
       }
     }
     throw SemanticError(
@@ -8275,7 +8435,7 @@ extension TypeChecker {
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
-    let targetId = createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: innerType)
+    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: innerType)
 
     // Type-check defaultExpr, injecting `it` for Result's error value.
     let typedDefault: TypedExpressionNode
@@ -8300,17 +8460,17 @@ extension TypeChecker {
       )
     }
 
-    try mergeBranchBreakTargetResult(type: innerType, span: span)
+    try mergeYieldTargetResult(type: innerType, span: span)
     try mergeBranchContribution(typedDefault, span: span)
 
     // Build the lowered whenExpression.
-    let targetState = activeBranchBreakTarget(targetId)
-    let didExplicitBranchBreak = targetState?.didExplicitBranchBreak == true
-    let resultType = popBranchBreakTarget(targetId).resultType ?? innerType
-    let materializedDefault = materializeExplicitBranchBreakBlockValue(
+    let targetState = activeYieldTarget(targetId)
+    let didExplicitYield = targetState?.didExplicitYield == true
+    let resultType = popYieldTarget(targetId).resultType ?? innerType
+    let materializedDefault = materializeExplicitYieldBlockValue(
       typedDefault,
       resultType: resultType,
-      didExplicitBranchBreak: didExplicitBranchBreak
+      didExplicitYield: didExplicitYield
     )
     switch kind {
     case .option:
@@ -8415,20 +8575,20 @@ extension TypeChecker {
     switch operandKind {
     case .option:
       // If transform already returns Option, flatten
-      if case .genericEnum(let template, _) = transformResultType, template == "Option" {
+      if case .genericEnum(let template, _, _) = transformResultType, template == "Option" {
         return (transformResultType, true)
       }
       // Otherwise wrap in Option
-      return (.genericEnum(template: "Option", args: [transformResultType]), false)
+      return (genericEnumType(template: "Option", args: [transformResultType]), false)
 
     case .result:
       // If transform already returns Result (1 type param), flatten
-      if case .genericEnum(let template, let args) = transformResultType,
+      if case .genericEnum(let template, let defId, let args) = transformResultType,
          template == "Result", args.count == 1 {
         return (transformResultType, true)
       }
       // Otherwise wrap in Result
-      return (.genericEnum(template: "Result", args: [transformResultType]), false)
+      return (genericEnumType(template: "Result", args: [transformResultType]), false)
     }
   }
 
@@ -8447,7 +8607,7 @@ extension TypeChecker {
     // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
     let transformExpectedType: Type? = nil
 
-    let targetId = createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: transformExpectedType)
+    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: transformExpectedType)
 
     // Create it symbol, type-check transformExpr in child scope with it injected.
     let underscoreSymbol = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
@@ -8459,13 +8619,13 @@ extension TypeChecker {
       )
     }
     try mergeBranchContribution(typedTransform, span: span)
-    let targetState = activeBranchBreakTarget(targetId)
-    let didExplicitBranchBreak = targetState?.didExplicitBranchBreak == true
-    let transformType = popBranchBreakTarget(targetId).resultType ?? typedTransform.type
-    let materializedTransform = materializeExplicitBranchBreakBlockValue(
+    let targetState = activeYieldTarget(targetId)
+    let didExplicitYield = targetState?.didExplicitYield == true
+    let transformType = popYieldTarget(targetId).resultType ?? typedTransform.type
+    let materializedTransform = materializeExplicitYieldBlockValue(
       typedTransform,
       resultType: transformType,
-      didExplicitBranchBreak: didExplicitBranchBreak
+      didExplicitYield: didExplicitYield
     )
 
     let (finalType, flattened) = computeAndThenResultType(

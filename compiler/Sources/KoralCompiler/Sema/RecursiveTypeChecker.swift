@@ -104,7 +104,7 @@ public class RecursiveTypeChecker {
             return context.nominalLayoutKind(for: .structure(defId: defId)) == .value
         case .`enum`:
             return context.nominalLayoutKind(for: type) == .value
-        case .genericStruct(let templateName, _):
+        case .genericStruct(let templateName, _, _):
             if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName) {
                 return context.isGenericStructTemplateMutable(templateDefId) == false
             }
@@ -134,7 +134,7 @@ public class RecursiveTypeChecker {
                 return []
             }
             return [defId]
-        case .genericStruct(let templateName, let args):
+        case .genericStruct(let templateName, _, let args):
             if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
                context.isGenericStructTemplateMutable(templateDefId) {
                 return []
@@ -145,7 +145,7 @@ public class RecursiveTypeChecker {
                 result.append(contentsOf: extractValueTypeDefIds(from: arg))
             }
             return result
-        case .genericEnum(_, let args):
+        case .genericEnum(_, _, let args):
             if context.nominalLayoutKind(for: type) == .managed {
                 return []
             }

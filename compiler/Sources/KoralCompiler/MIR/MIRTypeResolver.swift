@@ -153,23 +153,15 @@ struct MIRTypeResolver {
   func type(of intrinsic: MIRIntrinsic) -> Type? {
     switch intrinsic {
     case .allocMemory(_, let resultType),
-         .makeRef(_, _, let resultType),
-         .makeMutRef(_, _, let resultType),
          .downgradeRef(_, let resultType),
-         .downgradeMutRef(_, let resultType),
          .upgradeRef(_, let resultType),
-         .upgradeMutRef(_, let resultType),
          .takeMemory(_, let resultType),
          .nullPtr(let resultType):
       return resultType
-    case .isUniqueMutable:
-      return .bool
     case .traitObjectMatches:
       return .bool
     case .traitObjectDowncast(_, let resultType):
       return resultType
-    case .refCount:
-      return .uint
     case .spawnThread:
       return .int32
     case .deallocMemory,

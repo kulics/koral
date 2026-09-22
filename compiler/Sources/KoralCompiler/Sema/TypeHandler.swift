@@ -643,22 +643,24 @@ public class GenericHandler: TypeHandler {
     
     public func generateCTypeName(_ type: Type) -> String {
         switch type {
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let tplDefId, let args):
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                return "struct " + SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
+            }
+            let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+            return "struct \(template)_\(argsStr)\(suffix)"
+        case .genericEnum(let template, let tplDefId, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+                return "struct " + SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
             } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+                return "struct \(template)_\(argsStr)\(suffix)"
             }
-            return "struct \(template)_\(argsStr)"
-        case .genericEnum(let template, let args):
-            let argsStr: String
-            if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-            } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
-            }
-            return "struct \(template)_\(argsStr)"
         case .genericParameter(let name):
             // 泛型参数不应该出现在代码生成阶段
             return "/* generic parameter \(name) */"
@@ -669,23 +671,27 @@ public class GenericHandler: TypeHandler {
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         switch type {
-        case .genericStruct(let template, let args):
-            let argsStr: String
+        case .genericStruct(let template, let tplDefId, let args):
+            let qualifiedName: String
             if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+                qualifiedName = SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
             } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+                qualifiedName = "\(template)_\(argsStr)\(suffix)"
             }
-            let qualifiedName = "\(template)_\(argsStr)"
             return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
-        case .genericEnum(let template, let args):
-            let argsStr: String
+        case .genericEnum(let template, let tplDefId, let args):
+            let qualifiedName: String
             if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+                qualifiedName = SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
             } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+                qualifiedName = "\(template)_\(argsStr)\(suffix)"
             }
-            let qualifiedName = "\(template)_\(argsStr)"
             return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
         case .genericParameter:
             // 泛型参数不应该出现在代码生成阶段
@@ -697,23 +703,27 @@ public class GenericHandler: TypeHandler {
     
     public func generateDropCode(_ type: Type, value: String) -> String {
         switch type {
-        case .genericStruct(let template, let args):
-            let argsStr: String
+        case .genericStruct(let template, let tplDefId, let args):
+            let qualifiedName: String
             if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+                qualifiedName = SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
             } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+                qualifiedName = "\(template)_\(argsStr)\(suffix)"
             }
-            let qualifiedName = "\(template)_\(argsStr)"
             return "__koral_\(qualifiedName)_drop(&(\(value)));"
-        case .genericEnum(let template, let args):
-            let argsStr: String
+        case .genericEnum(let template, let tplDefId, let args):
+            let qualifiedName: String
             if let context = TypeHandlerRegistry.shared.currentContext {
-                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+                qualifiedName = SemaUtils.makeLayoutName(
+                    baseName: template, args: args, context: context, templateDefId: tplDefId)
             } else {
-                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let argsStr = args.map { $0.stableKey }.joined(separator: "_")
+                let suffix = tplDefId.isValid ? "_d\(tplDefId.id)" : ""
+                qualifiedName = "\(template)_\(argsStr)\(suffix)"
             }
-            let qualifiedName = "\(template)_\(argsStr)"
             return "__koral_\(qualifiedName)_drop(&(\(value)));"
         case .genericParameter:
             return "/* cannot drop generic parameter */"
@@ -724,7 +734,7 @@ public class GenericHandler: TypeHandler {
     
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, _, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -732,7 +742,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             return "\(template)_\(argsStr)"
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, _, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
                 argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
@@ -751,7 +761,7 @@ public class GenericHandler: TypeHandler {
         switch type {
         case .genericParameter:
             return true
-        case .genericStruct(_, let args), .genericEnum(_, let args):
+        case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
             guard let context = TypeHandlerRegistry.shared.currentContext else {
                 return false
             }
@@ -766,7 +776,7 @@ public class GenericHandler: TypeHandler {
     /// 获取泛型模板名称
     public func getTemplateName(_ type: Type) -> String? {
         switch type {
-        case .genericStruct(let template, _), .genericEnum(let template, _):
+        case .genericStruct(let template, _, _), .genericEnum(let template, _, _):
             return template
         case .genericParameter(let name):
             return name
@@ -778,7 +788,7 @@ public class GenericHandler: TypeHandler {
     /// 获取类型参数列表
     public func getTypeArguments(_ type: Type) -> [Type]? {
         switch type {
-        case .genericStruct(_, let args), .genericEnum(_, let args):
+        case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
             return args
         default:
             return nil

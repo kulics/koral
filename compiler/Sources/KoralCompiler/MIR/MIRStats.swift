@@ -213,18 +213,12 @@ private final class MIRStatsCounter {
       self.count(dest)
       self.count(source)
       self.count(count)
-    case .isUniqueMutable(let value),
-          .refCount(let value),
-         .downgradeRef(let value, _),
-         .downgradeMutRef(let value, _),
+    case .downgradeRef(let value, _),
          .upgradeRef(let value, _),
-         .upgradeMutRef(let value, _),
          .traitObjectMatches(let value, _, _, _),
          .traitObjectDowncast(let value, _):
       count(value)
-    case .makeRef(let ptr, let owner, _),
-         .makeMutRef(let ptr, let owner, _),
-         .initMemory(let ptr, let owner):
+    case .initMemory(let ptr, let owner):
       count(ptr)
       count(owner)
     case .nullPtr:

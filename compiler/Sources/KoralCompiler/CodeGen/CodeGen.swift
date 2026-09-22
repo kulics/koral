@@ -12,9 +12,16 @@ public class CodeGen {
   var tempVarCounter = 0
   private var globalInitializations: [(name: String, initializer: Symbol)] = []
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
+  private var cTypeNameCache: [Type: String] = [:]
+  private var callableNameByDefId: [UInt64: String] = [:]
+  private var callParametersByDefId: [UInt64: [Parameter]] = [:]
+  private var callParametersByQualifiedName: [String: [Parameter]] = [:]
   let mirProgram: MIRProgram
   private var foreignFunctionDefIds: Set<UInt64> = []
   private var foreignGlobalVarDefIds: Set<UInt64> = []
+  private var mirFunctionPlanDurationNs: UInt64 = 0
+  private var mirFunctionEmitDurationNs: UInt64 = 0
+  private var mirFunctionRenderCount: Int = 0
   
   // MARK: - Vtable Instance Tracking
   /// Tracks generated vtable instance names to avoid duplicate generation.
@@ -105,6 +112,7 @@ public class CodeGen {
       return nil
     })
     buildCIdentifierMap()
+    buildCallableIndexes()
     TypeHandlerRegistry.shared.setContext(context)
     TypeHandlerRegistry.shared.setCTypeNameResolver { [weak self] type in
       guard let self else { return nil }
@@ -119,6 +127,45 @@ public class CodeGen {
         return nil
       }
     }
+  }
+
+  private func phaseTimingEnabled() -> Bool {
+    let env = ProcessInfo.processInfo.environment
+    guard let value = env["KORAL_PROFILE_PHASES"] else {
+      return false
+    }
+    return value == "1" || value == "true" || value == "TRUE"
+  }
+
+  private func profileCodegenPhase(_ message: String, start: DispatchTime) {
+    guard phaseTimingEnabled() else {
+      return
+    }
+    let durationMs = (DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+    let payload = "[phase-ms] codegen: \(message) duration_ms=\(durationMs)\n"
+    FileHandle.standardError.write(Data(payload.utf8))
+  }
+
+  func recordMIRFunctionPlanDuration(_ durationNs: UInt64) {
+    mirFunctionPlanDurationNs += durationNs
+  }
+
+  func recordMIRFunctionEmitDuration(_ durationNs: UInt64) {
+    mirFunctionEmitDurationNs += durationNs
+  }
+
+  func recordMIRFunctionRender() {
+    mirFunctionRenderCount += 1
+  }
+
+  private func emitMIRFunctionTimingSummary() {
+    guard phaseTimingEnabled() else {
+      return
+    }
+    let planMs = mirFunctionPlanDurationNs / 1_000_000
+    let emitMs = mirFunctionEmitDurationNs / 1_000_000
+    let payload = "[phase-ms] codegen: mir-function-render count=\(mirFunctionRenderCount) plan_ms=\(planMs) emit_ms=\(emitMs)\n"
+    FileHandle.standardError.write(Data(payload.utf8))
   }
 
   deinit {
@@ -153,6 +200,28 @@ public class CodeGen {
 
     let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
     return "\(base)_\(symbol.defId.id)"
+  }
+
+  func callableName(for symbol: Symbol) -> String {
+    let key = defIdKey(symbol.defId)
+    if let cached = callableNameByDefId[key] {
+      return cached
+    }
+    let resolved = qualifiedName(for: symbol)
+    callableNameByDefId[key] = resolved
+    return resolved
+  }
+
+  func callParameters(for symbol: Symbol) -> [Parameter]? {
+    if let exact = callParametersByDefId[defIdKey(symbol.defId)] {
+      return exact
+    }
+    let targetName = callableName(for: symbol)
+    return callParametersByQualifiedName[targetName]
+  }
+
+  func callParameterTypes(for symbol: Symbol) -> [Type]? {
+    callParameters(for: symbol)?.map(\.type)
   }
 
   private func buildCIdentifierMap() {
@@ -244,6 +313,42 @@ public class CodeGen {
         cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
       }
       cIdentifierByDefId[defIdKey(defId)] = cId
+    }
+  }
+
+  private func buildCallableIndexes() {
+    func makeParameterList(_ parameters: [Symbol]) -> [Parameter] {
+      parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
+    }
+
+    func recordCallable(_ identifier: Symbol, parameters: [Symbol]?) {
+      let resolvedName = qualifiedName(for: identifier)
+      callableNameByDefId[defIdKey(identifier.defId)] = resolvedName
+      guard let parameters else { return }
+      let parameterList = makeParameterList(parameters)
+      callParametersByDefId[defIdKey(identifier.defId)] = parameterList
+      if callParametersByQualifiedName[resolvedName] == nil {
+        callParametersByQualifiedName[resolvedName] = parameterList
+      }
+    }
+
+    for function in mirProgram.functions {
+      recordCallable(function.identifier, parameters: function.parameters)
+    }
+
+    for global in mirProgram.globals {
+      switch global {
+      case .function(let identifier, let parameters, _):
+        if callParametersByDefId[defIdKey(identifier.defId)] == nil {
+          recordCallable(identifier, parameters: parameters)
+        }
+      case .foreignFunction(let identifier, let parameters):
+        recordCallable(identifier, parameters: parameters)
+      case .globalVariable(_, let initializerFunction, _):
+        recordCallable(initializerFunction, parameters: [])
+      default:
+        continue
+      }
     }
   }
 
@@ -367,6 +472,7 @@ public class CodeGen {
       """
 
     generateProgram()
+    emitMIRFunctionTimingSummary()
     
     return buffer
   }
@@ -466,13 +572,13 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericStruct(let template, let args):
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+      case .genericStruct(let template, let tplDefId, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericEnum(let template, let args):
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+      case .genericEnum(let template, let tplDefId, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -495,9 +601,9 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericStruct(let template, let args):
+      case .genericStruct(let template, let tplDefId, let args):
         guard requiresCompleteNominalDefinition(type) else { break }
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -513,13 +619,13 @@ public class CodeGen {
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericStruct(let nestedTemplate, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+          case .genericStruct(let nestedTemplate, let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericEnum(let nestedTemplate, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+          case .genericEnum(let nestedTemplate, let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
@@ -527,9 +633,9 @@ public class CodeGen {
             break
           }
         }
-      case .genericEnum(let template, let args):
+      case .genericEnum(let template, let tplDefId, let args):
         guard requiresCompleteNominalDefinition(type) else { break }
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -545,13 +651,13 @@ public class CodeGen {
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericStruct(let nestedTemplate, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+          case .genericStruct(let nestedTemplate, let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericEnum(let nestedTemplate, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context)
+          case .genericEnum(let nestedTemplate, let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
@@ -572,13 +678,13 @@ public class CodeGen {
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
-        case .genericStruct(let template, let args):
-          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        case .genericStruct(let template, let tplDefId, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
-        case .genericEnum(let template, let args):
-          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        case .genericEnum(let template, let tplDefId, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
@@ -690,11 +796,15 @@ public class CodeGen {
   }
 
   private func generateProgram() {
+    let totalStart = DispatchTime.now()
     let globals = mirProgram.globals
+    let typeDeclStart = DispatchTime.now()
     let declarations = sortTypeDeclarations(collectTypeDeclarations(globals))
     generateTypeForwardDeclarations(declarations)
     generateManagedNominalWrapperDeclarations(declarations)
+    profileCodegenPhase("type-declarations", start: typeDeclStart)
 
+    let userMainScanStart = DispatchTime.now()
     for global in globals {
       if case .function(let identifier, _, .global) = global,
          (context.getName(identifier.defId) ?? "") == "main" {
@@ -704,7 +814,9 @@ public class CodeGen {
         }
       }
     }
+    profileCodegenPhase("user-main-scan", start: userMainScanStart)
 
+    let foreignDeclStart = DispatchTime.now()
     let foreignTypes: [Symbol] = globals.compactMap {
       if case .foreignType(let identifier) = $0 { return identifier }
       return nil
@@ -746,12 +858,16 @@ public class CodeGen {
       }
       buffer += "\n"
     }
+    profileCodegenPhase("foreign-declarations", start: foreignDeclStart)
 
+    let functionDeclStart = DispatchTime.now()
     for function in mirProgram.functions {
       generateFunctionDeclaration(function.identifier, function.parameters)
     }
     buffer += "\n"
+    profileCodegenPhase("function-declarations", start: functionDeclStart)
 
+    let globalVarStart = DispatchTime.now()
     if !foreignGlobals.isEmpty {
       for (identifier, mutable) in foreignGlobals {
         let cType = cTypeName(identifier.type)
@@ -772,16 +888,29 @@ public class CodeGen {
       }
     }
     buffer += "\n"
+    profileCodegenPhase("global-variables", start: globalVarStart)
 
+    let vtableStart = DispatchTime.now()
     processVtableRequests()
+    profileCodegenPhase("vtables", start: vtableStart)
 
+    let functionImplStart = DispatchTime.now()
+    var functionImplementations: [String] = []
+    functionImplementations.reserveCapacity(mirProgram.functions.count)
     for function in mirProgram.functions {
-      generateMIRGlobalFunction(function.identifier, function.parameters, function)
+      functionImplementations.append(
+        generateMIRGlobalFunction(function.identifier, function.parameters, function)
+      )
     }
+    buffer += functionImplementations.joined()
+    profileCodegenPhase("function-implementations", start: functionImplStart)
 
+    let cMainStart = DispatchTime.now()
     if !globalInitializations.isEmpty || userMainFunctionName != nil {
       generateCMainFunction()
     }
+    profileCodegenPhase("c-main", start: cMainStart)
+    profileCodegenPhase("total", start: totalStart)
   }
 
   /// 生成 C 的 main 函数入口
@@ -996,7 +1125,12 @@ public class CodeGen {
     default:
       break
     }
-    return TypeHandlerRegistry.shared.generateConcreteCTypeName(type)
+    if let cached = cTypeNameCache[type] {
+      return cached
+    }
+    let resolved = TypeHandlerRegistry.shared.generateConcreteCTypeName(type)
+    cTypeNameCache[type] = resolved
+    return resolved
   }
 
   func nominalTypeCName(_ type: Type) -> String {
@@ -1005,10 +1139,10 @@ public class CodeGen {
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
     case .`enum`(let defId):
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-    case .genericStruct(let template, let args):
-      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
-    case .genericEnum(let template, let args):
-      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+    case .genericStruct(let template, let tplDefId, let args):
+      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+    case .genericEnum(let template, let tplDefId, let args):
+      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
     default:
       return cTypeName(type)
     }
@@ -1027,7 +1161,7 @@ public class CodeGen {
       if let members = context.getStructMembers(defId) {
         for member in members where needsDrop(member.type) { return true }
       }
-    case .genericStruct(let template, _):
+    case .genericStruct(let template, _, _):
       if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template),
          let members = context.getStructMembers(templateDefId) {
         for member in members where needsDrop(member.type) { return true }
@@ -1038,7 +1172,7 @@ public class CodeGen {
           for param in c.parameters where needsDrop(param.type) { return true }
         }
       }
-    case .genericEnum(let template, _):
+    case .genericEnum(let template, _, _):
       if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template),
          let cases = context.getEnumCases(templateDefId) {
         for c in cases {
@@ -1300,8 +1434,8 @@ public class CodeGen {
         return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
       case .`enum`(let defId):
         return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      case .genericStruct(let template, let args), .genericEnum(let template, let args):
-        return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+      case .genericStruct(let template, let tplDefId, let args), .genericEnum(let template, let tplDefId, let args):
+        return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
       default:
         return nil
       }

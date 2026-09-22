@@ -1112,13 +1112,13 @@ type Rect(origin Point, width Int, height Int);
 
 let p = Point(10, 20);
 when p in {
-    Point(x, y) then println(x + y),;  // 30
+    Point(x, y) then println(x + y),  // 30
 }
 
 // Nested struct destructuring
 let r = Rect(Point(1, 2), 30, 40);
 when r in {
-    Rect(Point(a, b), w, h) then println(a + b + w + h),;  // 73
+    Rect(Point(a, b), w, h) then println(a + b + w + h),  // 73
 }
 
 // Struct destructuring in if...is
@@ -1145,15 +1145,15 @@ when err in {
 
 // Wildcard and literal field matching
 when p in {
-    Point(0, y) then println(y),;       // Match when first field is 0
-    Point(_, y) then println(y),;       // Ignore first field
+    Point(0, y) then println(y),  // Match when first field is 0
+    Point(_, y) then println(y),  // Ignore first field
 }
 
 // Generic struct destructuring
 type Box[T Any](val T);
 let b = Box[Int](42);
 when b in {
-    Box(v) then println(v),;  // 42
+    Box(v) then println(v),  // 42
 }
 ```
 

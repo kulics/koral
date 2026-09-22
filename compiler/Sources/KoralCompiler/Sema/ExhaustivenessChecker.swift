@@ -45,7 +45,7 @@ extension ExhaustivenessChecker {
         switch subjectType {
         case .`enum`:
             return .fullSpace(for: subjectType, context: context)
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             guard let resolved = resolvedEnumCases else {
                 return nil
             }
@@ -400,7 +400,7 @@ extension ExhaustivenessChecker {
                     switch subjectType {
                     case .`enum`(let defId):
                         return context.getName(defId) ?? subjectType.description
-                    case .genericEnum(let templateName, _):
+                    case .genericEnum(let templateName, _, _):
                         return templateName
                     case .bool:
                         return "Bool"
@@ -426,7 +426,7 @@ extension ExhaustivenessChecker {
             let cases = context.getEnumCases(defId) ?? []
             try checkEnumExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
             
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             // Use resolved cases if available
             if let resolved = resolvedEnumCases {
                 try checkEnumExhaustiveness(typeName: templateName, cases: resolved, hasCatchall: hasCatchall)

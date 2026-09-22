@@ -109,14 +109,14 @@ extension Monomorphizer {
             // Check substitution map first
             if let substituted = substitution[name] {
                 // If the substituted type is a genericStruct, we need to instantiate it
-                if case .genericStruct(let template, let args) = substituted {
+                if case .genericStruct(let template, _, let args) = substituted {
                     // Check if it's a struct template
                     if let structTemplate = input.genericTemplates.structTemplates[template] {
                         return try instantiateStruct(template: structTemplate, args: args)
                     }
                 }
                 // If the substituted type is a genericEnum, we need to instantiate it
-                if case .genericEnum(let template, let args) = substituted {
+                if case .genericEnum(let template, _, let args) = substituted {
                     if let enumTemplate = input.genericTemplates.enumTemplates[template] {
                         return try instantiateEnum(template: enumTemplate, args: args)
                     }
@@ -157,7 +157,7 @@ extension Monomorphizer {
             // This handles cases like `Error ref` inside enum definitions where
             // the type checker already resolved it but the monomorphizer re-resolves from TypeNodes
             if input.genericTemplates.traits[name] != nil {
-                return .traitObject(traitName: name, typeArgs: [])
+                return .traitObject(traitName: name, traitDefId: .invalid, typeArgs: [])
             }
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
@@ -239,7 +239,7 @@ extension Monomorphizer {
     /// - Returns: The resolved concrete type, or the original type if it can't be resolved yet
     internal func resolveParameterizedType(_ type: Type, visited: Set<UInt64> = []) -> Type {
         switch type {
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let typeDefId, let args):
             if let cacheKey = typeInstantiationCacheKey(for: type),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -247,10 +247,10 @@ extension Monomorphizer {
 
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return resolvedArgs == args ? type : .genericStruct(template: template, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs)
             }
 
-            let resolvedType = Type.genericStruct(template: template, args: resolvedArgs)
+            let resolvedType = Type.genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs)
             if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -261,7 +261,7 @@ extension Monomorphizer {
                     return try instantiateStruct(template: structTemplate, args: resolvedArgs)
                 } catch {
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                    let layoutName = "\(template)_\(argLayoutKeys)"
+                    let layoutName = SemaUtils.makeLayoutName(baseName: template, args: resolvedArgs, context: context, templateDefId: typeDefId)
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
                     let inheritedMutable = context.defIdMap.lookupGenericStructTemplateDefId(template).map { context.isGenericStructTemplateMutable($0) } ?? false
                     context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs, templateName: template, isMutable: inheritedMutable)
@@ -271,7 +271,7 @@ extension Monomorphizer {
 
             return resolvedArgs == args ? type : resolvedType
             
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, let typeDefId, let args):
             if let cacheKey = typeInstantiationCacheKey(for: type),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -279,10 +279,10 @@ extension Monomorphizer {
 
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return resolvedArgs == args ? type : .genericEnum(template: template, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs)
             }
 
-            let resolvedType = Type.genericEnum(template: template, args: resolvedArgs)
+            let resolvedType = Type.genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs)
             if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -293,7 +293,7 @@ extension Monomorphizer {
                     return try instantiateEnum(template: enumTemplate, args: resolvedArgs)
                 } catch {
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                    let layoutName = "\(template)_\(argLayoutKeys)"
+                    let layoutName = SemaUtils.makeLayoutName(baseName: template, args: resolvedArgs, context: context, templateDefId: typeDefId)
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
                     context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
                     return .`enum`(defId: defId)
@@ -1315,7 +1315,7 @@ extension Monomorphizer {
                 templateName = context.getTemplateName(defId) ?? name
                 emittedTypeScopeName = context.getQualifiedName(defId) ?? name
                 isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            case .genericStruct(let name, _):
+            case .genericStruct(let name, _, _):
                 templateName = name
                 emittedTypeScopeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
@@ -1325,7 +1325,7 @@ extension Monomorphizer {
                 templateName = context.getTemplateName(defId) ?? name
                 emittedTypeScopeName = context.getQualifiedName(defId) ?? name
                 isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            case .genericEnum(let name, _):
+            case .genericEnum(let name, _, _):
                 templateName = name
                 emittedTypeScopeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
@@ -1544,8 +1544,8 @@ extension Monomorphizer {
         case .deferStatement(let expression):
             return .deferStatement(expression: resolveTypesInExpression(expression))
 
-        case .branchBreak(let target, let value):
-            return .branchBreak(target: target, value: resolveTypesInExpression(value))
+        case .yieldValue(let target, let value):
+            return .yieldValue(target: target, value: resolveTypesInExpression(value))
         }
     }
 }
@@ -1643,33 +1643,12 @@ extension Monomorphizer {
                 count: resolveTypesInExpression(count)
             )
             
-        case .isUniqueMutable(let val):
-            return .isUniqueMutable(val: resolveTypesInExpression(val))
 
-        case .makeRef(let ptr, let owner, let resultType):
-            return .makeRef(
-                ptr: resolveTypesInExpression(ptr),
-                owner: resolveTypesInExpression(owner),
-                resultType: resolveParameterizedType(resultType)
-            )
 
-        case .makeMutRef(let ptr, let owner, let resultType):
-            return .makeMutRef(
-                ptr: resolveTypesInExpression(ptr),
-                owner: resolveTypesInExpression(owner),
-                resultType: resolveParameterizedType(resultType)
-            )
 
-        case .refCount(let ref):
-            return .refCount(ref: resolveTypesInExpression(ref))
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(
-                val: resolveTypesInExpression(val),
-                resultType: resultType
-            )
-        case .downgradeMutRef(let val, let resultType):
-            return .downgradeMutRef(
                 val: resolveTypesInExpression(val),
                 resultType: resultType
             )
@@ -1680,13 +1659,6 @@ extension Monomorphizer {
                 val: resolveTypesInExpression(val),
                 resultType: resolvedResultType
             )
-        case .upgradeMutRef(let val, let resultType):
-            let resolvedResultType = resolveParameterizedType(resultType)
-            return .upgradeMutRef(
-                val: resolveTypesInExpression(val),
-                resultType: resolvedResultType
-            )
-            
         case .initMemory(let ptr, let val):
             return .initMemory(
                 ptr: resolveTypesInExpression(ptr),

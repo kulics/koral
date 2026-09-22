@@ -103,7 +103,10 @@ public class TypeResolver: CompilerPass {
             let sourceInfo = index < nodeSourceInfoList.count ? nodeSourceInfoList[index] : nil
             currentSourceFile = sourceInfo?.sourceFile ?? ""
             currentModulePath = sourceInfo?.modulePath ?? []
-            
+            // Keep the template registry module-aware during signature
+            // resolution so same-named generic types keep distinct identity.
+            defIdMap.currentModulePath = currentModulePath
+
             try resolveSignatures(node, defIdMap: defIdMap, index: index)
         }
 

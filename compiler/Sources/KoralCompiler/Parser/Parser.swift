@@ -10,6 +10,16 @@ public class Parser {
   /// Accumulated defaults from ALL parsed files (static, used by TypeChecker)
   nonisolated(unsafe) public static var allParsedParameterDefaults: [String: ExpressionNode] = [:]
 
+  /// "TraitName#methodName#paramName" keys whose default came from a trait
+  /// method signature.
+  public var traitDeclaredParameterDefaults: Set<String> = []
+  nonisolated(unsafe) public static var allTraitDeclaredParameterDefaults: Set<String> = []
+
+  /// "methodName#paramName" keys whose default came from a `given` method
+  /// implementation (including non-trait `given` blocks).
+  public var implDeclaredParameterDefaults: Set<String> = []
+  nonisolated(unsafe) public static var allImplDeclaredParameterDefaults: Set<String> = []
+
   public init(lexer: Lexer) {
     self.lexer = lexer
     self.currentToken = .bof

@@ -362,11 +362,11 @@ final class MIRLowerer {
       switch node {
       case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
         if nominalSymbol(identifier, matches: name) {
-          return .genericStruct(template: name, args: args)
+          return .genericStruct(template: name, templateDefId: .invalid, args: args)
         }
       case .globalEnumDeclaration(let identifier, _):
         if nominalSymbol(identifier, matches: name) {
-          return .genericEnum(template: name, args: args)
+          return .genericEnum(template: name, templateDefId: .invalid, args: args)
         }
       default:
         continue
@@ -377,9 +377,9 @@ final class MIRLowerer {
        let kind = context.getKind(defId) {
       switch kind {
       case .type(.structure), .genericTemplate(.structure):
-        return .genericStruct(template: name, args: args)
+        return .genericStruct(template: name, templateDefId: .invalid, args: args)
       case .type(.`enum`), .genericTemplate(.`enum`):
-        return .genericEnum(template: name, args: args)
+        return .genericEnum(template: name, templateDefId: .invalid, args: args)
       default:
         break
       }
@@ -486,7 +486,7 @@ private func traitObjectTypeArguments(from receiverType: Type) -> [Type] {
   switch receiverType {
   case .reference(let inner), .mutableReference(let inner):
     return traitObjectTypeArguments(from: inner)
-  case .traitObject(_, let typeArgs):
+  case .traitObject(_, _, let typeArgs):
     return typeArgs
   default:
     return []
@@ -498,8 +498,8 @@ private func ownershipUse(for expression: TypedExpressionNode) -> MIROwnershipUs
 }
 
 private final class MIRFunctionBuilder {
-  private struct MIRBranchBreakTargetContext {
-    let id: BranchBreakTargetId
+  private struct MIRYieldTargetContext {
+    let id: YieldTargetId
     let resultLocal: MIRLocalID?
     let joinBlock: MIRBlockID
     let baseScopeDepth: Int
@@ -527,7 +527,7 @@ private final class MIRFunctionBuilder {
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
   private var deferredExpressionsByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
-  private var branchBreakTargetStack: [MIRBranchBreakTargetContext] = []
+  private var yieldTargetStack: [MIRYieldTargetContext] = []
 
   init(
     program: MonomorphizedProgram,
@@ -932,11 +932,11 @@ private final class MIRFunctionBuilder {
     append(.scopeEnter(scope))
     scopeStack.append(scope)
 
-    let ownedBranchBreakTargets = statements.reduce(into: Set<BranchBreakTargetId>()) { ids, statement in
-      ids.formUnion(statement.ownedBranchBreakTargetIDs)
+    let ownedYieldTargets = statements.reduce(into: Set<YieldTargetId>()) { ids, statement in
+      ids.formUnion(statement.ownedYieldTargetIDs)
     }
     let blockProducesValue = type != .void && type != .never
-    let usesBranchBreakJoin = !ownedBranchBreakTargets.isEmpty && type != .never
+    let usesYieldJoin = !ownedYieldTargets.isEmpty && type != .never
     let resultLocal: MIRLocal? = blockProducesValue
       ? makeTemporary(type: type, nameHint: "block_result")
       : nil
@@ -945,16 +945,16 @@ private final class MIRFunctionBuilder {
     }
 
     let blockBody = currentBlockID
-    let joinBlock = usesBranchBreakJoin ? makeBlock() : nil
-    let branchBreakTargetDepth = joinBlock.map {
-      pushBranchBreakTargets(
-        ownedBranchBreakTargets,
+    let joinBlock = usesYieldJoin ? makeBlock() : nil
+    let yieldTargetDepth = joinBlock.map {
+      pushYieldTargets(
+        ownedYieldTargets,
         resultLocal: resultLocal,
         joinBlock: $0,
         baseScopeDepth: parentScopeDepth
       )
-    } ?? branchBreakTargetStack.count
-    if usesBranchBreakJoin {
+    } ?? yieldTargetStack.count
+    if usesYieldJoin {
       setCurrentBlock(blockBody)
     }
 
@@ -987,7 +987,7 @@ private final class MIRFunctionBuilder {
     }
     _ = scopeStack.popLast()
     deferredExpressionsByScope.removeValue(forKey: scope)
-    restoreBranchBreakTargets(toDepth: branchBreakTargetDepth)
+    restoreYieldTargets(toDepth: yieldTargetDepth)
 
     if let joinBlock {
       if !currentBlockIsTerminated {
@@ -1135,25 +1135,25 @@ private final class MIRFunctionBuilder {
       } else {
         _ = lowerExpression(expression)
       }
-    case .branchBreak(let target, let value):
-      lowerBranchBreak(target: target, value: value)
+    case .yieldValue(let target, let value):
+      lowerYield(target: target, value: value)
     }
   }
 
-  private func lowerBranchBreak(target: BranchBreakTargetId, value: TypedExpressionNode) {
-    guard let branchBreakContext = branchBreakTargetStack.last(where: { $0.id == target }) else {
-      fatalError("Unsupported break-with-value without MIR branch-break target reached MIR lowering")
+  private func lowerYield(target: YieldTargetId, value: TypedExpressionNode) {
+    guard let yieldValueContext = yieldTargetStack.last(where: { $0.id == target }) else {
+      fatalError("Unsupported yield without MIR yield target reached MIR lowering")
     }
 
     let loweredValue = lowerValue(value)
     guard !currentBlockIsTerminated else { return }
-    if let resultLocal = branchBreakContext.resultLocal {
+    if let resultLocal = yieldValueContext.resultLocal {
       append(.assign(.local(resultLocal), loweredValue))
     } else {
       append(.evaluate(loweredValue))
     }
-    emitScopeExits(fromDepth: branchBreakContext.baseScopeDepth)
-    terminate(.goto(branchBreakContext.joinBlock))
+    emitScopeExits(fromDepth: yieldValueContext.baseScopeDepth)
+    terminate(.goto(yieldValueContext.joinBlock))
   }
 
   private func emitScopeExits(fromDepth baseScopeDepth: Int) {
@@ -1173,21 +1173,21 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func pushBranchBreakTargets(
-    _ targets: Set<BranchBreakTargetId>,
+  private func pushYieldTargets(
+    _ targets: Set<YieldTargetId>,
     resultLocal: MIRLocal?,
     joinBlock: MIRBlockID,
     baseScopeDepth: Int? = nil
   ) -> Int {
-    let previousDepth = branchBreakTargetStack.count
+    let previousDepth = yieldTargetStack.count
     guard !targets.isEmpty else { return previousDepth }
     let targetBaseScopeDepth = baseScopeDepth ?? scopeStack.count
     for target in targets {
-      if branchBreakTargetStack.contains(where: { $0.id == target }) {
+      if yieldTargetStack.contains(where: { $0.id == target }) {
         continue
       }
-      branchBreakTargetStack.append(
-        MIRBranchBreakTargetContext(
+      yieldTargetStack.append(
+        MIRYieldTargetContext(
           id: target,
           resultLocal: resultLocal?.id,
           joinBlock: joinBlock,
@@ -1198,9 +1198,9 @@ private final class MIRFunctionBuilder {
     return previousDepth
   }
 
-  private func restoreBranchBreakTargets(toDepth depth: Int) {
-    guard branchBreakTargetStack.count > depth else { return }
-    branchBreakTargetStack.removeSubrange(depth..<branchBreakTargetStack.count)
+  private func restoreYieldTargets(toDepth depth: Int) {
+    guard yieldTargetStack.count > depth else { return }
+    yieldTargetStack.removeSubrange(depth..<yieldTargetStack.count)
   }
 
   private func lowerBranchBody(_ expression: TypedExpressionNode, resultLocal: MIRLocal?) {
@@ -1216,7 +1216,7 @@ private final class MIRFunctionBuilder {
       return
     }
 
-    if expression.containsBranchBreak {
+    if expression.containsYield {
       guard let result = lowerExpression(expression), !currentBlockIsTerminated else {
         return
       }
@@ -1370,12 +1370,12 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let branchBreakTargetDepth = pushBranchBreakTargets(
-      thenBranch.ownedBranchBreakTargetIDs.union(elseBranch?.ownedBranchBreakTargetIDs ?? []),
+    let yieldTargetDepth = pushYieldTargets(
+      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
+    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: conditionOperand, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -1898,12 +1898,12 @@ private final class MIRFunctionBuilder {
         case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
           let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
           if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
-            return .genericStruct(template: base, args: resolvedArgs)
+            return .genericStruct(template: base, templateDefId: .invalid, args: resolvedArgs)
           }
         case .globalEnumDeclaration(let identifier, _):
           let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
           if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
-            return .genericEnum(template: base, args: resolvedArgs)
+            return .genericEnum(template: base, templateDefId: .invalid, args: resolvedArgs)
           }
         default:
           continue
@@ -1913,9 +1913,9 @@ private final class MIRFunctionBuilder {
          let kind = context.getKind(defId) {
         switch kind {
         case .type(.structure), .genericTemplate(.structure):
-          return .genericStruct(template: base, args: resolvedArgs)
+          return .genericStruct(template: base, templateDefId: .invalid, args: resolvedArgs)
         case .type(.`enum`), .genericTemplate(.`enum`):
-          return .genericEnum(template: base, args: resolvedArgs)
+          return .genericEnum(template: base, templateDefId: .invalid, args: resolvedArgs)
         default:
           break
         }
@@ -1942,11 +1942,11 @@ private final class MIRFunctionBuilder {
     case .identifier(let name):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
       guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
-      return .traitObject(traitName: name, typeArgs: [])
+      return .traitObject(traitName: name, traitDefId: .invalid, typeArgs: [])
     case .generic(let base, let args):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedArgs.count == args.count else { return nil }
-      return .traitObject(traitName: base, typeArgs: resolvedArgs)
+      return .traitObject(traitName: base, traitDefId: .invalid, typeArgs: resolvedArgs)
     default:
       return nil
     }
@@ -1993,7 +1993,7 @@ private final class MIRFunctionBuilder {
         }
       }
       return nil
-    case .genericStruct(let templateName, let args):
+    case .genericStruct(let templateName, _, let args):
       if let members = programStructMembers(matching: resolvedType) {
         return members
       }
@@ -2037,7 +2037,7 @@ private final class MIRFunctionBuilder {
         return cases
       }
       return nil
-    case .genericEnum(let templateName, let args):
+    case .genericEnum(let templateName, _, let args):
       if let cases = programEnumCases(matching: resolvedType) {
         return cases
       }
@@ -2484,7 +2484,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func traitObjectPatternInfo(subjectType: Type, targetType: Type) -> (traitName: String, traitTypeArguments: [Type], concreteType: Type)? {
-    guard case .traitObject(let traitName, let traitTypeArguments) = subjectType else {
+    guard case .traitObject(let traitName, _, let traitTypeArguments) = subjectType else {
       return nil
     }
 
@@ -2655,12 +2655,12 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let branchBreakTargetDepth = pushBranchBreakTargets(
-      thenBranch.ownedBranchBreakTargetIDs.union(elseBranch?.ownedBranchBreakTargetIDs ?? []),
+    let yieldTargetDepth = pushYieldTargets(
+      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
+    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: condition, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -2824,14 +2824,14 @@ private final class MIRFunctionBuilder {
     let caseBlocks = cases.map { _ in makeBlock() }
     let nextBlocks = cases.map { _ in makeBlock() }
     let joinBlock = makeBlock()
-    let branchBreakTargetDepth = pushBranchBreakTargets(
-      cases.reduce(into: Set<BranchBreakTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedBranchBreakTargetIDs)
+    let yieldTargetDepth = pushYieldTargets(
+      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
+        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
       },
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
+    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(dispatchBlock)
 
@@ -2922,14 +2922,14 @@ private final class MIRFunctionBuilder {
 
     let dispatchBlock = currentBlockID
     let joinBlock = makeBlock()
-    let branchBreakTargetDepth = pushBranchBreakTargets(
-      cases.reduce(into: Set<BranchBreakTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedBranchBreakTargetIDs)
+    let yieldTargetDepth = pushYieldTargets(
+      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
+        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
       },
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
+    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     // Build switch cases and default
     var switchCases: [MIRSwitchCase] = []
@@ -3425,22 +3425,10 @@ private final class MIRFunctionBuilder {
       return .copyMemory(dest: lowerValue(dest), source: lowerValue(source), count: lowerValue(count))
     case .moveMemory(let dest, let source, let count):
       return .moveMemory(dest: lowerValue(dest), source: lowerValue(source), count: lowerValue(count))
-    case .isUniqueMutable(let value):
-      return .isUniqueMutable(value: lowerUniquenessProbeValue(value))
-    case .makeRef(let ptr, let owner, let resultType):
-      return .makeRef(ptr: lowerValue(ptr), owner: lowerValue(owner), resultType: resultType)
-    case .makeMutRef(let ptr, let owner, let resultType):
-      return .makeMutRef(ptr: lowerValue(ptr), owner: lowerValue(owner), resultType: resultType)
-    case .refCount(let ref):
-      return .refCount(ref: lowerValue(ref))
     case .downgradeRef(let value, let resultType):
       return .downgradeRef(value: lowerValue(value), resultType: resultType)
-    case .downgradeMutRef(let value, let resultType):
-      return .downgradeMutRef(value: lowerValue(value), resultType: resultType)
     case .upgradeRef(let value, let resultType):
       return .upgradeRef(value: lowerValue(value), resultType: resultType)
-    case .upgradeMutRef(let value, let resultType):
-      return .upgradeMutRef(value: lowerValue(value), resultType: resultType)
     case .initMemory(let ptr, let value):
       return .initMemory(ptr: lowerValue(ptr), value: lowerValue(value))
     case .deinitMemory(let ptr):
@@ -3493,10 +3481,6 @@ private final class MIRFunctionBuilder {
       }
     }
     return .operand(.constant(.void))
-  }
-
-  private func lowerUniquenessProbeValue(_ expression: TypedExpressionNode) -> MIRValue {
-    lowerBorrowedSourceValue(expression)
   }
 
   private func lowerBorrowedSourceValue(_ expression: TypedExpressionNode) -> MIRValue {

@@ -226,8 +226,8 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(expression)
       }
 
-    case .branchBreak(let target, let value):
-      print("\(indent)Break target=\(target.rawValue):")
+    case .yieldValue(let target, let value):
+      print("\(indent)Yield target=\(target.rawValue):")
       withIndent {
         printTypedExpression(value)
       }

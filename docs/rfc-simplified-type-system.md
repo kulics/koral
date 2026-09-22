@@ -323,7 +323,7 @@ ARC 在新模型里是**实现层能力**，不是用户必须直接操作的类
 
 - 任何类型都可以实现 `Drop`
 - `Drop` 的表面签名统一为 `drop(self) Void`
-- 对 plain `type`，编译器可以在隐藏 ARC / hidden ownership backing 上实现 drop；如果逃逸分析证明该值可以不必堆分配或共享，就可以优化掉额外 ARC，多数实现仍然以 ARC-backed finalization 作为基础模型
+- 对 plain `type`，编译器可以在隐藏 ARC / hidden ownership backing 上实现 drop；布局分析只决定是否需要 ARC-backed 表示，逃逸分析已整体移除，不再作为分配或共享的优化依据；多数实现仍然以 ARC-backed finalization 作为基础模型
 - 对 `type mutable`，drop 在最后一个 owning handle 死亡时触发
 - `Drop` 实现类型必然是 ARC-backed 的对象语义；其运行时表示必须保有最终ization / retain-release 生命周期
 - drop 发生在受控 finalization context 中，不再向用户暴露析构期 raw pointer

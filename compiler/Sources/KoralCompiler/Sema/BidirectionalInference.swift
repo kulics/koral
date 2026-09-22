@@ -139,14 +139,14 @@ public class BidirectionalInference {
             
         // 字符串字面量
         case .stringLiteral:
-            return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
+            return lookupType(name: "String") ?? .genericStruct(template: "String", templateDefId: .invalid, args: [])
 
         // Rune 字面量
         case .runeLiteral:
-            return lookupType(name: "Rune") ?? .genericStruct(template: "Rune", args: [])
+            return lookupType(name: "Rune") ?? .genericStruct(template: "Rune", templateDefId: .invalid, args: [])
 
         case .interpolatedString:
-            return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
+            return lookupType(name: "String") ?? .genericStruct(template: "String", templateDefId: .invalid, args: [])
             
         // 变量引用
         case .identifier(let name):
@@ -451,7 +451,7 @@ public class BidirectionalInference {
         case .pairVariableDeclaration(let first, let second, let value, _):
             let valueType = synthesize(value, span: span)
             // Extract Pair type args for binding types
-            if case .genericStruct(_, let typeArgs) = valueType, typeArgs.count == 2 {
+            if case .genericStruct(_, _, let typeArgs) = valueType, typeArgs.count == 2 {
                 if !first.isDiscard { extendEnvironment(name: first.name, type: typeArgs[0]) }
                 if !second.isDiscard { extendEnvironment(name: second.name, type: typeArgs[1]) }
             }
@@ -486,7 +486,7 @@ public class BidirectionalInference {
             )
         case .generic(let base, let args):
             let argTypes = args.map { resolveTypeNode($0) }
-            return .genericStruct(template: base, args: argTypes)
+            return .genericStruct(template: base, templateDefId: .invalid, args: argTypes)
         case .reference(let inner, let mutable):
             return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
         case .pointer(let inner, let mutable):

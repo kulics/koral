@@ -329,12 +329,8 @@ final class MIRVerifier {
       try verifyValue(dest, in: function, localIDs: localIDs)
       try verifyValue(source, in: function, localIDs: localIDs)
       try verifyValue(count, in: function, localIDs: localIDs)
-    case .isUniqueMutable(let value),
-          .refCount(let value),
-         .downgradeRef(let value, _),
-         .downgradeMutRef(let value, _),
-         .upgradeRef(let value, _),
-         .upgradeMutRef(let value, _):
+    case .downgradeRef(let value, _),
+         .upgradeRef(let value, _):
       try verifyValue(value, in: function, localIDs: Set(function.locals.map(\.id)))
     case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
       let localIDs = Set(function.locals.map(\.id))
@@ -379,9 +375,7 @@ final class MIRVerifier {
       default:
         try fail(function, "trait object downcast intrinsic result is not a valid type: \(context.getDebugName(resultType))")
       }
-    case .makeRef(let ptr, let owner, _),
-         .makeMutRef(let ptr, let owner, _),
-         .initMemory(let ptr, let owner):
+    case .initMemory(let ptr, let owner):
       let localIDs = Set(function.locals.map(\.id))
       try verifyValue(ptr, in: function, localIDs: localIDs)
       try verifyValue(owner, in: function, localIDs: localIDs)
@@ -534,13 +528,13 @@ final class MIRVerifier {
 
   private func traitObjectReferenceInfo(_ type: Type) -> (traitName: String, typeArguments: [Type])? {
     switch type {
-    case .traitObject(let traitName, let typeArguments):
+    case .traitObject(let traitName, _, let typeArguments):
       return (traitName, typeArguments)
     case .reference(let inner),
          .mutableReference(let inner),
          .borrowedReference(let inner),
          .mutableBorrowedReference(let inner):
-      if case .traitObject(let traitName, let typeArguments) = inner {
+      if case .traitObject(let traitName, _, let typeArguments) = inner {
         return (traitName, typeArguments)
       }
       return nil

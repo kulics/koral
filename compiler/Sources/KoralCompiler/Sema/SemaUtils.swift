@@ -362,13 +362,13 @@ public enum SemaUtils {
             )
             return .`enum`(defId: defId)
             
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let defId, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
-            return .genericStruct(template: template, args: newArgs)
+            return .genericStruct(template: template, templateDefId: defId, args: newArgs)
             
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, let defId, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
-            return .genericEnum(template: template, args: newArgs)
+            return .genericEnum(template: template, templateDefId: defId, args: newArgs)
             
         case .opaque:
             return type
@@ -382,10 +382,10 @@ public enum SemaUtils {
             // They are handled by the constraint solver
             return type
             
-        case .traitObject(let traitName, let typeArgs):
+        case .traitObject(let traitName, let defId, let typeArgs):
             if typeArgs.isEmpty { return type }
             let newArgs = typeArgs.map { substituteType($0, substitution: substitution, context: context) }
-            return .traitObject(traitName: traitName, typeArgs: newArgs)
+            return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: newArgs)
         }
     }
     
@@ -422,8 +422,18 @@ public enum SemaUtils {
         let argLayoutKeys = args.map { $0.stableKey }.joined(separator: "_")
         return "\(baseName)_\(argLayoutKeys)"
     }
-    public static func makeLayoutName(baseName: String, args: [Type], context: CompilerContext) -> String {
+    public static func makeLayoutName(
+        baseName: String,
+        args: [Type],
+        context: CompilerContext,
+        templateDefId: DefId? = nil
+    ) -> String {
         let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+        // Include the template's declaration identity so same-named generic
+        // templates from different modules do not collapse into one layout.
+        if let templateDefId, templateDefId.isValid {
+            return "\(baseName)_\(argLayoutKeys)_d\(templateDefId.id)"
+        }
         return "\(baseName)_\(argLayoutKeys)"
     }
     

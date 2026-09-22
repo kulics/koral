@@ -37,7 +37,7 @@ extension TypeChecker {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return containsNeverType(inner)
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, _, let args), .genericEnum(_, _, let args), .traitObject(_, _, let args):
       return args.contains(where: containsNeverType)
     default:
       return false
@@ -94,11 +94,11 @@ extension TypeChecker {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       context.setExplicitDrop(defId)
-    case .genericStruct(let template, _):
+    case .genericStruct(let template, _, _):
       if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template) {
         context.setExplicitDrop(templateDefId)
       }
-    case .genericEnum(let template, _):
+    case .genericEnum(let template, _, _):
       if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template) {
         context.setExplicitDrop(templateDefId)
       }
@@ -148,7 +148,7 @@ extension TypeChecker {
         }
       }
       return firstSignatureVisibilityViolation(in: returns, requiredAccess: requiredAccess)
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, _, let args), .genericEnum(_, _, let args), .traitObject(_, _, let args):
       for arg in args {
         if let violation = firstSignatureVisibilityViolation(in: arg, requiredAccess: requiredAccess) {
           return violation
@@ -470,20 +470,11 @@ extension TypeChecker {
 
     switch symbol.kind {
     case .function:
-      currentScope.definePrivateFunction(
-        name,
-        sourceFile: sourceFile,
-        type: symbol.type,
-        modulePath: sourceModulePath
-      )
-    case .variable(let variableKind):
-      currentScope.definePrivateSymbol(
-        name,
-        sourceFile: sourceFile,
-        type: symbol.type,
-        mutable: variableKind == .MutableValue,
-        modulePath: sourceModulePath
-      )
+      // Bind the local name (which may be an import alias) to the declaration's
+      // own DefId so later codegen refers to the real symbol.
+      currentScope.defineImportedFunction(name, sourceFile: sourceFile, defId: symbol.defId)
+    case .variable:
+      currentScope.defineImportedSymbol(name, sourceFile: sourceFile, defId: symbol.defId)
     case .type:
       if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
         try currentScope.definePrivateType(name, sourceFile: sourceFile, type: symbol.type)
@@ -582,8 +573,14 @@ extension TypeChecker {
       _ = paramTypes
       _ = returnType
       
-      // Look up the actual symbol from scope
-      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+      // Look up the declaring module's own symbol (same-named functions in
+      // other modules are distinct declarations). Prefer the module-wide key:
+      // the file-scoped key can still point at the pass-1 placeholder.
+      let moduleScoped = defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
+        ?? defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile)
+      if let defId = moduleScoped,
          let funcType = defIdMap.getSymbolType(defId) {
         let symbol = Symbol(
           defId: defId,
@@ -595,7 +592,8 @@ extension TypeChecker {
       return nil
 
     case .foreignFunctionDeclaration(let name, _, _, _, _):
-      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+      if let defId = defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile),
          let funcType = defIdMap.getSymbolType(defId) {
         let symbol = Symbol(
           defId: defId,
@@ -875,7 +873,13 @@ extension TypeChecker {
       self.currentSpan = span
       // For private types, allow same name in different files
       let isPrivate = (access == .file_private)
-      if !isPrivate && currentScope.hasTypeDefinition(name) {
+      if !typeParameters.isEmpty {
+        if !isPrivate,
+           defIdMap.hasGenericEnumTemplate(name: name, modulePath: currentModulePath)
+            || (!isStdLib && stdLibTypes.contains(name)) {
+          throw SemanticError.duplicateDefinition(name, span: span)
+        }
+      } else if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
       
@@ -925,7 +929,16 @@ extension TypeChecker {
       )
       // For private types, allow same name in different files
       let isPrivate = (access == .file_private)
-      if !isPrivate && currentScope.hasTypeDefinition(name) {
+      if !typeParameters.isEmpty {
+        // Generic templates are identified per module: the same name in a
+        // different user module is a distinct declaration. Standard library
+        // names stay reserved and cannot be redefined.
+        if !isPrivate,
+           defIdMap.hasGenericStructTemplate(name: name, modulePath: currentModulePath)
+            || (!isStdLib && stdLibTypes.contains(name)) {
+          throw SemanticError.duplicateDefinition(name, span: span)
+        }
+      } else if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
       
@@ -1283,11 +1296,11 @@ extension TypeChecker {
         } else if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           genericSelfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
-          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericStructType(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
-          genericSelfType = .genericEnum(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericEnumType(template: baseName, args: genericSelfArgs)
         } else {
-          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericStructType(template: baseName, args: genericSelfArgs)
         }
 
         // Register all method signatures (without checking bodies)
@@ -1495,9 +1508,9 @@ extension TypeChecker {
         if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           selfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
-          selfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          selfType = genericStructType(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
-          selfType = .genericEnum(template: baseName, args: genericSelfArgs)
+          selfType = genericEnumType(template: baseName, args: genericSelfArgs)
         } else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
@@ -2539,11 +2552,11 @@ extension TypeChecker {
         } else if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           genericSelfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
-          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericStructType(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
-          genericSelfType = .genericEnum(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericEnumType(template: baseName, args: genericSelfArgs)
         } else {
-          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          genericSelfType = genericStructType(template: baseName, args: genericSelfArgs)
         }
         
         // Find the templates registered in Pass 2 and check their bodies
@@ -2828,9 +2841,9 @@ extension TypeChecker {
         if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           selfType = modifierSelfType
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
-          selfType = .genericStruct(template: baseName, args: genericSelfArgs)
+          selfType = genericStructType(template: baseName, args: genericSelfArgs)
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
-          selfType = .genericEnum(template: baseName, args: genericSelfArgs)
+          selfType = genericEnumType(template: baseName, args: genericSelfArgs)
         } else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
@@ -3239,10 +3252,10 @@ extension TypeChecker {
           for i in 1..<namedCheckEnd {
             let traitParam = traitParams[i]
             let implParam = implParams[i]
-            let traitKey = "\(method.name).\(traitParam.name)"
-            let implKey = "\(method.name).\(implParam.name)"
-            let traitHasDefault = parsedParameterDefaults[traitKey] != nil
-            let implHasDefault = parsedParameterDefaults[implKey] != nil
+            let traitOriginKey = "\(traitName)#\(method.name)#\(traitParam.name)"
+            let implOriginKey = "\(method.name)#\(implParam.name)"
+            let traitHasDefault = traitDeclaredParameterDefaults.contains(traitOriginKey)
+            let implHasDefault = implDeclaredParameterDefaults.contains(implOriginKey)
             if traitHasDefault && implHasDefault {
               throw SemanticError(.generic(
                 "Trait method '\(method.name)' has default value for parameter '\(traitParam.name)', implementation must not also declare a default value"

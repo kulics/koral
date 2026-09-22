@@ -103,7 +103,7 @@ public class Unifier {
             try unify(ret1, ret2, span: span)
             
         // 泛型结构体
-        case (.genericStruct(let template1, let args1), .genericStruct(let template2, let args2)):
+        case (.genericStruct(let template1, _, let args1), .genericStruct(let template2, _, let args2)):
             if template1 != template2 {
                 throw UnificationError.templateMismatch(
                     expected: template1,
@@ -125,7 +125,7 @@ public class Unifier {
             }
             
         // 泛型枚举类型
-        case (.genericEnum(let template1, let args1), .genericEnum(let template2, let args2)):
+        case (.genericEnum(let template1, _, let args1), .genericEnum(let template2, _, let args2)):
             if template1 != template2 {
                 throw UnificationError.templateMismatch(
                     expected: template1,
@@ -276,7 +276,7 @@ public class Unifier {
             }
             return occurs(tv, in: ret, visited: &visited)
             
-        case .genericStruct(_, let args):
+        case .genericStruct(_, _, let args):
             for arg in args {
                 if occurs(tv, in: arg, visited: &visited) {
                     return true
@@ -284,7 +284,7 @@ public class Unifier {
             }
             return false
             
-        case .genericEnum(_, let args):
+        case .genericEnum(_, _, let args):
             for arg in args {
                 if occurs(tv, in: arg, visited: &visited) {
                     return true
@@ -328,7 +328,7 @@ public class Unifier {
             }
             return false
 
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, _, let typeArgs):
             for typeArg in typeArgs {
                 if occurs(tv, in: typeArg, visited: &visited) {
                     return true
@@ -360,11 +360,11 @@ public class Unifier {
             let resolvedRet = resolve(ret)
             return .function(parameters: resolvedParams, returns: resolvedRet)
             
-        case .genericStruct(let template, let args):
-            return .genericStruct(template: template, args: args.map { resolve($0) })
+        case .genericStruct(let template, let defId, let args):
+            return .genericStruct(template: template, templateDefId: defId, args: args.map { resolve($0) })
             
-        case .genericEnum(let template, let args):
-            return .genericEnum(template: template, args: args.map { resolve($0) })
+        case .genericEnum(let template, let defId, let args):
+            return .genericEnum(template: template, templateDefId: defId, args: args.map { resolve($0) })
             
         case .reference(let inner):
             return .reference(inner: resolve(inner))

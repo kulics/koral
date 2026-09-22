@@ -448,9 +448,9 @@ extension Monomorphizer {
             let name = context.getName(defId) ?? ""
             // Use stored templateName if available, otherwise fall back to full name
             structureName = context.getTemplateName(defId) ?? name
-        case .genericStruct(let templateName, _):
+        case .genericStruct(let templateName, _, _):
             structureName = templateName
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             structureName = templateName
         case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
@@ -565,7 +565,7 @@ extension Monomorphizer {
             switch baseType {
             case .structure(let defId), .`enum`(let defId):
                 return context.getTypeArguments(defId)?.count ?? 0
-            case .genericStruct(_, let args), .genericEnum(_, let args):
+            case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
                 return args.count
             case .pointer:
                 return 1
@@ -915,7 +915,7 @@ extension Monomorphizer {
             }
             return nil
 
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, _, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
@@ -962,7 +962,7 @@ extension Monomorphizer {
             }
             return nil
 
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, _, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
@@ -1417,10 +1417,10 @@ extension Monomorphizer {
 
     private func normalizeTypeArgument(_ type: Type) -> Type {
         switch type {
-        case .genericStruct(let template, let args):
-            return .genericStruct(template: template, args: args.map { normalizeTypeArgument($0) })
-        case .genericEnum(let template, let args):
-            return .genericEnum(template: template, args: args.map { normalizeTypeArgument($0) })
+        case .genericStruct(let template, _, let args):
+            return .genericStruct(template: template, templateDefId: .invalid, args: args.map { normalizeTypeArgument($0) })
+        case .genericEnum(let template, _, let args):
+            return .genericEnum(template: template, templateDefId: .invalid, args: args.map { normalizeTypeArgument($0) })
         case .reference(let inner):
             return .reference(inner: normalizeTypeArgument(inner))
         case .mutableReference(let inner):
@@ -1471,9 +1471,9 @@ extension Monomorphizer {
                 return [concreteName, templateName]
             }
             return [concreteName]
-        case .genericStruct(let templateName, _):
+        case .genericStruct(let templateName, _, _):
             return [templateName]
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             return [templateName]
         case .`enum`(let defId):
             let concreteName = context.getName(defId) ?? ""
@@ -1508,9 +1508,9 @@ extension Monomorphizer {
         case .structure(let defId):
             let name = context.getName(defId) ?? ""
             return context.getTemplateName(defId) ?? name
-        case .genericStruct(let templateName, _):
+        case .genericStruct(let templateName, _, _):
             return templateName
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             return templateName
         case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
@@ -1565,10 +1565,10 @@ extension Monomorphizer {
                 }
             }
             return typeMatchesExpectedPattern(actual: actualReturn, expected: expectedReturn)
-        case .genericStruct(let expectedTemplate, let expectedArgs):
+        case .genericStruct(let expectedTemplate, _, let expectedArgs):
             let actualArgs: [Type]
             switch actual {
-            case .genericStruct(let actualTemplate, let args):
+            case .genericStruct(let actualTemplate, _, let args):
                 guard actualTemplate == expectedTemplate else { return false }
                 actualArgs = args
             case .structure(let defId):
@@ -1587,10 +1587,10 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericEnum(let expectedTemplate, let expectedArgs):
+        case .genericEnum(let expectedTemplate, _, let expectedArgs):
             let actualArgs: [Type]
             switch actual {
-            case .genericEnum(let actualTemplate, let args):
+            case .genericEnum(let actualTemplate, _, let args):
                 guard actualTemplate == expectedTemplate else { return false }
                 actualArgs = args
             case .`enum`(let defId):
@@ -1716,10 +1716,10 @@ extension Monomorphizer {
         case .pointer(let pInner):
             guard case .pointer(let aInner) = actual else { return false }
             return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-        case .genericStruct(let pTemplate, let pArgs):
+        case .genericStruct(let pTemplate, _, let pArgs):
             let aArgs: [Type]
             switch actual {
-            case .genericStruct(let aTemplate, let args):
+            case .genericStruct(let aTemplate, _, let args):
                 guard pTemplate == aTemplate else { return false }
                 aArgs = args
             case .structure(let defId):
@@ -1738,10 +1738,10 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericEnum(let pTemplate, let pArgs):
+        case .genericEnum(let pTemplate, _, let pArgs):
             let aArgs: [Type]
             switch actual {
-            case .genericEnum(let aTemplate, let args):
+            case .genericEnum(let aTemplate, _, let args):
                 guard pTemplate == aTemplate else { return false }
                 aArgs = args
             case .`enum`(let defId):
@@ -2144,11 +2144,11 @@ extension Monomorphizer {
     /// Returns (traitName, typeArgs) if the type is a trait object or reference to trait object.
     internal func extractTraitObjectType(_ type: Type) -> (traitName: String, typeArgs: [Type])? {
         switch type {
-        case .traitObject(let traitName, let typeArgs):
+        case .traitObject(let traitName, _, let typeArgs):
             return (traitName, typeArgs)
         case .reference(let inner), .mutableReference(let inner),
              .borrowedReference(let inner), .mutableBorrowedReference(let inner):
-            if case .traitObject(let traitName, let typeArgs) = inner {
+            if case .traitObject(let traitName, _, let typeArgs) = inner {
                 return (traitName, typeArgs)
             }
             return nil

@@ -194,6 +194,18 @@ public class UnifiedScope {
     functionSymbols.insert(name)
   }
 
+  /// Binds an imported name (possibly an alias) to the ORIGINAL declaration's
+  /// `DefId`, so codegen still emits/calls the declaring symbol's name.
+  public func defineImportedFunction(_ name: String, sourceFile: String, defId: DefId) {
+    privateNames["\(name)@\(sourceFile)"] = defId
+    functionSymbols.insert(name)
+  }
+
+  /// Binds an imported value name (possibly an alias) to the ORIGINAL `DefId`.
+  public func defineImportedSymbol(_ name: String, sourceFile: String, defId: DefId) {
+    privateNames["\(name)@\(sourceFile)"] = defId
+  }
+
   public func definePrivateFunction(_ name: String, sourceFile: String, type: Type, modulePath: [String] = []) {
     guard let map = defIdMap else {
       return

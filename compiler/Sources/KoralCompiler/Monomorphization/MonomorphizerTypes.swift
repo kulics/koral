@@ -67,8 +67,8 @@ extension Monomorphizer {
         }
         
         // Calculate layout name
-        let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let layoutName = "\(templateName)_\(argLayoutKeys)"
+        let layoutName = SemaUtils.makeLayoutName(
+            baseName: templateName, args: args, context: context, templateDefId: template.defId)
         
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
@@ -171,8 +171,8 @@ extension Monomorphizer {
         }
         
         // Calculate layout name
-        let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let layoutName = "\(templateName)_\(argLayoutKeys)"
+        let layoutName = SemaUtils.makeLayoutName(
+            baseName: templateName, args: args, context: context, templateDefId: template.defId)
         
         // Create placeholder for recursion
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)

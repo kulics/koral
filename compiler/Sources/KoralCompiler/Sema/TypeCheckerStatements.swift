@@ -147,7 +147,7 @@ extension TypeChecker {
 
   func statementCanFallThrough(_ stmt: TypedStatementNode) -> Bool {
     switch stmt {
-    case .return, .break, .continue, .branchBreak:
+    case .return, .break, .continue, .yieldValue:
       return false
     case .expression(let expr):
       return expr.type != .never
@@ -174,7 +174,7 @@ extension TypeChecker {
       return "break"
     case .continue:
       return "continue"
-    case .branchBreak:
+    case .yieldValue:
       return "break"
     case .expression(let expr):
       return expr.type == .never ? "control flow terminator" : nil
@@ -387,7 +387,7 @@ extension TypeChecker {
       let valueType = typedValue.type
 
       // Verify the value is a Pair type
-      guard case .genericStruct(let templateName, let typeArgs) = valueType,
+      guard case .genericStruct(let templateName, _, let typeArgs) = valueType,
             templateName == "Pair",
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(
@@ -843,7 +843,7 @@ extension TypeChecker {
         throw SemanticError(.generic(
           "control flow statement 'yield' is not allowed in defer expression"))
       }
-      guard let currentTarget = branchBreakTargets.last else {
+      guard let currentTarget = yieldTargets.last else {
         throw SemanticError(.generic("yield outside of branch expression body"), span: span)
       }
       if exitableConstructStack.count > currentTarget.constructStackDepthAtCreation,
@@ -871,9 +871,9 @@ extension TypeChecker {
         }
       }
       let typedValue = try typedValueOpt ?? inferTypedExpression(value)
-      markExplicitBranchBreak(on: currentTarget.id)
-      try mergeBranchBreakTargetResult(type: typedValue.type, span: span)
-      return .branchBreak(target: currentTarget.id, value: typedValue)
+      markExplicitYield(on: currentTarget.id)
+      try mergeYieldTargetResult(type: typedValue.type, span: span)
+      return .yieldValue(target: currentTarget.id, value: typedValue)
 
     case .break(let span):
       self.currentSpan = span

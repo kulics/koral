@@ -49,7 +49,7 @@ public enum DefKind: Hashable, Equatable {
 ///
 /// DefId 是编译器中用于唯一标识类型、函数、变量等定义的核心数据结构。
 /// 它是一个纯索引（UInt64），所有元数据由 DefIdMap 统一管理。
-public struct DefId: Hashable, Equatable {
+public struct DefId: Hashable, Equatable, Sendable {
     /// 唯一数字 ID（用于快速比较）
     ///
     /// 由 DefIdMap 分配的全局唯一数字标识符，用于高效的相等性比较和哈希。
@@ -58,6 +58,12 @@ public struct DefId: Hashable, Equatable {
     /// 创建一个新的 DefId
     ///
     /// - Parameter id: 唯一数字 ID
+    /// Sentinel for types whose declaration identity is not yet resolved.
+    public static let invalid = DefId(id: 0)
+
+    /// Whether this identifies a real declaration.
+    public var isValid: Bool { id != 0 }
+
     public init(id: UInt64) {
         self.id = id
     }
@@ -933,12 +939,18 @@ public class DefIdMap {
 
     // MARK: - Generic Template Info
 
+    /// Module path of the declaration currently being processed. Used to give
+    /// same-named generic templates from different modules distinct identity.
+    public var currentModulePath: [String] = []
+
     public func registerGenericStructTemplate(name: String, defId: DefId, info: GenericStructTemplateInfo) {
+        genericStructTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
         genericStructTemplates[name] = defId
         genericStructTemplateInfo[defId.id] = info
     }
 
     public func registerGenericEnumTemplate(name: String, defId: DefId, info: GenericEnumTemplateInfo) {
+        genericEnumTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
         genericEnumTemplates[name] = defId
         genericEnumTemplateInfo[defId.id] = info
     }
@@ -956,12 +968,26 @@ public class DefIdMap {
         genericFunctionTemplateInfo[defId.id] = info
     }
 
+    /// Whether THIS module already declares a generic template with `name`.
+    /// Same-named templates in other modules are distinct declarations.
+    public func hasGenericStructTemplate(name: String, modulePath: [String]) -> Bool {
+        genericStructTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)] != nil
+    }
+
+    /// Whether THIS module already declares a generic enum template with `name`.
+    public func hasGenericEnumTemplate(name: String, modulePath: [String]) -> Bool {
+        genericEnumTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)] != nil
+    }
+
     public func lookupGenericStructTemplateDefId(_ name: String) -> DefId? {
-        return genericStructTemplates[name]
+        let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
+        let hit = genericStructTemplates[qualified] ?? genericStructTemplates[name]
+        return hit
     }
 
     public func lookupGenericEnumTemplateDefId(_ name: String) -> DefId? {
-        return genericEnumTemplates[name]
+        let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
+        return genericEnumTemplates[qualified] ?? genericEnumTemplates[name]
     }
 
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {

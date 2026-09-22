@@ -183,12 +183,8 @@ final class MIRFunctionCodeEmitter {
       case .deallocMemory(let ptr),
            .deinitMemory(let ptr),
            .takeMemory(let ptr, _),
-           .isUniqueMutable(let ptr),
-         .refCount(let ptr),
            .downgradeRef(let ptr, _),
-           .downgradeMutRef(let ptr, _),
            .upgradeRef(let ptr, _),
-           .upgradeMutRef(let ptr, _),
            .traitObjectMatches(let ptr, _, _, _),
            .traitObjectDowncast(let ptr, _):
         walkValue(ptr)
@@ -197,9 +193,7 @@ final class MIRFunctionCodeEmitter {
         walkValue(dest)
         walkValue(source)
         walkValue(count)
-      case .makeRef(let ptr, let owner, _),
-           .makeMutRef(let ptr, let owner, _),
-           .initMemory(let ptr, let owner):
+      case .initMemory(let ptr, let owner):
         walkValue(ptr)
         walkValue(owner)
       case .nullPtr:
@@ -581,32 +575,8 @@ final class MIRFunctionCodeEmitter {
     func parameters(for callee: MIROperand) -> [Parameter] {
       switch callee {
       case .function(let symbol):
-        if let exact = codeGen.mirProgram.functions.first(where: { $0.identifier.defId == symbol.defId }),
-           case .function(let parameters, _) = exact.identifier.type {
+        if let parameters = codeGen.callParameters(for: symbol) {
           return parameters
-        }
-        let targetName = codeGen.qualifiedName(for: symbol)
-        if let exact = codeGen.mirProgram.functions.first(where: { codeGen.qualifiedName(for: $0.identifier) == targetName }),
-           case .function(let parameters, _) = exact.identifier.type {
-          return parameters
-        }
-        for global in codeGen.mirProgram.globals {
-          switch global {
-          case .function(let identifier, let parameters, _)
-          where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
-            if case .function(let functionParameters, _) = identifier.type {
-              return functionParameters
-            }
-            return parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
-          case .foreignFunction(let identifier, let parameters)
-          where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
-            if case .function(let functionParameters, _) = identifier.type {
-              return functionParameters
-            }
-            return parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }
-          default:
-            continue
-          }
         }
         if case .function(let parameters, _) = symbol.type {
           return parameters
@@ -1285,17 +1255,22 @@ final class MIRFunctionCodeEmitter {
     codeGen.buffer = ""
     codeGen.indent = "  "
 
+    let planStart = DispatchTime.now()
     let plan = MIRFunctionEmitPlan.build(
       codeGen: codeGen,
       function: mirFunction,
       localNameOverridesByDefId: localNameOverridesByDefId
     )
+    codeGen.recordMIRFunctionPlanDuration(DispatchTime.now().uptimeNanoseconds - planStart.uptimeNanoseconds)
     let emitter = MIRFunctionCodeEmitter(
       codeGen: codeGen,
       function: mirFunction,
       plan: plan
     )
+    let emitStart = DispatchTime.now()
     emitter.emitBody()
+    codeGen.recordMIRFunctionEmitDuration(DispatchTime.now().uptimeNanoseconds - emitStart.uptimeNanoseconds)
+    codeGen.recordMIRFunctionRender()
     let result = MIRFunctionRenderResult(
       definitions: emitter.generatedDefinitions,
       body: codeGen.buffer
@@ -1320,12 +1295,13 @@ final class MIRFunctionCodeEmitter {
     let paramsStr = params.isEmpty ? "void" : params.joined(separator: ", ")
     let nested = renderMIRFunctionBody(mirFunction)
 
-    var functionBuffer = nested.definitions
-    functionBuffer += "\nstatic \(returnCType) \(name)(\(paramsStr));\n"
-    functionBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
-    functionBuffer += nested.body
-    functionBuffer += "}\n"
-    nestedFunctionDefinitions += functionBuffer
+    nestedFunctionDefinitions += [
+      nested.definitions,
+      "\nstatic \(returnCType) \(name)(\(paramsStr));\n",
+      "static \(returnCType) \(name)(\(paramsStr)) {\n",
+      nested.body,
+      "}\n"
+    ].joined()
   }
 
   private func generateCaptureLambdaFunction(
@@ -1354,13 +1330,15 @@ final class MIRFunctionCodeEmitter {
     }
     let nested = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
 
-    var functionBuffer = nested.definitions
-    functionBuffer += "\nstatic \(returnCType) \(name)(\(params.joined(separator: ", ")));\n"
-    functionBuffer += "static \(returnCType) \(name)(\(params.joined(separator: ", "))) {\n"
-    functionBuffer += "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n"
-    functionBuffer += nested.body
-    functionBuffer += "}\n"
-    nestedFunctionDefinitions += functionBuffer
+    let paramsSignature = params.joined(separator: ", ")
+    nestedFunctionDefinitions += [
+      nested.definitions,
+      "\nstatic \(returnCType) \(name)(\(paramsSignature));\n",
+      "static \(returnCType) \(name)(\(paramsSignature)) {\n",
+      "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n",
+      nested.body,
+      "}\n"
+    ].joined()
   }
 
   private func generateLambdaEnvStruct(name: String, captures: [CapturedVariable]) {
@@ -1419,7 +1397,7 @@ final class MIRFunctionCodeEmitter {
     case .local(let local):
       return MIRValueEmission(expression: localName(for: local), cleanups: [])
     case .function(let symbol):
-      let funcName = codeGen.qualifiedName(for: symbol)
+      let funcName = codeGen.callableName(for: symbol)
       let closureExpr = codeGen.nextTempWithInit(
         cType: "struct __koral_Closure",
         initExpr: "{ .fn = (void*)\(funcName), .env = NULL, .drop = NULL }"
@@ -1540,7 +1518,7 @@ final class MIRFunctionCodeEmitter {
     let expression: String
     switch call.callee {
     case .function(let symbol):
-      expression = emitDirectCall(functionName: codeGen.qualifiedName(for: symbol), arguments: argumentList, returnType: call.type)
+      expression = emitDirectCall(functionName: codeGen.callableName(for: symbol), arguments: argumentList, returnType: call.type)
     default:
       let calleeType = resolver.type(of: call.callee) ?? .void
       guard case .function(let parameters, let returns) = calleeType else {
@@ -1601,7 +1579,28 @@ final class MIRFunctionCodeEmitter {
     case .borrow:
       return emitValue(value, sourceMode: true)
     case .move, .take:
-      return emitValue(value, sourceMode: true)
+      let emission = emitValue(value, sourceMode: true)
+      // When passing a managed nominal value that was read from another
+      // managed nominal's payload (or from a local holding a managed nominal
+      // that was returned from a function), we must retain it.  The callee
+      // will drop the value; without a retain the payload's reference to the
+      // nested field will have an under-counted refcount, leading to
+      // use-after-free when the outer object is dropped.
+      //
+      // We check: the value is a PlaceRead of a .field where the base type
+      // is managed nominal and the field type is also managed nominal.
+      if case .placeRead(let place, _) = value,
+         case .field(let base, _) = place,
+         let baseType = resolver.type(of: base),
+         let fieldType = resolver.type(of: place),
+         codeGen.usesManagedNominalRepresentation(baseType),
+         codeGen.usesManagedNominalRepresentation(fieldType),
+         codeGen.needsDrop(fieldType) {
+        let temp = codeGen.emitTempCopyOrMove(type: fieldType, source: emission.expression, isLvalue: true)
+        emitCleanups(emission.cleanups)
+        return MIRValueEmission(expression: temp, cleanups: cleanupForTemporaryResult(expression: temp, type: fieldType))
+      }
+      return emission
     }
   }
 
@@ -1684,23 +1683,7 @@ final class MIRFunctionCodeEmitter {
   }
 
   private func globalFunctionParameterTypes(for symbol: Symbol) -> [Type]? {
-    if let exactFunction = codeGen.mirProgram.functions.first(where: { $0.identifier.defId == symbol.defId }) {
-      return exactFunction.parameters.map(\.type)
-    }
-    let targetName = codeGen.qualifiedName(for: symbol)
-    for global in codeGen.mirProgram.globals {
-      switch global {
-      case .function(let identifier, let parameters, _)
-      where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
-        return parameters.map(\.type)
-      case .foreignFunction(let identifier, let parameters)
-      where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
-        return parameters.map(\.type)
-      default:
-        continue
-      }
-    }
-    return nil
+    codeGen.callParameterTypes(for: symbol)
   }
 
   private func emitAggregate(_ aggregate: MIRAggregate) -> MIRValueEmission {
@@ -2050,72 +2033,7 @@ final class MIRFunctionCodeEmitter {
     case .moveMemory(let dest, let source, let count):
       return emitMemoryTransfer(functionName: "memmove", dest: dest, source: source, count: count)
 
-    case .isUniqueMutable(let value):
-      let valueEmission = emitValue(value, sourceMode: true)
-      let result = codeGen.nextTempWithDecl(cType: "int")
-      // The value is ptr ref mutable T — a raw pointer to the ref struct.
-      // Dereference to access the control block: ((struct __koral_Ref*)ptr)->control
-      let valueType = resolver.type(of: value) ?? .void
-      let control: String
-      switch valueType {
-      case .mutablePointer, .pointer:
-        control = "((struct __koral_Ref*)\(valueEmission.expression))->control"
-      default:
-        control = controlExpression(for: valueType, value: valueEmission.expression)
-      }
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(result) = 0;\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("if (\(control)) {\n")
-      codeGen.withIndent {
-        codeGen.addIndent()
-        codeGen.appendToBuffer("\(result) = (atomic_load(&((struct __koral_Control*)\(control))->strong_count) == 1);\n")
-      }
-      codeGen.addIndent()
-      codeGen.appendToBuffer("}\n")
-      emitCleanups(valueEmission.cleanups)
-      return MIRValueEmission(expression: result, cleanups: [])
-
-    case .makeRef(let ptr, let owner, let resultType),
-         .makeMutRef(let ptr, let owner, let resultType):
-      let ptrEmission = emitValue(ptr, sourceMode: true)
-      let ownerEmission = emitValue(owner, sourceMode: true)
-      let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(result).ptr = (void*)\(ptrEmission.expression);\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(result).control = \(ownerEmission.expression).control;\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("if (\(result).control) { __koral_retain(\(result).control); }\n")
-      emitCleanups(ptrEmission.cleanups + ownerEmission.cleanups)
-      return MIRValueEmission(expression: result, cleanups: cleanupForTemporaryResult(expression: result, type: resultType))
-
-    case .refCount(let ref):
-      let refEmission = emitValue(ref, sourceMode: true)
-      let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(.uint))
-      let refType = resolver.type(of: ref) ?? .void
-      let control: String
-      switch refType {
-      case .mutablePointer, .pointer:
-        control = "((struct __koral_Ref*)\(refEmission.expression))->control"
-      default:
-        control = controlExpression(for: refType, value: refEmission.expression)
-      }
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(result) = 0;\n")
-      codeGen.addIndent()
-      codeGen.appendToBuffer("if (\(control)) {\n")
-      codeGen.withIndent {
-        codeGen.addIndent()
-        codeGen.appendToBuffer("\(result) = (\(codeGen.cTypeName(.uint)))atomic_load(&((struct __koral_Control*)\(control))->strong_count);\n")
-      }
-      codeGen.addIndent()
-      codeGen.appendToBuffer("}\n")
-      emitCleanups(refEmission.cleanups)
-      return MIRValueEmission(expression: result, cleanups: [])
-
-    case .downgradeRef(let value, let resultType),
-         .downgradeMutRef(let value, let resultType):
+    case .downgradeRef(let value, let resultType):
       let valueEmission = emitValue(value, sourceMode: true)
       let expression: String
       let valueType = resolver.type(of: value) ?? .void
@@ -2143,8 +2061,7 @@ final class MIRFunctionCodeEmitter {
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
 
-    case .upgradeRef(let value, let resultType),
-         .upgradeMutRef(let value, let resultType):
+    case .upgradeRef(let value, let resultType):
       let valueEmission = emitValue(value, sourceMode: true)
       let successVar = codeGen.nextTempWithDecl(cType: "int")
       let expression: String
@@ -2577,7 +2494,7 @@ final class MIRFunctionCodeEmitter {
     case .local(let local):
       return localName(for: local)
     case .function(let symbol):
-      return codeGen.qualifiedName(for: symbol)
+      return codeGen.callableName(for: symbol)
     case .constant(let constant):
       switch constant {
       case .integer(let value, _), .float(let value, _):
@@ -2766,7 +2683,7 @@ extension CodeGen {
     _ identifier: Symbol,
     _ params: [Symbol],
     _ mirFunction: MIRFunction
-  ) {
+  ) -> String {
     let cName = cIdentifier(for: identifier)
     let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
@@ -2774,14 +2691,14 @@ extension CodeGen {
     let savedBuffer = buffer
     buffer = ""
     let rendered = renderMIRFunctionBody(mirFunction)
-    buffer += rendered.definitions
-    buffer += "\(returnType) \(cName)(\(paramList)) {\n"
-    buffer += rendered.body
-    buffer += "}\n"
-
-    let functionCode = buffer
+    let functionCode = [
+      rendered.definitions,
+      "\(returnType) \(cName)(\(paramList)) {\n",
+      rendered.body,
+      "}\n"
+    ].joined()
     buffer = savedBuffer
 
-    buffer += functionCode
+    return functionCode
   }
 }

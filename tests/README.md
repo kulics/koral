@@ -63,7 +63,7 @@ Useful flags:
 
 ## Focused regression buckets
 
-The shared suite remains flat under `tests/compiler-cases/`, but the recent compiler fixes added a few high-value semantic buckets that are worth rerunning together when touching parser visibility, escape analysis, `ref`, or `self` behavior.
+The shared suite remains flat under `tests/compiler-cases/`, but a few high-value semantic buckets are worth rerunning together when touching parser visibility, raw pointers, weak references, or `self` behavior.
 
 ### Access, visibility, and import discipline
 
@@ -107,50 +107,34 @@ Use this bucket when changing statement termination or line-join tokens.
 - `newline_semicolon_comment_blocks_infix`
 - `newline_semicolon_comparison_blocks_error`
 
-### New reference surface (`*T`, `?*T`, `*unsafe T`)
+### Raw pointer and weak reference surface (`*unsafe T`, `?T`)
 
-Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.
+Use this bucket when changing raw-pointer or weak-reference syntax/semantics. Managed references (`*T`, `*mutable T`, `?*T`) and `box()` are removed; only `*unsafe T` / `*unsafe mutable T` and `?T` remain.
 
-- `raw_deref_mutable_ref_readonly_pointer_error`
+- `raw_sigils_basic_test`
 - `raw_address_readonly_pointer_deref_error`
-- `implicit_mutable_ref_from_readonly_pointer_deref_error`
-- `implicit_mutable_ref_from_immutable_value_error`
-- `weakref_basic`
-- `weakref_lifecycle`
-- `weakref_struct`
-- `mut_weakref_basic`
-- `trait_object_weakref`
-- `trait_object_mut_weakref_roundtrip`
+- `raw_address_of_literal_error`
+- `raw_address_of_temporary_error`
+- `raw_method_call_error_test`
+- `pointer_test`
+- `cast_pointer_int_uint`
+- `deref_assignment_requires_reference_type`
+- `unsafe_deref_or_return_non_option_result_error`
+- `weak_sigils_basic_test`
+- `upgrade_requires_weak_ref_error`
 
-### Escape analysis and managed reference promotion
+### Receiver and `self` semantics
 
-Use this bucket when changing escape promotion, conditional branch merge logic, inter-procedural escape, or container store paths.
+Use this bucket when changing receiver syntax, `self` parameter passing, or auto-deref behaviour on generic parameters. Receiver syntax is `self` only — there is no `*self` / `*mutable self`, and no receiver auto-ref/auto-deref.
 
-- `escape_alias_container_store_regression`
-- `inter_procedural_escape`
-- `inter_procedural_escape_recursive_ref_regression`
-- `conditional_managed_ref_lambda_return`
-- `escape_analysis`
-- `escape_analysis_coverage`
-- `explicit_ref_promotion`
-- `box_escape_analysis`
-- `builtin_subscript_ref_escape`
-- `no_implicit_ref_promotion_error`
-- `mut_ref_receiver_copy_field_escape_regression`
-- `ref_escape_pattern_alias`
+- `receiver_self_syntax_error`
+- `receiver_amp_self_test`
+- `generic_given_pointer_self_signature_regression`
+- `generic_any_not_auto_deref_error`
+- `mut_param_trait_signature_regression`
+- `value_param_copy`
 
-### Receiver syntax migration (`*self`, `*mutable self`)
-
-Use this bucket when changing receiver auto-ref/auto-deref, managed receiver return paths, or U2 receiver syntax migration behavior.
-
-- `raw_pointer_readonly_mut_receiver_error`
-- `when_ref_in_private_fn`
-- `mut_ref_method_dispatch_widening`
-- `self_ref_receiver_temp_cleanup_unique_mutable`
-- `self_mut_ref_rvalue_receiver_error`
-- `value_semantics_self_ref_on_immutable_base_error`
-
-Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `&unsafe`, `&unsafe mutable`, `*`).
+New work should add coverage directly under `tests/compiler-cases/` using the current surface: `self` receivers, `type` / `type mutable` declarations, `?T` weak references, and `*unsafe T` / `*unsafe mutable T` raw pointers.
 
 ## Rerun a bucket
 
@@ -158,16 +142,17 @@ Because `--filter` is substring-only, the most reliable workflow is to loop over
 
 ```bash
 cases=(
-	escape_alias_container_store_regression
-	inter_procedural_escape
-	inter_procedural_escape_recursive_ref_regression
-	conditional_managed_ref_lambda_return
-	weakref_basic
-	weakref_lifecycle
-	weakref_struct
-	mut_weakref_basic
-	trait_object_weakref
-	trait_object_mut_weakref_roundtrip
+	raw_sigils_basic_test
+	raw_address_readonly_pointer_deref_error
+	raw_address_of_literal_error
+	raw_address_of_temporary_error
+	raw_method_call_error_test
+	pointer_test
+	weak_sigils_basic_test
+	upgrade_requires_weak_ref_error
+	receiver_self_syntax_error
+	receiver_amp_self_test
+	generic_any_not_auto_deref_error
 )
 
 for case_name in "${cases[@]}"; do

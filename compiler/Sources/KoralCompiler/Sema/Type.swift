@@ -219,12 +219,12 @@ public indirect enum Type: CustomStringConvertible {
   case mutableWeakReference(inner: Type)
   case genericParameter(name: String)
   case `enum`(defId: DefId)
-  case genericStruct(template: String, args: [Type])
-  case genericEnum(template: String, args: [Type])
+  case genericStruct(template: String, templateDefId: DefId, args: [Type])
+  case genericEnum(template: String, templateDefId: DefId, args: [Type])
   case opaque(defId: DefId)
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
-  case traitObject(traitName: String, typeArgs: [Type])
+  case traitObject(traitName: String, traitDefId: DefId, typeArgs: [Type])
   
   // MARK: - Context-Aware Accessors
 
@@ -381,10 +381,10 @@ public indirect enum Type: CustomStringConvertible {
       return "?*mutable \(inner.description)"
     case .genericParameter(let name):
       return name
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, _, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(template)[\(argsStr)]"
-    case .genericEnum(let template, let args):
+    case .genericEnum(let template, _, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(template)[\(argsStr)]"
     case .opaque(let defId):
@@ -396,7 +396,7 @@ public indirect enum Type: CustomStringConvertible {
       return "module(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return tv.description
-    case .traitObject(let traitName, let typeArgs):
+    case .traitObject(let traitName, _, let typeArgs):
       if typeArgs.isEmpty {
         return traitName
       }
@@ -498,15 +498,17 @@ public indirect enum Type: CustomStringConvertible {
     case .`enum`(let defId):
       hasher.combine(25)
       hasher.combine(defId.id)
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       hasher.combine(26)
+      hasher.combine(defId.isValid ? defId.id : 0)
       hasher.combine(template)
       hasher.combine(args.count)
       for arg in args {
         hasher.combine(arg.stableHashKey)
       }
-    case .genericEnum(let template, let args):
+    case .genericEnum(let template, let defId, let args):
       hasher.combine(27)
+      hasher.combine(defId.isValid ? defId.id : 0)
       hasher.combine(template)
       hasher.combine(args.count)
       for arg in args {
@@ -524,8 +526,9 @@ public indirect enum Type: CustomStringConvertible {
     case .typeVariable(let tv):
       hasher.combine(30)
       hasher.combine(tv.id)
-    case .traitObject(let traitName, let typeArgs):
+    case .traitObject(let traitName, let defId, let typeArgs):
       hasher.combine(31)
+      hasher.combine(defId.isValid ? defId.id : 0)
       hasher.combine(traitName)
       hasher.combine(typeArgs.count)
       for arg in typeArgs {
@@ -578,24 +581,24 @@ public indirect enum Type: CustomStringConvertible {
       return "MutWeakRef(\(inner.stableKey))"
     case .genericParameter(let name):
       return "Param(\(name))"
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       let argsKey = args.map { $0.stableKey }.joined(separator: ",")
-      return "GS(\(template))[\(argsKey)]"
-    case .genericEnum(let template, let args):
+      return "GS(\(template))#\(defId.id)[\(argsKey)]"
+    case .genericEnum(let template, let defId, let args):
       let argsKey = args.map { $0.stableKey }.joined(separator: ",")
-      return "GE(\(template))[\(argsKey)]"
+      return "GE(\(template))#\(defId.id)[\(argsKey)]"
     case .opaque(let defId):
       return "Opaque#\(defId.id)"
     case .module(let info):
       return "M(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return "TV#\(tv.id)"
-    case .traitObject(let traitName, let typeArgs):
+    case .traitObject(let traitName, let defId, let typeArgs):
       if typeArgs.isEmpty {
-        return "TO(\(traitName))"
+        return "TO(\(traitName))#\(defId.id)"
       }
       let argsKey = typeArgs.map { $0.stableKey }.joined(separator: ",")
-      return "TO(\(traitName))[\(argsKey)]"
+      return "TO(\(traitName))#\(defId.id)[\(argsKey)]"
     }
   }
   
@@ -633,10 +636,10 @@ public indirect enum Type: CustomStringConvertible {
       return self
     case .function: return self
     case .genericParameter: return self
-    case .genericStruct(let template, let args):
-      return .genericStruct(template: template, args: args.map { $0.canonical })
-    case .genericEnum(let template, let args):
-      return .genericEnum(template: template, args: args.map { $0.canonical })
+    case .genericStruct(let template, let defId, let args):
+      return .genericStruct(template: template, templateDefId: defId, args: args.map { $0.canonical })
+    case .genericEnum(let template, let defId, let args):
+      return .genericEnum(template: template, templateDefId: defId, args: args.map { $0.canonical })
     case .opaque:
       return self
     case .module:
@@ -731,7 +734,7 @@ public extension Type {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return inner.containsBorrowedReference
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, _, let args), .genericEnum(_, _, let args), .traitObject(_, _, let args):
       return args.contains(where: \.containsBorrowedReference)
     default:
       return false
@@ -783,10 +786,17 @@ extension Type: Equatable, Hashable {
       return l == r
     case (.genericParameter(let l), .genericParameter(let r)):
       return l == r
-    case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)):
-      return lTemplate == rTemplate && lArgs == rArgs
-    case (.genericEnum(let lTemplate, let lArgs), .genericEnum(let rTemplate, let rArgs)):
-      return lTemplate == rTemplate && lArgs == rArgs
+    case (.genericStruct(let lTemplate, let lDefId, let lArgs), .genericStruct(let rTemplate, let rDefId, let rArgs)):
+      guard lArgs == rArgs else { return false }
+      // Both sides carry declaration identity: same-named templates from
+      // different modules are distinct. When either side is still unresolved,
+      // fall back to the name.
+      if lDefId.isValid && rDefId.isValid { return lDefId == rDefId }
+      return lTemplate == rTemplate
+    case (.genericEnum(let lTemplate, let lDefId, let lArgs), .genericEnum(let rTemplate, let rDefId, let rArgs)):
+      guard lArgs == rArgs else { return false }
+      if lDefId.isValid && rDefId.isValid { return lDefId == rDefId }
+      return lTemplate == rTemplate
     case (.opaque(let lDefId), .opaque(let rDefId)):
       return lDefId == rDefId
     case (.module(let lInfo), .module(let rInfo)):
@@ -794,8 +804,10 @@ extension Type: Equatable, Hashable {
     
     case (.typeVariable(let lTV), .typeVariable(let rTV)):
       return lTV == rTV
-    case (.traitObject(let lName, let lArgs), .traitObject(let rName, let rArgs)):
-      return lName == rName && lArgs == rArgs
+    case (.traitObject(let lName, let lDefId, let lArgs), .traitObject(let rName, let rDefId, let rArgs)):
+      guard lArgs == rArgs else { return false }
+      if lDefId.isValid && rDefId.isValid { return lDefId == rDefId }
+      return lName == rName
 
     default:
       return false

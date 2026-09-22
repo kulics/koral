@@ -196,7 +196,7 @@ public indirect enum TypedStatementNode {
   case `break`
   case `continue`
   case deferStatement(expression: TypedExpressionNode)
-  case branchBreak(target: BranchBreakTargetId, value: TypedExpressionNode)
+  case yieldValue(target: YieldTargetId, value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision
@@ -339,16 +339,10 @@ public indirect enum TypedIntrinsic {
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
   case moveMemory(
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
-  case isUniqueMutable(val: TypedExpressionNode)
-  case makeRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
-  case makeMutRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
-  case refCount(ref: TypedExpressionNode)
 
   // Weak Reference Operations
   case downgradeRef(val: TypedExpressionNode, resultType: Type)
-  case downgradeMutRef(val: TypedExpressionNode, resultType: Type)
   case upgradeRef(val: TypedExpressionNode, resultType: Type)
-  case upgradeMutRef(val: TypedExpressionNode, resultType: Type)
 
   // Pointer Operations
   case initMemory(ptr: TypedExpressionNode, val: TypedExpressionNode)
@@ -367,14 +361,8 @@ public indirect enum TypedIntrinsic {
     case .deallocMemory: return .void
     case .copyMemory: return .void
     case .moveMemory: return .void
-    case .isUniqueMutable: return .bool
-    case .makeRef(_, _, let resultType): return resultType
-    case .makeMutRef(_, _, let resultType): return resultType
-    case .refCount: return .uint
     case .downgradeRef(_, let resultType): return resultType
-    case .downgradeMutRef(_, let resultType): return resultType
     case .upgradeRef(_, let resultType): return resultType
-    case .upgradeMutRef(_, let resultType): return resultType
     case .initMemory: return .void
     case .deinitMemory: return .void
     case .takeMemory(let ptr):

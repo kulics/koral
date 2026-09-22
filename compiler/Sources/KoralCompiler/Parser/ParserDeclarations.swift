@@ -138,6 +138,12 @@ extension Parser {
 
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
+        if isNominalMutable {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: "Type alias cannot be marked mutable"
+          )
+        }
         if isIntrinsic {
           throw ParserError.unexpectedToken(span: currentSpan, got: "Intrinsic type alias is not supported")
         }
@@ -293,7 +299,8 @@ extension Parser {
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
-          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+          parsedParameterDefaults["\(methodName).\(pname)"] = defaultExpr
+          traitDeclaredParameterDefaults.insert("\(name)#\(methodName)#\(pname)")
         }
         parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
@@ -415,6 +422,7 @@ extension Parser {
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
           parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+          implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }
         parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
@@ -539,6 +547,7 @@ extension Parser {
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
           parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+          implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }
         parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
         if currentToken === .comma {
@@ -947,6 +956,12 @@ extension Parser {
     }
 
     if currentToken === .leftBrace {
+      if isMutable {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: "Enum type cannot be marked mutable"
+        )
+      }
       return try parseEnumDeclaration(name, typeParams: typeParams, access: access, span: span)
     }
 

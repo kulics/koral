@@ -124,6 +124,7 @@ extension CodeGen {
       appendToBuffer("} data;\n")
     }
     appendToBuffer("};\n\n")
+    // For enums, pass nil parameters since enum fields are in cases (handled differently)
     appendManagedNominalCopyFunction(name: name)
     appendManagedEnumPayloadDropFunction(name: name, payloadName: payloadName, cases: cases)
     appendManagedNominalDropFunction(name: name)
@@ -193,10 +194,10 @@ extension CodeGen {
           elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         case .`enum`(let defId):
           elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        case .genericStruct(let template, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
-        case .genericEnum(let template, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
+        case .genericStruct(let template, let tplDefId, let args):
+          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        case .genericEnum(let template, let tplDefId, let args):
+          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
         default:
           elementTypeName = cTypeName(elementType)
         }

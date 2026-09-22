@@ -1167,13 +1167,13 @@ type Rect(origin Point, width Int, height Int);
 
 let p = Point(10, 20);
 when p in {
-    Point(x, y) then println(x + y),;  // 30
+    Point(x, y) then println(x + y),  // 30
 }
 
 // 嵌套结构体解构
 let r = Rect(Point(1, 2), 30, 40);
 when r in {
-    Rect(Point(a, b), w, h) then println(a + b + w + h),;  // 73
+    Rect(Point(a, b), w, h) then println(a + b + w + h),  // 73
 }
 
 // 在 if...is 中使用结构体解构
@@ -1183,15 +1183,15 @@ if p is Point(x, y) then {
 
 // 通配符和字面量字段匹配
 when p in {
-    Point(0, y) then println(y),;       // 第一个字段为 0 时匹配
-    Point(_, y) then println(y),;       // 忽略第一个字段
+    Point(0, y) then println(y),  // 第一个字段为 0 时匹配
+    Point(_, y) then println(y),  // 忽略第一个字段
 }
 
 // 泛型结构体解构
 type Box[T Any](val T);
 let b = Box[Int](42);
 when b in {
-    Box(v) then println(v),;  // 42
+    Box(v) then println(v),  // 42
 }
 ```
 

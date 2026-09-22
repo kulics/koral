@@ -114,6 +114,7 @@ public class NameCollector: CompilerPass {
             currentSourceFile = sourceInfo?.sourceFile ?? ""
             currentModulePath = sourceInfo?.modulePath ?? []
             currentPackageID = sourceInfo?.packageID ?? ""
+            defIdMap.currentModulePath = currentModulePath
             
             try collectDefinition(node, isStdLib: isStdLib)
 
@@ -511,7 +512,14 @@ public class NameCollector: CompilerPass {
 
         // 收集函数信息
         let isPrivate = (access == .file_private)
-        let key = isPrivate ? "\(name)@\(currentSourceFile)" : name
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+        let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
+
+        // 检查重复定义（同名自由函数不允许重载，后定义不得覆盖先前定义）
+        if collectedFunctions[key] != nil {
+            throw SemanticError.duplicateDefinition(name, span: span)
+        }
+
         collectedFunctions[key] = CollectedFunctionInfo(
             defId: defId,
             name: name,
@@ -754,7 +762,11 @@ public class NameCollector: CompilerPass {
         )
 
         // 收集函数信息
-        collectedFunctions[name] = CollectedFunctionInfo(
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+        if collectedFunctions[qualifiedName] != nil {
+            throw SemanticError.duplicateDefinition(name, span: span)
+        }
+        collectedFunctions[qualifiedName] = CollectedFunctionInfo(
             defId: defId,
             name: name,
             isGeneric: !typeParameters.isEmpty,
@@ -764,7 +776,7 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath
         )
     }
-    
+
     // MARK: - 辅助方法
     
     /// 检查方法级类型参数与外部类型参数的冲突

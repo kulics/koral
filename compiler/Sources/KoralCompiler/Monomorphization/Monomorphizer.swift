@@ -308,12 +308,12 @@ public class Monomorphizer {
 
     internal func typeInstantiationCacheKey(for type: Type) -> InstantiationKey? {
         switch type {
-        case .genericStruct(let templateName, let args):
+        case .genericStruct(let templateName, _, let args):
             guard let template = input.genericTemplates.structTemplates[templateName] else {
                 return nil
             }
             return .structType(templateDefId: template.defId, args: args)
-        case .genericEnum(let templateName, let args):
+        case .genericEnum(let templateName, _, let args):
             guard let template = input.genericTemplates.enumTemplates[templateName] else {
                 return nil
             }
@@ -800,7 +800,7 @@ public class Monomorphizer {
         let base = baseType
 
         switch base {
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, _, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
                     let extensions = input.genericTemplates.extensionMethods[template],
@@ -810,7 +810,7 @@ public class Monomorphizer {
                         methodTypeArgCount: methodTypeArgs.count,
                         extensionTypeArgCount: resolvedArgs.count
                     ) {
-                let resolvedBase = resolveParameterizedType(.genericStruct(template: template, args: resolvedArgs))
+                let resolvedBase = resolveParameterizedType(.genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
                     structureName: template,
@@ -819,7 +819,7 @@ public class Monomorphizer {
                     methodInfo: ext
                 )
             }
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, _, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
                     let extensions = input.genericTemplates.extensionMethods[template],
@@ -829,7 +829,7 @@ public class Monomorphizer {
                         methodTypeArgCount: methodTypeArgs.count,
                         extensionTypeArgCount: resolvedArgs.count
                     ) {
-                let resolvedBase = resolveParameterizedType(.genericEnum(template: template, args: resolvedArgs))
+                let resolvedBase = resolveParameterizedType(.genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
                     structureName: template,

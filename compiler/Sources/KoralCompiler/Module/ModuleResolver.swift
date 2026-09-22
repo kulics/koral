@@ -389,6 +389,8 @@ public class ModuleResolver {
         for (key, value) in parser.parsedParameterDefaults {
             Parser.allParsedParameterDefaults[key] = value
         }
+        Parser.allTraitDeclaredParameterDefaults.formUnion(parser.traitDeclaredParameterDefaults)
+        Parser.allImplDeclaredParameterDefaults.formUnion(parser.implDeclaredParameterDefaults)
 
         guard case .program(let globalNodes) = ast else {
             throw ModuleError.invalidModulePath(file)

@@ -74,9 +74,9 @@ extension TypeChecker {
       defer { currentFunctionReturnType = savedFunctionReturnType }
       defer { inferredFunctionReturnType = savedInferredFunctionReturnType }
       defer { isInferringFunctionReturnType = savedIsInferringFunctionReturnType }
-      let savedBranchBreakTargets = branchBreakTargets
-      defer { branchBreakTargets = savedBranchBreakTargets }
-      branchBreakTargets = []
+      let savedYieldTargets = yieldTargets
+      defer { yieldTargets = savedYieldTargets }
+      yieldTargets = []
 
       // Lambda has its own scope, so reset insideDefer.
       // This allows return/break/continue/defer inside a lambda that
@@ -222,8 +222,14 @@ extension TypeChecker {
         if !captures.contains(where: { $0.symbol.defId == defId }) {
           let captureKind: CaptureKind
           if info.mutable {
-            // let mutable variables are captured by pointer so mutations are visible outside
-            captureKind = .byMutReference
+            // Closure capture is copy-only. A mutable binding cannot be captured:
+            // the closure would hold a pointer to storage it does not own, so an
+            // escaping closure would dangle. Wrap the state in a shared `Cell`
+            // (a `type mutable` object) and capture the cell instead.
+            throw SemanticError(
+              .generic("Cannot capture mutable variable '\(name)'; hold the state in a Cell and capture the cell instead"),
+              span: currentSpan
+            )
           } else if case .reference(_) = info.type {
             captureKind = .byReference
           } else {

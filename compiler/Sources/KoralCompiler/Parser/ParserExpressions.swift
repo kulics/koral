@@ -1213,8 +1213,8 @@ extension Parser {
       typeArgs: [],
       methodName: "new",
       arguments: [
-        CallArg(expression: .integerLiteral(String(secs))),
-        CallArg(expression: .integerLiteral(String(nanos)))
+        CallArg(label: "seconds", expression: .integerLiteral(String(secs))),
+        CallArg(label: "nanoseconds", expression: .integerLiteral(String(nanos)))
       ]
     )
 

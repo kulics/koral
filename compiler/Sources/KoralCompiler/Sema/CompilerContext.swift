@@ -255,23 +255,23 @@ public final class CompilerContext: @unchecked Sendable {
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
             return requiresManagedNominalLayout(for: defId)
 
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let tplDefId, let args):
             if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
                (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
                 return true
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return requiresManagedNominalLayout(for: defId)
             }
             return false
 
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, let tplDefId, let args):
             if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
                defIdMap.hasExplicitDrop(templateDefId) {
                 return true
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return requiresManagedNominalLayout(for: defId)
             }
@@ -343,22 +343,22 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
             return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let tplDefId, let args):
             if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
                (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
                 return []
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
             }
             return []
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, let tplDefId, let args):
             if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
                defIdMap.hasExplicitDrop(templateDefId) {
                 return []
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self)
+            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
             }
@@ -489,17 +489,17 @@ public final class CompilerContext: @unchecked Sendable {
             return defIdMap.getName(defId) ?? "<unknown>"
         case .genericParameter(let name):
             return name
-        case .genericStruct(let template, let args):
+        case .genericStruct(let template, let tplDefId, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
             return "\(template)[\(argsStr)]"
-        case .genericEnum(let template, let args):
+        case .genericEnum(let template, let tplDefId, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
             return "\(template)[\(argsStr)]"
         case .module(let info):
             return "module \(info.modulePath.joined(separator: "."))"
         case .typeVariable(let tv):
             return "?\(tv.id)"
-        case .traitObject(let traitName, let typeArgs):
+        case .traitObject(let traitName, _, let typeArgs):
             if typeArgs.isEmpty { return traitName }
             let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
             return "[\(argsStr)]\(traitName)"
@@ -555,15 +555,15 @@ public final class CompilerContext: @unchecked Sendable {
             return freeTypeVariables(in: inner)
         case .genericParameter:
             return []
-        case .genericStruct(_, let args):
+        case .genericStruct(_, _, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
-        case .genericEnum(_, let args):
+        case .genericEnum(_, _, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
         case .module:
             return []
         case .opaque:
             return []
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, _, let typeArgs):
             return typeArgs.flatMap { freeTypeVariables(in: $0) }
         }
     }
@@ -606,20 +606,21 @@ public final class CompilerContext: @unchecked Sendable {
             return layoutKey(for: defId)
         case .genericParameter(let name):
             return "Param_\(name)"
-        case .genericStruct(let template, let args):
-            let argsKeys = args.map { getLayoutKey($0) }.joined(separator: "_")
-            return "\(template)_\(argsKeys)"
-        case .genericEnum(let template, let args):
-            let argsKeys = args.map { getLayoutKey($0) }.joined(separator: "_")
-            return "\(template)_\(argsKeys)"
+        case .genericStruct(let template, let tplDefId, let args):
+            return SemaUtils.makeLayoutName(
+                baseName: template, args: args, context: self, templateDefId: tplDefId)
+        case .genericEnum(let template, let tplDefId, let args):
+            return SemaUtils.makeLayoutName(
+                baseName: template, args: args, context: self, templateDefId: tplDefId)
         case .module(let info):
             return "M_\(info.modulePath.joined(separator: "_"))"
         case .typeVariable(let tv):
             return "TV_\(tv.id)"
-        case .traitObject(let traitName, let typeArgs):
-            if typeArgs.isEmpty { return "TO_\(traitName)" }
+        case .traitObject(let traitName, let traitDefId, let typeArgs):
+            let suffix = traitDefId.isValid ? "_d\(traitDefId.id)" : ""
+            if typeArgs.isEmpty { return "TO_\(traitName)\(suffix)" }
             let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
-            return "TO_\(traitName)_\(argsKeys)"
+            return "TO_\(traitName)_\(argsKeys)\(suffix)"
         }
     }
 
@@ -701,15 +702,15 @@ public final class CompilerContext: @unchecked Sendable {
             return containsGenericParameterInternal(inner, visited: &visited)
         case .genericParameter:
             return true
-        case .genericStruct(_, let args):
+        case .genericStruct(_, _, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
-        case .genericEnum(_, let args):
+        case .genericEnum(_, _, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
         case .module:
             return false
         case .typeVariable:
             return true
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, _, let typeArgs):
             return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
         }
     }

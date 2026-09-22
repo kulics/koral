@@ -19,7 +19,7 @@ public struct GlobalNodeSourceInfo {
   }
 }
 
-public struct BranchBreakTargetId: Hashable {
+public struct YieldTargetId: Hashable {
   public let rawValue: Int
 
   public init(rawValue: Int) {
@@ -27,7 +27,7 @@ public struct BranchBreakTargetId: Hashable {
   }
 }
 
-enum BranchBreakTargetKind {
+enum YieldTargetKind {
   case ifExpression
   case whenExpression
   case ifPatternExpression
@@ -36,16 +36,16 @@ enum BranchBreakTargetKind {
 enum ExpressionUsage: Equatable {
   case value
   case statement
-  case branchBody(target: BranchBreakTargetId)
+  case branchBody(target: YieldTargetId)
 }
 
-struct BranchBreakTarget {
-  let id: BranchBreakTargetId
-  let kind: BranchBreakTargetKind
+struct YieldTarget {
+  let id: YieldTargetId
+  let kind: YieldTargetKind
   let span: SourceSpan
   let preferredType: Type?
   var resultType: Type?
-  var didExplicitBranchBreak: Bool
+  var didExplicitYield: Bool
   let constructStackDepthAtCreation: Int
 }
 
@@ -101,15 +101,15 @@ indirect enum ConformanceTypeKey: Hashable {
   case structure(defId: DefId)
   case `enum`(defId: DefId)
   case opaque(defId: DefId)
-  case genericStruct(template: String, args: [ConformanceTypeKey])
-  case genericEnum(template: String, args: [ConformanceTypeKey])
+  case genericStruct(template: String, templateDefId: DefId, args: [ConformanceTypeKey])
+  case genericEnum(template: String, templateDefId: DefId, args: [ConformanceTypeKey])
   case pointer(element: ConformanceTypeKey)
   case mutablePointer(element: ConformanceTypeKey)
   case reference(inner: ConformanceTypeKey)
   case mutableReference(inner: ConformanceTypeKey)
   case weakReference(inner: ConformanceTypeKey)
   case mutableWeakReference(inner: ConformanceTypeKey)
-  case traitObject(traitName: String, typeArgs: [ConformanceTypeKey])
+  case traitObject(traitName: String, traitDefId: DefId, typeArgs: [ConformanceTypeKey])
   case anyGeneric
   case fallback(description: String)
 }
@@ -189,10 +189,20 @@ public class TypeChecker {
   // Named parameter info for functions: DefId -> [(name, named)] for each parameter
   // Used to validate named argument labels at call sites
   var functionNamedParams: [DefId: [(name: String, named: Bool)]] = [:]
+
+  // Parameter labels for methods keyed by owner type name and method name.
+  // Method symbols share a `DefId` with same-named methods on other types, so
+  // `functionNamedParams` alone cannot identify a method's labels reliably.
+  var methodParamLabels: [String: [String: [(name: String, named: Bool)]]] = [:]
   
   // Parsed default values for named parameters (from parser)
   // Key format: "ParentName.paramName" (e.g., "Window.width", "connect.port")
   var parsedParameterDefaults: [String: ExpressionNode] = [:]
+
+  // "TraitName#methodName#paramName" keys whose default came from a trait signature
+  var traitDeclaredParameterDefaults: Set<String> = []
+  // "methodName#paramName" keys whose default came from a `given` method impl
+  var implDeclaredParameterDefaults: Set<String> = []
   
   // Stack of generic types currently being resolved (for recursion detection)
   var resolvingGenericTypes: Set<String> = []
@@ -245,8 +255,8 @@ public class TypeChecker {
   var loopDepth: Int = 0
   var insideDefer: Bool = false
   var currentBlockExpressionDepth: Int = 0
-  var branchBreakTargets: [BranchBreakTarget] = []
-  var nextBranchBreakTargetId: Int = 0
+  var yieldTargets: [YieldTarget] = []
+  var nextYieldTargetId: Int = 0
   var exitableConstructStack: [ExitableConstruct] = []
 
   var synthesizedTempIndex: Int = 0
@@ -378,6 +388,21 @@ public class TypeChecker {
   ) {
     // Store named parameter info for call-site validation
     functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
+
+    // Method `DefId`s are shared with same-named methods on other types, so also
+    // key the labels by owner type name + method name.
+    let labelName = declaredName ?? context.getName(symbol.defId) ?? ""
+    let labelOwner: String? = {
+      switch owner {
+      case .concreteType(let typeName): return typeName
+      case .extensionTemplate(let ownerName): return ownerName
+      case nil: return nil
+      }
+    }()
+    if let labelOwner {
+      methodParamLabels[labelOwner, default: [:]][labelName] =
+        parameters.map { (name: $0.name, named: $0.named) }
+    }
     
     if isReceiverStyleMethodParameters(parameters) {
       receiverStyleMethodDefIds.insert(symbol.defId.id)
@@ -408,7 +433,7 @@ public class TypeChecker {
     switch type {
     case .structure(let defId):
       return context.isTypeMutable(defId)
-    case .genericStruct(let templateName, _):
+    case .genericStruct(let templateName, _, _):
       if currentScope.lookupGenericStructTemplate(templateName)?.isMutable == true {
         return true
       }
@@ -518,22 +543,22 @@ public class TypeChecker {
       return .opaque(defId: defId)
     case .genericParameter:
       return .anyGeneric
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, let defId, let args):
       if mode == .wildcardReceiver {
-        return .genericStruct(template: template, args: Array(repeating: .anyGeneric, count: args.count))
+        return .genericStruct(template: template, templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
       }
       if mode == .wildcardTraitArg {
-        return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .genericStruct(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .genericStruct(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
-    case .genericEnum(let template, let args):
+      return .genericStruct(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
+    case .genericEnum(let template, let defId, let args):
       if mode == .wildcardReceiver {
-        return .genericEnum(template: template, args: Array(repeating: .anyGeneric, count: args.count))
+        return .genericEnum(template: template, templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
       }
       if mode == .wildcardTraitArg {
-        return .genericEnum(template: template, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .genericEnum(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .genericEnum(template: template, args: args.map { conformanceTypeKey($0, mode: .exact) })
+      return .genericEnum(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
     case .pointer(let element):
       if mode == .wildcardReceiver {
         return .pointer(element: .anyGeneric)
@@ -616,11 +641,11 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .mutableWeakReference(inner: conformanceTypeKey(inner, mode: nextMode))
-    case .traitObject(let traitName, let typeArgs):
+    case .traitObject(let traitName, let defId, let typeArgs):
       if mode == .wildcardTraitArg {
-        return .traitObject(traitName: traitName, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .traitObject(traitName: traitName, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .exact) })
+      return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .exact) })
     default:
       return .fallback(description: type.description)
     }
@@ -666,8 +691,8 @@ public class TypeChecker {
          (.opaque(let lhs), .opaque(let rhs)):
       return lhs == rhs
 
-    case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)),
-         (.genericEnum(let lTemplate, let lArgs), .genericEnum(let rTemplate, let rArgs)):
+    case (.genericStruct(let lTemplate, _, let lArgs), .genericStruct(let rTemplate, _, let rArgs)),
+         (.genericEnum(let lTemplate, _, let lArgs), .genericEnum(let rTemplate, _, let rArgs)):
       guard lTemplate == rTemplate, lArgs.count == rArgs.count else {
         return false
       }
@@ -684,7 +709,7 @@ public class TypeChecker {
          (.mutableWeakReference(let l), .mutableWeakReference(let r)):
       return conformanceTypeKeyMatches(l, r)
 
-    case (.traitObject(let lName, let lArgs), .traitObject(let rName, let rArgs)):
+    case (.traitObject(let lName, _, let lArgs), .traitObject(let rName, _, let rArgs)):
       guard lName == rName, lArgs.count == rArgs.count else {
         return false
       }
@@ -774,7 +799,13 @@ public class TypeChecker {
   var currentSourceFile: String = ""
   
   /// 当前正在处理的节点的模块路径
-  var currentModulePath: [String] = []
+  var currentModulePath: [String] = [] {
+    didSet {
+      // Keep the template registry module-aware so same-named generic
+      // declarations from different modules keep distinct identity.
+      defIdMap.currentModulePath = currentModulePath
+    }
+  }
 
   /// 当前正在处理的节点所属 package。
   var currentPackageID: String = ""
@@ -906,6 +937,8 @@ public class TypeChecker {
     self.currentFileName = userFileName
     self.importGraph = importGraph
     self.parsedParameterDefaults = Parser.allParsedParameterDefaults
+    self.traitDeclaredParameterDefaults = Parser.allTraitDeclaredParameterDefaults
+    self.implDeclaredParameterDefaults = Parser.allImplDeclaredParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context
@@ -934,6 +967,8 @@ public class TypeChecker {
     self.currentFileName = userFileName
     self.importGraph = importGraph
     self.parsedParameterDefaults = Parser.allParsedParameterDefaults
+    self.traitDeclaredParameterDefaults = Parser.allTraitDeclaredParameterDefaults
+    self.implDeclaredParameterDefaults = Parser.allImplDeclaredParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context
@@ -1295,11 +1330,11 @@ public class TypeChecker {
     }
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
-    let previousBranchBreakTargets = branchBreakTargets
-    branchBreakTargets = []
+    let previousYieldTargets = yieldTargets
+    yieldTargets = []
     defer {
       currentFunctionReturnType = previousReturnType
-      branchBreakTargets = previousBranchBreakTargets
+      yieldTargets = previousYieldTargets
     }
 
     return try withNewScope {
@@ -1401,7 +1436,7 @@ public class TypeChecker {
     case .`enum`(let defId):
       return context.getEnumCases(defId)
       
-    case .genericEnum(let templateName, let typeArgs):
+    case .genericEnum(let templateName, _, let typeArgs):
       // Look up the enum template and substitute type parameters
       guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
         return nil
@@ -1468,7 +1503,7 @@ public class TypeChecker {
       let (expectedInner, actualInner) = expected.compatibleIndirectionInners(with: actual)!
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
 
-    case (.genericStruct(let expectedName, let expectedArgs), .genericStruct(let actualName, let actualArgs)):
+    case (.genericStruct(let expectedName, _, let expectedArgs), .genericStruct(let actualName, _, let actualArgs)):
       guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
         if !unifyTypes(ea, aa, bindings: &bindings) {
@@ -1477,7 +1512,7 @@ public class TypeChecker {
       }
       return true
       
-    case (.genericEnum(let expectedName, let expectedArgs), .genericEnum(let actualName, let actualArgs)):
+    case (.genericEnum(let expectedName, _, let expectedArgs), .genericEnum(let actualName, _, let actualArgs)):
       guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
         if !unifyTypes(ea, aa, bindings: &bindings) {
@@ -1529,7 +1564,7 @@ public class TypeChecker {
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .mutableWeakReference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
-    case .genericStruct(_, let args), .genericEnum(_, let args):
+    case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
       for arg in args {
         extractGenericParameterNamesHelper(from: arg, names: &names, seen: &seen)
       }

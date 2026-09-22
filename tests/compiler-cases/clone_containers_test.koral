@@ -1,0 +1,129 @@
+// EXPECT: list clone ok
+// EXPECT: set clone ok
+// EXPECT: dict clone ok
+// EXPECT: deque clone ok
+// EXPECT: shallow element copy ok
+
+// Container clone(): independent shallow copy.
+// Mutating the clone must not affect the source; nested shared objects stay shared.
+
+type mutable Shared(mutable value Int);
+
+given Shared {
+    public bump(self) Void = {
+        self.value = self.value + 1;
+    };
+};
+
+let main() Int = {
+    // List
+    let src = List[Int].new();
+    src.push(1);
+    src.push(2);
+    let list_copy = src.clone();
+    list_copy.push(3);
+    if src.count() <> 2 then {
+        eprintln("FAIL: list source changed by clone mutation");
+        return 1;
+    };
+    if list_copy.count() <> 3 then {
+        eprintln("FAIL: list clone missing element");
+        return 1;
+    };
+    if list_copy[0] <> 1 or list_copy[1] <> 2 or list_copy[2] <> 3 then {
+        eprintln("FAIL: list clone contents");
+        return 1;
+    };
+    println("list clone ok");
+
+    // Set
+    let src_set = Set[Int].new();
+    src_set.insert(10);
+    src_set.insert(20);
+    let set_copy = src_set.clone();
+    set_copy.insert(30);
+    if src_set.count() <> 2 then {
+        eprintln("FAIL: set source changed by clone mutation");
+        return 1;
+    };
+    if set_copy.count() <> 3 or not set_copy.contains(30) then {
+        eprintln("FAIL: set clone contents");
+        return 1;
+    };
+    println("set clone ok");
+
+    // Dict
+    let src_dict = Dict[String, Int].new();
+    src_dict.insert("a", 1);
+    src_dict.insert("b", 2);
+    let dict_copy = src_dict.clone();
+    dict_copy.insert("c", 3);
+    if src_dict.count() <> 2 then {
+        eprintln("FAIL: dict source changed by clone mutation");
+        return 1;
+    };
+    if dict_copy.count() <> 3 then {
+        eprintln("FAIL: dict clone missing entry");
+        return 1;
+    };
+    when dict_copy.get("a") in {
+        .Some(v) then {
+            if v <> 1 then {
+                eprintln("FAIL: dict clone value");
+                return 1;
+            };
+        },
+        .None() then {
+            eprintln("FAIL: dict clone lost key");
+            return 1;
+        },
+    };
+    println("dict clone ok");
+
+    // Deque
+    let src_deque = Deque[Int].new();
+    src_deque.push_back(1);
+    src_deque.push_front(0);
+    let deque_copy = src_deque.clone();
+    deque_copy.push_back(2);
+    if src_deque.count() <> 2 then {
+        eprintln("FAIL: deque source changed by clone mutation");
+        return 1;
+    };
+    if deque_copy.count() <> 3 or deque_copy[2] <> 2 then {
+        eprintln("FAIL: deque clone contents");
+        return 1;
+    };
+    if deque_copy[0] <> 0 or deque_copy[1] <> 1 then {
+        eprintln("FAIL: deque clone order");
+        return 1;
+    };
+    println("deque clone ok");
+
+    // Shallow element semantics: nested shared objects stay shared.
+    let shared = Shared(1);
+    let holders = List[Shared].new();
+    holders.push(shared);
+    let holders_copy = holders.clone();
+    // Both lists see the same Shared object.
+    when holders_copy.get(0) in {
+        .Some(s) then { s.bump(); },
+        .None() then {
+            eprintln("FAIL: clone lost element");
+            return 1;
+        },
+    };
+    if shared.value <> 2 then {
+        eprintln("FAIL: clone should share nested mutable object");
+        return 1;
+    };
+    // ...but the list shells are independent.
+    holders.push(Shared(9));
+    if holders_copy.count() <> 1 then {
+        eprintln("FAIL: clone shell not independent");
+        return 1;
+    };
+    println("shallow element copy ok");
+
+    return 0;
+};

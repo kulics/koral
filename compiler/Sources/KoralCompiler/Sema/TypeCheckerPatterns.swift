@@ -194,7 +194,7 @@ extension TypeChecker {
         cases = context.getEnumCases(defId) ?? []
         enumDefId = defId
         
-      case .genericEnum(let templateName, let typeArgs):
+      case .genericEnum(let templateName, _, let typeArgs):
         // Look up the enum template and substitute type parameters
         guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
           throw SemanticError.undefinedType(templateName)
@@ -365,7 +365,7 @@ extension TypeChecker {
         members = context.getStructMembers(defId) ?? []
         structDefId = defId
         
-      case .genericStruct(let templateName, let typeArgs):
+      case .genericStruct(let templateName, _, let typeArgs):
         guard templateName == typeName else {
           throw SemanticError(.typeMismatch(
             expected: typeName, got: subjectType.description), span: span)

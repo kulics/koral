@@ -52,7 +52,7 @@ extension TypeChecker {
     }
     
     // Extract T from [T]Option
-    guard case .genericEnum(let templateName, let typeArgs) = optionType,
+    guard case .genericEnum(let templateName, _, let typeArgs) = optionType,
           templateName == "Option",
           typeArgs.count == 1 else {
       return nil
@@ -147,7 +147,7 @@ extension TypeChecker {
                 if inferred[tParamName] == nil {
                   if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
                      case .function(_, let optionType) = nextMethod.type,
-                     case .genericEnum(let templateName, let typeArgs) = optionType,
+                     case .genericEnum(let templateName, _, let typeArgs) = optionType,
                      templateName == "Option",
                      typeArgs.count == 1 {
                     inferred[tParamName] = typeArgs[0]
@@ -202,14 +202,14 @@ extension TypeChecker {
         }
       }
     case .generic(let base, let args):
-      if case .genericStruct(let templateName, let typeArgs) = type {
+      if case .genericStruct(let templateName, _, let typeArgs) = type {
         // Match against genericStruct type
         if templateName == base && typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
         }
-      } else if case .genericEnum(let templateName, let typeArgs) = type {
+      } else if case .genericEnum(let templateName, _, let typeArgs) = type {
         // Match against genericEnum type
         if templateName == base && typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
@@ -314,7 +314,7 @@ extension TypeChecker {
                 if inferred[tParamName] == nil {
                   if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
                      case .function(_, let optionType) = nextMethod.type,
-                     case .genericEnum(let templateName, let typeArgs) = optionType,
+                     case .genericEnum(let templateName, _, let typeArgs) = optionType,
                      templateName == "Option",
                      typeArgs.count == 1 {
                     inferred[tParamName] = typeArgs[0]
@@ -400,7 +400,7 @@ extension TypeChecker {
       constructorDescription: name
     )
     
-    let genericType = Type.genericStruct(template: name, args: resolvedArgs)
+    let genericType = genericStructType(template: name, args: resolvedArgs)
     
     return .typeConstruction(
       identifier: makeLocalSymbol(name: name, type: genericType, kind: .type),

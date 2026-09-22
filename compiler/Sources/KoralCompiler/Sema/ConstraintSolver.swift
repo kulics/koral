@@ -129,7 +129,7 @@ public class ConstraintSolver {
             let instanceType: Type
             // 根据模板名称判断是结构体还是枚举类型
             // 这里简化处理，实际需要查询类型注册表
-            instanceType = .genericStruct(template: template, args: args)
+            instanceType = .genericStruct(template: template, templateDefId: .invalid, args: args)
             
             do {
                 try unifier.unify(.typeVariable(tv), instanceType, span: span)

@@ -165,7 +165,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .genericStruct(let templateName, let args):
+    case .genericStruct(let templateName, _, let args):
       if let extensions = genericExtensionMethods[templateName],
          let ext = extensions.first(where: { $0.method.name == name })
       {
@@ -178,7 +178,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .genericEnum(let templateName, let args):
+    case .genericEnum(let templateName, _, let args):
       if let extensions = genericExtensionMethods[templateName],
          let ext = extensions.first(where: { $0.method.name == name })
       {
@@ -369,8 +369,8 @@ extension TypeChecker {
       guard case .mutablePointer(let aInner) = actual else { return false }
       return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
 
-    case .genericStruct(let pTemplate, let pArgs):
-      guard case .genericStruct(let aTemplate, let aArgs) = actual,
+    case .genericStruct(let pTemplate, _, let pArgs):
+      guard case .genericStruct(let aTemplate, _, let aArgs) = actual,
             pTemplate == aTemplate,
             pArgs.count == aArgs.count else { return false }
       for (pArg, aArg) in zip(pArgs, aArgs) {
@@ -380,8 +380,8 @@ extension TypeChecker {
       }
       return true
 
-    case .genericEnum(let pTemplate, let pArgs):
-      guard case .genericEnum(let aTemplate, let aArgs) = actual,
+    case .genericEnum(let pTemplate, _, let pArgs):
+      guard case .genericEnum(let aTemplate, _, let aArgs) = actual,
             pTemplate == aTemplate,
             pArgs.count == aArgs.count else { return false }
       for (pArg, aArg) in zip(pArgs, aArgs) {
@@ -763,10 +763,10 @@ extension TypeChecker {
     let typeArgs: [Type]
     
     switch baseType {
-    case .genericStruct(let name, let args):
+    case .genericStruct(let name, _, let args):
       templateName = name
       typeArgs = args
-    case .genericEnum(let name, let args):
+    case .genericEnum(let name, _, let args):
       templateName = name
       typeArgs = args
     case .structure(let defId):
@@ -1072,7 +1072,7 @@ extension TypeChecker {
         }
       }
       return nil
-    case .genericStruct(let template, let args):
+    case .genericStruct(let template, _, let args):
       if template == "List", args.count == 1 {
         return .list(element: args[0])
       }
@@ -1397,19 +1397,7 @@ extension TypeChecker {
       }
       return .intrinsicCall(.spawnThread(outHandle: outHandle, outTid: outTid, closure: closure, stackSize: stackSize))
 
-    case "is_unique_mutable":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let val = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.isUniqueMutable(val: val))
 
-    case "ref_count":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let refValue = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.refCount(ref: refValue))
 
     default: return nil
     }

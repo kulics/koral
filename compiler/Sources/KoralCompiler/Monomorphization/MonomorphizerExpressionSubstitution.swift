@@ -1015,8 +1015,8 @@ extension Monomorphizer {
         case .deferStatement(let expression):
             return .deferStatement(expression: substituteTypesInExpression(expression, substitution: substitution))
 
-        case .branchBreak(let target, let value):
-            return .branchBreak(target: target, value: substituteTypesInExpression(value, substitution: substitution))
+        case .yieldValue(let target, let value):
+            return .yieldValue(target: target, value: substituteTypesInExpression(value, substitution: substitution))
         }
     }
     
@@ -1116,44 +1116,18 @@ extension Monomorphizer {
             )
 
             
-        case .isUniqueMutable(let val):
-            return .isUniqueMutable(val: substituteTypesInExpression(val, substitution: substitution))
 
-        case .makeRef(let ptr, let owner, let resultType):
-            return .makeRef(
-                ptr: substituteTypesInExpression(ptr, substitution: substitution),
-                owner: substituteTypesInExpression(owner, substitution: substitution),
-                resultType: substituteType(resultType, substitution: substitution)
-            )
 
-        case .makeMutRef(let ptr, let owner, let resultType):
-            return .makeMutRef(
-                ptr: substituteTypesInExpression(ptr, substitution: substitution),
-                owner: substituteTypesInExpression(owner, substitution: substitution),
-                resultType: substituteType(resultType, substitution: substitution)
-            )
 
-        case .refCount(let ref):
-            return .refCount(ref: substituteTypesInExpression(ref, substitution: substitution))
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(
                 val: substituteTypesInExpression(val, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )
-        case .downgradeMutRef(let val, let resultType):
-            return .downgradeMutRef(
-                val: substituteTypesInExpression(val, substitution: substitution),
-                resultType: substituteType(resultType, substitution: substitution)
-            )
             
         case .upgradeRef(let val, let resultType):
             return .upgradeRef(
-                val: substituteTypesInExpression(val, substitution: substitution),
-                resultType: substituteType(resultType, substitution: substitution)
-            )
-        case .upgradeMutRef(let val, let resultType):
-            return .upgradeMutRef(
                 val: substituteTypesInExpression(val, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )

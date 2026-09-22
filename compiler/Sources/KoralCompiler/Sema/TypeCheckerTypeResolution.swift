@@ -147,7 +147,7 @@ extension TypeChecker {
           "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
         ), span: currentSpan)
       }
-      return wrap(.traitObject(traitName: name, typeArgs: []), mutable)
+      return wrap(.traitObject(traitName: name, traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []), mutable)
     }
 
     if case .generic(let base, let args) = inner, visibleTraitInfo(base) != nil {
@@ -158,11 +158,38 @@ extension TypeChecker {
         ), span: currentSpan)
       }
       let resolvedArgs = try args.map { try resolveChild($0) }
-      return wrap(.traitObject(traitName: base, typeArgs: resolvedArgs), mutable)
+      return wrap(.traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs), mutable)
     }
 
     let base = try resolveChild(inner)
     return wrap(base, mutable)
+  }
+
+
+  // MARK: - Identity-carrying type construction
+
+  /// Builds a generic struct type with the template's declaration identity.
+  func genericStructType(template name: String, args: [Type]) -> Type {
+    .genericStruct(
+      template: name,
+      templateDefId: currentScope.lookupGenericStructTemplate(name)?.defId ?? .invalid,
+      args: args)
+  }
+
+  /// Builds a generic enum type with the template's declaration identity.
+  func genericEnumType(template name: String, args: [Type]) -> Type {
+    .genericEnum(
+      template: name,
+      templateDefId: currentScope.lookupGenericEnumTemplate(name)?.defId ?? .invalid,
+      args: args)
+  }
+
+  /// Builds a trait-object type with the trait's declaration identity.
+  func traitObjectType(traitName name: String, typeArgs: [Type]) -> Type {
+    .traitObject(
+      traitName: name,
+      traitDefId: visibleTraitInfo(name)?.defId ?? .invalid,
+      typeArgs: typeArgs)
   }
 
   private func modulePath(of type: Type) -> [String]? {
@@ -272,7 +299,7 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
+        return .reference(inner: .traitObject(traitName: name, traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []))
       }
       if let importError = explicitImportErrorForUnresolvedType(name) {
         throw importError
@@ -312,7 +339,7 @@ extension TypeChecker {
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref (e.g., type [T]Node(value T, next ref [T]Node))
         if resolvingGenericTypes.contains(recursionKey) {
-          return .genericStruct(template: base, args: resolvedArgs)
+          return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -326,7 +353,7 @@ extension TypeChecker {
         }
         
         // Return parameterized type instead of instantiating
-        return .genericStruct(template: base, args: resolvedArgs)
+        return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericEnumTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -350,7 +377,7 @@ extension TypeChecker {
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref
         if resolvingGenericTypes.contains(recursionKey) {
-          return .genericEnum(template: base, args: resolvedArgs)
+          return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -364,7 +391,7 @@ extension TypeChecker {
         }
         
         // Return parameterized type instead of instantiating
-        return .genericEnum(template: base, args: resolvedArgs)
+        return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
       } else if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
         if !safe {
@@ -373,7 +400,7 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       } else {
         throw SemanticError.undefinedType(base)
       }
@@ -412,11 +439,11 @@ extension TypeChecker {
       
       if let template = currentScope.lookupGenericStructTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
-        return .genericStruct(template: base, args: resolvedArgs)
+        return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
       }
       if let template = currentScope.lookupGenericEnumTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
-        return .genericEnum(template: base, args: resolvedArgs)
+        return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
       }
       if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
@@ -425,11 +452,11 @@ extension TypeChecker {
             "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       }
       
       // Conservative default to generic struct if template is unresolved (diagnosed later)
-      return .genericStruct(template: base, args: resolvedArgs)
+      return .genericStruct(template: base, templateDefId: currentScope.lookupGenericStructTemplate(base)?.defId ?? .invalid, args: resolvedArgs)
       
     case .functionType(let paramTypes, let returnType):
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
@@ -589,7 +616,7 @@ extension TypeChecker {
     switch type {
     case .structure(let defId):
       satisfied = context_isTypeMutable(defId)
-    case .genericStruct(let templateName, _):
+    case .genericStruct(let templateName, _, _):
       if let defId = defIdMap.lookupGenericStructTemplateDefId(templateName) {
         satisfied = context_isTypeMutable(defId)
       } else {
@@ -631,7 +658,7 @@ extension TypeChecker {
       }
     }
 
-    if case .traitObject(let toTraitName, let toTraitArgs) = selfType {
+    if case .traitObject(let toTraitName, _, let toTraitArgs) = selfType {
       let actualTrait = canonicalTraitRef(traitName: toTraitName, traitTypeArgs: toTraitArgs)
       if actualTrait == traitRef {
         return
@@ -926,7 +953,7 @@ extension TypeChecker {
         }
         return false
       }()
-      if case .traitObject(let name, let args) = inner {
+      if case .traitObject(let name, _, let args) = inner {
         traitName = name
         traitTypeArgs = args
       } else {
@@ -934,7 +961,7 @@ extension TypeChecker {
       }
     case .weakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let name, let args) = inner {
+      if case .traitObject(let name, _, let args) = inner {
         traitName = name
         traitTypeArgs = args
       } else {
@@ -942,7 +969,7 @@ extension TypeChecker {
       }
     case .mutableWeakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let name, let args) = inner {
+      if case .traitObject(let name, _, let args) = inner {
         traitName = name
         traitTypeArgs = args
       } else {

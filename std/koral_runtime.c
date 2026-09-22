@@ -2274,39 +2274,14 @@ int64_t __koral_process_working_set_bytes(uint32_t pid) {
 }
 
 #if defined(__APPLE__)
-static int64_t __koral_process_group_working_set_bytes_macos(uint32_t root_pid) {
-    int count = proc_listallpids(NULL, 0);
-    if (count <= 0) {
-        return __koral_process_working_set_bytes(root_pid);
-    }
-
-    int* pids = (int*)malloc((size_t)count * sizeof(int));
-    if (pids == NULL) {
-        return __koral_process_working_set_bytes(root_pid);
-    }
-
-    int actual = proc_listallpids(pids, count * (int)sizeof(int));
-    if (actual < 0) {
-        free(pids);
-        return __koral_process_working_set_bytes(root_pid);
-    }
-
-    int64_t total = 0;
-    for (int i = 0; i < actual; i++) {
-        int pid = pids[i];
-        if (pid <= 0) continue;
-
-        struct proc_bsdinfo bsdinfo;
-        int bsd_size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdinfo, (int)sizeof(bsdinfo));
-        if (bsd_size != (int)sizeof(bsdinfo)) continue;
-        if ((uint32_t)bsdinfo.pbi_pgid != root_pid) continue;
-
-        int64_t rss = __koral_process_working_set_bytes((uint32_t)pid);
-        if (rss > 0) total += rss;
-    }
-
-    free(pids);
-    if (total > 0) return total;
+// On macOS the test runner needs the memory footprint of the spawned process
+// (typically the compiler or a test binary). Child helper processes (clang,
+// ld) contribute relatively little compared to the root, and scanning the
+// full process table on every 50 ms poll tick was both slow and error-prone
+// (the old process-group scan could attribute unrelated processes to the
+// measured tree). Reporting the root process RSS alone is accurate enough
+// and avoids those failure modes.
+static int64_t __koral_process_tree_working_set_bytes_macos(uint32_t root_pid) {
     return __koral_process_working_set_bytes(root_pid);
 }
 #endif
@@ -2460,9 +2435,10 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
 
     return total;
 #elif defined(__APPLE__)
-    // POSIX subprocesses spawned by Koral run in a dedicated process group,
-    // so summing the group captures the compiler and any helper children.
-    return __koral_process_group_working_set_bytes_macos(root_pid);
+    // Walk the process tree rooted at root_pid so we capture the compiler
+    // and any helper children (clang, ld, …) without scanning unrelated
+    // processes that merely share a process-group id.
+    return __koral_process_tree_working_set_bytes_macos(root_pid);
 #elif defined(__linux__)
     return __koral_process_group_working_set_bytes_linux(root_pid);
 #else

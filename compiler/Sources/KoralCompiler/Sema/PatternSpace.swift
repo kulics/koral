@@ -321,7 +321,7 @@ extension PatternSpace {
             }
             return result
             
-        case .genericEnum(let templateName, _):
+        case .genericEnum(let templateName, _, _):
             guard let defId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName) else {
                 return nil
             }

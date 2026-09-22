@@ -47,9 +47,9 @@ c.count = c.count + 1;  // in-place mutation through shared reference
 let sign = if x > 0 then 1 else if x < 0 then -1 else 0;
 
 let label = when status in {
-    .Active then "running",
+    .Active() then "running",
     .Paused(reason) then "paused: " + reason,
-    .Stopped then "done",
+    .Stopped() then "done",
 }
 ```
 
@@ -206,7 +206,7 @@ let result = list.iterator();
 ### Functions and Lambdas
 
 - Top-level and generic functions
-- Constructor labels and default-fill: `type Point(x Int, y Int)` constructed as `Point(x: 1, y: 2)` or `Point(x: 1, ...)`; ordinary static methods remain positional-only
+- Call labels and defaults: positional parameters are passed without labels (`Point(1, 2)`), named parameters (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Constructors, free functions, methods and static methods all follow the same rules
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
