@@ -6,15 +6,15 @@
 // ============================================================================
 
 public type mutable Printer(
-    output String,
-    indent UInt,
-    at_line_start Bool,
+    mutable output StringBuilder,
+    mutable indent UInt,
+    mutable at_line_start Bool,
 );
 
 given Printer {
 
     public new() Printer = Printer(StringBuilder.new(), 0, true);
-    public result(self) String = self.output;
+    public result(self) String = self.output.to_string();
 
     // ========================================================================
     // Low-level output
@@ -53,31 +53,31 @@ given Printer {
         .Named(name) then self.write_token(name),
         .SelfType(kw) then self.write_token(kw),
         .Mutable(inner, kw) then {
-            when *inner in {
+            when inner in {
                 .Ref(ref_inner, ref_kw) then {
                     self.write_token(ref_kw);
                     self.write_token(kw);
                     self.write_space();
-                    self.print_type(*ref_inner);
+                    self.print_type(ref_inner);
                 },
                 .Ptr(ptr_inner, ptr_kw) then {
                     self.write_token(ptr_kw);
                     self.write_space();
                     self.write_token(kw);
                     self.write_space();
-                    self.print_type(*ptr_inner);
+                    self.print_type(ptr_inner);
                 },
                 .Weakref(weak_inner, weak_kw) then {
                     self.write_token(weak_kw);
                     self.write_space();
                     self.write_token(kw);
                     self.write_space();
-                    self.print_type(*weak_inner);
+                    self.print_type(weak_inner);
                 },
                 _ then {
                     self.write_token(kw);
                     self.write_space();
-                    self.print_type(*inner);
+                    self.print_type(inner);
                 },
             };
         },
@@ -86,7 +86,7 @@ given Printer {
             self.write_token(lb);
             for i in 0..<args.count() then {
                 let arg = args[i];
-                self.print_type(*arg.inner);
+                self.print_type(arg.inner);
                 if arg.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rb);
@@ -96,25 +96,25 @@ given Printer {
             self.write_token(lp);
             for i in 0..<args.count() then {
                 let arg = args[i];
-                self.print_type(*arg.inner);
+                self.print_type(arg.inner);
                 if arg.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rp);
             self.write_space();
-            self.print_type(*return_type);
+            self.print_type(return_type);
         },
         .Ref(inner, kw) then {
             self.write_token(kw);
-            self.print_type(*inner);
+            self.print_type(inner);
         },
         .Ptr(inner, kw) then {
             self.write_token(kw);
             self.write_space();
-            self.print_type(*inner);
+            self.print_type(inner);
         },
         .Weakref(inner, kw) then {
             self.write_token(kw);
-            self.print_type(*inner);
+            self.print_type(inner);
         },
     };
 
@@ -133,7 +133,7 @@ given Printer {
                     self.write("and");
                     self.write_space();
                 };
-                self.print_type(*p.constraints[j]);
+                self.print_type(p.constraints[j]);
             };
             if p.comma is .Some(c) then { self.write_token(c); self.write_space();};
         };
@@ -170,7 +170,7 @@ given Printer {
                         self.write_token(label);
                         if a.colon is .Some(c) then { self.write_token(c); self.write_space();};
                     };
-                    self.print_pattern(*a.pattern);
+                    self.print_pattern(a.pattern);
                     if a.comma is .Some(c) then { self.write_token(c); self.write_space();};
                 };
                 if rp is .Some(r) then { self.write_token(r);};
@@ -185,7 +185,7 @@ given Printer {
                     self.write_token(label);
                     if a.colon is .Some(c) then { self.write_token(c); self.write_space();};
                 };
-                self.print_pattern(*a.pattern);
+                self.print_pattern(a.pattern);
                 if a.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rp);
@@ -196,27 +196,27 @@ given Printer {
             self.write_token(value);
         },
         .AndPattern(left, and_kw, right) then {
-            self.print_pattern(*left);
+            self.print_pattern(left);
             self.write_space();
             self.write_token(and_kw);
             self.write_space();
-            self.print_pattern(*right);
+            self.print_pattern(right);
         },
         .OrPattern(left, or_kw, right) then {
-            self.print_pattern(*left);
+            self.print_pattern(left);
             self.write_space();
             self.write_token(or_kw);
             self.write_space();
-            self.print_pattern(*right);
+            self.print_pattern(right);
         },
         .NotPattern(not_kw, inner) then {
             self.write_token(not_kw);
             self.write_space();
-            self.print_pattern(*inner);
+            self.print_pattern(inner);
         },
         .ParenPattern(lp, inner, rp) then {
             self.write_token(lp);
-            self.print_pattern(*inner);
+            self.print_pattern(inner);
             self.write_token(rp);
         },
     };
@@ -239,23 +239,23 @@ given Printer {
                 self.write_token(comment);
                 self.write_newline();
             };
-            self.print_expr(*inner);
+            self.print_expr(inner);
         },
 
         .BinaryOp(left, op, right) then {
-            self.print_expr(*left);
+            self.print_expr(left);
             self.write_space();
             self.write_token(op);
             self.write_space();
-            self.print_expr(*right);
+            self.print_expr(right);
         },
         .UnaryMinus(op, operand) then {
             self.write_token(op);
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .Deref(op, operand) then {
             self.write_token(op);
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .AddressOf(op, raw_kw, mut_kw, operand) then {
             if raw_kw is .Some(rk) then {
@@ -266,7 +266,7 @@ given Printer {
                     self.write_token(mk);
                 };
                 self.write_space();
-                self.print_expr(*operand);
+                self.print_expr(operand);
                 return;
             };
             self.write_token(op);
@@ -274,15 +274,15 @@ given Printer {
                 self.write_token(mk);
                 self.write_space();
             };
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .NotExpr(op, operand) then {
             self.write_token(op);
             self.write_space();
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .IsExpr(subject, is_kw, not_kw, pattern) then {
-            self.print_expr(*subject);
+            self.print_expr(subject);
             self.write_space();
             self.write_token(is_kw);
             if not_kw is .Some(nk) then {
@@ -290,21 +290,21 @@ given Printer {
                 self.write_token(nk);
             };
             self.write_space();
-            self.print_pattern(*pattern);
+            self.print_pattern(pattern);
         },
         .BitwiseNot(op, operand) then {
             self.write_token(op);
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .PrefixKw(kw, operand) then {
             self.write_token(kw);
             self.write_space();
-            self.print_expr(*operand);
+            self.print_expr(operand);
         },
         .TypeCast(lp, cast_type, rp, operand) then {
-            self.print_expr(*operand);
+            self.print_expr(operand);
             self.write_token(lp);
-            self.print_type(*cast_type);
+            self.print_type(cast_type);
             self.write_token(rp);
         },
         .Paren(lp, inner, rp) then {
@@ -313,34 +313,34 @@ given Printer {
                 core_ref = nested;
             };
             self.write_token(lp);
-            self.print_expr(*core_ref);
+            self.print_expr(core_ref);
             self.write_token(rp);
         },
         .PairExpr(lp, first, comma, second, rp) then {
             self.write_token(lp);
-            self.print_expr(*first);
+            self.print_expr(first);
             self.write_token(comma);
             self.write_space();
-            self.print_expr(*second);
+            self.print_expr(second);
             self.write_token(rp);
         },
         .TraitQualification(lp, base, as_kw, trait_type, rp) then {
             self.write_token(lp);
-            self.print_expr(*base);
+            self.print_expr(base);
             self.write_space();
             self.write_token(as_kw);
             self.write_space();
-            self.print_type(*trait_type);
+            self.print_type(trait_type);
             self.write_token(rp);
         },
 
         .FieldAccess(base, dot, field) then {
-            self.print_expr(*base);
+            self.print_expr(base);
             self.write_token(dot);
             self.write_token(field);
         },
         .QualifiedCall(base, dot, trait_lp, trait_name, trait_rp, method_name, lp, args, rp) then {
-            self.print_expr(*base);
+            self.print_expr(base);
             self.write_token(dot);
             self.write_token(trait_lp);
             self.write_token(trait_name);
@@ -351,23 +351,23 @@ given Printer {
             self.write_token(rp);
         },
         .Call(callee, lp, args, rp) then {
-            self.print_expr(*callee);
+            self.print_expr(callee);
             self.write_token(lp);
             self.print_call_args(args);
             self.write_token(rp);
         },
         .SubscriptExpr(base, lb, args, rb) then {
-            self.print_expr(*base);
+            self.print_expr(base);
             self.write_token(lb);
             self.print_call_args(args);
             self.write_token(rb);
         },
         .GenericInst(base, lb, type_args, rb) then {
-            self.print_expr(*base);
+            self.print_expr(base);
             self.write_token(lb);
             for i in 0..<type_args.count() then {
                 let a = type_args[i];
-                self.print_type(*a.inner);
+                self.print_type(a.inner);
                 if a.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rb);
@@ -382,28 +382,28 @@ given Printer {
             };
         },
 
-        .Block(lb, items, rb) then self.print_block(lb, items, rb),
+        .Block(lb, items, tail_expr, rb) then self.print_block(lb, items, tail_expr, rb),
 
         .If(kw, cond, then_kw, then_body, else_kw, else_body) then
-            self.print_if(kw, *cond, then_kw, *then_body, else_kw, else_body),
+            self.print_if(kw, cond, then_kw, then_body, else_kw, else_body),
         .IfPattern(kw, subject, is_kw, pattern, then_kw, then_body, else_kw, else_body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_expr(*subject);
+            self.print_expr(subject);
             self.write_space();
             self.write_token(is_kw);
             self.write_space();
-            self.print_pattern(*pattern);
+            self.print_pattern(pattern);
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
-            self.print_expr(*then_body);
+            self.print_expr(then_body);
             if else_kw is .Some(ek) then {
                 self.write_space();
                 self.write_token(ek);
                 if else_body is .Some(eb) then {
                     self.write_space();
-                    self.print_expr(*eb);
+                    self.print_expr(eb);
                 };
             };
         },
@@ -411,61 +411,61 @@ given Printer {
         .While(kw, cond, then_kw, body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_expr(*cond);
+            self.print_expr(cond);
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
-            self.print_expr(*body);
+            self.print_expr(body);
         },
         .WhilePattern(kw, subject, is_kw, pattern, then_kw, body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_expr(*subject);
+            self.print_expr(subject);
             self.write_space();
             self.write_token(is_kw);
             self.write_space();
-            self.print_pattern(*pattern);
+            self.print_pattern(pattern);
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
-            self.print_expr(*body);
+            self.print_expr(body);
         },
         .For(kw, binding, eq, iterable, then_kw, body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_pattern(*binding);
+            self.print_pattern(binding);
             self.write_space();
             self.write_token(eq);
             self.write_space();
-            self.print_expr(*iterable);
+            self.print_expr(iterable);
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
-            self.print_expr(*body);
+            self.print_expr(body);
         },
         .When(kw, subject, is_kw, lb, arms, rb) then
-            self.print_when(kw, *subject, is_kw, lb, arms, rb),
+            self.print_when(kw, subject, is_kw, lb, arms, rb),
 
         .AndThen(left, and_kw, then_kw, right) then {
-            self.print_expr(*left);
+            self.print_expr(left);
             self.write_space();
             self.write_token(and_kw);
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
-            self.print_expr(*right);
+            self.print_expr(right);
         },
         .OrElse(left, or_kw, else_kw, right) then {
-            self.print_expr(*left);
+            self.print_expr(left);
             self.write_space();
             self.write_token(or_kw);
             self.write_space();
             self.write_token(else_kw);
             self.write_space();
-            self.print_expr(*right);
+            self.print_expr(right);
         },
         .OrReturn(left, or_kw, return_kw) then {
-            self.print_expr(*left);
+            self.print_expr(left);
             self.write_space();
             self.write_token(or_kw);
             self.write_space();
@@ -473,9 +473,9 @@ given Printer {
         },
 
         .RangeExpr(left, op, right) then {
-            if left is .Some(l) then { self.print_expr(*l);};
+            if left is .Some(l) then { self.print_expr(l);};
             self.write_token(op);
-            if right is .Some(r) then { self.print_expr(*r);};
+            if right is .Some(r) then { self.print_expr(r);};
         },
 
         .EmptyLiteral(lb, rb) then {
@@ -486,7 +486,7 @@ given Printer {
             self.write_token(lb);
             for i in 0..<elements.count() then {
                 let element = elements[i];
-                self.print_expr(*element.value);
+                self.print_expr(element.value);
                 if element.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rb);
@@ -495,10 +495,10 @@ given Printer {
             self.write_token(lb);
             for i in 0..<entries.count() then {
                 let entry = entries[i];
-                self.print_expr(*entry.key);
+                self.print_expr(entry.key);
                 self.write_token(entry.colon);
                 self.write_space();
-                self.print_expr(*entry.value);
+                self.print_expr(entry.value);
                 if entry.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rb);
@@ -511,19 +511,19 @@ given Printer {
                 self.write_token(p.name);
                 if p.param_type is .Some(pt) then {
                     self.write_space();
-                    self.print_type(*pt);
+                    self.print_type(pt);
                 };
                 if p.comma is .Some(c) then { self.write_token(c); self.write_space();};
             };
             self.write_token(rp);
             if ret is .Some(rt) then {
                 self.write_space();
-                self.print_type(*rt);
+                self.print_type(rt);
             };
             self.write_space();
             self.write_token(arrow);
             self.write_space();
-            self.print_expr(*body);
+            self.print_expr(body);
         },
         .EnumVariant(name, lp, fields, rp) then {
             self.write_token(name);
@@ -533,7 +533,7 @@ given Printer {
                     let f = fields[i];
                     self.write_token(f.name);
                     if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-                    self.print_type(*f.field_type);
+                    self.print_type(f.field_type);
                     if f.comma is .Some(c) then { self.write_token(c); self.write_space();};
                 };
                 if rp is .Some(r) then { self.write_token(r);};
@@ -563,7 +563,7 @@ given Printer {
                 self.write_token(arg_label);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();};
             };
-            self.print_expr(*value);
+            self.print_expr(value);
             if comma is .Some(c) then { self.write_token(c);};
         },
         .DefaultFill(leading_comments, ellipsis, comma) then {
@@ -582,7 +582,7 @@ given Printer {
                 self.write_token(arg_label);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();};
             };
-            self.print_expr(*value);
+            self.print_expr(value);
             if comma is .Some(c) then { self.write_token(c); self.write_space();};
         },
         .DefaultFill(_, ellipsis, comma) then {
@@ -594,7 +594,7 @@ given Printer {
     file_private call_args_need_multiline(self, args List[CstCallArg]) Bool = {
         for arg in args then {
             when arg in {
-                .Value(_, _, value, _) then when *value in {
+                .Value(_, _, value, _) then when value in {
                     .Commented(_, _) then { return true;},
                     _ then {},
                 },
@@ -610,25 +610,25 @@ given Printer {
     // Block printing: { items }
     // ========================================================================
 
-    file_private print_block(self, lb Token, items List[CstItem], rb Token) Void = {
+    file_private print_block(self, lb Token, items List[CstItem], tail_expr Option[CstExpr], rb Token) Void = {
         self.write_token(lb);
-        if items.count() == 0 then {
+        if items.count() == 0 and tail_expr is .None() then {
             self.write_token(rb);
             return;
         };
-        self.print_block_items_multiline(items, rb);
+        self.print_block_items_multiline(items, tail_expr, rb);
     };
 
-    file_private print_block_multiline(self, lb Token, items List[CstItem], rb Token) Void = {
+    file_private print_block_multiline(self, lb Token, items List[CstItem], tail_expr Option[CstExpr], rb Token) Void = {
         self.write_token(lb);
-        if items.count() == 0 then {
+        if items.count() == 0 and tail_expr is .None() then {
             self.write_token(rb);
             return;
         };
-        self.print_block_items_multiline(items, rb);
+        self.print_block_items_multiline(items, tail_expr, rb);
     };
 
-    file_private print_block_items_multiline(self, items List[CstItem], rb Token) Void = {
+    file_private print_block_items_multiline(self, items List[CstItem], tail_expr Option[CstExpr], rb Token) Void = {
         self.write_newline();
         self.indent += 1;
         let mutable i UInt = 0;
@@ -645,13 +645,17 @@ given Printer {
                 i += 1;
                 continue;
             };
-            self.print_item(*items[i]);
+            self.print_item(items[i]);
             let next_is_trailing = self.next_is_trailing_comment(items, i);
                 
             if not next_is_trailing then {
                 if not self.at_line_start then { self.write_newline();};
             };
             i += 1;
+        };
+        if tail_expr is .Some(expr) then {
+            self.print_expr(expr);
+            if not self.at_line_start then { self.write_newline();};
         };
         self.indent -= 1;
         self.write_token(rb);
@@ -670,7 +674,7 @@ given Printer {
         self.write_space();
         self.write_token(then_kw);
 
-        let then_is_block = when then_body in { .Block(_, _, _) then true, _ then false };
+        let then_is_block = when then_body in { .Block(_, _, _, _) then true, _ then false };
 
         if then_is_block then {
             self.write_space();
@@ -680,7 +684,7 @@ given Printer {
                 self.write_token(ek);
                 if else_body is .Some(eb) then {
                     self.write_space();
-                    self.print_expr(*eb);
+                    self.print_expr(eb);
                 };
             };
         } else {
@@ -690,10 +694,10 @@ given Printer {
             if else_kw is .Some(ek) then {
                 if else_body is .Some(eb) then {
                     let else_is_block_like = when eb in {
-                        .Block(_, _, _) or .When(_, _, _, _, _, _) then true,
+                        .Block(_, _, _, _) or .When(_, _, _, _, _, _) then true,
                         _ then false,
                     };
-                    let eb_expr = *eb;
+                    let eb_expr = eb;
                     if else_is_block_like then {
                         self.write_newline();
                         self.write_token(ek);
@@ -750,16 +754,16 @@ given Printer {
         self.write_newline();
         self.indent += 1;
         for i in 0..<arms.count() then {
-            let arm = *arms[i];
+            let arm = arms[i];
             for comment in arm.leading_comments then {
                 self.write_token(comment);
                 self.write_newline();
             };
-            self.print_pattern(*arm.pattern);
+            self.print_pattern(arm.pattern);
             self.write_space();
             self.write_token(arm.then_kw);
             self.write_space();
-            self.print_expr(*arm.body);
+            self.print_expr(arm.body);
             self.write(",");
             for j in 0..<arm.trailing_comments.count() then {
                 let comment = arm.trailing_comments[j];
@@ -785,12 +789,12 @@ given Printer {
             self.write_token(name);
             if var_type is .Some(vt) then {
                 self.write_space();
-                self.print_type(*vt);
+                self.print_type(vt);
             };
             self.write_space();
             self.write_token(eq);
             self.write_space();
-            self.print_expr(*value);
+            self.print_expr(value);
         },
         .PairVarDecl(let_kw, lp, first, comma, second, rp, eq, value) then {
             self.write_token(let_kw);
@@ -804,37 +808,32 @@ given Printer {
             self.write_space();
             self.write_token(eq);
             self.write_space();
-            self.print_expr(*value);
+            self.print_expr(value);
         },
         .Assignment(target, op, value) then {
-            self.print_expr(*target);
+            self.print_expr(target);
             self.write_space();
             self.write_token(op);
             self.write_space();
-            self.print_expr(*value);
+            self.print_expr(value);
         },
         .ExprStmt(expr, _) then {
-            self.print_expr(*expr);
+            self.print_expr(expr);
         },
         .Defer(kw, value) then {
             self.write_token(kw);
             self.write_space();
-            self.print_expr(*value);
+            self.print_expr(value);
         },
         .Return(kw, value) then {
             self.write_token(kw);
             if value is .Some(v) then {
                 self.write_space();
-                self.print_expr(*v);
+                self.print_expr(v);
             };
         },
         .Break(kw) then {
             self.write_token(kw);
-        },
-        .Yield(kw, value) then {
-            self.write_token(kw);
-            self.write_space();
-            self.print_expr(*value);
         },
         .Continue(kw) then self.write_token(kw),
     };
@@ -844,7 +843,7 @@ given Printer {
         self.write_token(binding.name);
         if binding.binding_type is .Some(bt) then {
             self.write_space();
-            self.print_type(*bt);
+            self.print_type(bt);
         };
     };
 
@@ -854,11 +853,11 @@ given Printer {
 
     public print_item(self, item CstItem) Void = when item in {
         .Decl(d) then {
-            self.print_decl(*d);
+            self.print_decl(d);
             self.write(";");
         },
         .Stmt(s) then {
-            self.print_stmt(*s);
+            self.print_stmt(s);
             self.write(";");
         },
         .Comment(t) then self.write_token(t),
@@ -885,15 +884,15 @@ given Printer {
             };
         },
         .Func(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then
-            self.print_func_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, *body),
+            self.print_func_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body),
         .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret) then
             self.print_foreign_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret),
         .Type(vis, mods, kw, gp, name, body) then
-            self.print_type_decl(vis, mods, kw, gp, name, *body),
+            self.print_type_decl(vis, mods, kw, gp, name, body),
         .Trait(vis, kw, gp, name, supers, lb, members, rb) then
             self.print_trait_decl(vis, kw, gp, name, supers, lb, members, rb),
         .Given(vis, mods, kw, gp, target, as_kw, trait_type, lb, members, rb) then
-            self.print_given_decl(vis, mods, kw, gp, *target, as_kw, trait_type, lb, members, rb),
+            self.print_given_decl(vis, mods, kw, gp, target, as_kw, trait_type, lb, members, rb),
         .GivenNot(vis, mods, kw, gp, target, not_kw, trait_name) then {
             if vis is .Some(v) then { self.write_token(v); self.write_space();};
             for mod in mods then {
@@ -901,9 +900,9 @@ given Printer {
                 self.write_space();
             };
             self.write_token(kw);
-            if gp is .Some(g) then { self.print_generic_params(*g);};
+            if gp is .Some(g) then { self.print_generic_params(g);};
             self.write_space();
-            self.print_type(*target);
+            self.print_type(target);
             self.write_space();
             self.write_token(not_kw);
             self.write_space();
@@ -917,7 +916,7 @@ given Printer {
             self.write_token(name);
             if var_type is .Some(vt) then {
                 self.write_space();
-                self.print_type(*vt);
+                self.print_type(vt);
             };
         },
         .TraitMethod(vis, gp, name, lp, params, rp, ret) then {
@@ -927,7 +926,7 @@ given Printer {
             };
             self.write_token(name);
             if gp is .Some(g) then {
-                self.print_generic_params(*g);
+                self.print_generic_params(g);
             };
             self.write_token(lp);
             for param in params then {
@@ -938,7 +937,7 @@ given Printer {
                     .NamedParam(pname, colon, pt, comma) then {
                         self.write_token(pname);
                         if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-                        self.print_type(*pt);
+                        self.print_type(pt);
                         if comma is .Some(c) then {
                             self.write_token(c);
                             self.write_space();
@@ -949,7 +948,7 @@ given Printer {
             self.write_token(rp);
             if ret is .Some(rt) then {
                 self.write_space();
-                self.print_type(*rt);
+                self.print_type(rt);
             };
         },
     };
@@ -1001,10 +1000,10 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                yield if self.count_params(params) > 0 then {
+                if self.count_params(params) > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret);
-                    yield (self.indent * 4) + head_len > 90;
-                } else false;
+                    (self.indent * 4) + head_len > 90
+                } else false
             } else false;
 
         if vis is .Some(v) then { self.write_token(v); self.write_space();};
@@ -1015,7 +1014,7 @@ given Printer {
         if let_kw is .Some(k) then { self.write_token(k); self.write_space();};
         if mut_kw is .Some(k) then { self.write_token(k); self.write_space();};
         if name is .Some(n) then { self.write_token(n);};
-        if gp is .Some(g) then { self.print_generic_params(*g);};
+        if gp is .Some(g) then { self.print_generic_params(g);};
         if lp is .Some(l) then {
             self.write_token(l);
             if wrap_params then { self.print_params_multiline(params);} else { self.print_params(params);};
@@ -1023,16 +1022,16 @@ given Printer {
         };
         if ret is .Some(rt) then {
             self.write_space();
-            self.print_type(*rt);
+            self.print_type(rt);
         };
         self.write_space();
         self.write_token(eq);
 
         // Block/when/if body: same line
         when body in {
-            .Block(lb, items, rb) then {
+            .Block(lb, items, tail_expr, rb) then {
                 self.write_space();
-                self.print_block_multiline(lb, items, rb);
+                self.print_block_multiline(lb, items, tail_expr, rb);
                 return;
             },
             .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
@@ -1072,10 +1071,10 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                yield if self.count_params(params) > 0 then {
+                if self.count_params(params) > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret);
-                    yield (self.indent * 4) + head_len > 90;
-                } else false;
+                    (self.indent * 4) + head_len > 90
+                } else false
             } else false;
 
         if vis is .Some(v) then { self.write_token(v); self.write_space();};
@@ -1086,7 +1085,7 @@ given Printer {
         if let_kw is .Some(k) then { self.write_token(k); self.write_space();};
         if mut_kw is .Some(k) then { self.write_token(k); self.write_space();};
         if name is .Some(n) then { self.write_token(n);};
-        if gp is .Some(g) then { self.print_generic_params(*g);};
+        if gp is .Some(g) then { self.print_generic_params(g);};
         if lp is .Some(l) then {
             self.write_token(l);
             if wrap_params then { self.print_params_multiline(params);} else { self.print_params(params);};
@@ -1094,7 +1093,7 @@ given Printer {
         };
         if ret is .Some(rt) then {
             self.write_space();
-            self.print_type(*rt);
+            self.print_type(rt);
         };
     };
 
@@ -1128,7 +1127,7 @@ given Printer {
                 if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
                 self.write_token(name);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-                self.print_type(*param_type);
+                self.print_type(param_type);
                 self.write(",");
             },
         };
@@ -1159,7 +1158,7 @@ given Printer {
 
     file_private estimate_call_arg_length(self, arg CstCallArg) UInt = when arg in {
         .Value(label, colon, value, comma) then {
-            let mutable len = self.estimate_expr_length(*value);
+            let mutable len = self.estimate_expr_length(value);
             if label is .Some(arg_label) then {
                 len += arg_label.to_string().count();
                 if colon is .Some(c) then {
@@ -1167,12 +1166,12 @@ given Printer {
                 };
             };
             if comma is .Some(c) then { len += c.to_string().count();};
-            yield len;
+            len
         },
         .DefaultFill(_, ellipsis, comma) then {
             let mutable len = ellipsis.to_string().count();
             if comma is .Some(c) then { len += c.to_string().count();};
-            yield len;
+            len
         },
     };
 
@@ -1185,7 +1184,7 @@ given Printer {
                 if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
                 self.write_token(name);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-                self.print_type(*param_type);
+                self.print_type(param_type);
                 if comma is .Some(c) then { self.write_token(c); self.write_space();};
             },
         };
@@ -1207,15 +1206,15 @@ given Printer {
         self.write_token(kw);
         self.write_space();
         self.write_token(name);
-        if gp is .Some(g) then { self.print_generic_params(*g);};
+        if gp is .Some(g) then { self.print_generic_params(g);};
         when body in {
             .Struct(lp, items, rp) then {
                 let field_count = self.count_struct_fields(items);
                 let wrap_fields = if not self.struct_items_are_simple(items) then true else {
-                    yield if field_count > 0 then {
+                    if field_count > 0 then {
                         let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, items);
-                        yield (self.indent * 4) + decl_len > 90;
-                    } else false;
+                        (self.indent * 4) + decl_len > 90
+                    } else false
                 };
 
                 self.write_token(lp);
@@ -1223,7 +1222,7 @@ given Printer {
                     self.print_struct_body_multiline(items, rp);
                 } else {
                     for item in items then {
-                        when *item in {
+                        when item in {
                             .Field(field) then self.print_struct_field(field),
                             _ then {},
                         };
@@ -1239,7 +1238,7 @@ given Printer {
                 self.write_space();
                 self.write_token(eq);
                 self.write_space();
-                self.print_type(*target);
+                self.print_type(target);
             },
             .Empty() then {},
         };
@@ -1250,7 +1249,7 @@ given Printer {
         if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
         self.write_token(f.name);
         if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-        self.print_type(*f.field_type);
+        self.print_type(f.field_type);
         if f.comma is .Some(c) then { self.write_token(c); self.write_space();};
     };
 
@@ -1259,7 +1258,7 @@ given Printer {
         if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
         self.write_token(f.name);
         if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
-        self.print_type(*f.field_type);
+        self.print_type(f.field_type);
         self.write(",");
     };
 
@@ -1268,7 +1267,7 @@ given Printer {
         self.indent += 1;
         let mutable i UInt = 0;
         while i < items.count() then {
-            when *items[i] in {
+            when items[i] in {
                 .BlankLine() then {
                     self.write_newline();
                 },
@@ -1284,7 +1283,7 @@ given Printer {
                 .Field(field) then {
                     self.print_struct_field_multiline(field);
                     if i + 1 < items.count() then {
-                        when *items[i + 1] in {
+                        when items[i + 1] in {
                             .Comment(t) then {
                                 self.write_space();
                                 self.write_token(t);
@@ -1321,11 +1320,11 @@ given Printer {
                 .BlankLine() then {
                     let prev_is_comment =
                         if i > 0 then {
-                            yield when cases[i - 1] in { .Comment(_) then true, _ then false };
+                            when cases[i - 1] in { .Comment(_) then true, _ then false }
                         } else false;
                     let next_is_code =
                         if i + 1 < cases.count() then {
-                            yield when cases[i + 1] in { .Decl(_) or .Stmt(_) then true, _ then false };
+                            when cases[i + 1] in { .Decl(_) or .Stmt(_) then true, _ then false }
                         } else false;
                     if prev_is_comment and next_is_code then {
                         i += 1;
@@ -1345,11 +1344,11 @@ given Printer {
                 .Stmt(s) then {
                     when s in {
                         .ExprStmt(expr, _) then {
-                            self.print_expr(*expr);
+                            self.print_expr(expr);
                             self.write(",");
                         },
                         _ then {
-                            self.print_stmt(*s);
+                            self.print_stmt(s);
                             self.write(",");
                         },
                     };
@@ -1371,7 +1370,7 @@ given Printer {
                     if not self.at_line_start then { self.write_newline();};
                 },
                 .Decl(d) then {
-                    self.print_decl(*d);
+                    self.print_decl(d);
                     self.write(",");
                     if i + 1 < cases.count() then {
                         when cases[i + 1] in {
@@ -1410,14 +1409,14 @@ given Printer {
         self.write_token(kw);
         self.write_space();
         self.write_token(name);
-        if gp is .Some(g) then { self.print_generic_params(*g);};
+        if gp is .Some(g) then { self.print_generic_params(g);};
         for i in 0..<supers.count() then {
             self.write_space();
             if i > 0 then {
                 self.write("and");
                 self.write_space();
             };
-            self.print_type(*supers[i]);
+            self.print_type(supers[i]);
         };
         self.write_space();
         self.print_member_block(lb, members, rb);
@@ -1440,7 +1439,7 @@ given Printer {
         };
         self.write_token(kw);
         if gp is .Some(g) then {
-            self.print_generic_params(*g);
+            self.print_generic_params(g);
             self.write_space();
         } else {
             self.write_space();
@@ -1451,7 +1450,7 @@ given Printer {
             self.write_token(akw);
             if trait_type is .Some(tt) then {
                 self.write_space();
-                self.print_type(*tt);
+                self.print_type(tt);
             };
         };
         self.write_space();
@@ -1472,7 +1471,7 @@ given Printer {
         self.indent += 1;
         let mutable i UInt = 0;
         while i < members.count() then {
-            let item = *members[i];
+            let item = members[i];
             if members[i] is .BlankLine() then {
                 let prev_is_comment = self.previous_non_blank_is_comment(members, i);
                 let prev_is_simple = self.previous_non_blank_is_simple(members, i);
@@ -1510,7 +1509,7 @@ given Printer {
                     } else if curr_is_comment and not next_is_comment then {
                     } else {
                         let curr_simple = Printer.is_simple_item(item);
-                        let next_simple = Printer.is_simple_item(*next_ref);
+                        let next_simple = Printer.is_simple_item(next_ref);
                         if not (curr_simple and next_simple) then {
                             self.write_newline();
                         };
@@ -1530,7 +1529,7 @@ given Printer {
     public print_file(self, items List[CstItem]) Void = {
         let mutable i UInt = 0;
         while i < items.count() then {
-            let item = *items[i];
+            let item = items[i];
             if items[i] is .BlankLine() then {
                 let prev_is_comment = self.previous_non_blank_is_comment(items, i);
                 let prev_is_simple = self.previous_non_blank_is_simple(items, i);
@@ -1561,7 +1560,7 @@ given Printer {
                 let next_is_comment = when next_ref in { .Comment(_) then true, _ then false };
                 let next_is_blank = when next_ref in { .BlankLine() then true, _ then false };
                 let curr_is_simple = Printer.is_simple_item(item);
-                let next_is_simple = Printer.is_simple_item(*next_ref);
+                let next_is_simple = Printer.is_simple_item(next_ref);
 
                 if not next_is_blank then {
                     if curr_is_comment and next_is_comment then {
@@ -1598,7 +1597,7 @@ given Printer {
         while i > 0 then {
             i -= 1;
             if items[i] is .BlankLine() then { continue;};
-            return Printer.is_comment_item(*items[i]);
+            return Printer.is_comment_item(items[i]);
         };
         return false;
     };
@@ -1609,8 +1608,8 @@ given Printer {
         while i > 0 then {
             i -= 1;
             if items[i] is .BlankLine() then { continue;};
-            if Printer.is_comment_item(*items[i]) then { return false;};
-            return Printer.is_simple_item(*items[i]);
+            if Printer.is_comment_item(items[i]) then { return false;};
+            return Printer.is_simple_item(items[i]);
         };
         return false;
     };
@@ -1619,7 +1618,7 @@ given Printer {
         let mutable i = index + 1;
         while i < items.count() then {
             if items[i] is .BlankLine() then { i += 1; continue;};
-            return Printer.is_code_item(*items[i]);
+            return Printer.is_code_item(items[i]);
         };
         return false;
     };
@@ -1628,8 +1627,8 @@ given Printer {
         let mutable i = index + 1;
         while i < items.count() then {
             if items[i] is .BlankLine() then { i += 1; continue;};
-            if not Printer.is_code_item(*items[i]) then { return false;};
-            return Printer.is_simple_item(*items[i]);
+            if not Printer.is_code_item(items[i]) then { return false;};
+            return Printer.is_simple_item(items[i]);
         };
         return false;
     };
@@ -1645,7 +1644,7 @@ given Printer {
                 when d in {
                     .Func(_, _, _, _, _, _, _, _, _, _, _, body) then {
                         return when body in {
-                            .Block(_, _, _) then false,
+                            .Block(_, _, _, _) then false,
                             _ then true,
                         };
                     },
@@ -1679,16 +1678,16 @@ given Printer {
         .SelfExpr(tok) then tok.to_string().count(),
         .UnderscoreExpr(tok) then tok.to_string().count(),
         .Commented(comments, inner) then {
-            let mutable sum = self.estimate_expr_length(*inner);
+            let mutable sum = self.estimate_expr_length(inner);
             for comment in comments then {
                 sum += comment.to_string().count() + 1;
             };
-            yield sum;
+            sum
         },
         .BinaryOp(left, op, right) then
-            self.estimate_expr_length(*left) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(*right),
-        .UnaryMinus(_, operand) then 1 + self.estimate_expr_length(*operand),
-        .Deref(_, operand) then 1 + self.estimate_expr_length(*operand),
+            self.estimate_expr_length(left) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(right),
+        .UnaryMinus(_, operand) then 1 + self.estimate_expr_length(operand),
+        .Deref(_, operand) then 1 + self.estimate_expr_length(operand),
         .AddressOf(_, raw_kw, mut_kw, operand) then {
             let mutable prefix UInt = 1;
             if raw_kw is .Some(rk) then {
@@ -1696,62 +1695,63 @@ given Printer {
                 if mut_kw is .Some(mk) then {
                     prefix += 1 + mk.to_string().count();
                 };
-                yield prefix + 1 + self.estimate_expr_length(*operand);
-            };
-            if mut_kw is .Some(mk) then {
-                prefix += mk.to_string().count() + 1;
-            };
-            yield prefix + self.estimate_expr_length(*operand);
+                prefix + 1 + self.estimate_expr_length(operand)
+            } else {
+                if mut_kw is .Some(mk) then {
+                    prefix += mk.to_string().count() + 1;
+                };
+                prefix + self.estimate_expr_length(operand)
+            }
         },
-        .NotExpr(_, operand) then 4 + self.estimate_expr_length(*operand),
+        .NotExpr(_, operand) then 4 + self.estimate_expr_length(operand),
         .EmptyLiteral(_, _) then 2,
         .CollectionLiteral(_, elements, _) then {
             let mutable len UInt = 2;
             for i in 0..<elements.count() then {
                 if i > 0 then { len += 1;};
-                len += self.estimate_expr_length(*elements[i].value);
+                len += self.estimate_expr_length(elements[i].value);
                 if elements[i].comma is .Some(_) then { len += 1;};
             };
-            yield len;
+            len
         },
         .DictLiteral(_, entries, _) then {
             let mutable len UInt = 2;
             for i in 0..<entries.count() then {
                 if i > 0 then { len += 1;};
-                len += self.estimate_expr_length(*entries[i].key) + 2 + self.estimate_expr_length(*entries[i].value);
+                len += self.estimate_expr_length(entries[i].key) + 2 + self.estimate_expr_length(entries[i].value);
                 if entries[i].comma is .Some(_) then { len += 1;};
             };
-            yield len;
+            len
         },
-        .PairExpr(_, first, _, second, _) then 4 + self.estimate_expr_length(*first) + self.estimate_expr_length(*second),
-        .Paren(_, inner, _) then 2 + self.estimate_expr_length(*inner),
-        .TraitQualification(_, base, _, trait_type, _) then 4 + self.estimate_expr_length(*base) + self.estimate_type_length(*trait_type),
-        .Block(_, _, _) then 10,
+        .PairExpr(_, first, _, second, _) then 4 + self.estimate_expr_length(first) + self.estimate_expr_length(second),
+        .Paren(_, inner, _) then 2 + self.estimate_expr_length(inner),
+        .TraitQualification(_, base, _, trait_type, _) then 4 + self.estimate_expr_length(base) + self.estimate_type_length(trait_type),
+        .Block(_, _, _, _) then 10,
         .FieldAccess(base, _, field) then
-            self.estimate_expr_length(*base) + 1 + field.to_string().count(),
+            self.estimate_expr_length(base) + 1 + field.to_string().count(),
         .QualifiedCall(base, _, _, trait_name, _, method_name, _, args, _) then {
-            let mutable len = self.estimate_expr_length(*base) + 4 + trait_name.to_string().count() + method_name.to_string().count() + 2;
+            let mutable len = self.estimate_expr_length(base) + 4 + trait_name.to_string().count() + method_name.to_string().count() + 2;
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2;};
                 len += self.estimate_call_arg_length(args[i]);
             };
-            yield len;
+            len
         },
         .Call(callee, _, args, _) then {
-            let mutable len = self.estimate_expr_length(*callee) + 2;
+            let mutable len = self.estimate_expr_length(callee) + 2;
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2;};
                 len += self.estimate_call_arg_length(args[i]);
             };
-            yield len;
+            len
         },
         .GenericInst(base, _, type_args, _) then {
-            let mutable len = self.estimate_expr_length(*base) + 2;
+            let mutable len = self.estimate_expr_length(base) + 2;
             for i in 0..<type_args.count() then {
                 if i > 0 then { len += 2;};
-                len += self.estimate_type_length(*type_args[i].inner);
+                len += self.estimate_type_length(type_args[i].inner);
             };
-            yield len;
+            len
         },
         .EnumVariant(name, lp, fields, _) then {
             let mutable len = name.to_string().count();
@@ -1759,10 +1759,10 @@ given Printer {
                 len += 2;
                 for i in 0..<fields.count() then {
                     if i > 0 then { len += 2;};
-                    len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(*fields[i].field_type);
+                    len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(fields[i].field_type);
                 };
             };
-            yield len;
+            len
         },
         _ then 10,
     };
@@ -1770,32 +1770,32 @@ given Printer {
     file_private estimate_type_length(self, t CstType) UInt = when t in {
         .Named(name) then name.to_string().count(),
         .SelfType(_) then 4,
-        .Mutable(inner, _) then when *inner in {
-            .Ref(ref_inner, _) then self.estimate_type_length(*ref_inner) + 5,
-            .Ptr(ptr_inner, _) then self.estimate_type_length(*ptr_inner) + 15,
-            .Weakref(weak_inner, _) then self.estimate_type_length(*weak_inner) + 6,
-            _ then self.estimate_type_length(*inner) + 4,
+        .Mutable(inner, _) then when inner in {
+            .Ref(ref_inner, _) then self.estimate_type_length(ref_inner) + 5,
+            .Ptr(ptr_inner, _) then self.estimate_type_length(ptr_inner) + 15,
+            .Weakref(weak_inner, _) then self.estimate_type_length(weak_inner) + 6,
+            _ then self.estimate_type_length(inner) + 4,
         },
         .Generic(_, args, _, base) then {
             let mutable len = base.to_string().count() + 2;
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2;};
-                len += self.estimate_type_length(*args[i].inner);
+                len += self.estimate_type_length(args[i].inner);
             };
-            yield len;
+            len
         },
         .Function(func_kw, _, args, _, return_type) then {
             let mutable len = func_kw.to_string().count() + 3;
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2;};
-                len += self.estimate_type_length(*args[i].inner);
+                len += self.estimate_type_length(args[i].inner);
             };
-            len += self.estimate_type_length(*return_type);
-            yield len;
+            len += self.estimate_type_length(return_type);
+            len
         },
-        .Ref(inner, _) then self.estimate_type_length(*inner) + 1,
-        .Ptr(inner, _) then self.estimate_type_length(*inner) + 7,
-        .Weakref(inner, _) then self.estimate_type_length(*inner) + 2,
+        .Ref(inner, _) then self.estimate_type_length(inner) + 1,
+        .Ptr(inner, _) then self.estimate_type_length(inner) + 7,
+        .Weakref(inner, _) then self.estimate_type_length(inner) + 2,
     };
 
     file_private estimate_head_length(self,
@@ -1813,14 +1813,14 @@ given Printer {
         if let_kw is .Some(k) then { len += k.to_string().count() + 1;};
         if mut_kw is .Some(k) then { len += k.to_string().count() + 1;};
         if gp is .Some(g) then {
-            let gv = *g;
+            let gv = g;
             len += 2;// [ ]
             for gi in 0..<gv.params.count() then {
                 let p = gv.params[gi];
                 len += p.name.to_string().count();
                 for ci in 0..<p.constraints.count() then {
                     if ci > 0 then { len += 5;};// " and "
-                    len += 1 + self.estimate_type_length(*p.constraints[ci]);
+                    len += 1 + self.estimate_type_length(p.constraints[ci]);
                 };
                 if p.comma is .Some(_) then { len += 2;};
             };
@@ -1838,14 +1838,14 @@ given Printer {
                     },
                     .NamedParam(name, mut_kw, colon, param_type, comma) then {
                         if mut_kw is .Some(_) then { len += 4;};
-                        len += name.to_string().count() + 1 + self.estimate_type_length(*param_type);
+                        len += name.to_string().count() + 1 + self.estimate_type_length(param_type);
                         if colon is .Some(_) then { len += 1;};
                         if comma is .Some(_) then { len += 2;};
                     },
                 };
             };
         };
-        if ret is .Some(rt) then { len += 1 + self.estimate_type_length(*rt);};
+        if ret is .Some(rt) then { len += 1 + self.estimate_type_length(rt);};
         return len;
     };
 
@@ -1861,14 +1861,14 @@ given Printer {
         };
         len += kw.to_string().count() + 1;
         if gp is .Some(g) then {
-            let gv = *g;
+            let gv = g;
             len += 2;
             for gi in 0..<gv.params.count() then {
                 let p = gv.params[gi];
                 len += p.name.to_string().count();
                 for ci in 0..<p.constraints.count() then {
                     if ci > 0 then { len += 5;};// " and "
-                    len += 1 + self.estimate_type_length(*p.constraints[ci]);
+                    len += 1 + self.estimate_type_length(p.constraints[ci]);
                 };
                 if p.comma is .Some(_) then { len += 2;};
             };
@@ -1876,11 +1876,11 @@ given Printer {
         len += name.to_string().count();
         len += 2;
         for item in items then {
-            when *item in {
+            when item in {
                 .Field(f) then {
                     if f.access is .Some(a) then { len += a.to_string().count() + 1;};
                     if f.mut_kw is .Some(mk) then { len += mk.to_string().count() + 1;};
-                    len += f.name.to_string().count() + 1 + self.estimate_type_length(*f.field_type);
+                    len += f.name.to_string().count() + 1 + self.estimate_type_length(f.field_type);
                     if f.colon is .Some(_) then { len += 1;};
                     if f.comma is .Some(_) then { len += 2;};
                 },
@@ -1901,7 +1901,7 @@ given Printer {
     file_private count_struct_fields(self, items List[CstStructBodyItem]) UInt = {
         let mutable count UInt = 0;
         for item in items then {
-            when *item in {
+            when item in {
                 .Field(_) then { count += 1;},
                 _ then {},
             };
@@ -1911,7 +1911,7 @@ given Printer {
 
     file_private struct_items_are_simple(self, items List[CstStructBodyItem]) Bool = {
         for item in items then {
-            when *item in {
+            when item in {
                 .Field(_) then {},
                 _ then { return false;},
             };
@@ -1924,7 +1924,7 @@ given Printer {
     // ========================================================================
 
     public finalize(self) Void = {
-        let runes = self.output.to_runes();
+        let runes = self.output.to_string().to_runes();
         let mutable result = StringBuilder.new();
         let mutable consecutive_newlines UInt = 0;
         let mutable line_buf = StringBuilder.new();
@@ -1934,7 +1934,7 @@ given Printer {
             let r = runes[i];
             if r.to_uint32() == 10 then {
                 // Strip trailing whitespace from line
-                let line_runes = line_buf.to_runes();
+                let line_runes = line_buf.to_string().to_runes();
                 let mutable end UInt = line_runes.count();
                 while end > 0 then {
                     let ch = line_runes[end - 1].to_uint32();
@@ -1959,7 +1959,7 @@ given Printer {
         };
         // Flush remaining line_buf
         if line_buf.count() > 0 then {
-            let line_runes = line_buf.to_runes();
+            let line_runes = line_buf.to_string().to_runes();
             let mutable end UInt = line_runes.count();
             while end > 0 then {
                 let ch = line_runes[end - 1].to_uint32();
@@ -1972,7 +1972,7 @@ given Printer {
             };
         };
         // Ensure trailing newline
-        let result_runes = result.to_runes();
+        let result_runes = result.to_string().to_runes();
         if result_runes.count() > 0 then {
             if result_runes[result_runes.count() - 1].to_uint32() <> 10 then {
                 result.push_byte('\n');
@@ -1987,7 +1987,7 @@ given Printer {
 // ============================================================================
 
 file_private let validate_optional_expr_usage(expr Option[CstExpr], statement_context Bool) Result[Void] = when expr in {
-    .Some(inner) then validate_expr_usage(*inner, statement_context),
+    .Some(inner) then validate_expr_usage(inner, statement_context),
     .None() then .Ok({}),
 };
 
@@ -1995,7 +1995,7 @@ file_private let validate_call_args(args List[CstCallArg]) Result[Void] = {
     for arg in args then {
         when arg in {
             .Value(_, _, value, _) then {
-                validate_expr_usage(*value, false) or return;
+                validate_expr_usage(value, false) or return;
             },
             .DefaultFill(_, _, _) then {},
         };
@@ -2005,7 +2005,7 @@ file_private let validate_call_args(args List[CstCallArg]) Result[Void] = {
 
 file_private let validate_item_list(items List[CstItem]) Result[Void] = {
     for item in items then {
-        when validate_item(*item) in {
+        when validate_item(item) in {
             .Ok(_) then {},
             .Error(e) then { return .Error(e);},
         };
@@ -2019,110 +2019,103 @@ file_private let validate_type_body(body CstTypeBody) Result[Void] = when body i
 };
 
 file_private let validate_decl(decl CstDecl) Result[Void] = when decl in {
-    .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(*body, false),
-    .Type(_, _, _, _, _, body) then validate_type_body(*body),
+    .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
+    .Type(_, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, members, _) then validate_item_list(members),
     .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
     .Using(_) or .ForeignUsing(_, _) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _) or .GivenNot(_, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok({}),
 };
 
 file_private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
-    .VarDecl(_, _, _, _, _, value) then validate_expr_usage(*value, false),
-    .PairVarDecl(_, _, _, _, _, _, _, value) then validate_expr_usage(*value, false),
+    .VarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
+    .PairVarDecl(_, _, _, _, _, _, _, value) then validate_expr_usage(value, false),
     .Assignment(target, _, value) then {
-        validate_expr_usage(*target, false) or return;
-        return validate_expr_usage(*value, false);
+        validate_expr_usage(target, false) or return;
+        return validate_expr_usage(value, false);
     },
-    .ExprStmt(expr, _) then validate_expr_usage(*expr, true),
-    .Defer(_, value) then validate_expr_usage(*value, true),
+    .ExprStmt(expr, _) then validate_expr_usage(expr, true),
+    .Defer(_, value) then validate_expr_usage(value, true),
     .Return(_, value) then validate_optional_expr_usage(value, false),
     .Break(_) then .Ok({}),
-    .Yield(_, value) then validate_expr_usage(*value, false),
     .Continue(_) then .Ok({}),
 };
 
 file_private let validate_item(item CstItem) Result[Void] = when item in {
-    .Decl(decl) then validate_decl(*decl),
-    .Stmt(stmt) then validate_stmt(*stmt),
+    .Decl(decl) then validate_decl(decl),
+    .Stmt(stmt) then validate_stmt(stmt),
     .Comment(_) or .TrailingComment(_) or .BlankLine() then .Ok({}),
 };
 
 file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Result[Void] = when expr in {
     .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolLit(_) or .Ident(_) or .SelfExpr(_) or .UnderscoreExpr(_) or .EnumVariant(_, _, _, _) then .Ok({}),
-    .Commented(_, inner) then validate_expr_usage(*inner, statement_context),
+    .Commented(_, inner) then validate_expr_usage(inner, statement_context),
     .BinaryOp(left, _, right) then {
-        validate_expr_usage(*left, false) or return;
-        return validate_expr_usage(*right, false);
+        validate_expr_usage(left, false) or return;
+        return validate_expr_usage(right, false);
     },
-    .UnaryMinus(_, operand) or .Deref(_, operand) or .NotExpr(_, operand) or .BitwiseNot(_, operand) or .PrefixKw(_, operand) then validate_expr_usage(*operand, false),
-    .AddressOf(_, _, _, operand) then validate_expr_usage(*operand, false),
-    .IsExpr(subject, _, _, _) then validate_expr_usage(*subject, false),
-    .TypeCast(_, _, _, operand) then validate_expr_usage(*operand, false),
-    .Paren(_, inner, _) then validate_expr_usage(*inner, false),
+    .UnaryMinus(_, operand) or .Deref(_, operand) or .NotExpr(_, operand) or .BitwiseNot(_, operand) or .PrefixKw(_, operand) then validate_expr_usage(operand, false),
+    .AddressOf(_, _, _, operand) then validate_expr_usage(operand, false),
+    .IsExpr(subject, _, _, _) then validate_expr_usage(subject, false),
+    .TypeCast(_, _, _, operand) then validate_expr_usage(operand, false),
+    .Paren(_, inner, _) then validate_expr_usage(inner, false),
     .PairExpr(_, first, _, second, _) then {
-        validate_expr_usage(*first, false) or return;
-        return validate_expr_usage(*second, false);
+        validate_expr_usage(first, false) or return;
+        return validate_expr_usage(second, false);
     },
-    .TraitQualification(_, base, _, _, _) then validate_expr_usage(*base, false),
-    .FieldAccess(base, _, _) then validate_expr_usage(*base, false),
+    .TraitQualification(_, base, _, _, _) then validate_expr_usage(base, false),
+    .FieldAccess(base, _, _) then validate_expr_usage(base, false),
     .QualifiedCall(base, _, _, _, _, _, _, args, _) then {
-        validate_expr_usage(*base, false) or return;
+        validate_expr_usage(base, false) or return;
         return validate_call_args(args);
     },
     .Call(callee, _, args, _) then {
-        validate_expr_usage(*callee, false) or return;
+        validate_expr_usage(callee, false) or return;
         return validate_call_args(args);
     },
     .SubscriptExpr(base, _, args, _) then {
-        validate_expr_usage(*base, false) or return;
+        validate_expr_usage(base, false) or return;
         return validate_call_args(args);
     },
-    .GenericInst(base, _, _, _) then validate_expr_usage(*base, false),
+    .GenericInst(base, _, _, _) then validate_expr_usage(base, false),
     .ImplicitMember(_, _, _, args, _) then validate_call_args(args),
-    .Block(_, items, _) then validate_item_list(items),
+    .Block(_, items, tail_expr, _) then {
+        validate_item_list(items) or return;
+        return validate_optional_expr_usage(tail_expr, false);
+    },
     .If(_, cond, _, then_body, _, else_body) then {
-        validate_expr_usage(*cond, false) or return;
-        validate_expr_usage(*then_body, statement_context) or return;
+        validate_expr_usage(cond, false) or return;
+        validate_expr_usage(then_body, statement_context) or return;
         return validate_optional_expr_usage(else_body, statement_context);
     },
     .IfPattern(_, subject, _, _, _, then_body, _, else_body) then {
-        validate_expr_usage(*subject, false) or return;
-        validate_expr_usage(*then_body, statement_context) or return;
+        validate_expr_usage(subject, false) or return;
+        validate_expr_usage(then_body, statement_context) or return;
         return validate_optional_expr_usage(else_body, statement_context);
     },
     .While(_, cond, _, body) then {
-        if not statement_context then {
-            return .Error("Parse error: 'while' can only be used as a statement");
-        };
-        validate_expr_usage(*cond, false) or return;
-        return validate_expr_usage(*body, true);
+        validate_expr_usage(cond, false) or return;
+        return validate_expr_usage(body, true);
     },
     .WhilePattern(_, subject, _, _, _, body) then {
-        if not statement_context then {
-            return .Error("Parse error: 'while' can only be used as a statement");
-        };
-        validate_expr_usage(*subject, false) or return;
-        return validate_expr_usage(*body, true);
+        validate_expr_usage(subject, false) or return;
+        return validate_expr_usage(body, true);
     },
     .For(_, _, _, iterable, _, body) then {
-        if not statement_context then {
-            return .Error("Parse error: 'for' can only be used as a statement");
-        };
-        validate_expr_usage(*iterable, false) or return;
-        return validate_expr_usage(*body, true);
+        validate_expr_usage(iterable, false) or return;
+        return validate_expr_usage(body, true);
     },
     .When(_, subject, _, _, arms, _) then {
-        validate_expr_usage(*subject, false) or return;
+        validate_expr_usage(subject, false) or return;
         for arm in arms then {
-            validate_expr_usage(*arm.body, statement_context) or return;
+            validate_expr_usage(arm.body, statement_context) or return;
         };
         return .Ok({});
     },
     .AndThen(left, _, _, right) or .OrElse(left, _, _, right) then {
-        validate_expr_usage(*left, false) or return;
-        return validate_expr_usage(*right, false);
+        validate_expr_usage(left, false) or return;
+        return validate_expr_usage(right, false);
     },
-    .OrReturn(left, _, _) then validate_expr_usage(*left, false),
+    .OrReturn(left, _, _) then validate_expr_usage(left, false),
     .RangeExpr(left, _, right) then {
         validate_optional_expr_usage(left, false) or return;
         return validate_optional_expr_usage(right, false);
@@ -2130,18 +2123,18 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
     .EmptyLiteral(_, _) then .Ok({}),
     .CollectionLiteral(_, elements, _) then {
         for element in elements then {
-            validate_expr_usage(*element.value, false) or return;
+            validate_expr_usage(element.value, false) or return;
         };
         return .Ok({});
     },
     .DictLiteral(_, entries, _) then {
         for entry in entries then {
-            validate_expr_usage(*entry.key, false) or return;
-            validate_expr_usage(*entry.value, false) or return;
+            validate_expr_usage(entry.key, false) or return;
+            validate_expr_usage(entry.value, false) or return;
         };
         return .Ok({});
     },
-    .Lambda(_, _, _, _, _, body) then validate_expr_usage(*body, false),
+    .Lambda(_, _, _, _, _, body) then validate_expr_usage(body, false),
 };
 
 public let format_source(source String) Result[String] = {

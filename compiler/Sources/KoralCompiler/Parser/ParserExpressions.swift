@@ -192,94 +192,74 @@ extension Parser {
   
   /// Parse expression rule - main entry point for expression parsing
   func expression() throws -> ExpressionNode {
-    return try parseOrReturnExpression()
+    return try parseOrExpression()
   }
   
   // MARK: - Logical Expressions
 
-  /// or return layer: lowest precedence.
-  /// Parses `<expr> or return` as early-return propagation sugar.
-  private func parseOrReturnExpression() throws -> ExpressionNode {
-    var left = try parseOrElseExpression()
-
-    while currentToken === .orKeyword {
-      if lexer.peekNextToken() === .returnKeyword {
-        let startSpan = currentSpan
-        try match(.orKeyword)
-        try match(.returnKeyword)
-        left = .orReturnExpression(operand: left, span: startSpan)
-      } else {
-        break
-      }
-    }
-
-    return left
-  }
-  
-  /// or else layer: above `or return`, below logical `or`.
-  /// Parses `<expr> or else <expr>` as value coalescing / early exit.
-  private func parseOrElseExpression() throws -> ExpressionNode {
-    var left = try parseOrExpression()
-
-    while currentToken === .orKeyword {
-      // Peek: if next token is `else`, this is `or else` syntax
-      if lexer.peekNextToken() === .elseKeyword {
-        let startSpan = currentSpan
-        try match(.orKeyword)
-        try match(.elseKeyword)
-        let defaultExpr = try parseOrExpression()
-        left = .orElseExpression(operand: left, defaultExpr: defaultExpr, span: startSpan)
-      } else {
-        break  // Not `or else`, let parseOrExpression handle logical `or`
-      }
-    }
-    return left
-  }
-
   private func parseOrExpression() throws -> ExpressionNode {
-    var left = try parseAndThenExpression()
+    var left = try parseOptionFlowExpression()
 
     while currentToken === .orKeyword {
-      // If next token is `else` / `return`, don't consume — handled by higher layers.
-      if lexer.peekNextToken() === .elseKeyword || lexer.peekNextToken() === .returnKeyword {
-        break
-      }
       try match(.orKeyword)
-      let right = try parseAndThenExpression()
+      let right = try parseOptionFlowExpression()
       left = .orExpression(left: left, right: right)
     }
     return left
   }
 
-  /// Logical AND layer: below optional chaining / value transformation (`and then`).
+  /// `or else` / `or return` bind tighter than logical `or` but looser than `and`.
+  private func parseOptionFlowExpression() throws -> ExpressionNode {
+    var left = try parseAndExpression()
+
+    while currentToken === .orKeyword {
+      if lexer.peekNextToken() === .elseKeyword {
+        let startSpan = currentSpan
+        try match(.orKeyword)
+        try match(.elseKeyword)
+        let defaultExpr = try parseAndExpression()
+        left = .orElseExpression(operand: left, defaultExpr: defaultExpr, span: startSpan)
+        continue
+      }
+
+      if lexer.peekNextToken() === .returnKeyword {
+        let startSpan = currentSpan
+        try match(.orKeyword)
+        try match(.returnKeyword)
+        left = .orReturnExpression(operand: left, span: startSpan)
+        continue
+      }
+
+      break
+    }
+
+    return left
+  }
+
   private func parseAndExpression() throws -> ExpressionNode {
-    var left = try parseLogicalNotExpression()
+    var left = try parseAndThenExpression()
 
     while currentToken === .andKeyword {
-      // If next token is `then`, don't consume — handled by `and then` layer above.
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
-      let right = try parseLogicalNotExpression()
+      let right = try parseAndThenExpression()
       left = .andExpression(left: left, right: right)
     }
     return left
   }
 
-  /// Optional chaining / value transformation layer: above logical AND, below logical OR.
-  /// Parses `<expr> and then <expr>` left-associatively.
   private func parseAndThenExpression() throws -> ExpressionNode {
-    var left = try parseAndExpression()
+    var left = try parseLogicalNotExpression()
 
     while currentToken === .andKeyword {
-      // Peek: if next token is `then`, this is `and then` syntax
       if lexer.peekNextToken() === .thenKeyword {
         let startSpan = currentSpan
         try match(.andKeyword)
         try match(.thenKeyword)
-        let transformExpr = try parseAndExpression()
+        let transformExpr = try parseLogicalNotExpression()
         left = .andThenExpression(operand: left, transformExpr: transformExpr, span: startSpan)
       } else {
-        break  // Not `and then`, let caller handle logical `and`
+        break
       }
     }
     return left
@@ -298,10 +278,10 @@ extension Parser {
   // MARK: - Is / Is Not Expressions
 
   /// Parse `is`/`is not` expression layer.
-  /// Precedence: not > is/is not > bitwise or
+  /// Precedence: not > is/is not > range
   /// Parses `expr is pattern` as `isExpression` and `expr is not pattern` as `isNotExpression`.
   private func parseIsExpression() throws -> ExpressionNode {
-    let left = try parseBitwiseOrExpression()
+    let left = try parseRangeExpression()
 
     if currentToken === .isKeyword {
       let startSpan = currentSpan
@@ -344,10 +324,10 @@ extension Parser {
   }
 
   private func parseBitwiseAndExpression() throws -> ExpressionNode {
-    var left = try parseRangeExpression()
+    var left = try parseShiftExpression()
     while currentToken === .ampersand {
       try match(.ampersand)
-      let right = try parseRangeExpression()
+      let right = try parseShiftExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
     }
     return left
@@ -439,7 +419,7 @@ extension Parser {
   /// Fourth level: Comparisons
   private func parseComparisonExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
-    let left = try parseShiftExpression()
+    let left = try parseBitwiseOrExpression()
 
     guard isComparisonToken(currentToken) else {
       return left
@@ -448,7 +428,7 @@ extension Parser {
     if isEqualityComparisonToken(currentToken) {
       let op = currentToken
       try match(op)
-      let right = try parseShiftExpression()
+      let right = try parseBitwiseOrExpression()
       if isComparisonToken(currentToken) {
         throw comparisonChainError(at: currentSpan)
       }
@@ -462,7 +442,7 @@ extension Parser {
     let firstToken = currentToken
     let firstDirection = comparisonChainDirection(for: firstToken)
     try match(firstToken)
-    let firstRight = try parseShiftExpression()
+    let firstRight = try parseBitwiseOrExpression()
 
     guard let direction = firstDirection else {
       return .comparisonExpression(
@@ -482,7 +462,7 @@ extension Parser {
 
       let op = currentToken
       try match(op)
-      let right = try parseShiftExpression()
+      let right = try parseBitwiseOrExpression()
       operands.append(right)
       operators.append(tokenToComparisonOperator(op))
     }
@@ -1263,24 +1243,73 @@ extension Parser {
 
   
   // MARK: - Block Expression
+
+  private func blockCompoundAssignmentOperator(_ token: Token) -> CompoundAssignmentOperator? {
+    switch token {
+    case .plusEqual: return .plus
+    case .minusEqual: return .minus
+    case .multiplyEqual: return .multiply
+    case .divideEqual: return .divide
+    case .remainderEqual: return .remainder
+    case .ampersandEqual: return .bitwiseAnd
+    case .pipeEqual: return .bitwiseOr
+    case .caretEqual: return .bitwiseXor
+    case .leftShiftEqual: return .shiftLeft
+    case .rightShiftEqual: return .shiftRight
+    default: return nil
+    }
+  }
   
   /// Parse block expression
   private func blockExpression() throws -> ExpressionNode {
     try match(.leftBrace)
     var statements: [StatementNode] = []
+    var tailExpression: ExpressionNode? = nil
 
-    // Parse statements until right brace
     while currentToken !== .rightBrace {
       if currentToken === .eof {
         throw ParserError.unexpectedEndOfFile(span: currentSpan)
       }
 
-      let stmt = try statement()
-      statements.append(stmt)
+      switch currentToken {
+      case .letKeyword, .returnKeyword, .breakKeyword, .continueKeyword, .deferKeyword:
+        statements.append(try statement())
+        continue
+      default:
+        break
+      }
+
+      let startSpan = currentSpan
+      let expr = try expression()
+
+      if currentToken === .equal {
+        try match(.equal)
+        let value = try expression()
+        try requireSemicolon()
+        statements.append(.assignment(target: expr, operator: nil, value: value, span: startSpan))
+        continue
+      }
+
+      if let op = blockCompoundAssignmentOperator(currentToken) {
+        try match(currentToken)
+        let value = try expression()
+        try requireSemicolon()
+        statements.append(.assignment(target: expr, operator: op, value: value, span: startSpan))
+        continue
+      }
+
+      if currentToken === .semicolon {
+        try requireSemicolon()
+        statements.append(.expression(expr, span: startSpan))
+        continue
+      }
+
+      tailExpression = expr
+      break
     }
     
     try match(.rightBrace)
-    return .blockExpression(statements: statements)
+    return .blockExpression(statements: statements, tailExpression: tailExpression)
   }
   
   // MARK: - Control Flow Expressions

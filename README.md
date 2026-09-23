@@ -53,20 +53,27 @@ let label = when status in {
 }
 ```
 
-Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. In expression-form `if`/`when`, a block branch still defaults to `Void`; use `yield expression` to produce the enclosing expression's value from inside the block.
+Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. A block may end with a final expression without a trailing semicolon; that final expression becomes the block's value. If the block has no final expression, or the last expression ends with a semicolon, the block evaluates to `Void`.
 
 ```koral
 let label = if score >= 90 then {
     if score == 100 then {
-        yield "perfect";
+        "perfect"
+    } else {
+        "A"
     }
-    yield "A";
 } else {
-    yield "other";
+    "other"
 }
 ```
 
-`while` and `for` intentionally keep the same `... then ...` surface shape, but they are statements rather than value-producing expressions.
+`while` and `for` intentionally keep the same `... then ...` surface shape and are ordinary expressions whose result type is `Void`.
+
+```koral
+let loop_value = while ready() then {
+    process_next();
+};
+```
 
 ### Pattern matching built into `if` and `while`
 

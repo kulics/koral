@@ -498,13 +498,6 @@ private func ownershipUse(for expression: TypedExpressionNode) -> MIROwnershipUs
 }
 
 private final class MIRFunctionBuilder {
-  private struct MIRYieldTargetContext {
-    let id: YieldTargetId
-    let resultLocal: MIRLocalID?
-    let joinBlock: MIRBlockID
-    let baseScopeDepth: Int
-  }
-
   private let program: MonomorphizedProgram
   private let identifier: Symbol
   private let parameters: [Symbol]
@@ -527,7 +520,6 @@ private final class MIRFunctionBuilder {
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
   private var deferredExpressionsByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
-  private var yieldTargetStack: [MIRYieldTargetContext] = []
 
   init(
     program: MonomorphizedProgram,
@@ -749,8 +741,8 @@ private final class MIRFunctionBuilder {
       }
       let place = lowerPlace(expression) ?? .global(symbol.defId)
       return MIRExprResult(type: symbol.type, category: expression.valueCategory, operand: nil, place: place)
-    case .blockExpression(let statements, let type):
-      return lowerBlock(statements: statements, type: type)
+    case .blockExpression(let statements, let tailExpression, let type):
+      return lowerBlock(statements: statements, tailExpression: tailExpression, type: type)
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       return lowerIfExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch, type: type)
     case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
@@ -926,17 +918,12 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func lowerBlock(statements: [TypedStatementNode], type: Type) -> MIRExprResult? {
+  private func lowerBlock(statements: [TypedStatementNode], tailExpression: TypedExpressionNode?, type: Type) -> MIRExprResult? {
     let parentScopeDepth = scopeStack.count
     let scope = makeScopeID()
     append(.scopeEnter(scope))
     scopeStack.append(scope)
-
-    let ownedYieldTargets = statements.reduce(into: Set<YieldTargetId>()) { ids, statement in
-      ids.formUnion(statement.ownedYieldTargetIDs)
-    }
     let blockProducesValue = type != .void && type != .never
-    let usesYieldJoin = !ownedYieldTargets.isEmpty && type != .never
     let resultLocal: MIRLocal? = blockProducesValue
       ? makeTemporary(type: type, nameHint: "block_result")
       : nil
@@ -944,34 +931,15 @@ private final class MIRFunctionBuilder {
       append(.declare(resultLocal.id))
     }
 
-    let blockBody = currentBlockID
-    let joinBlock = usesYieldJoin ? makeBlock() : nil
-    let yieldTargetDepth = joinBlock.map {
-      pushYieldTargets(
-        ownedYieldTargets,
-        resultLocal: resultLocal,
-        joinBlock: $0,
-        baseScopeDepth: parentScopeDepth
-      )
-    } ?? yieldTargetStack.count
-    if usesYieldJoin {
-      setCurrentBlock(blockBody)
-    }
-
     let result: MIRExprResult?
 
-    if type != .void,
-       type != .never,
-       let last = statements.last,
-       case .expression(let expression) = last {
-      for statement in statements.dropLast() {
-        lowerStatement(statement)
-      }
-      result = lowerExpression(expression)
+    for statement in statements {
+      lowerStatement(statement)
+    }
+
+    if let tailExpression, !currentBlockIsTerminated {
+      result = lowerExpression(tailExpression)
     } else {
-      for statement in statements {
-        lowerStatement(statement)
-      }
       result = MIRExprResult(type: type, category: .rvalue, operand: type == .void ? .constant(.void) : nil, place: nil)
     }
 
@@ -987,18 +955,6 @@ private final class MIRFunctionBuilder {
     }
     _ = scopeStack.popLast()
     deferredExpressionsByScope.removeValue(forKey: scope)
-    restoreYieldTargets(toDepth: yieldTargetDepth)
-
-    if let joinBlock {
-      if !currentBlockIsTerminated {
-        terminate(.goto(joinBlock))
-      }
-      setCurrentBlock(joinBlock)
-      if let resultLocal {
-        return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
-      }
-      return MIRExprResult(type: type, category: .rvalue, operand: type == .void ? .constant(.void) : nil, place: nil)
-    }
 
     if let resultLocal {
       return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
@@ -1135,25 +1091,7 @@ private final class MIRFunctionBuilder {
       } else {
         _ = lowerExpression(expression)
       }
-    case .yieldValue(let target, let value):
-      lowerYield(target: target, value: value)
     }
-  }
-
-  private func lowerYield(target: YieldTargetId, value: TypedExpressionNode) {
-    guard let yieldValueContext = yieldTargetStack.last(where: { $0.id == target }) else {
-      fatalError("Unsupported yield without MIR yield target reached MIR lowering")
-    }
-
-    let loweredValue = lowerValue(value)
-    guard !currentBlockIsTerminated else { return }
-    if let resultLocal = yieldValueContext.resultLocal {
-      append(.assign(.local(resultLocal), loweredValue))
-    } else {
-      append(.evaluate(loweredValue))
-    }
-    emitScopeExits(fromDepth: yieldValueContext.baseScopeDepth)
-    terminate(.goto(yieldValueContext.joinBlock))
   }
 
   private func emitScopeExits(fromDepth baseScopeDepth: Int) {
@@ -1173,36 +1111,6 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func pushYieldTargets(
-    _ targets: Set<YieldTargetId>,
-    resultLocal: MIRLocal?,
-    joinBlock: MIRBlockID,
-    baseScopeDepth: Int? = nil
-  ) -> Int {
-    let previousDepth = yieldTargetStack.count
-    guard !targets.isEmpty else { return previousDepth }
-    let targetBaseScopeDepth = baseScopeDepth ?? scopeStack.count
-    for target in targets {
-      if yieldTargetStack.contains(where: { $0.id == target }) {
-        continue
-      }
-      yieldTargetStack.append(
-        MIRYieldTargetContext(
-          id: target,
-          resultLocal: resultLocal?.id,
-          joinBlock: joinBlock,
-          baseScopeDepth: targetBaseScopeDepth
-        )
-      )
-    }
-    return previousDepth
-  }
-
-  private func restoreYieldTargets(toDepth depth: Int) {
-    guard yieldTargetStack.count > depth else { return }
-    yieldTargetStack.removeSubrange(depth..<yieldTargetStack.count)
-  }
-
   private func lowerBranchBody(_ expression: TypedExpressionNode, resultLocal: MIRLocal?) {
     guard let resultLocal, expression.type != .never, expression.type != .void else {
       _ = lowerExpression(expression)
@@ -1213,14 +1121,6 @@ private final class MIRFunctionBuilder {
        let place = lowerPlace(inner) {
       let refValue = MIRValue.ref(place, kind: referenceKind(for: type), allocation: .heapOwned)
       append(.assign(.local(resultLocal.id), refValue))
-      return
-    }
-
-    if expression.containsYield {
-      guard let result = lowerExpression(expression), !currentBlockIsTerminated else {
-        return
-      }
-      assignBranchResult(result, to: resultLocal.id)
       return
     }
 
@@ -1370,12 +1270,6 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
-      resultLocal: resultLocal,
-      joinBlock: joinBlock
-    )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: conditionOperand, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -2655,12 +2549,6 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
-      resultLocal: resultLocal,
-      joinBlock: joinBlock
-    )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: condition, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -2824,14 +2712,6 @@ private final class MIRFunctionBuilder {
     let caseBlocks = cases.map { _ in makeBlock() }
     let nextBlocks = cases.map { _ in makeBlock() }
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
-      },
-      resultLocal: resultLocal,
-      joinBlock: joinBlock
-    )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     setCurrentBlock(dispatchBlock)
 
@@ -2922,14 +2802,6 @@ private final class MIRFunctionBuilder {
 
     let dispatchBlock = currentBlockID
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
-      },
-      resultLocal: resultLocal,
-      joinBlock: joinBlock
-    )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
 
     // Build switch cases and default
     var switchCases: [MIRSwitchCase] = []

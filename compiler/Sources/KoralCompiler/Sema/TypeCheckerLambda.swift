@@ -74,9 +74,6 @@ extension TypeChecker {
       defer { currentFunctionReturnType = savedFunctionReturnType }
       defer { inferredFunctionReturnType = savedInferredFunctionReturnType }
       defer { isInferringFunctionReturnType = savedIsInferringFunctionReturnType }
-      let savedYieldTargets = yieldTargets
-      defer { yieldTargets = savedYieldTargets }
-      yieldTargets = []
 
       // Lambda has its own scope, so reset insideDefer.
       // This allows return/break/continue/defer inside a lambda that
@@ -110,8 +107,8 @@ extension TypeChecker {
       let bodyUsage: ExpressionUsage
       let bodyExpectedType: Type?
       if case .blockExpression = body {
-        bodyUsage = .statement
-        bodyExpectedType = nil
+        bodyUsage = .value
+        bodyExpectedType = resolvedExplicitReturnType ?? expectedReturnType
       } else {
         bodyUsage = .value
         bodyExpectedType = resolvedExplicitReturnType ?? expectedReturnType
@@ -240,7 +237,7 @@ extension TypeChecker {
         }
       }
       
-    case .blockExpression(let statements):
+    case .blockExpression(let statements, let tailExpression):
       var blockLocalNames = localNames
       for stmt in statements {
         switch stmt {
@@ -254,6 +251,9 @@ extension TypeChecker {
         default:
           try collectCapturedVariablesFromStatement(stmt: stmt, localNames: blockLocalNames, captures: &captures)
         }
+      }
+      if let tailExpression {
+        try collectCapturedVariables(expr: tailExpression, localNames: blockLocalNames, captures: &captures)
       }
       
     case .call(let callee, let arguments):
@@ -478,8 +478,6 @@ extension TypeChecker {
       }
     case .break:
       break
-    case .yield(let value, _):
-      try collectCapturedVariables(expr: value, localNames: localNames, captures: &captures)
     case .continue:
       break
     case .deferStatement(let expression, _):

@@ -371,7 +371,6 @@ public indirect enum StatementNode {
   case expression(ExpressionNode, span: SourceSpan)
   case `return`(value: ExpressionNode?, span: SourceSpan)
   case `break`(span: SourceSpan)
-  case yield(value: ExpressionNode, span: SourceSpan)
   case `continue`(span: SourceSpan)
   case deferStatement(expression: ExpressionNode, span: SourceSpan)
 }
@@ -386,7 +385,6 @@ extension StatementNode {
     case .expression(_, let span): return span
     case .return(_, let span): return span
     case .break(let span): return span
-    case .yield(_, let span): return span
     case .continue(let span): return span
     case .deferStatement(_, let span): return span
     }
@@ -514,7 +512,7 @@ public indirect enum ExpressionNode {
   case unsafeDerefExpression(ExpressionNode)
   case ptrExpression(ExpressionNode, mutable: Bool)
   case identifier(String)
-  case blockExpression(statements: [StatementNode])
+  case blockExpression(statements: [StatementNode], tailExpression: ExpressionNode?)
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
   case call(callee: ExpressionNode, arguments: [CallArg])

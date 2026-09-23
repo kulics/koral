@@ -491,19 +491,24 @@ In Koral, `{}` represents a block expression.
 Block rules:
 
 - A block contains zero or more statements.
-- A plain block's default type is `Void`.
+- A block may end with a final expression that does not use a trailing semicolon.
+- If a block has a final expression, the block's type and value are the type and value of that expression.
+- If a block has no final expression, or the last expression ends with a semicolon, the block's type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- `yield <expression>` is not a general block-return mechanism. It is only valid inside the body of the nearest value-producing `if` or `when` branch, where it produces that branch result and exits the branch body early.
 - Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
-- `yield` and `break` cannot penetrate through the innermost exitable construct. This means `yield`/`break` cannot cross a loop boundary (e.g., inside a `for`/`while` inside a branch) or a branch boundary (e.g., inside an `if`/`when` expression inside a loop) to reach an outer target.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
-Because a plain block produces `Void`, a block-bodied function must hand its result back explicitly — with `return`, or with `yield` inside a value-producing `if`/`when` branch:
+Examples:
 
 ```koral
 let load(path String) Result[Int] = {
     let text = read_text_file(path) or return;
     return parse_int(text);
+};
+
+let increment() Int = {
+    let base = 41;
+    base + 1
 };
 
 let a Void = {};
@@ -633,18 +638,17 @@ Operator precedence from high to low:
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
-6. Comparison: `==`, `<>`, `<`, `>`, `<=`, `>=`
-7. Range: `..`, `..<`, `<..`, `<..<`
-8. Bitwise AND: `&`
-9. Bitwise XOR: `^`
-10. Bitwise OR: `|`
+6. Bitwise AND: `&`
+7. Bitwise XOR: `^`
+8. Bitwise OR: `|`
+9. Comparison: `==`, `<>`, `<`, `>`, `<=`, `>=`
+10. Range: `..`, `..<`, `<..`, `<..<`
 11. Pattern test: `is`, `is not`
 12. Logical NOT: `not`
-13. Logical AND: `and`
-14. Optional chaining: `and then`
-15. Logical OR: `or`
-16. Value coalescing: `or else`
-17. Early-return propagation: `or return`
+13. Optional chaining: `and then`
+14. Logical AND: `and`
+15. Value coalescing / early-return propagation: `or else`, `or return`
+16. Logical OR: `or`
 
 When mixing `and then`, `or else`, and `or return` in one expression, use parentheses to make intent explicit.
 
@@ -923,20 +927,19 @@ When we don't need to handle the `else` branch, we can omit it. In that case the
 let main() Void = if 1 == 1 then println("yes");
 ```
 
-When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `yield <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `yield <expression>` is not valid in single-branch `if` bodies because there is no branch-result target.
+When an `if` with `else` uses a block branch, the final expression of that block becomes the branch value.
 
 ```koral
 let label = if score >= 90 then {
     if score == 100 then {
-        yield "perfect";
+        "perfect"
+    } else {
+        "A"
     }
-    yield "A";
 } else {
-    yield "other";
+    "other"
 };
 ```
-
-`yield <expression>` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own branch-result target.
 
 ### Loops
 
@@ -967,6 +970,14 @@ for x in nums then {
 for i in 0..5 then {
     println(i);
 };
+
+let loop_value = while false then {
+    println("unreachable");
+};
+
+let for_value = for x in nums then {
+    println(x);
+};
 ```
 
 The loop binding position accepts the same shapes as `let`: a single binding or a `Pair` destructuring binding. Each element may use `_`, `mutable`, and an optional type annotation.
@@ -996,13 +1007,12 @@ while true then {
 };
 ```
 
-### Early Exit: `return` and `yield`
+### Early Exit: `return`
 
 - `return` leaves the enclosing function with a value (or `Void`).
-- `yield <expression>` produces the value of the nearest value-producing `if` / `when` branch and exits that branch body early. It is not a general block-return mechanism and is invalid outside such a branch body.
 - Plain `break` (without expression) exits the nearest enclosing `while` / `for` loop.
 
-`yield` and `break` cannot penetrate the innermost exitable construct: neither can cross a loop boundary or a branch boundary to reach an outer target.
+`break` cannot penetrate the innermost exitable construct: it cannot cross a branch boundary to reach an outer loop target.
 
 ### Cleanup with `defer`
 
@@ -1055,7 +1065,7 @@ defer {
 
 #### Restrictions
 
-- `return`, `break`, and `continue` are not allowed inside a `defer` expression. This includes `yield <expression>` used for branch values.
+- `return`, `break`, and `continue` are not allowed inside a `defer` expression.
 - Nested `defer` is not allowed inside a `defer` expression.
 - `defer` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
@@ -1502,21 +1512,22 @@ let result = when x in {
 };
 ```
 
-Like `if`, a block branch in `when` still defaults to `Void`. Use `yield <expression>` to produce the enclosing `when` expression's value and to support early exit inside the block branch body. `yield <expression>` is valid only when `when` is used as an expression.
+Like `if`, a block branch in `when` uses its final expression as the branch value.
 
 ```koral
 let label = when score in {
     100 then {
         println("bonus");
-        yield "perfect";
+        "perfect"
     },
     >= 90 then {
         if has_curve(score) then {
-            yield "A+";
-        };
-        yield "A";
+            "A+"
+        } else {
+            "A"
+        }
     },
-    _ then { yield "other" },
+    _ then { "other" },
 };
 ```
 

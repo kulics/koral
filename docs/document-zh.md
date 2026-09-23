@@ -491,19 +491,24 @@ a = 2;  // 合法
 块规则：
 
 - 块包含零条或多条语句。
-- 普通块的默认类型是 `Void`。
+- 块可以在末尾带一个不写分号的尾表达式。
+- 如果块带有尾表达式，块的类型和值就是该表达式的类型和值。
+- 如果块没有尾表达式，或最后一个表达式写了分号，块的类型是 `Void`。
 - `return`、`break`、`continue` 可以提前结束块，因此让该块的类型是 `Never`。
-- `yield <expression>` 不是通用的块返回机制。它只在最近的产生值的 `if` / `when` 分支 body 内有效，用于产出该分支的结果并提前退出分支 body。
 - 裸 `break`（不带表达式）退出最近的 `while` 或 `for` 循环。
-- `yield` 与 `break` 不能穿透最内层可退出结构。也就是说 `yield`/`break` 不能跨越循环边界（例如分支内的 `for`/`while`）或分支边界（例如循环内的 `if`/`when` 表达式）到达外层目标。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
 
-由于普通块产生 `Void`，块体函数必须显式交回结果——用 `return`，或在产生值的 `if`/`when` 分支里用 `yield`：
+示例：
 
 ```koral
 let load(path String) Result[Int] = {
     let text = read_text_file(path) or return;
     return parse_int(text);
+};
+
+let increment() Int = {
+    let base = 41;
+    base + 1
 };
 
 let a Void = {};
@@ -633,18 +638,17 @@ y >>= 2;     // y = y >> 2
 3. 乘除：`*`、`/`、`%`
 4. 加减：`+`、`-`
 5. 移位：`<<`、`>>`
-6. 比较：`==`、`<>`、`<`、`>`、`<=`、`>=`
-7. 范围：`..`、`..<`、`<..`、`<..<`
-8. 按位与：`&`
-9. 按位异或：`^`
-10. 按位或：`|`
+6. 按位与：`&`
+7. 按位异或：`^`
+8. 按位或：`|`
+9. 比较：`==`、`<>`、`<`、`>`、`<=`、`>=`
+10. 范围：`..`、`..<`、`<..`、`<..<`
 11. 模式测试：`is`、`is not`
 12. 逻辑非：`not`
-13. 逻辑与：`and`
-14. 可选链：`and then`
-15. 逻辑或：`or`
-16. 值合并：`or else`
-17. 早返回传播：`or return`
+13. 可选链：`and then`
+14. 逻辑与：`and`
+15. 值合并 / 早返回传播：`or else`、`or return`
+16. 逻辑或：`or`
 
 在同一表达式中混用 `and then`、`or else` 与 `or return` 时，请用圆括号让意图明确。
 
@@ -918,20 +922,19 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 let main() Void = if 1 == 1 then println("yes");
 ```
 
-当带 `else` 的 `if` 使用块分支时，该块仍默认为 `Void`。用 `yield <expression>` 产出外层 `if` 表达式的值，并可提前退出该分支 body。`yield <expression>` 在单分支 `if` 体中无效，因为没有分支结果目标。
+当带 `else` 的 `if` 使用块分支时，该块的尾表达式就是该分支的值。
 
 ```koral
 let label = if score >= 90 then {
     if score == 100 then {
-        yield "perfect";
+        "perfect"
+    } else {
+        "A"
     }
-    yield "A";
 } else {
-    yield "other";
+    "other"
 };
 ```
-
-语句形态的嵌套 `if` / `when` 中的 `yield <expression>` 仍指向外层分支表达式。嵌套的 `if` / `when` 表达式会创建自己的分支结果目标。
 
 ### 循环
 
@@ -962,6 +965,14 @@ for x in nums then {
 for i in 0..5 then {
     println(i);
 };
+
+let loop_value = while false then {
+    println("unreachable");
+};
+
+let for_value = for x in nums then {
+    println(x);
+};
 ```
 
 循环绑定位置接受与 `let` 相同的形态：单个绑定或 `Pair` 解构绑定。每个元素可使用 `_`、`mutable` 和可选类型标注。
@@ -991,13 +1002,12 @@ while true then {
 };
 ```
 
-### 早退出：`return` 与 `yield`
+### 早退出：`return`
 
 - `return` 带值（或 `Void`）离开所在函数。
-- `yield <expression>` 产出最近的产生值的 `if` / `when` 分支的值，并提前退出该分支 body。它不是通用的块返回机制，在这样的分支 body 之外无效。
 - 裸 `break`（不带表达式）退出最近的 `while` / `for` 循环。
 
-`yield` 与 `break` 不能穿透最内层可退出结构：二者都不能跨越循环边界或分支边界到达外层目标。
+`break` 不能穿透最内层可退出结构：它不能跨越分支边界到达外层循环目标。
 
 ### 用 `defer` 做清理
 
@@ -1050,7 +1060,7 @@ defer {
 
 #### 限制
 
-- `defer` 表达式内不允许 `return`、`break`、`continue`。这包括用于分支值的 `yield <expression>`。
+- `defer` 表达式内不允许 `return`、`break`、`continue`。
 - `defer` 表达式内不允许嵌套 `defer`。
 - `defer` 不是异常式的栈展开机制；在 `panic/abort/exit` 的 `Never` 终止路径上不保证执行。
 - 这些限制不跨越 Lambda 边界——Lambda 有自己独立的作用域。
@@ -1494,21 +1504,22 @@ let result = when x in {
 };
 ```
 
-与 `if` 一样，`when` 中的块分支仍默认为 `Void`。用 `yield <expression>` 产出外层 `when` 表达式的值，并支持块分支 body 内的早退。`yield <expression>` 只在 `when` 作为表达式使用时有效。
+与 `if` 一样，`when` 中块分支的尾表达式就是该分支的值。
 
 ```koral
 let label = when score in {
     100 then {
         println("bonus");
-        yield "perfect";
+        "perfect"
     },
     >= 90 then {
         if has_curve(score) then {
-            yield "A+";
-        };
-        yield "A";
+            "A+"
+        } else {
+            "A"
+        }
     },
-    _ then { yield "other" },
+    _ then { "other" },
 };
 ```
 
