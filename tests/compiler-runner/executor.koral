@@ -54,7 +54,7 @@ file_private let is_windows_host() Bool =
     if env("OS") is .Some(os) then os.contains("Windows") else false;
 
 file_private type CommandExecution {
-    Finished(output CommandOutput),
+    Finished(output CommandOutput, peak_bytes UInt),
     TimedOut(exit_code Int),
     Aborted(exit_code Int),
     MemoryExceeded(exit_code Int, peak_bytes UInt),
@@ -242,7 +242,7 @@ file_private let prepared_run_executable_path(info CaseInfo, output_dir Path, la
             copy_attempt += 1;
             continue;
         };
-        when copy_file(exe_path, launch_path) in {
+        when copy_file(exe_path, to: launch_path) in {
             .Ok(_) then {
                 sleep(100ms);
                 return Result[Path].Ok(launch_path);
@@ -341,13 +341,10 @@ file_private let execute_command_with_timeout(
 
     let pid = proc.pid();
     let command_start = MonoTime.now();
-    let poll_sleep = Duration.new(0, 50_000_000).unwrap();
+    let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap();
 
     let mutable aborted = false;
     let mutable timed_out = false;
-    let mutable memory_exceeded = false;
-    let mutable peak_memory UInt = 0;
-    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt);
     let mutable exit_status = Option[ExitStatus].None();
 
     while exit_status is .None() then {
@@ -359,9 +356,6 @@ file_private let execute_command_with_timeout(
                 .None() then {},
             },
             .Error(message) then {
-                if memory_exceeded then {
-                    return CommandExecution.MemoryExceeded(-1, peak_memory);
-                };
                 if timed_out then {
                     return CommandExecution.TimedOut(-1);
                 };
@@ -386,27 +380,19 @@ file_private let execute_command_with_timeout(
             let _ = kill_process_tree(pid);
         };
 
-        let current_mem_raw = process_tree_working_set_bytes(pid);
-        let current_mem = current_mem_raw(UInt);
-        if current_mem > 0(UInt) then {
-            if current_mem > peak_memory then {
-                peak_memory = current_mem;
-            };
-            if not memory_exceeded and memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
-                memory_exceeded = true;
-                let _ = kill_process_tree(pid);
-            };
-        };
-
         sleep(poll_sleep);
     };
 
     let stdout_content = read_text_file_or_empty(stdout_path);
     let stderr_content = read_text_file_or_empty(stderr_path);
 
+    // Peak RSS comes from the kernel (wait4 ru_maxrss) captured at process exit.
+    let peak_memory = proc.peak_rss_bytes()(UInt);
+    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt);
+
     when exit_status in {
         .Some(status) then {
-            if memory_exceeded then {
+            if memory_limit_bytes > 0(UInt) and peak_memory > memory_limit_bytes then {
                 return CommandExecution.MemoryExceeded(infer_exit_code(status), peak_memory);
             };
             if timed_out then {
@@ -415,12 +401,9 @@ file_private let execute_command_with_timeout(
             if aborted then {
                 return CommandExecution.Aborted(infer_exit_code(status));
             };
-            return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content));
+            return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content), peak_memory);
         },
         .None() then {
-            if memory_exceeded then {
-                return CommandExecution.MemoryExceeded(-1, peak_memory);
-            };
             if timed_out then {
                 return CommandExecution.TimedOut(-1);
             };
@@ -502,7 +485,7 @@ file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Resu
         },
     };
 
-    let case_stem = info.relative_path .replace_all("\\", "/") .replace_all("/", "__") .replace_all(".koral", "");
+    let case_stem = info.relative_path .replace_all("\\", with: "/") .replace_all("/", with: "__") .replace_all(".koral", with: "");
     let case_root = root.join(case_stem);
     when create_dir_all(case_root) in {
         .Ok(_) then {},
@@ -594,7 +577,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
         "failed to spawn compiler",
         stop_requested,
     ) in {
-        .Finished(output) then output,
+        .Finished(output, _) then output,
         .TimedOut(exit_code) then {
             return timeout_case_result(config, info, start, exit_code);
         },
@@ -658,7 +641,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             "failed to spawn compiler",
             stop_requested,
         ) in {
-            .Finished(output) then output,
+            .Finished(output, _) then output,
             .TimedOut(exit_code) then {
                 return timeout_case_result(config, info, start, exit_code);
             },
@@ -722,7 +705,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
             timeout_secs,
             stop_requested,
         ) in {
-            .Finished(output) then output,
+            .Finished(output, _) then output,
             .TimedOut(exit_code) then {
                 return timeout_case_result(config, info, start, exit_code);
             },
@@ -741,7 +724,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                     timeout_secs,
                     stop_requested,
                 ) in {
-                    .Finished(output) then output,
+                    .Finished(output, _) then output,
                     .TimedOut(exit_code) then {
                         return timeout_case_result(config, info, start, exit_code);
                     },
@@ -833,7 +816,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
         timeout_secs,
         stop_requested,
     ) in {
-        .Finished(output) then output,
+        .Finished(output, _) then output,
         .TimedOut(exit_code) then {
             return timeout_case_result(config, info, start, exit_code);
         },
@@ -852,7 +835,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested At
                 timeout_secs,
                 stop_requested,
             ) in {
-                .Finished(output) then output,
+                .Finished(output, _) then output,
                 .TimedOut(exit_code) then {
                     return timeout_case_result(config, info, start, exit_code);
                 },

@@ -2154,6 +2154,7 @@ uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <spawn.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
 #include <signal.h>
 #include <poll.h>
 #if defined(__APPLE__)
@@ -2554,6 +2555,18 @@ static void koral_process_handle_close(DWORD pid) {
 
 #endif
 
+// Normalize ru_maxrss to bytes. The unit is platform-dependent:
+// macOS reports bytes, Linux/BSD report kilobytes.
+#if !defined(_WIN32) && !defined(_WIN64)
+static uint64_t koral_maxrss_to_bytes(const struct rusage* ru) {
+#if defined(__APPLE__) && defined(__MACH__)
+    return (uint64_t)ru->ru_maxrss;            // macOS: already bytes
+#else
+    return (uint64_t)ru->ru_maxrss * 1024u;    // Linux/BSD: kilobytes
+#endif
+}
+#endif
+
 int32_t __koral_waitpid(uint32_t pid) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = koral_process_handle_take((DWORD)pid);
@@ -2574,7 +2587,7 @@ int32_t __koral_waitpid(uint32_t pid) {
 #endif
 }
 
-int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num, uint64_t* out_maxrss_bytes) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = koral_process_handle_take((DWORD)pid);
     if (h == NULL) {
@@ -2591,13 +2604,22 @@ int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_n
         CloseHandle(h);
         return -1;
     }
+    if (out_maxrss_bytes != NULL) {
+        PROCESS_MEMORY_COUNTERS pmc;
+        if (GetProcessMemoryInfo(h, &pmc, sizeof(pmc))) {
+            *out_maxrss_bytes = (uint64_t)pmc.PeakWorkingSetSize;
+        } else {
+            *out_maxrss_bytes = 0;
+        }
+    }
     CloseHandle(h);
     *exit_code = (int32_t)code;
     *signal_num = 0;
     return 0;
 #else
     int status;
-    while (waitpid((pid_t)pid, &status, 0) < 0) {
+    struct rusage ru;
+    while (wait4((pid_t)pid, &status, 0, &ru) < 0) {
         if (errno != EINTR) return -1;
     }
     if (WIFEXITED(status)) {
@@ -2610,11 +2632,14 @@ int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_n
         *exit_code = -1;
         *signal_num = 0;
     }
+    if (out_maxrss_bytes != NULL) {
+        *out_maxrss_bytes = koral_maxrss_to_bytes(&ru);
+    }
     return 0;
 #endif
 }
 
-int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num, uint64_t* out_maxrss_bytes) {
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE h = koral_process_handle_peek((DWORD)pid);
     int using_registry_handle = (h != NULL);
@@ -2649,6 +2674,15 @@ int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_nu
         return -1;
     }
 
+    if (out_maxrss_bytes != NULL) {
+        PROCESS_MEMORY_COUNTERS pmc;
+        if (GetProcessMemoryInfo(h, &pmc, sizeof(pmc))) {
+            *out_maxrss_bytes = (uint64_t)pmc.PeakWorkingSetSize;
+        } else {
+            *out_maxrss_bytes = 0;
+        }
+    }
+
     if (using_registry_handle) {
         koral_process_handle_close((DWORD)pid);
     } else {
@@ -2660,7 +2694,8 @@ int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_nu
     return 1;  // exited
 #else
     int status;
-    pid_t result = waitpid((pid_t)pid, &status, WNOHANG);
+    struct rusage ru;
+    pid_t result = wait4((pid_t)pid, &status, WNOHANG, &ru);
     if (result < 0) return -1;
     if (result == 0) return 0;  // still running
     if (WIFEXITED(status)) {
@@ -2672,6 +2707,10 @@ int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_nu
     } else {
         *exit_code = -1;
         *signal_num = 0;
+    }
+    // wait4 only fills rusage when a child was actually reaped.
+    if (out_maxrss_bytes != NULL) {
+        *out_maxrss_bytes = koral_maxrss_to_bytes(&ru);
     }
     return 1;  // exited
 #endif

@@ -18,11 +18,11 @@ foreign let __koral_waitpid(pid UInt32) Int32;
 
 /// Wait for child process with full exit information.
 /// Returns 0 on success, non-zero on failure.
-foreign let __koral_waitpid_full(pid UInt32, exit_code *unsafe Int32, signal_num *unsafe Int32) Int32;
+foreign let __koral_waitpid_full(pid UInt32, exit_code *unsafe Int32, signal_num *unsafe Int32, out_maxrss_bytes *unsafe UInt64) Int32;
 
 /// Non-blocking check if child process has exited.
 /// Returns >0 if exited, 0 if still running, <0 on error.
-foreign let __koral_try_waitpid(pid UInt32, exit_code *unsafe Int32, signal_num *unsafe Int32) Int32;
+foreign let __koral_try_waitpid(pid UInt32, exit_code *unsafe Int32, signal_num *unsafe Int32, out_maxrss_bytes *unsafe UInt64) Int32;
 
 /// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
 /// Allocates memory for output buffers (caller must free with dealloc_memory).
@@ -49,6 +49,7 @@ type mutable ProcessStorage(
     mutable stdout_fd Int32,
     mutable stderr_fd Int32,
     mutable waited Bool,
+    mutable peak_rss_bytes UInt64,
 );
 
 given ProcessStorage as Drop {
@@ -82,6 +83,10 @@ given Process {
     /// Get the child process PID.
     public pid(self) UInt32 = self.storage.pid;
 
+    /// Peak resident set size (RSS) of the child process in bytes, as reported
+    /// by the kernel after the process was reaped. 0 means not captured.
+    public peak_rss_bytes(self) UInt64 = self.storage.peak_rss_bytes;
+
     /// Block until the child process exits, returning its exit status.
     public wait(self) Result[ExitStatus] = {
         if self.storage.waited then {
@@ -89,10 +94,12 @@ given Process {
         };
         let mutable exit_code Int32 = 0;
         let mutable signal_num Int32 = 0;
-        let result = __koral_waitpid_full(self.storage.pid, &unsafe exit_code, &unsafe signal_num);
+        let mutable maxrss UInt64 = 0;
+        let result = __koral_waitpid_full(self.storage.pid, &unsafe exit_code, &unsafe signal_num, &unsafe maxrss);
         if result <> 0 then {
             return Result[ExitStatus].Error(last_error_message());
         };
+        self.storage.peak_rss_bytes = maxrss;
         self.storage.waited = true;
         return if signal_num > 0 then
             Result[ExitStatus].Ok(ExitStatus.from_signal(signal_num(Int))) else
@@ -177,13 +184,15 @@ given Process {
     public try_wait(self) Result[Option[ExitStatus]] = {
         let mutable exit_code Int32 = 0;
         let mutable signal_num Int32 = 0;
-        let result = __koral_try_waitpid(self.storage.pid, &unsafe exit_code, &unsafe signal_num);
+        let mutable maxrss UInt64 = 0;
+        let result = __koral_try_waitpid(self.storage.pid, &unsafe exit_code, &unsafe signal_num, &unsafe maxrss);
         if result < 0 then {
             return Result[Option[ExitStatus]].Error(last_error_message());
         };
         if result == 0 then {
             return Result[Option[ExitStatus]].Ok(Option[ExitStatus].None());
         };
+        self.storage.peak_rss_bytes = maxrss;
         self.storage.waited = true;
         let status = if signal_num > 0 then {
             yield ExitStatus.from_signal(signal_num(Int));
