@@ -25,7 +25,7 @@
 
 - `self` 按拷贝传递；ARC / 隐藏间接层由类型布局分析决定，与 method call receiver 适配无关。
 - `type mutable` 恒为 managed（共享对象语义）。
-- plain `type` 只暴露值语义；底层是 inline value 还是 managed wrapper 由编译器按语义属性决定，已确认的触发条件：
+- plain `type` 只暴露浅层不可变、无 identity、且不承诺值语义；底层是 inline value 还是 managed wrapper 由编译器按语义属性决定，已确认的触发条件：
   - 值递归
   - 显式 `Drop` conformance
 - managed nominal 的 copy 必须对嵌套 managed 字段逐个 retain，与外层 control block 的 retain 配套；否则参数 drop 会造成 use-after-free。
@@ -59,7 +59,7 @@ Swift 主线基线：**526/526 全部通过**。运行方式见 `tests/compiler-
 7. **拒绝 `mutable type alias` / `mutable type enum`**：parser 明确报错（声明处可变性仅适用于 nominal）。
 8. **收紧 `borrow_ptr` / `borrow_mut_ptr`**：新增 `Pod` 标记 trait，`List` 的两个入口限定 `[T Pod]`，不再是「任意 T → `*unsafe T`」的通用桥；删除泄漏内部 bucket 类型的 `Dict.borrow_ptr`。
 9. **旧机制清理**：删除已死的 COW / 旧托管引用 intrinsic 及其全管线（`is_unique_mutable`、`ref_count`、`make_ref`、`make_mut_ref`、`downgrade_mut_ref`、`upgrade_mut_ref` 及名称匹配入口）。`.reference` / `.mutableReference` 类型与隐式解引用是 managed nominal 的内部布局表示，非用户表层遗留，保留。
-10. **branch/break → yield 术语**：类型、方法、注释、诊断全部切换，`TypedASTBranchBreakSummary.swift` 更名 `TypedASTYieldSummary.swift`。
+10. **旧的 `yield` 术语记录已过时**：当前实现没有表层 `yield` 语法；value-producing `if` / `when` 直接取分支最后一个表达式，先前的“branch/break → yield”记录不再代表现状。
 11. **全局同名自由函数查重**：`NameCollector` 按模块限定查重，重复定义报 `Duplicate definition`。
 
 ## 当前 bootstrap 状态

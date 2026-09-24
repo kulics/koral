@@ -1075,10 +1075,12 @@ defer {
 Koral provides three special operators for working with `Option` and `Result` types:
 
 - `or else`: Value coalescing. Returns the right-hand default value when the left side is `None` or `Error`.
-- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`.
+- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`. If the right-hand side already produces the same `Option` / `Result` kind, the result is flattened by one layer.
 - `or return`: Early-return propagation sugar. It unwraps `Some` / `Ok`, and on `None` / `Error` returns from the enclosing function.
 
 In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
+
+Precedence follows the parser: `and then` binds tighter than logical `and`, while `or else` / `or return` bind tighter than logical `or` but looser than logical `and`.
 
 ```koral
 let opt = Option[Int].Some(42);

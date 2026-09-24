@@ -348,7 +348,7 @@ ARC 在新模型里是**实现层能力**，不是用户必须直接操作的类
 为了避免歧义，本 RFC 进一步规定：
 
 1. `drop(self)` 内禁止显式调用 `drop(...)`
-2. `drop(self)` 内禁止把 `self` 作为返回值、yield 值或闭包捕获值导出
+2. `drop(self)` 内禁止把 `self` 作为返回值、`if` / `when` 分支结果值或闭包捕获值导出
 3. `drop(self)` 内允许读取字段、调用 pure / observation-style helper、释放外部资源、释放内部子对象引用
 4. `drop(self)` 内是否允许调用普通 trait / given 方法，由编译器按“不得导致对象复活或重入析构”规则判定；保守实现可以只允许直接字段访问和白名单 intrinsic
 
@@ -616,7 +616,7 @@ type mutable Counter(mutable value Int, id UInt)
 没有托管引用语法之后，闭包捕获由编译器隐藏实现：
 
 - 捕获 plain `type` 值时，编译器可复制、共享 backing storage 或提升到隐藏 box
-- 捕获 `let mutable` 局部时，编译器可自动生成隐藏 capture cell
+- 捕获 `let mutable` 局部时，编译器直接拒绝；需要共享可变状态时，用户应显式放入 `Cell[T]`
 - 捕获 `type mutable` 对象时，闭包共享同一对象
 
 这些机制是实现细节，不再暴露为用户可写的安全引用类型。
@@ -675,7 +675,7 @@ raw pointer 的 pointee 当前建议保持兼容，但需要补齐风险说明�
 1. `*unsafe T` / `*unsafe mutable T` 可以继续指向普通 Koral 类型
 2. 一旦某个 `T` 进入 raw pointee 语义，编译器就必须把该 `T` 视为具有稳定、可寻址、可重定位定义的物理布局
 3. 对已进入 raw pointee 语义的 `T`，编译器不得再使用会破坏地址稳定性的隐藏表示变换
-4. 对递归类型、trait object backing、closure capture cell、隐藏共享 backing 等依赖特殊布局的实现，如果无法满足第 2 条和第 3 条，就不得形成对应的 `*unsafe T`
+4. 对递归类型、trait object backing、隐藏共享 backing 等依赖特殊布局的实现，如果无法满足第 2 条和第 3 条，就不得形成对应的 `*unsafe T`
 5. 任何公开 API 一旦暴露 `*unsafe T`，就等价于把 `T` 的某种物理布局承诺暴露给低层代码
 
 这意味着：
@@ -730,7 +730,7 @@ let t *unsafe KoralTimespec = ...;
 
 1. `*unsafe T` 指向普通 Koral 类型时，`T` 必须被视为具有可寻址、可重定位定义的物理布局
 2. 编译器不得对已进入 raw pointee 语义的 `T` 再做会破坏地址稳定性的隐藏表示变换
-3. 对递归类型、trait object backing、closure capture cell 这类依赖隐藏布局的实现，要么禁止形成 `*unsafe T`，要么单独规定其 raw layout 规则
+3. 对递归类型、trait object backing 这类依赖隐藏布局的实现，要么禁止形成 `*unsafe T`，要么单独规定其 raw layout 规则
 4. 任何依赖 raw pointee 的 API 都必须被视为比普通类型语义更底层的承诺，它会反向约束编译器优化空间
 
 这条路不是不能走，但它的代价必须在 RFC 中明确，而不能继续假设“任意 T 都能指针化”是零成本的。
@@ -739,7 +739,7 @@ let t *unsafe KoralTimespec = ...;
 
 - 当前 Koral 风格更偏向保留 `*unsafe T` 对普通类型的支持
 - 如果保留，就要把它视为编译器布局自由的一项显式约束
-- 这项约束尤其会影响递归类型、trait object backing、closure capture cell、以及任何依赖 hidden storage 的实现
+- 这项约束尤其会影响递归类型、trait object backing、以及任何依赖 hidden storage 的实现
 
 #### 可变枚举
 

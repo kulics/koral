@@ -1070,10 +1070,12 @@ defer {
 Koral 为 `Option` 和 `Result` 类型提供三个特殊操作符：
 
 - `or else`：值合并。左侧为 `None` 或 `Error` 时返回右侧默认值。
-- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换。
+- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换。若右侧本身产出相同 kind 的 `Option` / `Result`，结果会自动拍平一层。
 - `or return`：早返回传播语法糖。它解包 `Some` / `Ok`，遇到 `None` / `Error` 则从所在函数返回。
 
 在 `and then` 与 `or else` 表达式中，关键字 `it` 指代被解包的值：对 `and then`，`it` 是内层的 `Some` 或 `Ok` 值；对作用于 `Result` 的 `or else`，`it` 是 `Error` 值。
+
+其优先级与解析器一致：`and then` 高于逻辑 `and`；`or else` / `or return` 高于逻辑 `or`，但低于逻辑 `and`。
 
 ```koral
 let opt = Option[Int].Some(42);

@@ -199,8 +199,8 @@ let result = list.iterator();
 - `for` statements over any `Iterable`
 - `when` expressions/statements for exhaustive pattern matching
 - `defer` for deterministic cleanup
-- `break`, `continue`, `return`, `yield`
-- `yield expression` inside the nearest value-producing `if` / `when` branch body for branch values and early branch exit
+- `break`, `continue`, `return`
+- Value-producing `if` / `when`: the branch's final expression becomes the branch value
 
 ### Pattern Matching
 
