@@ -1,3 +1,4 @@
+
 given TypeChecker {
     module_private spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
         let _ = self;
@@ -20,7 +21,8 @@ given TypeChecker {
     };
 
     module_private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
-        let mutable msg = "Type ";
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type ");
         msg.push_string(self.context().type_display_name(bound_type));
         msg.push_string(" does not explicitly implement trait ");
         msg.push_string(constraint);
@@ -31,15 +33,16 @@ given TypeChecker {
             msg.push_string(constraint);
             msg.push_string(")");
         };
-        return msg;
+        return msg.to_string();
     };
 
     module_private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type]) String = {
-        let mutable msg = "Type ";
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type ");
         msg.push_string(self.context().type_display_name(target_type));
         msg.push_string(" does not explicitly implement trait ");
         if not trait_args.is_empty() then {
-            let mutable args_display = String.new();
+            let mutable args_display = StringBuilder.new();
             let mutable first = true;
             for arg in trait_args then {
                 if not first then { args_display.push_string(", ");};
@@ -47,15 +50,16 @@ given TypeChecker {
                 first = false;
             };
             msg.push_string("[");
-            msg.push_string(args_display);
+            msg.push_string(args_display.to_string());
             msg.push_string("]");
         };
         msg.push_string(trait_name);
-        return msg;
+        return msg.to_string();
     };
 
     module_private trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
-        let mutable msg = "Type '";
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type '");
         msg.push_string(self.context().type_display_name(target_type));
         msg.push_string("' does not satisfy trait '");
         msg.push_string(trait_name);
@@ -64,11 +68,12 @@ given TypeChecker {
         msg.push_string("' does not implement '");
         msg.push_string(constraint);
         msg.push_string("'");
-        return msg;
+        return msg.to_string();
     };
 
     module_private trait_requirement_missing_blanket_given_message(self, target_type Type, trait_name String, modifier_name String) String = {
-        let mutable msg = "Type '";
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type '");
         msg.push_string(self.context().type_display_name(target_type));
         msg.push_string("' does not satisfy trait '");
         msg.push_string(trait_name);
@@ -77,7 +82,33 @@ given TypeChecker {
         msg.push_string("' and '");
         msg.push_string(trait_name);
         msg.push_string("'");
-        return msg;
+        return msg.to_string();
+    };
+
+    module_private mutable_constraint_violation_message(self, target_type Type, context String) String = {
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type '");
+        msg.push_string(self.context().type_display_name(target_type));
+        msg.push_string("' does not satisfy the 'mutable' constraint");
+        if not context.is_empty() then {
+            msg.push_string(" (");
+            msg.push_string(context);
+            msg.push_string(")");
+        };
+        msg.push_string(". Only types declared with 'type mutable' can be used as weak references.");
+        return msg.to_string();
+    };
+
+    module_private satisfies_mutable_constraint(self, target_type Type) Bool = {
+        return when target_type in {
+            .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
+            .GenericStruct(template, _, _) then when self.try_resolve_named_type_without_diag(template) in {
+                .Some(resolved) then self.satisfies_mutable_constraint(self.canonicalize_alias_type(resolved)),
+                .None() then false,
+            },
+            .GenericParameter(_) then true,
+            _ then false,
+        };
     };
 
     module_private is_upper_first_char(self, s String) Bool = {
@@ -90,7 +121,7 @@ given TypeChecker {
 
     module_private make_visibility_checker(self) Option[VisibilityChecker] = {
         return when self.storage.import_graph in {
-            .Some(graph) then Option[VisibilityChecker].Some(VisibilityChecker.new(box(graph), self.storage.module_path, self.storage.file_path)),
+            .Some(graph) then Option[VisibilityChecker].Some(VisibilityChecker.new(graph, self.storage.module_path, self.storage.file_path)),
             .None() then Option[VisibilityChecker].None(),
         };
     };
@@ -171,14 +202,14 @@ given TypeChecker {
                     .None() then Option[Pair[String, AccessModifier]].None(),
                 };
             },
-            .ReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .MutableReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .BorrowedReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .MutableBorrowedReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .PointerType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .MutablePointerType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .WeakReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
-            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .ReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .MutableReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .BorrowedReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .MutableBorrowedReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .PointerType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .MutablePointerType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .WeakReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
             .FunctionType(params, return_type) then {
                 for param in params then {
                     when self.first_signature_visibility_violation(param.param_type, required_access) in {
@@ -186,29 +217,29 @@ given TypeChecker {
                         .None() then {},
                     };
                 };
-                yield self.first_signature_visibility_violation(*return_type, required_access);
+                yield self.first_signature_visibility_violation(return_type, required_access);
             },
-            .GenericStruct(_, args) then {
+            .GenericStruct(_, _, args) then {
                 for arg in args then {
-                    when self.first_signature_visibility_violation(*arg, required_access) in {
+                    when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
                         .None() then {},
                     };
                 };
                 yield Option[Pair[String, AccessModifier]].None();
             },
-            .GenericEnum(_, args) then {
+            .GenericEnum(_, _, args) then {
                 for arg in args then {
-                    when self.first_signature_visibility_violation(*arg, required_access) in {
+                    when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
                         .None() then {},
                     };
                 };
                 yield Option[Pair[String, AccessModifier]].None();
             },
-            .TraitObject(_, type_args) then {
+            .TraitObject(_, _, type_args) then {
                 for arg in type_args then {
-                    when self.first_signature_visibility_violation(*arg, required_access) in {
+                    when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
                         .None() then {},
                     };
@@ -384,10 +415,6 @@ given TypeChecker {
     };
 
     module_private lookup_current_file_def_id(self, name String) Option[DefId] = {
-        when self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
-            .Some(def_id) then { return Option[DefId].Some(def_id);},
-            .None() then {},
-        };
         let mutable id UInt = 1;
         let next_def_id = self.context().next_def_id();
         while id < next_def_id then {
@@ -403,6 +430,10 @@ given TypeChecker {
                 .None() then {},
             };
             id += 1;
+        };
+        when self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
+            .Some(def_id) then { return Option[DefId].Some(def_id);},
+            .None() then {},
         };
         return Option[DefId].None();
     };
@@ -424,7 +455,7 @@ given TypeChecker {
                         .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
                         .Trait() then {
                             let trait_name = self.context().get_name(def_id) or else name;
-                            yield Option[Type].Some(self.canonical_trait_object_type(trait_name));
+                            yield Option[Type].Some(Type.TraitObject(trait_name, def_id, List[Type].new()));
                         },
                     },
                     .GenericTemplate(template_kind) then when template_kind in {
@@ -444,7 +475,7 @@ given TypeChecker {
         return when self.context().get_name(def_id) in {
             .Some(name) then {
                 let kind_opt = self.context().get_kind(def_id);
-                let symbol_type = when self.context().get_symbol_type(def_id) in {
+                let mutable symbol_type = when self.context().get_symbol_type(def_id) in {
                     .Some(t) then t,
                     .None() then when kind_opt in {
                         .Some(kind) then when kind in {
@@ -452,7 +483,7 @@ given TypeChecker {
                                 .Structure() then Type.StructureType(def_id),
                                 .Enum() then Type.EnumType(def_id),
                                 .Opaque() then Type.OpaqueType(def_id),
-                                .Trait() then self.canonical_trait_object_type(name),
+                                .Trait() then Type.TraitObject(name, def_id, List[Type].new()),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
                                 .Structure() then Type.StructureType(def_id),
@@ -649,15 +680,18 @@ given TypeChecker {
         if trait_name == "Any" then {
             return true;
         };
+        if trait_name == "mutable" then {
+            return self.satisfies_mutable_constraint(target_type);
+        };
         when target_type in {
-            .TraitObject(name, _) then {
+            .TraitObject(name, _, _) then {
                 return name == trait_name or self.storage.trait_registry.has_inheritance(name, trait_name);
             },
             _ then {},
         };
         if trait_name == "Deref" then {
             return when target_type in {
-                .TraitObject(_, _) then false,
+                .TraitObject(_, _, _) then false,
                 .OpaqueType(_) then false,
                 .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                     .Some(constraints) then {
@@ -686,6 +720,9 @@ given TypeChecker {
     };
 
     module_private satisfies_trait_requirement_with_args(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
+        if trait_name == "mutable" then {
+            return trait_args.is_empty() and self.satisfies_mutable_constraint(target_type);
+        };
         let key = self.trait_conformance_key(target_type, trait_name, trait_args);
         if self.storage.trait_requirement_in_progress.contains(key) then {
             return false;
@@ -781,7 +818,7 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 let mutable out = List[Type].new();
                 for arg in trait_args then {
-                    out.push(self.resolve_type_with_bindings(*arg, bindings));
+                    out.push(self.resolve_type_with_bindings(arg, bindings));
                 };
                 yield out;
             },
@@ -825,8 +862,8 @@ given TypeChecker {
             .MutablePointerType(_) then "MutPtr",
             .WeakReferenceType(_) then "WeakRef",
             .MutableWeakReferenceType(_) then "MutWeakRef",
-            .GenericStruct(template, _) then template,
-            .GenericEnum(template, _) then template,
+            .GenericStruct(template, _, _) then template,
+            .GenericEnum(template, _, _) then template,
             .StructureType(def_id) then when self.context().get_template_name(def_id) in {
                 .Some(template_name) then template_name,
                 .None() then self.context().get_name(def_id) or else "struct#\(def_id.id)",
@@ -836,7 +873,7 @@ given TypeChecker {
                 .None() then self.context().get_name(def_id) or else "enum#\(def_id.id)",
             },
             .GenericParameter(name) then "GenericParam:\(name)",
-            .TraitObject(name, _) then "TraitObject:\(name)",
+            .TraitObject(name, _, _) then "TraitObject:\(name)",
             _ then self.context().type_display_name(target_type),
         };
     };
@@ -844,14 +881,14 @@ given TypeChecker {
     module_private type_modifier_inner_type(self, target_type Type) Option[Type] = {
         let _ = self;
         return when target_type in {
-            .ReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableReferenceType(inner) then Option[Type].Some(*inner),
-            .BorrowedReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableBorrowedReferenceType(inner) then Option[Type].Some(*inner),
-            .PointerType(inner) then Option[Type].Some(*inner),
-            .MutablePointerType(inner) then Option[Type].Some(*inner),
-            .WeakReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableWeakReferenceType(inner) then Option[Type].Some(*inner),
+            .ReferenceType(inner) then Option[Type].Some(inner),
+            .MutableReferenceType(inner) then Option[Type].Some(inner),
+            .BorrowedReferenceType(inner) then Option[Type].Some(inner),
+            .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
+            .PointerType(inner) then Option[Type].Some(inner),
+            .MutablePointerType(inner) then Option[Type].Some(inner),
+            .WeakReferenceType(inner) then Option[Type].Some(inner),
+            .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
             _ then Option[Type].None(),
         };
     };
@@ -860,7 +897,7 @@ given TypeChecker {
         if trait_name == "Deref" then {
             return Option[GenericTraitConformanceStatus].None();
         };
-        let inner_type = self.type_modifier_inner_type(target_type) or else {
+        let mutable inner_type = self.type_modifier_inner_type(target_type) or else {
             return Option[GenericTraitConformanceStatus].None();
         };
         when inner_type in {
@@ -926,7 +963,7 @@ given TypeChecker {
         return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name));
     };
 
-    module_private conformance_type_key_matches(self, pattern Type, actual Type, bindings *mutable Dict[String, Type]) Bool = {
+    module_private conformance_type_key_matches(self, pattern Type, actual Type, bindings Dict[String, Type]) Bool = {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
@@ -938,55 +975,55 @@ given TypeChecker {
                 };
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .BorrowedReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .MutableBorrowedReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
-            .GenericStruct(template, p_args) then when actual in {
-                .GenericStruct(actual_template, a_args) then {
+            .GenericStruct(template, _, p_args) then when actual in {
+                .GenericStruct(actual_template, _, a_args) then {
                     if not (template == actual_template and p_args.count() == a_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((*p_args[i]), (*a_args[i]), bindings) then {
+                        if not self.conformance_type_key_matches((p_args[i]), (a_args[i]), bindings) then {
                             return false;
                         };
                         i += 1;
@@ -1005,7 +1042,7 @@ given TypeChecker {
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((*p_args[i]), actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches((p_args[i]), actual_args[i], bindings) then {
                             return false;
                         };
                         i += 1;
@@ -1014,14 +1051,14 @@ given TypeChecker {
                 },
                 _ then false,
             },
-            .GenericEnum(template, p_args) then when actual in {
-                .GenericEnum(actual_template, a_args) then {
+            .GenericEnum(template, _, p_args) then when actual in {
+                .GenericEnum(actual_template, _, a_args) then {
                     if not (template == actual_template and p_args.count() == a_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((*p_args[i]), (*a_args[i]), bindings) then {
+                        if not self.conformance_type_key_matches((p_args[i]), (a_args[i]), bindings) then {
                             return false;
                         };
                         i += 1;
@@ -1040,7 +1077,7 @@ given TypeChecker {
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((*p_args[i]), actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches((p_args[i]), actual_args[i], bindings) then {
                             return false;
                         };
                         i += 1;
@@ -1144,56 +1181,56 @@ given TypeChecker {
                 };
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .BorrowedReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableBorrowedReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
-            .GenericStruct(template, p_args) then when actual in {
-                .GenericStruct(actual_template, a_args) then {
+            .GenericStruct(template, _, p_args) then when actual in {
+                .GenericStruct(actual_template, _, a_args) then {
                     if not (template == actual_template and p_args.count() == a_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), (*a_args[i]), current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), (a_args[i]), current_bindings) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1213,7 +1250,7 @@ given TypeChecker {
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), actual_args[i], current_bindings) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1222,15 +1259,15 @@ given TypeChecker {
                 },
                 _ then Option[Dict[String, Type]].None(),
             },
-            .GenericEnum(template, p_args) then when actual in {
-                .GenericEnum(actual_template, a_args) then {
+            .GenericEnum(template, _, p_args) then when actual in {
+                .GenericEnum(actual_template, _, a_args) then {
                     if not (template == actual_template and p_args.count() == a_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), (*a_args[i]), current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), (a_args[i]), current_bindings) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1250,7 +1287,7 @@ given TypeChecker {
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), actual_args[i], current_bindings) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1276,6 +1313,9 @@ given TypeChecker {
         return when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
             .Satisfied() then true,
             .MissingConstraint(bound_type, constraint_param, constraint) then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -1286,6 +1326,9 @@ given TypeChecker {
                 yield false;
             },
             .MissingBlanketGiven(modifier_name) then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -1296,6 +1339,9 @@ given TypeChecker {
                 yield false;
             },
             .MissingConformance() then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args);
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message));
                 yield false;
@@ -1307,11 +1353,57 @@ given TypeChecker {
         return self.enforce_explicit_trait_requirement_with_context(target_type, trait_name, "");
     };
 
+    module_private enforce_mutable_constraint_for_call(self, target_type Type, function String) Bool = {
+        let satisfied = when target_type in {
+            .StructureType(def_id) then self.context().is_struct_mutable(def_id),
+            .GenericStruct(template_name, template_def_id, _) then {
+                if template_def_id.is_valid() then {
+                    yield self.context().is_struct_mutable(template_def_id);
+                };
+                let resolved_def_id = self.storage.generic_templates.lookup_struct_def_id(template_name);
+                yield resolved_def_id.is_valid() and self.context().is_struct_mutable(resolved_def_id);
+            },
+            _ then false,
+        };
+        if not satisfied then {
+            self.push_diagnostic_at_span(
+                "'\(function)' requires a 'type mutable' argument, but '\(type_to_string(target_type))' is not declared as 'type mutable'",
+                unknown_span()
+            );
+        };
+        return satisfied;
+    };
+
+    // Swift calls `enforceGenericConstraints` only from
+    // `resolveGenericExtensionMethod` (TypeCheckerMethods.swift:572) — a CALL
+    // SITE, where the type arguments are concrete. Re-checking a body while
+    // materializing a trait-tool method for a conformance is a DECLARATION
+    // activity and must not report: `contains` materialized for
+    // `EnumerateIterator[T, R] as Iterator[Pair[UInt, T]]` would otherwise
+    // demand `Pair[UInt, T]: Eq` before `T` is known. The call site enforces.
+    module_private constraint_enforcement_is_deferred(self) Bool = {
+        return self.storage.constraint_enforcement_deferred;
+    };
+
     module_private enforce_explicit_trait_requirement_with_context(self, target_type Type, trait_name String, constraint_param String) Bool = {
         when target_type in {
             .Unknown() then { return true;},
             .TypeVar(_) then { return true;},
             _ then {},
+        };
+
+        if trait_name == "mutable" then {
+            if self.satisfies_mutable_constraint(target_type) then {
+                return true;
+            };
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    self.mutable_constraint_violation_message(target_type, if constraint_param.is_empty() then "" else "checking constraint \(constraint_param): mutable")
+                )
+            );
+            return false;
         };
 
         // Check generic parameter constraints first (like Swift's hasTraitBound)
@@ -1336,6 +1428,9 @@ given TypeChecker {
         return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
             .Satisfied() then true,
             .MissingConstraint(bound_type, constraint_param, constraint) then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -1346,6 +1441,9 @@ given TypeChecker {
                 yield false;
             },
             .MissingBlanketGiven(modifier_name) then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
@@ -1356,6 +1454,9 @@ given TypeChecker {
                 yield false;
             },
             .MissingConformance() then {
+                if self.constraint_enforcement_is_deferred() then {
+                    yield true;
+                };
                 let message = if constraint_param.is_empty() then self.trait_missing_conformance_message(target_type, trait_name, List[Type].new()) else self.trait_missing_constraint_message(target_type, constraint_param, trait_name);
                 self.storage.diagnostics.push(
                     make_diagnostic(
@@ -1377,7 +1478,7 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
                     // Use resolution_scope-aware resolution so generic params like T are found
-                    let item_type = self.resolve_type((*trait_args[0(UInt)]));
+                    let mutable item_type = self.resolve_type((trait_args[0(UInt)]));
                     let mutable args = List[Type].new();
                     args.push(item_type);
                     self.record_explicit_trait_conformance(target_type, "Iterator", args);
@@ -1395,7 +1496,7 @@ given TypeChecker {
         when trait_type in {
             .Generic(_, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
-                    let item_type = self.resolve_type_with_bindings((*trait_args[0(UInt)]), bindings);
+                    let mutable item_type = self.resolve_type_with_bindings((trait_args[0(UInt)]), bindings);
                     let mutable args = List[Type].new();
                     args.push(item_type);
                     self.record_explicit_trait_conformance(target_type, "Iterator", args);

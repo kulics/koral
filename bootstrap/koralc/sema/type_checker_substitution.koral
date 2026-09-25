@@ -90,43 +90,43 @@ given TypeChecker {
     module_private apply_subst_to_trait_members(self, subst TypeSubstitution, members List[TypedTraitMember]) List[TypedTraitMember] = {
         let mutable out = List[TypedTraitMember].new();
         for member in members then {
-            out.push(TypedTraitMember(member.name, self.apply_subst_to_params(subst, member.params), subst.apply(member.return_type)));
+            out.push(TypedTraitMember(member.name, member.has_generic_type_params, self.apply_subst_to_params(subst, member.params), subst.apply(member.return_type)));
         };
         return out;
     };
 
-    module_private apply_subst_to_given_members(self, subst TypeSubstitution, members List[* TypedGivenMember]) List[* TypedGivenMember] = {
-        let mutable out = List[* TypedGivenMember].new();
+    module_private apply_subst_to_given_members(self, subst TypeSubstitution, members List[TypedGivenMember]) List[TypedGivenMember] = {
+        let mutable out = List[TypedGivenMember].new();
         for m_ref in members then {
-            let m = *m_ref;
+            let m = m_ref;
             let new_body = when m.body in {
-                .Some(b) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, b)),
-                .None() then Option[* TypedExpr].None(),
+                .Some(b) then Option[TypedExpr].Some(self.apply_subst_to_expr(subst, b)),
+                .None() then Option[TypedExpr].None(),
             };
             let new_params = self.apply_subst_to_params(subst, m.params);
             let new_return_type = subst.apply(m.return_type);
-            out.push(box(TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body)));
+            out.push(TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body));
         };
         return out;
     };
 
-    module_private apply_subst_to_symbol(self, subst TypeSubstitution, symbol * Symbol) Symbol = {
+    module_private apply_subst_to_symbol(self, subst TypeSubstitution, symbol Symbol) Symbol = {
         return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind);
     };
 
-    module_private apply_subst_to_statement(self, subst TypeSubstitution, stmt * TypedStatement) TypedStatement = {
+    module_private apply_subst_to_statement(self, subst TypeSubstitution, stmt TypedStatement) TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
-                yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span);
+                yield TypedStatement.LetStmt(self.apply_subst_to_symbol(subst, symbol), self.apply_subst_to_expr(subst, value), span);
             },
             .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
                 let new_first_symbol = when first_symbol in {
-                    .Some(symbol) then Option[* Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
-                    .None() then Option[* Symbol].None(),
+                    .Some(symbol) then Option[Symbol].Some(self.apply_subst_to_symbol(subst, symbol)),
+                    .None() then Option[Symbol].None(),
                 };
                 let new_second_symbol = when second_symbol in {
-                    .Some(symbol) then Option[* Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
-                    .None() then Option[* Symbol].None(),
+                    .Some(symbol) then Option[Symbol].Some(self.apply_subst_to_symbol(subst, symbol)),
+                    .None() then Option[Symbol].None(),
                 };
                 yield TypedStatement.PairLetStmt(subst.apply(pair_type), new_first_symbol, new_second_symbol, self.apply_subst_to_expr(subst, value), span);
             },
@@ -138,8 +138,8 @@ given TypeChecker {
             },
             .IfStmt(condition, then_branch, else_branch, span) then {
                 let new_else = when else_branch in {
-                    .Some(expr) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
-                    .None() then Option[* TypedExpr].None(),
+                    .Some(expr) then Option[TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
+                    .None() then Option[TypedExpr].None(),
                 };
                 yield TypedStatement.IfStmt(
                     self.apply_subst_to_expr(subst, condition),
@@ -164,8 +164,8 @@ given TypeChecker {
             },
             .ReturnStmt(value, span) then {
                 let new_value = when value in {
-                    .Some(expr) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
-                    .None() then Option[* TypedExpr].None(),
+                    .Some(expr) then Option[TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
+                    .None() then Option[TypedExpr].None(),
                 };
                 yield TypedStatement.ReturnStmt(new_value, span);
             },
@@ -180,9 +180,9 @@ given TypeChecker {
         };
     };
 
-    module_private bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[* Symbol] = {
+    module_private bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[Symbol] = {
         if binding.is_discard then {
-            return Option[* Symbol].None();
+            return Option[Symbol].None();
         };
 
         if binding.name <> "_" and scope.lookup_local(binding.name) is .Some(_) then {
@@ -192,7 +192,7 @@ given TypeChecker {
         when binding.type_name in {
             .Some(type_annotation) then {
                 let expected_type = self.resolve_type_in_scope(type_annotation, scope);
-                if expected_type is .TraitObject(_, _) then {
+                if expected_type is .TraitObject(_, _, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"));
                 };
                 if not self.same_expr_type(binding_type, expected_type) and not self.is_unresolved_expr_type(binding_type) and not self.is_unresolved_expr_type(expected_type) then {
@@ -201,7 +201,8 @@ given TypeChecker {
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
                                 "Type mismatch: expected \(self.display_type_name(expected_type)), got \(self.display_type_name(binding_type))"
-                        )
+                        
+                    )
                     );
                 };
             },
@@ -214,7 +215,7 @@ given TypeChecker {
         context.set_span(def_id, binding.span);
         let sym = Symbol(def_id, binding_type, kind);
         scope.define(self.context(), sym);
-        return Option[* Symbol].Some(box(sym));
+        return Option[Symbol].Some(sym);
     };
 
     module_private get_pair_binding_type(self, pair_type Type, field_name String) Option[Type] = {
@@ -238,7 +239,7 @@ given TypeChecker {
         };
     };
 
-    module_private infer_pair_literal_binding_type(self, value * Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
+    module_private infer_pair_literal_binding_type(self, value Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
         return when value in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then {
@@ -247,8 +248,8 @@ given TypeChecker {
                         .None() then Option[Type].None(),
                     };
                     yield if name <> "Pair" or args.count() <= index then Option[Type].None() else {
-                        let arg_expr = (*args[index]);
-                        let typed_arg = self.check_expr_scoped_ref(box(arg_expr), expected_type, scope);
+                        let arg_expr = args[index];
+                        let typed_arg = self.check_expr_scoped_ref(arg_expr, expected_type, scope);
                         yield Option[Type].Some(self.concretize_default_literal_type(typed_arg.expr_type));
                     };
                 },
@@ -258,18 +259,22 @@ given TypeChecker {
         };
     };
 
-    module_private concretize_pair_constructor_binding_type(self, binding_type Type, value * Expr, scope Scope) Type = {
+    module_private concretize_pair_constructor_binding_type(self, binding_type Type, value Expr, scope Scope) Type = {
+        let mutable pair_template_def_id = Option[DefId].None();
         let needs_pair_args = when binding_type in {
             .StructureType(def_id) then (self.context().get_name(def_id) or else "") == "Pair",
-            .GenericStruct(template_name, args) then {
+            .GenericStruct(template_name, template_def_id, args) then {
                 if template_name <> "Pair" or args.count() <> 2(UInt) then {
                     yield false;
                 };
                 let mutable unresolved = false;
                 for arg in args then {
-                    if self.is_unresolved_expr_type(*arg) or *arg is .GenericParameter(_) then {
+                    if self.is_unresolved_expr_type(arg) or arg is .GenericParameter(_) then {
                         unresolved = true;
                     };
+                };
+                if unresolved then {
+                    pair_template_def_id = Option[DefId].Some(template_def_id);
                 };
                 yield unresolved;
             },
@@ -284,14 +289,17 @@ given TypeChecker {
                     if name <> "Pair" or args.count() <> 2(UInt) then {
                         yield binding_type;
                     };
-                    let first_arg = (*args[0(UInt)]);
-                    let second_arg = (*args[1(UInt)]);
-                    let first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(first_arg), .None(), scope).expr_type);
-                    let second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(second_arg), .None(), scope).expr_type);
-                    let mutable pair_args = List[* Type].new();
-                    pair_args.push(box(first_type));
-                    pair_args.push(box(second_type));
-                    yield Type.GenericStruct("Pair", pair_args);
+                    let first_arg = args[0(UInt)];
+                    let second_arg = args[1(UInt)];
+                    let mutable first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(first_arg, .None(), scope).expr_type);
+                    let mutable second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(second_arg, .None(), scope).expr_type);
+                    let mutable pair_args = List[Type].new();
+                    pair_args.push(first_type);
+                    pair_args.push(second_type);
+                    yield when pair_template_def_id in {
+                        .Some(template_def_id) then Type.GenericStruct("Pair", template_def_id, pair_args),
+                        .None() then binding_type,
+                    };
                 },
                 _ then binding_type,
             },
@@ -299,28 +307,36 @@ given TypeChecker {
         };
     };
 
-    module_private apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[* TypedWhenArm]) List[* TypedWhenArm] = {
-        let mutable out = List[* TypedWhenArm].new();
+    module_private apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[TypedWhenArm]) List[TypedWhenArm] = {
+        let mutable out = List[TypedWhenArm].new();
         for arm in arms then {
             let new_body = self.apply_subst_to_expr(subst, arm.body);
             let new_arm_type = new_body.expr_type;
-            out.push(box(TypedWhenArm(arm.pattern, new_body, new_arm_type)));
+            out.push(TypedWhenArm(arm.pattern, new_body, new_arm_type));
         };
         return out;
     };
 
-    module_private apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[* TypedExpr]) List[* TypedExpr] = {
-        let mutable out = List[* TypedExpr].new();
+    module_private apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[TypedExpr]) List[TypedExpr] = {
+        let mutable out = List[TypedExpr].new();
         for expr in exprs then {
             out.push(self.apply_subst_to_expr(subst, expr));
         };
         return out;
     };
 
-    module_private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[* TypedExpr, * TypedExpr]]) List[Pair[* TypedExpr, * TypedExpr]] = {
-        let mutable out = List[Pair[* TypedExpr, * TypedExpr]].new();
+    module_private apply_subst_to_symbol_list(self, subst TypeSubstitution, symbols List[Symbol]) List[Symbol] = {
+        let mutable out = List[Symbol].new();
+        for symbol in symbols then {
+            out.push(self.apply_subst_to_symbol(subst, symbol));
+        };
+        return out;
+    };
+
+    module_private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[TypedExpr, TypedExpr]]) List[Pair[TypedExpr, TypedExpr]] = {
+        let mutable out = List[Pair[TypedExpr, TypedExpr]].new();
         for entry in entries then {
-            out.push(Pair[* TypedExpr, * TypedExpr](
+            out.push(Pair[TypedExpr, TypedExpr](
                 self.apply_subst_to_expr(subst, entry.first),
                 self.apply_subst_to_expr(subst, entry.second)
             ));
@@ -328,51 +344,45 @@ given TypeChecker {
         return out;
     };
 
-    module_private apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[* TypedExpr]) Option[* TypedExpr] = {
+    module_private apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[TypedExpr]) Option[TypedExpr] = {
         return when expr in {
-            .Some(e) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
-            .None() then Option[* TypedExpr].None(),
+            .Some(e) then Option[TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
+            .None() then Option[TypedExpr].None(),
         };
     };
 
-    module_private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind * TypedExprKind) * TypedExprKind = {
+    module_private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind TypedExprKind) TypedExprKind = {
         return when kind in {
-            .Variable(symbol) then box(TypedExprKind.Variable(box(self.apply_subst_to_symbol(subst, symbol)))),
-            .IntegerLiteral(value) then box(TypedExprKind.IntegerLiteral(value)),
-            .FloatLiteral(value) then box(TypedExprKind.FloatLiteral(value)),
-            .StringLiteral(value) then box(TypedExprKind.StringLiteral(value)),
-            .BoolLiteral(value) then box(TypedExprKind.BoolLiteral(value)),
-            .CastExpr(target_type, expr) then box(TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr))),
-            .Unary(op, expr) then box(TypedExprKind.Unary(op, self.apply_subst_to_expr(subst, expr))),
-            .RefExpr(expr) then box(TypedExprKind.RefExpr(self.apply_subst_to_expr(subst, expr))),
-            .PtrExpr(expr) then box(TypedExprKind.PtrExpr(self.apply_subst_to_expr(subst, expr))),
-            .DerefExpr(expr) then box(TypedExprKind.DerefExpr(self.apply_subst_to_expr(subst, expr))),
-            .UnsafeDerefExpr(expr) then box(TypedExprKind.UnsafeDerefExpr(self.apply_subst_to_expr(subst, expr))),
-            .ArithmeticExpr(left, op, right) then box(TypedExprKind.ArithmeticExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
-            .WrappingArithmeticExpr(left, op, right) then box(TypedExprKind.WrappingArithmeticExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
-            .WrappingShiftExpr(left, op, right) then box(TypedExprKind.WrappingShiftExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
-            .ComparisonExpr(left, op, right) then box(TypedExprKind.ComparisonExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
-            .BitwiseExpr(left, op, right) then box(TypedExprKind.BitwiseExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right))),
-            .AndExpr(left, right) then box(TypedExprKind.AndExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
-            .OrExpr(left, right) then box(TypedExprKind.OrExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right))),
-            .Call(callee, args) then box(TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args))),
+            .Variable(symbol) then TypedExprKind.Variable(self.apply_subst_to_symbol(subst, symbol)),
+            .IntegerLiteral(value) then TypedExprKind.IntegerLiteral(value),
+            .FloatLiteral(value) then TypedExprKind.FloatLiteral(value),
+            .StringLiteral(value) then TypedExprKind.StringLiteral(value),
+            .BoolLiteral(value) then TypedExprKind.BoolLiteral(value),
+            .CastExpr(target_type, expr) then TypedExprKind.CastExpr(subst.apply(target_type), self.apply_subst_to_expr(subst, expr)),
+            .Unary(op, expr) then TypedExprKind.Unary(op, self.apply_subst_to_expr(subst, expr)),
+            .RefExpr(expr) then TypedExprKind.RefExpr(self.apply_subst_to_expr(subst, expr)),
+            .PtrExpr(expr) then TypedExprKind.PtrExpr(self.apply_subst_to_expr(subst, expr)),
+            .DerefExpr(expr) then TypedExprKind.DerefExpr(self.apply_subst_to_expr(subst, expr)),
+            .UnsafeDerefExpr(expr) then TypedExprKind.UnsafeDerefExpr(self.apply_subst_to_expr(subst, expr)),
+            .ArithmeticExpr(left, op, right) then TypedExprKind.ArithmeticExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right)),
+            .WrappingArithmeticExpr(left, op, right) then TypedExprKind.WrappingArithmeticExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right)),
+            .WrappingShiftExpr(left, op, right) then TypedExprKind.WrappingShiftExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right)),
+            .ComparisonExpr(left, op, right) then TypedExprKind.ComparisonExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right)),
+            .BitwiseExpr(left, op, right) then TypedExprKind.BitwiseExpr(self.apply_subst_to_expr(subst, left), op, self.apply_subst_to_expr(subst, right)),
+            .AndExpr(left, right) then TypedExprKind.AndExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right)),
+            .OrExpr(left, right) then TypedExprKind.OrExpr(self.apply_subst_to_expr(subst, left), self.apply_subst_to_expr(subst, right)),
+            .Call(callee, args) then TypedExprKind.Call(self.apply_subst_to_expr(subst, callee), self.apply_subst_to_expr_list(subst, args)),
             .GenericCall(function_symbol, type_args, args) then {
                 let mutable new_type_args = List[Type].new();
                 for type_arg in type_args then {
                     new_type_args.push(subst.apply(type_arg));
                 };
-                yield box(TypedExprKind.GenericCall(box(self.apply_subst_to_symbol(subst, function_symbol)), new_type_args, self.apply_subst_to_expr_list(subst, args)));
+                yield TypedExprKind.GenericCall(self.apply_subst_to_symbol(subst, function_symbol), new_type_args, self.apply_subst_to_expr_list(subst, args));
             },
             .IntrinsicCall(node) then {
                 let new_node = when node in {
-                    .IsUniqueMutable(ref_expr) then TypedIntrinsic.IsUniqueMutable(self.apply_subst_to_expr(subst, ref_expr)),
-                    .RefCount(ref_expr) then TypedIntrinsic.RefCount(self.apply_subst_to_expr(subst, ref_expr)),
-                    .MakeRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
-                    .MakeMutRef(pointer_expr, owner_expr, result_type) then TypedIntrinsic.MakeMutRef(self.apply_subst_to_expr(subst, pointer_expr), self.apply_subst_to_expr(subst, owner_expr), subst.apply(result_type)),
                     .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
-                    .DowngradeMutRef(ref_expr, result_type) then TypedIntrinsic.DowngradeMutRef(self.apply_subst_to_expr(subst, ref_expr), subst.apply(result_type)),
                     .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
-                    .UpgradeMutRef(weak_expr, result_type) then TypedIntrinsic.UpgradeMutRef(self.apply_subst_to_expr(subst, weak_expr), subst.apply(result_type)),
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(self.apply_subst_to_expr(subst, out_handle), self.apply_subst_to_expr(subst, out_tid), self.apply_subst_to_expr(subst, closure), self.apply_subst_to_expr(subst, stack_size)),
                     .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(self.apply_subst_to_expr(subst, count), subst.apply(result_type)),
                     .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(self.apply_subst_to_expr(subst, pointer_expr)),
@@ -383,9 +393,9 @@ given TypeChecker {
                     .TakeMemory(pointer_expr, result_type) then TypedIntrinsic.TakeMemory(self.apply_subst_to_expr(subst, pointer_expr), subst.apply(result_type)),
                     .NullPtr(result_type) then TypedIntrinsic.NullPtr(subst.apply(result_type)),
                 };
-                yield box(TypedExprKind.IntrinsicCall(new_node));
+                yield TypedExprKind.IntrinsicCall(new_node);
             },
-            .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
+            .MemberPath(base, path) then TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), self.apply_subst_to_symbol_list(subst, path)),
             .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
                 let mutable new_type_args = List[Type].new();
                 for type_arg in type_args then {
@@ -395,26 +405,26 @@ given TypeChecker {
                 for method_type_arg in method_type_args then {
                     new_method_type_args.push(subst.apply(method_type_arg));
                 };
-                yield box(TypedExprKind.MethodReference(
+                yield TypedExprKind.MethodReference(
                     self.apply_subst_to_expr(subst, base),
                     subst.apply(receiver_type),
-                    box(self.apply_subst_to_symbol(subst, method)),
+                    self.apply_subst_to_symbol(subst, method),
                     new_type_args,
                     new_method_type_args,
                     dispatch_callsite,
-                ));
+                );
             },
             .Block(statements) then {
-                let mutable new_statements = List[* TypedStatement].new();
+                let mutable new_statements = List[TypedStatement].new();
                 for stmt in statements then {
-                    new_statements.push(box(self.apply_subst_to_statement(subst, stmt)));
+                    new_statements.push(self.apply_subst_to_statement(subst, stmt));
                 };
-                yield box(TypedExprKind.Block(new_statements));
+                yield TypedExprKind.Block(new_statements);
             },
-            .IfExpr(condition, then_branch, else_branch) then box(TypedExprKind.IfExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, then_branch), self.apply_subst_to_optional_expr(subst, else_branch))),
-            .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
-            .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
-            .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
+            .IfExpr(condition, then_branch, else_branch) then TypedExprKind.IfExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, then_branch), self.apply_subst_to_optional_expr(subst, else_branch)),
+            .IsExpr(subject, pattern, negated) then TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated),
+            .WhenExpr(subject, arms) then TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms)),
+            .LambdaExpr(params, return_type, body) then TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body)),
             .StaticMethodCall(receiver_type, _, method, type_args, method_type_args, args) then {
                 let substituted_receiver = subst.apply(receiver_type);
                 let substituted_method = self.apply_subst_to_symbol(subst, method);
@@ -427,55 +437,55 @@ given TypeChecker {
                     substituted_method_type_args.push(subst.apply(method_type_arg));
                 };
                 let substituted_args = self.apply_subst_to_expr_list(subst, args);
-                yield box(TypedExprKind.StaticMethodCall(
+                yield TypedExprKind.StaticMethodCall(
                     substituted_receiver,
                     self.context().symbol_name(substituted_method),
-                    box(substituted_method),
+                    substituted_method,
                     substituted_type_args,
                     substituted_method_type_args,
                     substituted_args,
-                ));
+                );
             },
             .TypeConstruction(identifier, type_args, args) then {
                 let mutable substituted_type_args = List[Type].new();
                 for type_arg in type_args then {
                     substituted_type_args.push(subst.apply(type_arg));
                 };
-                yield box(TypedExprKind.TypeConstruction(
-                    box(self.apply_subst_to_symbol(subst, identifier)),
+                yield TypedExprKind.TypeConstruction(
+                    self.apply_subst_to_symbol(subst, identifier),
                     substituted_type_args,
                     self.apply_subst_to_expr_list(subst, args),
-                ));
+                );
             },
             .EnumConstruction(enum_type, case_name, args) then {
-                yield box(TypedExprKind.EnumConstruction(subst.apply(enum_type), case_name, self.apply_subst_to_expr_list(subst, args)));
+                yield TypedExprKind.EnumConstruction(subst.apply(enum_type), case_name, self.apply_subst_to_expr_list(subst, args));
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method);
                 let preserved_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind);
-                yield box(TypedExprKind.TraitMethodPlaceholder(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), box(preserved_method), List[Type].new(), dispatch_callsite));
+                yield TypedExprKind.TraitMethodPlaceholder(self.apply_subst_to_expr(subst, base), subst.apply(trait_type), preserved_method, List[Type].new(), dispatch_callsite);
             },
-            .TraitObjectConversion(inner, trait_type, concrete_type) then box(TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type))),
+            .TraitObjectConversion(inner, trait_type, concrete_type) then TypedExprKind.TraitObjectConversion(self.apply_subst_to_expr(subst, inner), subst.apply(trait_type), subst.apply(concrete_type)),
             .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
-                yield box(TypedExprKind.TraitMethodCall(self.apply_subst_to_expr(subst, receiver), subst.apply(trait_type), method_name, method_index, self.apply_subst_to_expr_list(subst, args)));
+                yield TypedExprKind.TraitMethodCall(self.apply_subst_to_expr(subst, receiver), subst.apply(trait_type), method_name, method_index, self.apply_subst_to_expr_list(subst, args));
             },
             .GenericInstantiation(base_type, type_args) then {
                 let mutable new_type_args = List[Type].new();
                 for type_arg in type_args then {
                     new_type_args.push(subst.apply(type_arg));
                 };
-                yield box(TypedExprKind.GenericInstantiation(subst.apply(base_type), new_type_args));
+                yield TypedExprKind.GenericInstantiation(subst.apply(base_type), new_type_args);
             },
         };
     };
 
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
-    module_private apply_subst_to_expr(self, subst TypeSubstitution, expr * TypedExpr) * TypedExpr = {
+    module_private apply_subst_to_expr(self, subst TypeSubstitution, expr TypedExpr) TypedExpr = {
         if subst.mapping.is_empty() then {
             return expr;
         };
         let new_type = subst.apply(expr.expr_type);
         let new_kind = self.apply_subst_to_expr_kind(subst, expr.expr_kind);
-        return box(TypedExpr(new_kind, new_type));
+        return TypedExpr(new_kind, new_type);
     };
 };

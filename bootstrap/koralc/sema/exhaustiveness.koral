@@ -4,1182 +4,1224 @@
 // ── ExhaustivenessChecker ─────────────────────────────────────────────────────
 
 public type ExhaustivenessChecker(
-    subject_type Type,
-    patterns List[* TypedPattern],
-    context CompilerContext,
-    generic_templates * GenericTemplateRegistry,
-    span SourceSpan,
+ subject_type Type,
+ patterns List[TypedPattern],
+ context CompilerContext,
+ generic_templates GenericTemplateRegistry,
+ span SourceSpan,
 );
 
 file_private type PatternSpace {
-    Full(type_value Type),
-    Empty(),
-    EnumCases(type_name String, cases Dict[String, List[* PatternSpace]]),
-    BoolValues(has_true Bool, has_false Bool),
-    IntRange(has_min Bool, min_val Int, has_max Bool, max_val Int),
+ Full(type_value Type),
+ Empty(),
+ EnumCases(type_name String, cases Dict[String, List[PatternSpace]]),
+ BoolValues(has_true Bool, has_false Bool),
+ IntRange(has_min Bool, min_val Int, has_max Bool, max_val Int),
 };
 
 // Simple integer string parser for exhaustiveness checking.
 let parse_int_str(s String) Int = {
-    if s.is_empty() then { return 0;};
-    let mutable result = 0;
-    let mutable negative = false;
-    let mutable i UInt = 0;
-    let first = s[0(UInt)];
-    if first == '-' then {
-        negative = true;
-        i = 1;
-    } else if first == '+' then {
-        i = 1;
-    };
-    while i < s.count() then {
-        let ch = s[i];
-        let mutable digit = -1;
-        if ch == '0' then { digit = 0;}
-        else if ch == '1' then { digit = 1;}
-        else if ch == '2' then { digit = 2;}
-        else if ch == '3' then { digit = 3;}
-        else if ch == '4' then { digit = 4;}
-        else if ch == '5' then { digit = 5;}
-        else if ch == '6' then { digit = 6;}
-        else if ch == '7' then { digit = 7;}
-        else if ch == '8' then { digit = 8;}
-        else if ch == '9' then { digit = 9;};
-        if digit >= 0 then {
-            result = result * 10 + digit;
-        };
-        i += 1;
-    };
-    if negative then { return 0 - result;};
-    return result;
+ if s.is_empty() then { return 0;};
+ let mutable result = 0;
+ let mutable negative = false;
+ let mutable i UInt = 0;
+ let first = s[0(UInt)];
+ if first == '-' then {
+ negative = true;
+ i = 1;
+ } else if first == '+' then {
+ i = 1;
+ };
+ while i < s.count() then {
+ let ch = s[i];
+ let mutable digit = -1;
+ if ch == '0' then { digit = 0;}
+ else if ch == '1' then { digit = 1;}
+ else if ch == '2' then { digit = 2;}
+ else if ch == '3' then { digit = 3;}
+ else if ch == '4' then { digit = 4;}
+ else if ch == '5' then { digit = 5;}
+ else if ch == '6' then { digit = 6;}
+ else if ch == '7' then { digit = 7;}
+ else if ch == '8' then { digit = 8;}
+ else if ch == '9' then { digit = 9;};
+ if digit >= 0 then {
+ result = result * 10 + digit;
+ };
+ i += 1;
+ };
+ if negative then { return 0 - result;};
+ return result;
 };
 
 given ExhaustivenessChecker {
-    public new(
-        subject_type Type,
-        patterns List[* TypedPattern],
-        context CompilerContext,
-        generic_templates * GenericTemplateRegistry,
-        span SourceSpan,
-    ) ExhaustivenessChecker = {
-        return ExhaustivenessChecker(subject_type, patterns, context, generic_templates, span);
-    };
+ public new(
+ subject_type Type,
+ patterns List[TypedPattern],
+ context CompilerContext,
+ generic_templates GenericTemplateRegistry,
+ span SourceSpan,
+ ) ExhaustivenessChecker = {
+ return ExhaustivenessChecker(subject_type, patterns, context, generic_templates, span);
+ };
 
-    // 执行穷举性检查
-    // 返回 Ok 或 Error(message)
-    public check(self) Result[Void] = {
-        // 先检查不可达模式
-        let _ = self.check_unreachable_patterns() or return;
+ // 执行穷举性检查
+ // 返回 Ok 或 Error(message)
+ public check(self) Result[Void] = {
+ // 先检查不可达模式
+ let _ = self.check_unreachable_patterns() or return;
 
-        when self.initial_finite_pattern_space() in {
-            .Some(space) then {
-                let mutable remaining = space;
-                for p in self.patterns.iterator() then {
-                    remaining = self.subtract_pattern(remaining, p, self.subject_type);
-                };
-                if not self.pattern_space_is_empty(remaining) then {
-                    let type_name = self.exhaustiveness_type_name();
-                    when self.subject_type in {
-                        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then {
-                            let message = self.missing_catchall_message(type_name);
-                            return Result[Void].Error(box(message));
-                        },
-                        _ then {},
-                    };
-                    let message = self.non_exhaustive_match_message_from_patterns(type_name, self.pattern_space_missing_cases(remaining));
-                    return Result[Void].Error(box(message));
-                };
-                return Result[Void].Ok({});
-            },
-            .None() then {},
-        };
+ when self.initial_finite_pattern_space() in {
+ .Some(space) then {
+ let mutable remaining = space;
+ for p in self.patterns.iterator() then {
+ remaining = self.subtract_pattern(remaining, p, self.subject_type);
+ };
+ if not self.pattern_space_is_empty(remaining) then {
+ let type_name = self.exhaustiveness_type_name();
+ when self.subject_type in {
+ .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then {
+ let message = self.missing_catchall_message(type_name);
+ return Result[Void].Error(message.to_string());
+ },
+ _ then {},
+ };
+ let message = self.non_exhaustive_match_message_from_patterns(type_name, self.pattern_space_missing_cases(remaining));
+ return Result[Void].Error(message.to_string());
+ };
+ return Result[Void].Ok({});
+ },
+ .None() then {},
+ };
 
-        // 检查是否有通配符/绑定模式（catchall）
-        let mutable has_catchall = false;
-        for p in self.patterns.iterator() then {
-            if is_catchall(p) then {
-                has_catchall = true;
-            };
-        };
-        // 按主题类型分支检查穷举性
-        when self.subject_type in {
-            .EnumType(_) then {},
-            .GenericEnum(template_name, _) then {
-                let _ = template_name;
-            },
-            .GenericStruct(_, _) then {
-                if not has_catchall then {
-                    let type_name = type_to_string(self.subject_type);
-                    let message = self.missing_catchall_message(type_name);
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .BoolType() then {
-                return self.check_bool_exhaustiveness(has_catchall);
-            },
-            .IntType() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Int");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Int8Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Int8");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Int16Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Int16");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Int32Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Int32");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Int64Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Int64");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .UIntType() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("UInt");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .UInt8Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("UInt8");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .UInt16Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("UInt16");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .UInt32Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("UInt32");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .UInt64Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("UInt64");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Float32Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Float32");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .Float64Type() then {
-                if not has_catchall then {
-                    let message = self.missing_catchall_message("Float64");
-                    return Result[Void].Error(box(message));
-                };
-            },
-            .StructureType(_) then {
-                if not has_catchall then {
-                    let type_name = self.context.type_display_name(self.subject_type);
-                    let message = self.missing_catchall_message(type_name);
-                    return Result[Void].Error(box(message));
-                };
-            },
-            _ then {
-                if not has_catchall then {
-                    let type_name = type_to_string(self.subject_type);
-                    // Unknown 类型和 TypeVar 跳过穷举性检查
-                    when self.subject_type in {
-                        .Unknown() then {},
-                        .TypeVar(_) then {},
-                        _ then {
-                            let message = self.missing_catchall_message(type_name);
-                            return Result[Void].Error(box(message));
-                        },
-                    };
-                };
-            },
-        };
-        return Result[Void].Ok({});
-    };
+ // 检查是否有通配符/绑定模式（catchall）
+ let mutable has_catchall = false;
+ for p in self.patterns.iterator() then {
+ if is_catchall(p) then {
+ has_catchall = true;
+ };
+ };
+ // 按主题类型分支检查穷举性
+ when self.subject_type in {
+ .EnumType(_) then {},
+ .GenericEnum(template_name, _, _) then {
+ let _ = template_name;
+ },
+ .GenericStruct(_, _, _) then {
+ if not has_catchall then {
+ let type_name = type_to_string(self.subject_type);
+ let message = self.missing_catchall_message(type_name);
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .BoolType() then {
+ return self.check_bool_exhaustiveness(has_catchall);
+ },
+ .IntType() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Int");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Int8Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Int8");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Int16Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Int16");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Int32Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Int32");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Int64Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Int64");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .UIntType() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("UInt");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .UInt8Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("UInt8");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .UInt16Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("UInt16");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .UInt32Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("UInt32");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .UInt64Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("UInt64");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Float32Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Float32");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .Float64Type() then {
+ if not has_catchall then {
+ let message = self.missing_catchall_message("Float64");
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ .StructureType(_) then {
+ if not has_catchall then {
+ let type_name = self.context.type_display_name(self.subject_type);
+ let message = self.missing_catchall_message(type_name);
+ return Result[Void].Error(message.to_string());
+ };
+ },
+ _ then {
+ if not has_catchall then {
+ let type_name = type_to_string(self.subject_type);
+ // Unknown 类型和 TypeVar 跳过穷举性检查
+ when self.subject_type in {
+ .Unknown() then {},
+ .TypeVar(_) then {},
+ _ then {
+ let message = self.missing_catchall_message(type_name);
+ return Result[Void].Error(message.to_string());
+ },
+ };
+ };
+ },
+ };
+ return Result[Void].Ok({});
+ };
 
 
-    // 检查不可达模式（已被前面模式完全覆盖的分支）
-    file_private check_unreachable_patterns(self) Result[Void] = {
-        let mutable covered_trait_object_types = Set[String].new();
-        let mutable has_catchall = false;
-        let mutable catchall_is_struct = false;
-        let mutable catchall_pattern_desc = "";
-        let pattern_count = self.patterns.count();
-        let mutable pattern_index UInt = 0;
-        let mutable remaining_space = self.initial_finite_pattern_space();
-        let mutable seen_patterns = Set[String].new();
+ // 检查不可达模式（已被前面模式完全覆盖的分支）
+ file_private check_unreachable_patterns(self) Result[Void] = {
+ let mutable covered_trait_object_types = Set[String].new();
+ let mutable has_catchall = false;
+ let mutable catchall_is_struct = false;
+ let mutable catchall_pattern_desc = StringBuilder.new();
+ catchall_pattern_desc.push_string("");
+ let pattern_count = self.patterns.count();
+ let mutable pattern_index UInt = 0;
+ let mutable remaining_space = self.initial_finite_pattern_space();
+ let mutable seen_patterns = Set[String].new();
 
-        for p in self.patterns.iterator() then {
-            if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
-                pattern_index += 1;
-                continue;
-            };
-            // Skip duplicate check for patterns with variable bindings --
-            // .Variable, .TraitObjectType, .TraitObjectTypeBinding each bind a
-            // fresh name so two arms with the same type are not duplicates.
-            let has_binding = (p is .Variable(_)) or (p is .TraitObjectType(_)) or (p is .TraitObjectTypeBinding(_, _));
-            if not has_binding then {
-                let pd = pattern_description(p);
-                if seen_patterns.contains(pd) then {
-                    return Result[Void].Error(box("Duplicate pattern: '" + pd + "' already matched earlier"));
-                };
-                seen_patterns.insert(pd);
-            };
-            if has_catchall then {
-                // When the catchall is a struct pattern and the current pattern is a
-                // wildcard, this is the synthetic else-branch of an if-is / while-is
-                // lowered when expression.  Skip the unreachable error to match the
-                // Swift compiler behaviour (which uses a separate ifPatternExpression
-                // node that never runs the exhaustiveness checker).
-                let skip = catchall_is_struct and (p is .Wildcard());
-                if not skip then {
-                    let message = unreachable_after_pattern_message(catchall_pattern_desc);
-                    return Result[Void].Error(box(message));
-                };
-            };
+ for p in self.patterns.iterator() then {
+ if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
+ pattern_index += 1;
+ continue;
+ };
+ // Skip duplicate check for patterns with variable bindings --
+ // .Variable, .TraitObjectType, .TraitObjectTypeBinding each bind a
+ // fresh name so two arms with the same type are not duplicates.
+ let has_binding = (p is .Variable(_)) or (p is .TraitObjectType(_)) or (p is .TraitObjectTypeBinding(_, _));
+ if not has_binding then {
+ let pd = pattern_description(p);
+ if seen_patterns.contains(pd) then {
+ return Result[Void].Error("Duplicate pattern: '" + pd + "' already matched earlier");
+ };
+ seen_patterns.insert(pd);
+ };
+ if has_catchall then {
+ // When the catchall is a struct pattern and the current pattern is a
+ // wildcard, this is the synthetic else-branch of an if-is / while-is
+ // lowered when expression. Skip the unreachable error to match the
+ // Swift compiler behaviour (which uses a separate ifPatternExpression
+ // node that never runs the exhaustiveness checker).
+ let skip = catchall_is_struct and (p is .Wildcard());
+ if not skip then {
+ let message = unreachable_after_pattern_message(catchall_pattern_desc.to_string());
+ return Result[Void].Error(message.to_string());
+ };
+ };
 
-            when remaining_space in {
-                .Some(space) then {
-                    let reduced = self.subtract_pattern(space, p, self.subject_type);
-                    let is_catchall_pattern = (p is .Wildcard()) or (p is .Variable(_));
-                    if not is_catchall_pattern and self.can_precisely_subtract_pattern(space, p, self.subject_type) and self.pattern_space_equals(space, reduced) then {
-                        let mutable message = "Unreachable pattern: already covered by previous patterns";
-                        return Result[Void].Error(box(message));
-                    };
-                    remaining_space = Option[PatternSpace].Some(reduced);
-                },
-                .None() then {},
-            };
+ when remaining_space in {
+ .Some(space) then {
+ let reduced = self.subtract_pattern(space, p, self.subject_type);
+ let is_catchall_pattern = (p is .Wildcard()) or (p is .Variable(_));
+ if not is_catchall_pattern and self.can_precisely_subtract_pattern(space, p, self.subject_type) and self.pattern_space_equals(space, reduced) then {
+ let mutable message = StringBuilder.new();
+ message.push_string("Unreachable pattern: already covered by previous patterns");
+ return Result[Void].Error(message.to_string());
+ };
+ remaining_space = Option[PatternSpace].Some(reduced);
+ },
+ .None() then {},
+ };
 
-            let pattern_trait_types = collect_trait_object_types(p);
-            if not pattern_trait_types.is_empty() then {
-                for type_name in pattern_trait_types.iterator() then {
-                    if covered_trait_object_types.contains(type_name) then {
-                        let mutable msg = "Unreachable pattern: implementation type pattern '";
-                        msg.push_string(type_name);
-                        msg.push_string("' is already covered");
-                        return Result[Void].Error(box(msg));
-                    };
-                };
-                for type_name in pattern_trait_types.iterator() then {
-                    covered_trait_object_types.insert(type_name);
-                };
-            };
+ let pattern_trait_types = collect_trait_object_types(p);
+ if not pattern_trait_types.is_empty() then {
+ for type_name in pattern_trait_types.iterator() then {
+ if covered_trait_object_types.contains(type_name) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("Unreachable pattern: implementation type pattern '");
+ msg.push_string(type_name);
+ msg.push_string("' is already covered");
+ return Result[Void].Error(msg.to_string());
+ };
+ };
+ for type_name in pattern_trait_types.iterator() then {
+ covered_trait_object_types.insert(type_name);
+ };
+ };
 
-            if is_catchall(p) then {
-                has_catchall = true;
-                catchall_is_struct = p is .StructPattern(_, _);
-                catchall_pattern_desc = pattern_description(p);
-            };
-            pattern_index += 1;
-        };
+ if is_catchall(p) then {
+ has_catchall = true;
+ catchall_is_struct = p is .StructPattern(_, _);
+ catchall_pattern_desc = StringBuilder.new(); catchall_pattern_desc.push_string(pattern_description(p));
+ };
+ pattern_index += 1;
+ };
 
-        return Result[Void].Ok({});
-    };
+ return Result[Void].Ok({});
+ };
 
-    file_private initial_finite_pattern_space(self) Option[PatternSpace] = {
-        return when self.subject_type in {
-            .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
-                .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), Option[List[EnumCaseInfo]].Some(cases))),
-                .None() then Option[PatternSpace].None(),
-            },
-            .GenericEnum(template_name, _) then {
-                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
-                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
-                    .None() then Option[List[EnumCaseInfo]].None(),
-                };
-                yield when maybe_cases in {
-                    .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(template_name, Option[List[EnumCaseInfo]].Some(cases))),
-                    .None() then Option[PatternSpace].None(),
-                };
-            },
-            .BoolType() then Option[PatternSpace].Some(PatternSpace.BoolValues(true, true)),
-            .IntType() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
-            .UIntType() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
-            .Int8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -128, true, 127)),
-            .Int16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -32768, true, 32767)),
-            .Int32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
-            .Int64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
-            .UInt8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 255)),
-            .UInt16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 65535)),
-            .UInt32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
-            .UInt64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
-            _ then Option[PatternSpace].None(),
-        };
-    };
+ file_private initial_finite_pattern_space(self) Option[PatternSpace] = {
+ return when self.subject_type in {
+ .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
+ .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), Option[List[EnumCaseInfo]].Some(cases))),
+ .None() then Option[PatternSpace].None(),
+ },
+ .GenericEnum(template_name, _, _) then {
+ let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+ .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+ .None() then Option[List[EnumCaseInfo]].None(),
+ };
+ yield when maybe_cases in {
+ .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(template_name, Option[List[EnumCaseInfo]].Some(cases))),
+ .None() then Option[PatternSpace].None(),
+ };
+ },
+ .BoolType() then Option[PatternSpace].Some(PatternSpace.BoolValues(true, true)),
+ .IntType() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+ .UIntType() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
+ .Int8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -128, true, 127)),
+ .Int16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, -32768, true, 32767)),
+ .Int32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+ .Int64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(false, 0, false, 0)),
+ .UInt8Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 255)),
+ .UInt16Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, true, 65535)),
+ .UInt32Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
+ .UInt64Type() then Option[PatternSpace].Some(PatternSpace.IntRange(true, 0, false, 0)),
+ _ then Option[PatternSpace].None(),
+ };
+ };
 
-    file_private enum_pattern_space(self, type_name String, maybe_cases Option[List[EnumCaseInfo]]) PatternSpace = {
-        let _ = self;
-        let mutable cases = Dict[String, List[* PatternSpace]].new();
-        when maybe_cases in {
-            .Some(all_cases) then {
-                for case_info in all_cases then {
-                    let mutable fields = List[* PatternSpace].new();
-                    for param in case_info.params then {
-                        fields.push(box(self.full_space_for_type(param.param_type)));
-                    };
-                    cases.insert(case_info.name, fields);
-                };
-            },
-            .None() then {},
-        };
-        return PatternSpace.EnumCases(type_name, cases);
-    };
+ file_private enum_pattern_space(self, type_name String, maybe_cases Option[List[EnumCaseInfo]]) PatternSpace = {
+ let _ = self;
+ let mutable cases = Dict[String, List[PatternSpace]].new();
+ when maybe_cases in {
+ .Some(all_cases) then {
+ for case_info in all_cases then {
+ let mutable fields = List[PatternSpace].new();
+ for param in case_info.params then {
+ fields.push(PatternSpace.Full(param.param_type));
+ };
+ cases.insert(case_info.name, fields);
+ };
+ },
+ .None() then {},
+ };
+ return PatternSpace.EnumCases(type_name, cases);
+ };
 
-    file_private full_space_for_type(self, t Type) PatternSpace = {
-        return when t in {
-            .BoolType() then PatternSpace.BoolValues(true, true),
-            .EnumType(def_id) then self.enum_pattern_space(self.context.type_display_name(t), self.context.get_enum_cases(def_id)),
-            .GenericEnum(template_name, _) then {
-                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
-                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
-                    .None() then Option[List[EnumCaseInfo]].None(),
-                };
-                yield self.enum_pattern_space(template_name, maybe_cases);
-            },
-            _ then PatternSpace.Full(t),
-        };
-    };
+ file_private full_space_for_type(self, t Type) PatternSpace = {
+ return when t in {
+ .BoolType() then PatternSpace.BoolValues(true, true),
+ .EnumType(def_id) then self.enum_pattern_space(self.context.type_display_name(t), self.context.get_enum_cases(def_id)),
+ .GenericEnum(template_name, _, _) then {
+ let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+ .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+ .None() then Option[List[EnumCaseInfo]].None(),
+ };
+ yield self.enum_pattern_space(template_name, maybe_cases);
+ },
+ _ then PatternSpace.Full(t),
+ };
+ };
 
-    file_private pattern_space_is_empty(self, space PatternSpace) Bool = {
-        let _ = self;
-        return when space in {
-            .Empty() then true,
-            .Full(_) then false,
-            .BoolValues(has_true, has_false) then not has_true and not has_false,
-            .EnumCases(_, cases) then cases.is_empty(),
-            .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
-        };
-    };
+ file_private pattern_space_is_empty(self, space PatternSpace) Bool = {
+ let _ = self;
+ return when space in {
+ .Empty() then true,
+ .Full(_) then false,
+ .BoolValues(has_true, has_false) then not has_true and not has_false,
+ .EnumCases(_, cases) then cases.is_empty(),
+ .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
+ };
+ };
 
-    file_private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
-        let _ = self;
-        return when lhs in {
-            .Empty() then rhs is .Empty(),
-            .Full(left_t) then when rhs in {
-                .Full(right_t) then left_t == right_t,
-                _ then false,
-            },
-            .BoolValues(left_true, left_false) then when rhs in {
-                .BoolValues(right_true, right_false) then left_true == right_true and left_false == right_false,
-                _ then false,
-            },
-            .EnumCases(left_name, left_cases) then when rhs in {
-                .EnumCases(right_name, right_cases) then {
-                    if left_name <> right_name or left_cases.count() <> right_cases.count() then {
-                        return false;
-                    };
-                    for entry in left_cases.iterator() then {
-                        let case_name = entry.first;
-                        let left_fields = entry.second;
-                        let right_fields = right_cases.get(case_name) or else { return false;};
-                        if left_fields.count() <> right_fields.count() then {
-                            return false;
-                        };
-                        let mutable idx UInt = 0;
-                        while idx < left_fields.count() then {
-                            if not self.pattern_space_equals(*left_fields[idx], *right_fields[idx]) then {
-                                return false;
-                            };
-                            idx += 1;
-                        };
-                    };
-                    yield true;
-                },
-                _ then false,
-            },
-            .IntRange(lh_min, lv_min, lh_max, lv_max) then when rhs in {
-                .IntRange(rh_min, rv_min, rh_max, rv_max) then {
-                    if lh_min <> rh_min then { return false;};
-                    if lh_min and lv_min <> rv_min then { return false;};
-                    if lh_max <> rh_max then { return false;};
-                    if lh_max and lv_max <> rv_max then { return false;};
-                    return true;
-                },
-                _ then false,
-            },
-        };
-    };
+ file_private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
+ let _ = self;
+ return when lhs in {
+ .Empty() then rhs is .Empty(),
+ .Full(left_t) then when rhs in {
+ .Full(right_t) then left_t == right_t,
+ _ then false,
+ },
+ .BoolValues(left_true, left_false) then when rhs in {
+ .BoolValues(right_true, right_false) then left_true == right_true and left_false == right_false,
+ _ then false,
+ },
+ .EnumCases(left_name, left_cases) then when rhs in {
+ .EnumCases(right_name, right_cases) then {
+ if left_name <> right_name or left_cases.count() <> right_cases.count() then {
+ return false;
+ };
+ for entry in left_cases.iterator() then {
+ let case_name = entry.first;
+ let left_fields = entry.second;
+ let right_fields = right_cases.get(case_name) or else { return false;};
+ if left_fields.count() <> right_fields.count() then {
+ return false;
+ };
+ let mutable idx UInt = 0;
+ while idx < left_fields.count() then {
+ if not self.pattern_space_equals(left_fields[idx], right_fields[idx]) then {
+ return false;
+ };
+ idx += 1;
+ };
+ };
+ yield true;
+ },
+ _ then false,
+ },
+ .IntRange(lh_min, lv_min, lh_max, lv_max) then when rhs in {
+ .IntRange(rh_min, rv_min, rh_max, rv_max) then {
+ if lh_min <> rh_min then { return false;};
+ if lh_min and lv_min <> rv_min then { return false;};
+ if lh_max <> rh_max then { return false;};
+ if lh_max and lv_max <> rv_max then { return false;};
+ return true;
+ },
+ _ then false,
+ },
+ };
+ };
 
-    // Subtract an integer literal from a PatternSpace.
-    // For unbounded ranges (no min, no max), we skip the subtraction because a
-    // single IntRange cannot represent "all integers except N". This avoids
-    // false unreachable-pattern diagnostics.
-    file_private subtract_int_literal(self, space PatternSpace, int_val Int) PatternSpace = {
-        return when space in {
-            .Full(t) then {
-                // Convert Full to IntRange and subtract
-                let range = PatternSpace.IntRange(false, 0, false, 0);
-                yield self.subtract_int_from_range(range, int_val);
-            },
-            .IntRange(has_min, _, has_max, _) then {
-                if not has_min and not has_max then {
-                    // Unbounded range - can't represent a single hole, keep unchanged
-                    return space;
-                };
-                yield self.subtract_int_from_range(space, int_val);
-            },
-            _ then space,
-        };
-    };
+ // Subtract an integer literal from a PatternSpace.
+ // For unbounded ranges (no min, no max), we skip the subtraction because a
+ // single IntRange cannot represent "all integers except N". This avoids
+ // false unreachable-pattern diagnostics.
+ file_private subtract_int_literal(self, space PatternSpace, int_val Int) PatternSpace = {
+ return when space in {
+ .Full(t) then {
+ // Convert Full to IntRange and subtract
+ let range = PatternSpace.IntRange(false, 0, false, 0);
+ yield self.subtract_int_from_range(range, int_val);
+ },
+ .IntRange(has_min, _, has_max, _) then {
+ if not has_min and not has_max then {
+ // Unbounded range - can't represent a single hole, keep unchanged
+ return space;
+ };
+ yield self.subtract_int_from_range(space, int_val);
+ },
+ _ then space,
+ };
+ };
 
-    // Subtract a single integer value from an IntRange.
-    // Note: for interior points we keep the left side [min, val-1] since we
-    // can only represent a single contiguous range.
-    file_private subtract_int_from_range(self, space PatternSpace, int_val Int) PatternSpace = {
-        return when space in {
-            .IntRange(has_min, min_val, has_max, max_val) then {
-                if has_min and has_max and min_val > max_val then {
-                    return PatternSpace.Empty();
-                };
-                // Value is outside the range - nothing to subtract
-                if has_min and int_val < min_val then { return space;};
-                if has_max and int_val > max_val then { return space;};
-                // Range is a single point and it matches
-                let is_single_point = has_min and has_max and min_val == max_val;
-                if is_single_point and int_val == min_val then {
-                    return PatternSpace.Empty();
-                };
-                // Value is at the min bound
-                if has_min and int_val == min_val then {
-                    if is_single_point then { return PatternSpace.Empty();};
-                    return PatternSpace.IntRange(true, min_val + 1, has_max, max_val);
-                };
-                // Value is at the max bound
-                if has_max and int_val == max_val then {
-                    if is_single_point then { return PatternSpace.Empty();};
-                    return PatternSpace.IntRange(has_min, min_val, true, max_val - 1);
-                };
-                // Interior point - split needed but we keep the left side [min, val-1]
-                // (best effort: may lose coverage info for right side)
-                return PatternSpace.IntRange(has_min, min_val, true, int_val - 1);
-            },
-            _ then space,
-        };
-    };
+ // Subtract a single integer value from an IntRange.
+ // Note: for interior points we keep the left side [min, val-1] since we
+ // can only represent a single contiguous range.
+ file_private subtract_int_from_range(self, space PatternSpace, int_val Int) PatternSpace = {
+ return when space in {
+ .IntRange(has_min, min_val, has_max, max_val) then {
+ if has_min and has_max and min_val > max_val then {
+ return PatternSpace.Empty();
+ };
+ // Value is outside the range - nothing to subtract
+ if has_min and int_val < min_val then { return space;};
+ if has_max and int_val > max_val then { return space;};
+ // Range is a single point and it matches
+ let is_single_point = has_min and has_max and min_val == max_val;
+ if is_single_point and int_val == min_val then {
+ return PatternSpace.Empty();
+ };
+ // Value is at the min bound
+ if has_min and int_val == min_val then {
+ if is_single_point then { return PatternSpace.Empty();};
+ return PatternSpace.IntRange(true, min_val + 1, has_max, max_val);
+ };
+ // Value is at the max bound
+ if has_max and int_val == max_val then {
+ if is_single_point then { return PatternSpace.Empty();};
+ return PatternSpace.IntRange(has_min, min_val, true, max_val - 1);
+ };
+ // Interior point - split needed but we keep the left side [min, val-1]
+ // (best effort: may lose coverage info for right side)
+ return PatternSpace.IntRange(has_min, min_val, true, int_val - 1);
+ },
+ _ then space,
+ };
+ };
 
-    // Convert a comparison pattern to an IntRange.
-    file_private comparison_to_int_range(self, op ComparisonPatternOperator, value_str String) PatternSpace = {
-        let value = parse_int_str(value_str);
-        return when op in {
-            .Greater() then PatternSpace.IntRange(true, value + 1, false, 0),
-            .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
-            .Less() then PatternSpace.IntRange(false, 0, true, value - 1),
-            .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
-        };
-    };
+ // Convert a comparison pattern to an IntRange.
+ file_private comparison_to_int_range(self, op ComparisonPatternOperator, value_str String) PatternSpace = {
+ let value = parse_int_str(value_str);
+ return when op in {
+ .Greater() then PatternSpace.IntRange(true, value + 1, false, 0),
+ .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
+ .Less() then PatternSpace.IntRange(false, 0, true, value - 1),
+ .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
+ };
+ };
 
-    // Subtract a comparison range from a PatternSpace.
-    file_private subtract_comparison(self, space PatternSpace, op ComparisonPatternOperator, value_str String) PatternSpace = {
-        return when space in {
-            .Full(t) then {
-                // Start with full IntRange, subtract comparison
-                let full_range = PatternSpace.IntRange(false, 0, false, 0);
-                yield self.subtract_range_from_range(full_range, self.comparison_to_int_range(op, value_str));
-            },
-            .IntRange(_, _, _, _) then self.subtract_range_from_range(space, self.comparison_to_int_range(op, value_str)),
-            _ then space,
-        };
-    };
+ // Subtract a comparison range from a PatternSpace.
+ file_private subtract_comparison(self, space PatternSpace, op ComparisonPatternOperator, value_str String) PatternSpace = {
+ return when space in {
+ .Full(t) then {
+ // Start with full IntRange, subtract comparison
+ let full_range = PatternSpace.IntRange(false, 0, false, 0);
+ yield self.subtract_range_from_range(full_range, self.comparison_to_int_range(op, value_str));
+ },
+ .IntRange(_, _, _, _) then self.subtract_range_from_range(space, self.comparison_to_int_range(op, value_str)),
+ _ then space,
+ };
+ };
 
-    // Subtract sub (an IntRange) from space (an IntRange).
-    file_private subtract_range_from_range(self, space PatternSpace, sub PatternSpace) PatternSpace = {
-        return when space in {
-            .IntRange(s_has_min, s_min, s_has_max, s_max) then when sub in {
-                .IntRange(r_has_min, r_min, r_has_max, r_max) then {
-                    // Check no overlap
-                    if s_has_max and r_has_min and s_max < r_min then { return space;};
-                    if s_has_min and r_has_max and s_min > r_max then { return space;};
-                    // sub covers all of space
-                    let sub_covers_min = (not r_has_min) or (s_has_min and r_min <= s_min);
-                    let sub_covers_max = (not r_has_max) or (s_has_max and r_max >= s_max);
-                    if sub_covers_min and sub_covers_max then {
-                        return PatternSpace.Empty();
-                    };
-                    // sub covers min side of space
-                    if sub_covers_min then {
-                        return PatternSpace.IntRange(true, r_max + 1, s_has_max, s_max);
-                    };
-                    // sub covers max side of space
-                    if sub_covers_max then {
-                        return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
-                    };
-                    // sub is interior - keep min side (best effort)
-                    return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
-                },
-                _ then space,
-            },
-            _ then space,
-        };
-    };
+ // Subtract sub (an IntRange) from space (an IntRange).
+ file_private subtract_range_from_range(self, space PatternSpace, sub PatternSpace) PatternSpace = {
+ return when space in {
+ .IntRange(s_has_min, s_min, s_has_max, s_max) then when sub in {
+ .IntRange(r_has_min, r_min, r_has_max, r_max) then {
+ // Check no overlap
+ if s_has_max and r_has_min and s_max < r_min then { return space;};
+ if s_has_min and r_has_max and s_min > r_max then { return space;};
+ // sub covers all of space
+ let sub_covers_min = (not r_has_min) or (s_has_min and r_min <= s_min);
+ let sub_covers_max = (not r_has_max) or (s_has_max and r_max >= s_max);
+ if sub_covers_min and sub_covers_max then {
+ return PatternSpace.Empty();
+ };
+ // sub covers min side of space
+ if sub_covers_min then {
+ return PatternSpace.IntRange(true, r_max + 1, s_has_max, s_max);
+ };
+ // sub covers max side of space
+ if sub_covers_max then {
+ return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
+ };
+ // sub is interior - keep min side (best effort)
+ return PatternSpace.IntRange(s_has_min, s_min, true, r_min - 1);
+ },
+ _ then space,
+ },
+ _ then space,
+ };
+ };
 
-    file_private subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) PatternSpace = {
-        return when pattern in {
-            .Wildcard() then PatternSpace.Empty(),
-            .Variable(_) then PatternSpace.Empty(),
-            .BoolLiteral(value) then self.subtract_bool(space, value),
-            .IntegerLiteral(value_str) then {
-                let value = parse_int_str(value_str);
-                yield self.subtract_int_literal(space, value);
-            },
-            .NegativeIntegerLiteral(value_str) then {
-                let value = 0 - (parse_int_str(value_str));
-                yield self.subtract_int_literal(space, value);
-            },
-            .EnumCase(case_name, _, elements) then self.subtract_enum_case(space, case_name, elements, subject_type),
-            .ComparisonPattern(op, value_str) then self.subtract_comparison(space, op, value_str),
-            .OrPattern(left, right) then {
-                let after_left = self.subtract_pattern(space, left, subject_type);
-                yield self.subtract_pattern(after_left, right, subject_type);
-            },
-            .AndPattern(left, right) then {
-                let after_left = self.subtract_pattern(space, left, subject_type);
-                yield self.subtract_pattern(after_left, right, subject_type);
-            },
-            _ then space,
-        };
-    };
+ file_private subtract_pattern(self, space PatternSpace, pattern TypedPattern, subject_type Type) PatternSpace = {
+ return when pattern in {
+ .Wildcard() then PatternSpace.Empty(),
+ .Variable(_) then PatternSpace.Empty(),
+ .BoolLiteral(value) then self.subtract_bool(space, value),
+ .IntegerLiteral(value_str) then {
+ let value = parse_int_str(value_str);
+ yield self.subtract_int_literal(space, value);
+ },
+ .NegativeIntegerLiteral(value_str) then {
+ let value = 0 - (parse_int_str(value_str));
+ yield self.subtract_int_literal(space, value);
+ },
+ .EnumCase(case_name, _, elements) then self.subtract_enum_case(space, case_name, elements, subject_type),
+ .ComparisonPattern(op, value_str) then self.subtract_comparison(space, op, value_str),
+ .OrPattern(left, right) then {
+ let after_left = self.subtract_pattern(space, left, subject_type);
+ yield self.subtract_pattern(after_left, right, subject_type);
+ },
+ .AndPattern(left, right) then {
+ let after_left = self.subtract_pattern(space, left, subject_type);
+ yield self.subtract_pattern(after_left, right, subject_type);
+ },
+ _ then space,
+ };
+ };
 
-    file_private can_precisely_subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) Bool = {
-        return when pattern in {
-            .Wildcard() then true,
-            .Variable(_) then true,
-            .BoolLiteral(_) then space is .BoolValues(_, _),
-            .IntegerLiteral(_) then when space in {
-                .IntRange(has_min, min_val, has_max, max_val) then {
-                    if not has_min and not has_max then {
-                        return false;
-                    };
-                    let value = when pattern in {
-                        .IntegerLiteral(value_str) then parse_int_str(value_str),
-                        _ then 0,
-                    };
-                    if has_min and has_max and min_val == max_val and value == min_val then {
-                        return true;
-                    };
-                    if has_min and value == min_val then {
-                        return true;
-                    };
-                    if has_max and value == max_val then {
-                        return true;
-                    };
-                    return false;
-                },
-                .Full(_) then true,
-                _ then false,
-            },
-            .NegativeIntegerLiteral(_) then when space in {
-                .IntRange(has_min, min_val, has_max, max_val) then {
-                    if not has_min and not has_max then {
-                        return false;
-                    };
-                    let value = when pattern in {
-                        .NegativeIntegerLiteral(value_str) then 0 - parse_int_str(value_str),
-                        _ then 0,
-                    };
-                    if has_min and has_max and min_val == max_val and value == min_val then {
-                        return true;
-                    };
-                    if has_min and value == min_val then {
-                        return true;
-                    };
-                    if has_max and value == max_val then {
-                        return true;
-                    };
-                    return false;
-                },
-                .Full(_) then true,
-                _ then false,
-            },
-            .ComparisonPattern(_, _) then space is .IntRange(_, _, _, _) or space is .Full(_),
-            .EnumCase(case_name, _, elements) then {
-                let case_fields = when space in {
-                    .Full(_) then self.enum_case_map_for_type(subject_type).get(case_name),
-                    .EnumCases(_, cases) then cases.get(case_name),
-                    _ then Option[List[* PatternSpace]].None(),
-                } or else { return false;};
-                if self.pattern_elements_all_catchall(elements) then {
-                    return true;
-                };
-                if case_fields.count() <> elements.count() then {
-                    return false;
-                };
-                let mutable idx UInt = 0;
-                while idx < elements.count() then {
-                    let field_space = *case_fields[idx];
-                    let field_type = self.pattern_space_type(field_space);
-                    if not self.can_precisely_subtract_pattern(field_space, elements[idx].pattern, field_type) then {
-                        return false;
-                    };
-                    idx += 1;
-                };
-                yield true;
-            },
-            .OrPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type) and self.can_precisely_subtract_pattern(space, right, subject_type),
-            .AndPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type) and self.can_precisely_subtract_pattern(space, right, subject_type),
-            _ then false,
-        };
-    };
+ file_private can_precisely_subtract_pattern(self, space PatternSpace, pattern TypedPattern, subject_type Type) Bool = {
+ return when pattern in {
+ .Wildcard() then true,
+ .Variable(_) then true,
+ .BoolLiteral(_) then space is .BoolValues(_, _),
+ .IntegerLiteral(_) then when space in {
+ .IntRange(has_min, min_val, has_max, max_val) then {
+ if not has_min and not has_max then {
+ return false;
+ };
+ let value = when pattern in {
+ .IntegerLiteral(value_str) then parse_int_str(value_str),
+ _ then 0,
+ };
+ if has_min and has_max and min_val == max_val and value == min_val then {
+ return true;
+ };
+ if has_min and value == min_val then {
+ return true;
+ };
+ if has_max and value == max_val then {
+ return true;
+ };
+ return false;
+ },
+ .Full(_) then true,
+ _ then false,
+ },
+ .NegativeIntegerLiteral(_) then when space in {
+ .IntRange(has_min, min_val, has_max, max_val) then {
+ if not has_min and not has_max then {
+ return false;
+ };
+ let value = when pattern in {
+ .NegativeIntegerLiteral(value_str) then 0 - parse_int_str(value_str),
+ _ then 0,
+ };
+ if has_min and has_max and min_val == max_val and value == min_val then {
+ return true;
+ };
+ if has_min and value == min_val then {
+ return true;
+ };
+ if has_max and value == max_val then {
+ return true;
+ };
+ return false;
+ },
+ .Full(_) then true,
+ _ then false,
+ },
+ .ComparisonPattern(_, _) then space is .IntRange(_, _, _, _) or space is .Full(_),
+ .EnumCase(case_name, _, elements) then {
+ let case_fields = when space in {
+ .Full(_) then self.enum_case_map_for_type(subject_type).get(case_name),
+ .EnumCases(_, cases) then cases.get(case_name),
+ _ then Option[List[PatternSpace]].None(),
+ } or else { return false;};
+ if self.pattern_elements_all_catchall(elements) then {
+ return true;
+ };
+ if case_fields.count() <> elements.count() then {
+ return false;
+ };
+ let mutable idx UInt = 0;
+ while idx < elements.count() then {
+ let field_space = case_fields[idx];
+ let mutable field_type = self.pattern_space_type(field_space);
+ if not self.can_precisely_subtract_pattern(field_space, elements[idx].pattern, field_type) then {
+ return false;
+ };
+ idx += 1;
+ };
+ yield true;
+ },
+ .OrPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type) and self.can_precisely_subtract_pattern(space, right, subject_type),
+ .AndPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type) and self.can_precisely_subtract_pattern(space, right, subject_type),
+ _ then false,
+ };
+ };
 
-    file_private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
-        let _ = self;
-        return when space in {
-            .BoolValues(has_true, has_false) then {
-                let next_true = if value then false else has_true;
-                let next_false = if value then has_false else false;
-                yield if not next_true and not next_false then PatternSpace.Empty() else PatternSpace.BoolValues(next_true, next_false);
-            },
-            _ then space,
-        };
-    };
+ file_private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
+ let _ = self;
+ return when space in {
+ .BoolValues(has_true, has_false) then {
+ let next_true = if value then false else has_true;
+ let next_false = if value then has_false else false;
+ yield if not next_true and not next_false then PatternSpace.Empty() else PatternSpace.BoolValues(next_true, next_false);
+ },
+ _ then space,
+ };
+ };
 
-    file_private subtract_enum_case(self, space PatternSpace, case_name String, elements List[* TypedPatternElement], subject_type Type) PatternSpace = {
-        let mutable cases = when space in {
-            .Full(_) then self.enum_case_map_for_type(subject_type),
-            .EnumCases(_, existing) then existing,
-            _ then { return space;},
-        };
-        let case_fields = cases.get(case_name) or else { return space;};
-        let covers_entire_case = self.pattern_elements_all_catchall(elements);
-        if covers_entire_case then {
-            let _ = cases.remove(case_name);
-        } else {
-            let new_fields = self.subtract_pattern_fields(case_fields, elements);
-            if self.pattern_space_list_all_empty(new_fields) then {
-                let _ = cases.remove(case_name);
-            } else {
-                cases.insert(case_name, new_fields);
-            };
-        };
-        if cases.is_empty() then {
-            return PatternSpace.Empty();
-        };
-        return when space in {
-            .EnumCases(type_name, _) then PatternSpace.EnumCases(type_name, cases),
-            .Full(_) then PatternSpace.EnumCases(self.exhaustiveness_type_name(), cases),
-            _ then space,
-        };
-    };
+ file_private subtract_enum_case(self, space PatternSpace, case_name String, elements List[TypedPatternElement], subject_type Type) PatternSpace = {
+ let mutable cases = when space in {
+ .Full(_) then self.enum_case_map_for_type(subject_type),
+ .EnumCases(_, existing) then existing,
+ _ then { return space;},
+ };
+ let case_fields = cases.get(case_name) or else { return space;};
+ let covers_entire_case = self.pattern_elements_all_catchall(elements);
+ if covers_entire_case then {
+ let _ = cases.remove(case_name);
+ } else {
+ let new_fields = self.subtract_pattern_fields(case_fields, elements);
+ if self.pattern_space_list_all_empty(new_fields) then {
+ let _ = cases.remove(case_name);
+ } else {
+ cases.insert(case_name, new_fields);
+ };
+ };
+ if cases.is_empty() then {
+ return PatternSpace.Empty();
+ };
+ return when space in {
+ .EnumCases(type_name, _) then PatternSpace.EnumCases(type_name, cases),
+ .Full(_) then PatternSpace.EnumCases(self.exhaustiveness_type_name(), cases),
+ _ then space,
+ };
+ };
 
-    file_private enum_case_map_for_type(self, t Type) Dict[String, List[* PatternSpace]] = {
-        let mutable cases = Dict[String, List[* PatternSpace]].new();
-        let maybe_cases = when t in {
-            .EnumType(def_id) then self.context.get_enum_cases(def_id),
-            .GenericEnum(template_name, _) then when self.generic_templates.lookup_enum(template_name) in {
-                .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
-                .None() then Option[List[EnumCaseInfo]].None(),
-            },
-            _ then Option[List[EnumCaseInfo]].None(),
-        };
-        when maybe_cases in {
-            .Some(all_cases) then {
-                for case_info in all_cases then {
-                    let mutable fields = List[* PatternSpace].new();
-                    for param in case_info.params then {
-                        fields.push(box(self.full_space_for_type(param.param_type)));
-                    };
-                    cases.insert(case_info.name, fields);
-                };
-            },
-            .None() then {},
-        };
-        return cases;
-    };
+ file_private enum_case_map_for_type(self, t Type) Dict[String, List[PatternSpace]] = {
+ let mutable cases = Dict[String, List[PatternSpace]].new();
+ let maybe_cases = when t in {
+ .EnumType(def_id) then self.context.get_enum_cases(def_id),
+ .GenericEnum(template_name, _, _) then when self.generic_templates.lookup_enum(template_name) in {
+ .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+ .None() then Option[List[EnumCaseInfo]].None(),
+ },
+ _ then Option[List[EnumCaseInfo]].None(),
+ };
+ when maybe_cases in {
+ .Some(all_cases) then {
+ for case_info in all_cases then {
+ let mutable fields = List[PatternSpace].new();
+ for param in case_info.params then {
+ fields.push(PatternSpace.Full(param.param_type));
+ };
+ cases.insert(case_info.name, fields);
+ };
+ },
+ .None() then {},
+ };
+ return cases;
+ };
 
-    file_private subtract_pattern_fields(self, fields List[* PatternSpace], elements List[* TypedPatternElement]) List[* PatternSpace] = {
-        if fields.count() <> elements.count() then {
-            return fields;
-        };
-        let mutable result = List[* PatternSpace].new();
-        let mutable idx UInt = 0;
-        while idx < fields.count() then {
-            let field_space = *fields[idx];
-            let element = elements[idx];
-            let field_type = self.pattern_space_type(field_space);
-            result.push(box(self.subtract_pattern(field_space, element.pattern, field_type)));
-            idx += 1;
-        };
-        return result;
-    };
+ file_private subtract_pattern_fields(self, fields List[PatternSpace], elements List[TypedPatternElement]) List[PatternSpace] = {
+ if fields.count() <> elements.count() then {
+ return fields;
+ };
+ let mutable result = List[PatternSpace].new();
+ let mutable idx UInt = 0;
+ while idx < fields.count() then {
+ let field_space = fields[idx];
+ let element = elements[idx];
+ let mutable field_type = self.pattern_space_type(field_space);
+ result.push(self.subtract_pattern(field_space, element.pattern, field_type));
+ idx += 1;
+ };
+ return result;
+ };
 
-    file_private pattern_space_type(self, space PatternSpace) Type = {
-        let _ = self;
-        return when space in {
-            .Full(t) then t,
-            .BoolValues(_, _) then Type.BoolType(),
-            .EnumCases(_, _) then Type.Unknown(),
-            _ then Type.Unknown(),
-        };
-    };
+ file_private pattern_space_type(self, space PatternSpace) Type = {
+ let _ = self;
+ return when space in {
+ .Full(t) then t,
+ .BoolValues(_, _) then Type.BoolType(),
+ .EnumCases(_, _) then Type.Unknown(),
+ _ then Type.Unknown(),
+ };
+ };
 
-    file_private pattern_elements_all_catchall(self, elements List[* TypedPatternElement]) Bool = {
-        let _ = self;
-        for element in elements then {
-            if not is_catchall(element.pattern) then {
-                return false;
-            };
-        };
-        return true;
-    };
+ file_private pattern_elements_all_catchall(self, elements List[TypedPatternElement]) Bool = {
+ let _ = self;
+ for element in elements then {
+ if not is_catchall(element.pattern) then {
+ return false;
+ };
+ };
+ return true;
+ };
 
-    file_private pattern_space_list_all_empty(self, spaces List[* PatternSpace]) Bool = {
-        for space in spaces then {
-            if not self.pattern_space_is_empty(*space) then {
-                return false;
-            };
-        };
-        return true;
-    };
+ file_private pattern_space_list_all_empty(self, spaces List[PatternSpace]) Bool = {
+ for space in spaces then {
+ if not self.pattern_space_is_empty(space) then {
+ return false;
+ };
+ };
+ return true;
+ };
 
-    file_private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
-        return when space in {
-            .Empty() then List[String].new(),
-            .Full(t) then {
-                let mutable out = List[String].new();
-                out.push(type_to_string(t));
-                yield out;
-            },
-            .BoolValues(has_true, has_false) then {
-                let mutable out = List[String].new();
-                if has_true then { out.push("true");};
-                if has_false then { out.push("false");};
-                yield out;
-            },
-            .EnumCases(_, cases) then {
-                let mutable out = List[String].new();
-                let mutable names = List[String].new();
-                for entry in cases.iterator() then { names.push(entry.first);};
-                names.sort();
-                for case_name in names then {
-                    let fields = cases.get(case_name) or else List[* PatternSpace].new();
-                    let rendered = self.render_missing_constructor(case_name, fields);
-                    for value in rendered then { out.push(value);};
-                };
-                yield out;
-            },
-            .IntRange(has_min, min_val, has_max, max_val) then {
-                let mutable out = List[String].new();
-                if has_min and has_max then {
-                    let mutable desc = "integer in [";
-                    desc.push_string("\(min_val)");
-                    desc.push_string(", ");
-                    desc.push_string("\(max_val)");
-                    desc.push_string("]");
-                    out.push(desc);
-                } else if has_min then {
-                    let mutable desc = "integer >= ";
-                    desc.push_string("\(min_val)");
-                    out.push(desc);
-                } else if has_max then {
-                    let mutable desc = "integer <= ";
-                    desc.push_string("\(max_val)");
-                    out.push(desc);
-                } else {
-                    out.push("integer (any)");
-                };
-                yield out;
-            },
-        };
-    };
+ file_private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
+ return when space in {
+ .Empty() then List[String].new(),
+ .Full(t) then {
+ let mutable out = List[String].new();
+ out.push(type_to_string(t));
+ yield out;
+ },
+ .BoolValues(has_true, has_false) then {
+ let mutable out = List[String].new();
+ if has_true then { out.push("true");};
+ if has_false then { out.push("false");};
+ yield out;
+ },
+ .EnumCases(_, cases) then {
+ let mutable out = List[String].new();
+ let mutable names = List[String].new();
+ for entry in cases.iterator() then { names.push(entry.first);};
+ names.sort();
+ for case_name in names then {
+ let fields = cases.get(case_name) or else List[PatternSpace].new();
+ let rendered = self.render_missing_constructor(case_name, fields);
+ for value in rendered then { out.push(value);};
+ };
+ yield out;
+ },
+ .IntRange(has_min, min_val, has_max, max_val) then {
+ let mutable out = List[String].new();
+ if has_min and has_max then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer in [");
+ desc.push_string("\(min_val)");
+ desc.push_string(", ");
+ desc.push_string("\(max_val)");
+ desc.push_string("]");
+ out.push(desc.to_string());
+ } else if has_min then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer >= ");
+ desc.push_string("\(min_val)");
+ out.push(desc.to_string());
+ } else if has_max then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer <= ");
+ desc.push_string("\(max_val)");
+ out.push(desc.to_string());
+ } else {
+ out.push("integer (any)");
+ };
+ yield out;
+ },
+ };
+ };
 
-    file_private render_missing_constructor(self, case_name String, fields List[* PatternSpace]) List[String] = {
-        let _ = self;
-        if fields.is_empty() then {
-            let mutable out = List[String].new();
-            out.push(".");
-            out[0(UInt)].push_string(case_name);
-            return out;
-        };
-        let mutable field_options = List[List[String]].new();
-        for field in fields then {
-            field_options.push(self.pattern_space_missing_fragments(*field));
-        };
-        let combinations = self.combine_missing_field_options(field_options);
-        let mutable out = List[String].new();
-        for combo in combinations then {
-            let mutable rendered = ".";
-            rendered.push_string(case_name);
-            rendered.push_byte('(');
-            let mutable first = true;
-            for fragment in combo then {
-                if not first then { rendered.push_string(", ");};
-                rendered.push_string(fragment);
-                first = false;
-            };
-            rendered.push_byte(')');
-            out.push(rendered);
-        };
-        return out;
-    };
+ file_private render_missing_constructor(self, case_name String, fields List[PatternSpace]) List[String] = {
+ let _ = self;
+ if fields.is_empty() then {
+ let mutable out = List[String].new();
+ out.push("." + case_name);
+ return out;
+ };
+ let mutable field_options = List[List[String]].new();
+ for field in fields then {
+ field_options.push(self.pattern_space_missing_fragments(field));
+ };
+ let combinations = self.combine_missing_field_options(field_options);
+ let mutable out = List[String].new();
+ for combo in combinations then {
+ let mutable rendered = StringBuilder.new();
+ rendered.push_string(".");
+ rendered.push_string(case_name);
+ rendered.push_byte('(');
+ let mutable first = true;
+ for fragment in combo then {
+ if not first then { rendered.push_string(", ");};
+ rendered.push_string(fragment);
+ first = false;
+ };
+ rendered.push_byte(')');
+ out.push(rendered.to_string());
+ };
+ return out;
+ };
 
-    file_private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
-        return when space in {
-            .Empty() then List[String].new(),
-            .Full(_) then {
-                let mutable out = List[String].new();
-                out.push("_");
-                yield out;
-            },
-            .BoolValues(has_true, has_false) then {
-                let mutable out = List[String].new();
-                if has_true and has_false then {
-                    out.push("_");
-                    return out;
-                };
-                if has_true then { out.push("true");};
-                if has_false then { out.push("false");};
-                yield out;
-            },
-            .EnumCases(_, cases) then {
-                let mutable out = List[String].new();
-                let mutable names = List[String].new();
-                for entry in cases.iterator() then { names.push(entry.first);};
-                names.sort();
-                for case_name in names then {
-                    let fields = cases.get(case_name) or else List[* PatternSpace].new();
-                    let rendered = self.render_missing_constructor(case_name, fields);
-                    for value in rendered then { out.push(value);};
-                };
-                yield out;
-            },
-            .IntRange(has_min, min_val, has_max, max_val) then {
-                let mutable out = List[String].new();
-                if has_min and has_max then {
-                    let mutable desc = "integer in [";
-                    desc.push_string("\(min_val)");
-                    desc.push_string(", ");
-                    desc.push_string("\(max_val)");
-                    desc.push_string("]");
-                    out.push(desc);
-                } else if has_min then {
-                    let mutable desc = "integer >= ";
-                    desc.push_string("\(min_val)");
-                    out.push(desc);
-                } else if has_max then {
-                    let mutable desc = "integer <= ";
-                    desc.push_string("\(max_val)");
-                    out.push(desc);
-                } else {
-                    out.push("integer (any)");
-                };
-                yield out;
-            },
-        };
-    };
+ file_private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
+ return when space in {
+ .Empty() then List[String].new(),
+ .Full(_) then {
+ let mutable out = List[String].new();
+ out.push("_");
+ yield out;
+ },
+ .BoolValues(has_true, has_false) then {
+ let mutable out = List[String].new();
+ if has_true and has_false then {
+ out.push("_");
+ return out;
+ };
+ if has_true then { out.push("true");};
+ if has_false then { out.push("false");};
+ yield out;
+ },
+ .EnumCases(_, cases) then {
+ let mutable out = List[String].new();
+ let mutable names = List[String].new();
+ for entry in cases.iterator() then { names.push(entry.first);};
+ names.sort();
+ for case_name in names then {
+ let fields = cases.get(case_name) or else List[PatternSpace].new();
+ let rendered = self.render_missing_constructor(case_name, fields);
+ for value in rendered then { out.push(value);};
+ };
+ yield out;
+ },
+ .IntRange(has_min, min_val, has_max, max_val) then {
+ let mutable out = List[String].new();
+ if has_min and has_max then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer in [");
+ desc.push_string("\(min_val)");
+ desc.push_string(", ");
+ desc.push_string("\(max_val)");
+ desc.push_string("]");
+ out.push(desc.to_string());
+ } else if has_min then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer >= ");
+ desc.push_string("\(min_val)");
+ out.push(desc.to_string());
+ } else if has_max then {
+ let mutable desc = StringBuilder.new();
+ desc.push_string("integer <= ");
+ desc.push_string("\(max_val)");
+ out.push(desc.to_string());
+ } else {
+ out.push("integer (any)");
+ };
+ yield out;
+ },
+ };
+ };
 
-    file_private combine_missing_field_options(self, options List[List[String]]) List[List[String]] = {
-        if options.is_empty() then {
-            return List[List[String]].new();
-        };
-        let mutable result = List[List[String]].new();
-        result.push(List[String].new());
-        for values in options then {
-            if values.is_empty() then {
-                return List[List[String]].new();
-            };
-            let mutable next = List[List[String]].new();
-            for prefix in result then {
-                for value in values then {
-                    let mutable combined = List[String].new();
-                    for existing in prefix then { combined.push(existing);};
-                    combined.push(value);
-                    next.push(combined);
-                };
-            };
-            result = next;
-        };
-        return result;
-    };
+ file_private combine_missing_field_options(self, options List[List[String]]) List[List[String]] = {
+ if options.is_empty() then {
+ return List[List[String]].new();
+ };
+ let mutable result = List[List[String]].new();
+ result.push(List[String].new());
+ for values in options then {
+ if values.is_empty() then {
+ return List[List[String]].new();
+ };
+ let mutable next = List[List[String]].new();
+ for prefix in result then {
+ for value in values then {
+ let mutable combined = List[String].new();
+ for existing in prefix then { combined.push(existing);};
+ combined.push(value);
+ next.push(combined);
+ };
+ };
+ result = next;
+ };
+ return result;
+ };
 
-    file_private exhaustiveness_type_name(self) String = {
-        return when self.subject_type in {
-            .EnumType(_) then self.context.type_display_name(self.subject_type),
-            .GenericEnum(template_name, _) then template_name,
-            .BoolType() then "Bool",
-            _ then type_to_string(self.subject_type),
-        };
-    };
+ file_private exhaustiveness_type_name(self) String = {
+ return when self.subject_type in {
+ .EnumType(_) then self.context.type_display_name(self.subject_type),
+ .GenericEnum(template_name, _, _) then template_name,
+ .BoolType() then "Bool",
+ _ then type_to_string(self.subject_type),
+ };
+ };
 
-    file_private non_exhaustive_match_message_from_patterns(self, type_name String, missing List[String]) String = {
-        let _ = self;
-        let mutable msg = "Non-exhaustive match on type '";
-        msg.push_string(type_name);
-        msg.push_string("': missing cases ");
-        let mutable first = true;
-        for c in missing then {
-            if not first then { msg.push_string(", ");};
-            msg.push_string(c);
-            first = false;
-        };
-        return msg;
-    };
+ file_private non_exhaustive_match_message_from_patterns(self, type_name String, missing List[String]) String = {
+ let _ = self;
+ let mutable msg = StringBuilder.new();
+ msg.push_string("Non-exhaustive match on type '");
+ msg.push_string(type_name);
+ msg.push_string("': missing cases ");
+ let mutable first = true;
+ for c in missing then {
+ if not first then { msg.push_string(", ");};
+ msg.push_string(c);
+ first = false;
+ };
+ return msg.to_string();
+ };
 
-    file_private is_synthetic_trailing_wildcard(self, pattern * TypedPattern, pattern_index UInt, pattern_count UInt) Bool = {
-        if pattern_count <> 2(UInt) then {
-            return false;
-        };
-        if pattern_index + 1(UInt) <> pattern_count then {
-            return false;
-        };
-        if pattern is not .Wildcard() then {
-            return false;
-        };
-        let first_pattern = self.patterns[0(UInt)];
-        return when first_pattern in {
-            .Wildcard() then false,
-            .Variable(_) then false,
-            _ then true,
-        };
-    };
+ file_private is_synthetic_trailing_wildcard(self, pattern TypedPattern, pattern_index UInt, pattern_count UInt) Bool = {
+ if pattern_count <> 2(UInt) then {
+ return false;
+ };
+ if pattern_index + 1(UInt) <> pattern_count then {
+ return false;
+ };
+ if pattern is not .Wildcard() then {
+ return false;
+ };
+ let first_pattern = self.patterns[0(UInt)];
+ return when first_pattern in {
+ .Wildcard() then false,
+ .Variable(_) then false,
+ _ then true,
+ };
+ };
 
-    // 检查 enum 是否已被完全覆盖
-    file_private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {
-        let all_cases = self.get_all_enum_case_names();
-        if all_cases.is_empty() then { return false;};
-        for case_name in all_cases.iterator() then {
-            if not covered_cases.contains(case_name) then {
-                return false;
-            };
-        };
-        return true;
-    };
+ // 检查 enum 是否已被完全覆盖
+ file_private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {
+ let all_cases = self.get_all_enum_case_names();
+ if all_cases.is_empty() then { return false;};
+ for case_name in all_cases.iterator() then {
+ if not covered_cases.contains(case_name) then {
+ return false;
+ };
+ };
+ return true;
+ };
 
-    // 获取所有 enum case 名称
-    file_private get_all_enum_case_names(self) Set[String] = {
-        let mutable names = Set[String].new();
-        when self.subject_type in {
-            .EnumType(def_id) then {
-                when self.context.get_enum_cases(def_id) in {
-                    .Some(cases) then {
-                        for c in cases then {
-                            names.insert(c.name);
-                        };
-                    },
-                    .None() then {},
-                };
-            },
-            .GenericEnum(template_name, _) then {
-                when self.generic_templates.lookup_enum(template_name) in {
-                    .Some(tmpl) then {
-                        when self.context.get_enum_cases(tmpl.def_id) in {
-                            .Some(cases) then {
-                                for c in cases then {
-                                    names.insert(c.name);
-                                };
-                            },
-                            .None() then {},
-                        };
-                    },
-                    .None() then {},
-                };
-            },
-            _ then {},
-        };
-        return names;
-    };
+ // 获取所有 enum case 名称
+ file_private get_all_enum_case_names(self) Set[String] = {
+ let mutable names = Set[String].new();
+ when self.subject_type in {
+ .EnumType(def_id) then {
+ when self.context.get_enum_cases(def_id) in {
+ .Some(cases) then {
+ for c in cases then {
+ names.insert(c.name);
+ };
+ },
+ .None() then {},
+ };
+ },
+ .GenericEnum(template_name, _, _) then {
+ when self.generic_templates.lookup_enum(template_name) in {
+ .Some(tmpl) then {
+ when self.context.get_enum_cases(tmpl.def_id) in {
+ .Some(cases) then {
+ for c in cases then {
+ names.insert(c.name);
+ };
+ },
+ .None() then {},
+ };
+ },
+ .None() then {},
+ };
+ },
+ _ then {},
+ };
+ return names;
+ };
 
-    // 检查 Bool 类型的穷举性
-    file_private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
-        if has_catchall then {
-            return Result[Void].Ok({});
-        };
+ // 检查 Bool 类型的穷举性
+ file_private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
+ if has_catchall then {
+ return Result[Void].Ok({});
+ };
 
-        let mutable has_true = false;
-        let mutable has_false = false;
+ let mutable has_true = false;
+ let mutable has_false = false;
 
-        for p in self.patterns.iterator() then {
-            when p in {
-                .BoolLiteral(value) then {
-                    if value then { has_true = true;} else { has_false = true;};
-                },
-                _ then {},
-            };
-        };
+ for p in self.patterns.iterator() then {
+ when p in {
+ .BoolLiteral(value) then {
+ if value then { has_true = true;} else { has_false = true;};
+ },
+ _ then {},
+ };
+ };
 
-        if not has_true or not has_false then {
-            let mutable missing = List[String].new();
-            if not has_true then { missing.push("true");};
-            if not has_false then { missing.push("false");};
-            let message = self.non_exhaustive_match_message("Bool", missing, false);
-            return Result[Void].Error(box(message));
-        };
+ if not has_true or not has_false then {
+ let mutable missing = List[String].new();
+ if not has_true then { missing.push("true");};
+ if not has_false then { missing.push("false");};
+ let message = self.non_exhaustive_match_message("Bool", missing, false);
+ return Result[Void].Error(message.to_string());
+ };
 
-        return Result[Void].Ok({});
-    };
+ return Result[Void].Ok({});
+ };
 
-    file_private missing_catchall_message(self, type_name String) String = {
-        let _ = self;
-        let mutable msg = "Match on type '";
-        msg.push_string(type_name);
-        msg.push_string("' requires a wildcard or variable binding pattern");
-        return msg;
-    };
+ file_private missing_catchall_message(self, type_name String) String = {
+ let _ = self;
+ let mutable msg = StringBuilder.new();
+ msg.push_string("Match on type '");
+ msg.push_string(type_name);
+ msg.push_string("' requires a wildcard or variable binding pattern");
+ return msg.to_string();
+ };
 
-    file_private non_exhaustive_match_message(self, type_name String, missing List[String], add_case_dot Bool) String = {
-        let mutable msg = "Non-exhaustive match on type '";
-        msg.push_string(type_name);
-        msg.push_string("': missing cases ");
-        let mutable first = true;
-        for c in missing then {
-            if not first then { msg.push_string(", ");};
-            if add_case_dot then {
-                msg.push_string(".");
-            };
-            msg.push_string(c);
-            first = false;
-        };
-        return msg;
-    };
+ file_private non_exhaustive_match_message(self, type_name String, missing List[String], add_case_dot Bool) String = {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("Non-exhaustive match on type '");
+ msg.push_string(type_name);
+ msg.push_string("': missing cases ");
+ let mutable first = true;
+ for c in missing then {
+ if not first then { msg.push_string(", ");};
+ if add_case_dot then {
+ msg.push_string(".");
+ };
+ msg.push_string(c);
+ first = false;
+ };
+ return msg.to_string();
+ };
 };
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 // 判断模式是否为 catchall（通配符或绑定模式）
-public let is_catchall(pattern * TypedPattern) Bool = {
-    return when pattern in {
-        .Wildcard() then true,
-        .Variable(_) then true,
-        .TraitObjectType(_) then false,
-        .TraitObjectTypeBinding(_, _) then false,
-        .OrPattern(left, right) then is_catchall(left) or is_catchall(right),
-        .AndPattern(left, right) then is_catchall(left) and is_catchall(right),
-        .NotPattern(_) then false,
-        .StructPattern(_, elements) then {
-            let mutable all_catchall = true;
-            for elem in elements then {
-                if not is_catchall(elem.pattern) then {
-                    all_catchall = false;
-                };
-            };
-            yield all_catchall;
-        },
-        .ComparisonPattern(_, _) then false,
-        _ then false,
-    };
+public let is_catchall(pattern TypedPattern) Bool = {
+ return when pattern in {
+ .Wildcard() then true,
+ .Variable(_) then true,
+ .TraitObjectType(_) then false,
+ .TraitObjectTypeBinding(_, _) then false,
+ .OrPattern(left, right) then is_catchall(left) or is_catchall(right),
+ .AndPattern(left, right) then is_catchall(left) and is_catchall(right),
+ .NotPattern(_) then false,
+ .StructPattern(_, elements) then {
+ let mutable all_catchall = true;
+ for elem in elements then {
+ if not is_catchall(elem.pattern) then {
+ all_catchall = false;
+ };
+ };
+ yield all_catchall;
+ },
+ .ComparisonPattern(_, _) then false,
+ _ then false,
+ };
 };
 
 
 // 获取模式的简短描述（用于错误消息）
-public let pattern_description(pattern * TypedPattern) String = {
-    return when pattern in {
-        .Wildcard() then "_",
-        .Variable(symbol) then if symbol.is_mutable() then {
-            let mutable msg = "mutable ";
-            msg.push_string("sym#\(symbol.def_id.id)");
-            yield msg;
-        } else "sym#\(symbol.def_id.id)",
-        .TraitObjectType(target_type) then type_to_string(target_type),
-        .TraitObjectTypeBinding(_, target_type) then type_to_string(target_type),
-        .BoolLiteral(value) then if value then "true" else "false",
-        .IntegerLiteral(value) then value,
-        .NegativeIntegerLiteral(value) then {
-            let mutable msg = "-";
-            msg.push_string(value);
-            yield msg;
-        },
-        .StringLiteral(value) then {
-            let mutable msg = "\"";
-            msg.push_string(value);
-            msg.push_string("\"");
-            yield msg;
-        },
-        .RuneLiteral(value) then {
-            let mutable msg = "'";
-            msg.push_string(value);
-            msg.push_string("'");
-            yield msg;
-        },
-        .EnumCase(name, _, elements) then {
-            let mutable msg = ".";
-            msg.push_string(name);
-            if elements.count() > 0 then {
-                msg.push_string("(");
-                let mutable first = true;
-                for elem in elements then {
-                    if not first then { msg.push_string(", "); };
-                    msg.push_string(pattern_description(elem.pattern));
-                    first = false;
-                };
-                msg.push_string(")");
-            };
-            yield msg;
-        },
-        .StructPattern(name, elements) then {
-            if elements.count() == 0 then {
-                yield name;
-            } else {
-                let mutable msg = name;
-                msg.push_string("(");
-                let mutable first = true;
-                for elem in elements then {
-                    if not first then { msg.push_string(", "); };
-                    msg.push_string(pattern_description(elem.pattern));
-                    first = false;
-                };
-                msg.push_string(")");
-                yield msg;
-            };
-        },
-        .ComparisonPattern(op, value) then {
-            let mutable msg = when op in {
-                .Greater() then ">",
-                .Less() then "<",
-                .GreaterEqual() then ">=",
-                .LessEqual() then "<=",
-            };
-            msg.push_string(value);
-            yield msg;
-        },
-        .AndPattern(_, _) then "<and>",
-        .OrPattern(_, _) then "<or>",
-        .NotPattern(_) then "<not>",
-    };
+public let pattern_description(pattern TypedPattern) String = {
+ return when pattern in {
+ .Wildcard() then "_",
+ .Variable(symbol) then if symbol.is_mutable() then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("mutable ");
+ msg.push_string("sym#\(symbol.def_id.id)");
+ yield msg.to_string();
+ } else "sym#\(symbol.def_id.id)",
+ .TraitObjectType(target_type) then type_to_string(target_type),
+ .TraitObjectTypeBinding(_, target_type) then type_to_string(target_type),
+ .BoolLiteral(value) then if value then "true" else "false",
+ .IntegerLiteral(value) then value,
+ .NegativeIntegerLiteral(value) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("-");
+ msg.push_string(value);
+ yield msg.to_string();
+ },
+ .StringLiteral(value) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("\"");
+ msg.push_string(value);
+ msg.push_string("\"");
+ yield msg.to_string();
+ },
+ .RuneLiteral(value) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("'");
+ msg.push_string(value);
+ msg.push_string("'");
+ yield msg.to_string();
+ },
+ .EnumCase(name, _, elements) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string(".");
+ msg.push_string(name);
+ if elements.count() > 0 then {
+ msg.push_string("(");
+ let mutable first = true;
+ for elem in elements then {
+ if not first then { msg.push_string(", "); };
+ msg.push_string(pattern_description(elem.pattern));
+ first = false;
+ };
+ msg.push_string(")");
+ };
+ yield msg.to_string();
+ },
+ .StructPattern(name, elements) then {
+ if elements.count() == 0 then {
+ yield name;
+ } else {
+ let mutable msg = StringBuilder.new();
+ msg.push_string(name);
+ msg.push_string("(");
+ let mutable first = true;
+ for elem in elements then {
+ if not first then { msg.push_string(", "); };
+ msg.push_string(pattern_description(elem.pattern));
+ first = false;
+ };
+ msg.push_string(")");
+ yield msg.to_string();
+ };
+ },
+ .ComparisonPattern(op, value) then {
+ let op_str = when op in {
+ .Greater() then ">",
+ .Less() then "<",
+ .GreaterEqual() then ">=",
+ .LessEqual() then "<=",
+ };
+ let mutable msg = StringBuilder.new();
+ msg.push_string(op_str);
+ msg.push_string(value);
+ yield msg.to_string();
+ },
+ .AndPattern(left, right) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_byte('(');
+ msg.push_string(pattern_description(left));
+ msg.push_string(" and ");
+ msg.push_string(pattern_description(right));
+ msg.push_byte(')');
+ yield msg.to_string();
+ },
+ .OrPattern(left, right) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_byte('(');
+ msg.push_string(pattern_description(left));
+ msg.push_string(" or ");
+ msg.push_string(pattern_description(right));
+ msg.push_byte(')');
+ yield msg.to_string();
+ },
+ .NotPattern(inner) then {
+ let mutable msg = StringBuilder.new();
+ msg.push_string("not ");
+ msg.push_string(pattern_description(inner));
+ yield msg.to_string();
+ },
+ };
 };
 
 file_private let unreachable_after_pattern_message(pattern_desc String) String = {
-    let mutable msg = "Unreachable pattern: pattern after '";
-    msg.push_string(pattern_desc);
-    msg.push_string("' is unreachable");
-    return msg;
+ let mutable msg = StringBuilder.new();
+ msg.push_string("Unreachable pattern: pattern after '");
+ msg.push_string(pattern_desc);
+ msg.push_string("' is unreachable");
+ return msg.to_string();
 };
 
-public let collect_trait_object_types(pattern * TypedPattern) Set[String] = {
-    let mutable covered = Set[String].new();
-    when pattern in {
-        .TraitObjectType(target_type) then {
-            covered.insert(type_to_string(target_type));
-        },
-        .TraitObjectTypeBinding(_, target_type) then {
-            covered.insert(type_to_string(target_type));
-        },
-        .OrPattern(left, right) then {
-            let left_types = collect_trait_object_types(left);
-            for type_name in left_types.iterator() then {
-                covered.insert(type_name);
-            };
-            let right_types = collect_trait_object_types(right);
-            for type_name in right_types.iterator() then {
-                covered.insert(type_name);
-            };
-        },
-        _ then {},
-    };
-    return covered;
+public let collect_trait_object_types(pattern TypedPattern) Set[String] = {
+ let mutable covered = Set[String].new();
+ when pattern in {
+ .TraitObjectType(target_type) then {
+ covered.insert(type_to_string(target_type));
+ },
+ .TraitObjectTypeBinding(_, target_type) then {
+ covered.insert(type_to_string(target_type));
+ },
+ .OrPattern(left, right) then {
+ let left_types = collect_trait_object_types(left);
+ for type_name in left_types.iterator() then {
+ covered.insert(type_name);
+ };
+ let right_types = collect_trait_object_types(right);
+ for type_name in right_types.iterator() then {
+ covered.insert(type_name);
+ };
+ },
+ _ then {},
+ };
+ return covered;
 };

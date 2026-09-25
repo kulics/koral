@@ -1,13 +1,13 @@
 // Typed AST printer – produces a human-readable representation of a TypedProgram.
 
 file_private let indent(level UInt) String = {
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     let mutable i UInt = 0;
     while i < level then {
         out.push_string("  ");
         i += 1;
     };
-    return out;
+    return out.to_string();
 };
 
 file_private let access_text(access AccessModifier) String = {
@@ -26,14 +26,14 @@ file_private let typed_param_text_named(p TypedParam, type_names Dict[UInt, Stri
 };
 
 file_private let typed_params_text_named(params List[TypedParam], type_names Dict[UInt, String]) String = {
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for p in params then {
         if not first then { out.push_string(", ");};
         out.push_string(typed_param_text_named(p, type_names));
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
 file_private let typed_field_text_named(f TypedField, level UInt, type_names Dict[UInt, String]) String = {
@@ -50,7 +50,8 @@ file_private let typed_enum_case_text_named(c TypedEnumCase, level UInt, type_na
     if c.fields.is_empty() then {
         return "\(indent(level))\(c.name)()";
     };
-    let mutable out = "\(indent(level))\(c.name)(";
+    let mutable out = StringBuilder.new();
+    out.push_string("\(indent(level))\(c.name)(");
     let mutable first = true;
     for f in c.fields then {
         if not first then { out.push_string(", ");};
@@ -59,7 +60,7 @@ file_private let typed_enum_case_text_named(c TypedEnumCase, level UInt, type_na
         first = false;
     };
     out.push_byte(')');
-    return out;
+    return out.to_string();
 };
 
 public let print_typed_program(program TypedProgram) Void = {
@@ -84,17 +85,17 @@ file_private let type_display_with_depth(t Type, type_names Dict[UInt, String], 
                 .None() then "enum#\(def_id.id)",
             },
             .OpaqueType(def_id) then "opaque#\(def_id.id)",
-            .GenericStruct(template, _) then "\(template)[...]",
-            .GenericEnum(template, _) then "\(template)[...]",
+            .GenericStruct(template, _, _) then "\(template)[...]",
+            .GenericEnum(template, _, _) then "\(template)[...]",
             .FunctionType(_, _) then "Func(...) ...",
-            .ReferenceType(_) then "*...",
-            .MutableReferenceType(_) then "*mutable ...",
-            .PointerType(_) then "*unsafe ...",
-            .MutablePointerType(_) then "*unsafe mutable ...",
-            .WeakReferenceType(_) then "?*...",
-            .MutableWeakReferenceType(_) then "?*mutable ...",
-            .TraitObject(trait_name, _) then trait_name,
-            .TypeVar(tv) then (*tv).display(),
+            .ReferenceType(_) then "...",
+            .MutableReferenceType(_) then "mutable ...",
+            .PointerType(_) then "unsafe ...",
+            .MutablePointerType(_) then "unsafe mutable ...",
+            .WeakReferenceType(_) then "?...",
+            .MutableWeakReferenceType(_) then "?mutable ...",
+            .TraitObject(trait_name, _, _) then trait_name,
+            .TypeVar(tv) then (tv).display(),
             .Unknown() then "?",
             _ then type_to_string(t),
         };
@@ -117,7 +118,8 @@ file_private let type_display_with_depth(t Type, type_names Dict[UInt, String], 
         .VoidType() then "Void",
         .NeverType() then "Never",
         .FunctionType(params, return_type) then {
-            let mutable out = "Func(";
+            let mutable out = StringBuilder.new();
+            out.push_string("Func(");
             let mutable first = true;
             for entry in params then {
                 if not first then { out.push_string(", ");};
@@ -126,8 +128,8 @@ file_private let type_display_with_depth(t Type, type_names Dict[UInt, String], 
             };
             out.push_byte(')');
             out.push_byte(' ');
-            out.push_string(type_display_with_depth(*return_type, type_names, depth + 1));
-            yield out;
+            out.push_string(type_display_with_depth(return_type, type_names, depth + 1));
+            yield out.to_string();
         },
         .StructureType(def_id) then when type_names.get(def_id.id) in {
             .Some(name) then name,
@@ -137,48 +139,50 @@ file_private let type_display_with_depth(t Type, type_names Dict[UInt, String], 
             .Some(name) then name,
             .None() then "enum#\(def_id.id)",
         },
-        .ReferenceType(inner) then "ref \(type_display_with_depth(*inner, type_names, depth + 1))",
-        .MutableReferenceType(inner) then "*mutable \(type_display_with_depth(*inner, type_names, depth + 1))",
-        .BorrowedReferenceType(inner) then "*\(type_display_with_depth(*inner, type_names, depth + 1))",
-        .MutableBorrowedReferenceType(inner) then "*mutable \(type_display_with_depth(*inner, type_names, depth + 1))",
-        .PointerType(inner) then "*unsafe \(type_display_with_depth(*inner, type_names, depth + 1))",
-        .MutablePointerType(inner) then "*unsafe mutable \(type_display_with_depth(*inner, type_names, depth + 1))",
-        .WeakReferenceType(inner) then "?*\(type_display_with_depth(*inner, type_names, depth + 1))",
-        .MutableWeakReferenceType(inner) then "?*mutable \(type_display_with_depth(*inner, type_names, depth + 1))",
+        .ReferenceType(inner) then "ref \(type_display_with_depth(inner, type_names, depth + 1))",
+        .MutableReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
+        .BorrowedReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
+        .MutableBorrowedReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
+        .PointerType(inner) then "unsafe \(type_display_with_depth(inner, type_names, depth + 1))",
+        .MutablePointerType(inner) then "unsafe mutable \(type_display_with_depth(inner, type_names, depth + 1))",
+        .WeakReferenceType(inner) then "?\(type_display_with_depth(inner, type_names, depth + 1))",
+        .MutableWeakReferenceType(inner) then "?\(type_display_with_depth(inner, type_names, depth + 1))",
         .OpaqueType(def_id) then "opaque#\(def_id.id)",
         .GenericParameter(name) then name,
-        .GenericStruct(template, args) then {
-            let mutable out = "\(template)[";
+        .GenericStruct(template, _, args) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("\(template)[");
             let mutable first = true;
             for arg in args then {
                 if not first then { out.push_string(", ");};
-                out.push_string(type_display_with_depth(*arg, type_names, depth + 1));
+                out.push_string(type_display_with_depth(arg, type_names, depth + 1));
                 first = false;
             };
             out.push_byte(']');
-            yield out;
+            yield out.to_string();
         },
-        .GenericEnum(template, args) then {
-            let mutable out = "\(template)[";
+        .GenericEnum(template, _, args) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("\(template)[");
             let mutable first = true;
             for arg in args then {
                 if not first then { out.push_string(", ");};
-                out.push_string(type_display_with_depth(*arg, type_names, depth + 1));
+                out.push_string(type_display_with_depth(arg, type_names, depth + 1));
                 first = false;
             };
             out.push_byte(']');
-            yield out;
+            yield out.to_string();
         },
         .ModuleType(info) then {
             yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".");
         },
-        .TraitObject(trait_name, _) then trait_name,
-        .TypeVar(tv) then (*tv).display(),
+        .TraitObject(trait_name, _, _) then trait_name,
+        .TypeVar(tv) then (tv).display(),
         .Unknown() then "?",
     };
 };
 
-file_private let print_typed_decl_named(decl * TypedDecl, level UInt, type_names Dict[UInt, String]) Void = {
+file_private let print_typed_decl_named(decl TypedDecl, level UInt, type_names Dict[UInt, String]) Void = {
     when decl in {
         .LetDecl(access, name, is_mutable, decl_type, initializer, span, _) then {
             let mut_kw = if is_mutable then "mutable " else "";
@@ -248,14 +252,14 @@ file_private let print_typed_decl_named(decl * TypedDecl, level UInt, type_names
             };
         },
         .UsingDecl(access, path_segments, span) then {
-            let mutable path = String.new();
+            let mutable path = StringBuilder.new();
             let mutable first = true;
             for seg in path_segments then {
                 if not first then { path.push_byte('.');};
                 path.push_string(seg);
                 first = false;
             };
-            println("\(indent(level))using \(path)");
+            println("\(indent(level))using \(path.to_string())");
         },
         .TraitDecl(access, name, members, span) then {
             println("\(indent(level))\(access_text(access))trait \(name) {");
@@ -270,14 +274,14 @@ file_private let print_typed_decl_named(decl * TypedDecl, level UInt, type_names
             println("\(indent(level))}");
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
-            let mutable trait_args_display = String.new();
+            let mutable trait_args_display = StringBuilder.new();
             let mutable first = true;
             for trait_arg in trait_args then {
                 if not first then { trait_args_display.push_string(", ");};
                 trait_args_display.push_string(type_display(trait_arg, type_names));
                 first = false;
             };
-            let trait_header = if trait_args_display.is_empty() then trait_name else "[\(trait_args_display)]\(trait_name)";
+            let trait_header = if trait_args_display.is_empty() then trait_name else "[\(trait_args_display.to_string())]\(trait_name.to_string())";
             println("\(indent(level))given \(type_display(target_type, type_names)) as \(trait_header) {");
             print_given_members_named(members, level + 1, type_names);
             println("\(indent(level))}");
@@ -290,7 +294,7 @@ file_private let print_typed_decl_named(decl * TypedDecl, level UInt, type_names
     };
 };
 
-file_private let print_given_members_named(members List[* TypedGivenMember], level UInt, type_names Dict[UInt, String]) Void = {
+file_private let print_given_members_named(members List[TypedGivenMember], level UInt, type_names Dict[UInt, String]) Void = {
     for member in members then {
         when member.body in {
             .Some(b) then {
@@ -304,12 +308,12 @@ file_private let print_given_members_named(members List[* TypedGivenMember], lev
     };
 };
 
-file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names Dict[UInt, String]) Void = {
+file_private let print_typed_expr_named(expr TypedExpr, level UInt, type_names Dict[UInt, String]) Void = {
     let prefix = indent(level);
     let type_ann = " :: \(type_display(expr.expr_type, type_names))";
     when expr.expr_kind in {
         .Variable(symbol) then {
-            println("\(prefix)Variable(\(printed_symbol_name(*symbol)) #\(symbol.def_id.id))\(type_ann)");
+            println("\(prefix)Variable(\(printed_symbol_name(symbol)) #\(symbol.def_id.id))\(type_ann)");
         },
         .IntegerLiteral(value) then {
             println("\(prefix)Int(\(value))\(type_ann)");
@@ -391,45 +395,19 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
             };
         },
         .GenericCall(function_symbol, type_args, args) then {
-            println("\(prefix)GenericCall \(printed_symbol_name(*function_symbol))\(type_ann)");
+            println("\(prefix)GenericCall \(printed_symbol_name(function_symbol))\(type_ann)");
             for a in args then {
                 print_typed_expr_named(a, level + 1, type_names);
             };
         },
         .IntrinsicCall(node) then {
             when node in {
-                .IsUniqueMutable(ref_expr) then {
-                    println("\(prefix)Intrinsic.is_unique_mutable -> Bool\(type_ann)");
-                    print_typed_expr_named(ref_expr, level + 1, type_names);
-                },
-                .RefCount(ref_expr) then {
-                    println("\(prefix)Intrinsic.ref_count -> UInt\(type_ann)");
-                    print_typed_expr_named(ref_expr, level + 1, type_names);
-                },
-                .MakeRef(pointer_expr, owner_expr, result_type) then {
-                    println("\(prefix)Intrinsic.make_ref -> \(type_display(result_type, type_names))\(type_ann)");
-                    print_typed_expr_named(pointer_expr, level + 1, type_names);
-                    print_typed_expr_named(owner_expr, level + 1, type_names);
-                },
-                .MakeMutRef(pointer_expr, owner_expr, result_type) then {
-                    println("\(prefix)Intrinsic.make_mut_ref -> \(type_display(result_type, type_names))\(type_ann)");
-                    print_typed_expr_named(pointer_expr, level + 1, type_names);
-                    print_typed_expr_named(owner_expr, level + 1, type_names);
-                },
                 .DowngradeRef(ref_expr, result_type) then {
                     println("\(prefix)Intrinsic.downgrade_ref -> \(type_display(result_type, type_names))\(type_ann)");
                     print_typed_expr_named(ref_expr, level + 1, type_names);
                 },
-                .DowngradeMutRef(ref_expr, result_type) then {
-                    println("\(prefix)Intrinsic.downgrade_mutable_ref -> \(type_display(result_type, type_names))\(type_ann)");
-                    print_typed_expr_named(ref_expr, level + 1, type_names);
-                },
                 .UpgradeRef(weak_expr, result_type) then {
                     println("\(prefix)Intrinsic.upgrade_ref -> \(type_display(result_type, type_names))\(type_ann)");
-                    print_typed_expr_named(weak_expr, level + 1, type_names);
-                },
-                .UpgradeMutRef(weak_expr, result_type) then {
-                    println("\(prefix)Intrinsic.upgrade_mutable_ref -> \(type_display(result_type, type_names))\(type_ann)");
                     print_typed_expr_named(weak_expr, level + 1, type_names);
                 },
                 .SpawnThread(out_handle, out_tid, closure, stack_size) then {
@@ -478,14 +456,14 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
             };
         },
         .MemberPath(base, path) then {
-            let mutable path_str = String.new();
+            let mutable path_str = StringBuilder.new();
             let mutable first = true;
             for seg in path then {
                 if not first then { path_str.push_byte('.');};
-                path_str.push_string(seg);
+                path_str.push_string(printed_symbol_name(seg));
                 first = false;
             };
-            println("\(prefix)MemberPath.\(path_str)\(type_ann)");
+            println("\(prefix.to_string())MemberPath.\(path_str.to_string())\(type_ann.to_string())");
             print_typed_expr_named(base, level + 1, type_names);
         },
         .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then {
@@ -493,7 +471,7 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
                 .Some(def_id) then " callsite=\(def_id.id)",
                 .None() then "",
             };
-            println("\(prefix)MethodReference.\(printed_symbol_name(*method)) receiver=\(type_display(receiver_type, type_names))\(callsite_text)\(type_ann)");
+            println("\(prefix)MethodReference.\(printed_symbol_name(method)) receiver=\(type_display(receiver_type, type_names))\(callsite_text)\(type_ann)");
             print_typed_expr_named(base, level + 1, type_names);
         },
         .Block(statements) then {
@@ -526,13 +504,13 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
             print_typed_expr_named(body, level + 1, type_names);
         },
         .StaticMethodCall(receiver_type, _, method, _, _, args) then {
-            println("\(prefix)StaticCall \(type_display(receiver_type, type_names)).\(printed_symbol_name(*method))\(type_ann)");
+            println("\(prefix)StaticCall \(type_display(receiver_type, type_names)).\(printed_symbol_name(method))\(type_ann)");
             for a in args then {
                 print_typed_expr_named(a, level + 1, type_names);
             };
         },
         .TypeConstruction(identifier, _, args) then {
-            println("\(prefix)TypeConstruction \(printed_symbol_name(*identifier))\(type_ann)");
+            println("\(prefix)TypeConstruction \(printed_symbol_name(identifier))\(type_ann)");
             for a in args then {
                 print_typed_expr_named(a, level + 1, type_names);
             };
@@ -548,7 +526,7 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
                 .Some(def_id) then " callsite=\(def_id.id)",
                 .None() then "",
             };
-            println("\(prefix)TraitMethodPlaceholder \(type_display(trait_type, type_names)).\(printed_symbol_name(*method))\(callsite_text)\(type_ann)");
+            println("\(prefix)TraitMethodPlaceholder \(type_display(trait_type, type_names)).\(printed_symbol_name(method))\(callsite_text)\(type_ann)");
             print_typed_expr_named(base, level + 1, type_names);
         },
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
@@ -568,12 +546,12 @@ file_private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names
     };
 };
 
-file_private let print_typed_stmt_named(stmt * TypedStatement, level UInt, type_names Dict[UInt, String]) Void = {
+file_private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names Dict[UInt, String]) Void = {
     let prefix = indent(level);
     when stmt in {
         .LetStmt(symbol, value, span) then {
             let mut_kw = if symbol.is_mutable() then "mutable " else "";
-            println("\(prefix)let \(mut_kw)\(printed_symbol_name(*symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))");
+            println("\(prefix)let \(mut_kw)\(printed_symbol_name(symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))");
             print_typed_expr_named(value, level + 1, type_names);
         },
         .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
@@ -633,11 +611,11 @@ file_private let print_typed_stmt_named(stmt * TypedStatement, level UInt, type_
     };
 };
 
-file_private let typed_pair_binding_text(binding Option[* Symbol], type_names Dict[UInt, String]) String = {
+file_private let typed_pair_binding_text(binding Option[Symbol], type_names Dict[UInt, String]) String = {
     return when binding in {
         .Some(symbol) then {
             let mut_kw = if symbol.is_mutable() then "mutable " else "";
-            yield "\(mut_kw)\(printed_symbol_name(*symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))";
+            yield "\(mut_kw)\(printed_symbol_name(symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))";
         },
         .None() then "_",
     };

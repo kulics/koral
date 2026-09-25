@@ -43,11 +43,13 @@ public let run_driver() Int = {
         print_usage();
         return 0;
     };
-    let mutable command = "build";
+    let mutable command = StringBuilder.new();
+    command.push_string("build");
     let mutable index UInt = 1;
 
     if first == "check" or first == "build" or first == "emit-c" or first == "run" then {
-        command = first;
+        command = StringBuilder.new();
+        command.push_string(first);
         index = 2;
     };
 
@@ -117,7 +119,7 @@ public let run_driver() Int = {
     };
 
     let options = InvocationOptions(
-        command,
+        command.to_string(),
         package_config_path,
         entry_file_path,
         target_module_name,
@@ -138,7 +140,7 @@ public let run_driver() Int = {
         return 1;
     };
 
-    return when command in {
+    return when command.to_string() in {
         "emit-c" then run_emit_c(options),
         "check" then run_check(options),
         "build" then run_build(options),
@@ -191,7 +193,7 @@ file_private let read_source(file_path String) Option[String] = {
 };
 
 file_private let normalize_path_for_match(path String) String =
-    path.into_path().normalize().to_string().replace_all("\\", "/").to_ascii_lowercase();
+    path.into_path().normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase();
 
 file_private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
     let diag_norm = normalize_path_for_match(diag_path);
@@ -200,7 +202,7 @@ file_private let path_matches_user_file(diag_path String, user_file_path String)
         return true;
     };
 
-    let user_input_norm = user_file_path.replace_all("\\", "/").to_ascii_lowercase();
+    let user_input_norm = user_file_path.replace_all("\\", with: "/").to_ascii_lowercase();
     if diag_norm == user_input_norm or diag_norm.ends_with("/" + user_input_norm) then {
         return true;
     };
@@ -238,15 +240,16 @@ file_private let format_cli_diagnostic_record(record DiagnosticRecord, user_file
     let diag = record.diagnostic;
     let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path;
     let rendered_message = strip_duplicate_cli_prefix(diag.message);
-    let mutable header = when diag.span in {
-        .Some(span) then if is_known_span(span) then "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)" else "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
-        .None() then "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
+    let mutable header = StringBuilder.new();
+    when diag.span in {
+        .Some(span) then if is_known_span(span) then header.push_string("\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)") else header.push_string("\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)"),
+        .None() then header.push_string("\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)"),
     };
     for note in record.notes then {
         header.push_string("\n  note: ");
         header.push_string(note.message);
     };
-    return header;
+    return header.to_string();
 };
 
 file_private let print_user_focused_diagnostic_records(diagnostics DiagnosticCollector, user_file_path String) Void = {
@@ -279,7 +282,7 @@ file_private let format_cli_diagnostic(diag DiagnosticError, user_file_path Stri
 };
 
 file_private let sanitize_module_artifact_name(module_name String) String = {
-    return module_name.replace_all("::", "__");
+    return module_name.replace_all("::", with: "__");
 };
 
 file_private let package_id_for_resolved_kind(kind ResolvedPackageKind) String = {
@@ -345,7 +348,7 @@ file_private let manifest_root_module_name(manifest PackageManifest) Option[Stri
     return Option[String].None();
 };
 
-file_private let push_unique_module_name(names *mutable List[String], seen *mutable Set[String], candidate String) Void = {
+file_private let push_unique_module_name(names List[String], seen Set[String], candidate String) Void = {
     if seen.contains(candidate) then {
         return;
     };
@@ -394,13 +397,13 @@ file_private let collect_needed_std_module_names(
     let mutable seen = Set[String].new();
 
     when manifest_root_module_name(manifest) in {
-        .Some(root_name) then push_unique_module_name(&mutable seeds, &mutable seen, root_name),
+        .Some(root_name) then push_unique_module_name(seeds, seen, root_name),
         .None() then {},
     };
 
     for seed_name in extra_seed_names then {
         if manifest.modules.get(seed_name) is .Some(_) then {
-            push_unique_module_name(&mutable seeds, &mutable seen, seed_name);
+            push_unique_module_name(seeds, seen, seed_name);
         };
     };
 
@@ -408,7 +411,7 @@ file_private let collect_needed_std_module_names(
         if is_std_module_path(edge.target) then {
             let module_name = manifest_module_name_for_path(edge.target);
             if manifest.modules.get(module_name) is .Some(_) then {
-                push_unique_module_name(&mutable seeds, &mutable seen, module_name);
+                push_unique_module_name(seeds, seen, module_name);
             };
         };
     };
@@ -417,7 +420,7 @@ file_private let collect_needed_std_module_names(
         if is_std_module_path(symbol_import.target) then {
             let module_name = manifest_module_name_for_path(symbol_import.target);
             if manifest.modules.get(module_name) is .Some(_) then {
-                push_unique_module_name(&mutable seeds, &mutable seen, module_name);
+                push_unique_module_name(seeds, seen, module_name);
             };
         };
     };
@@ -522,7 +525,7 @@ file_private let make_prepared_compilation(
 };
 
 file_private let load_manifest_modules_into_prepared(
-    resolver *mutable ModuleResolver,
+    resolver ModuleResolver,
     manifest PackageManifest,
     package_kind ResolvedPackageKind,
     std_root_module_name Option[String],
@@ -608,7 +611,7 @@ file_private let load_manifest_modules_into_prepared(
 
 file_private let prepare_package_compilation(options InvocationOptions) Result[PreparedCompilation] = {
     let package_config_path = options.package_config_path or else {
-        return Result[PreparedCompilation].Error(box("missing --package-config"));
+        return Result[PreparedCompilation].Error("missing --package-config");
     };
     let manifest = load_package_manifest(package_config_path) or return;
     let target_module_name = when options.target_module_name in {
@@ -661,7 +664,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
 
     for module_name in module_names_to_load then {
         let spec = package_graph.modules_by_name.get(module_name) or else {
-            return Result[PreparedCompilation].Error(box("Target module '\(module_name)' not found in resolved module graph"));
+            return Result[PreparedCompilation].Error("Target module '\(module_name)' not found in resolved module graph");
         };
         if contains_module_path(loaded_module_paths, spec.path_segments) then {
             continue;
@@ -708,7 +711,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
             let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, std_seed_module_names);
             let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
             let std_prepared = load_manifest_modules_into_prepared(
-                &mutable resolver,
+                resolver,
                 filtered_std_manifest,
                 ResolvedPackageKind.Std(),
                 package_graph.std_root_module_name,
@@ -728,7 +731,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
     };
 
     let target_spec = package_graph.modules_by_name.get(package_graph.target_module_name) or else {
-        return Result[PreparedCompilation].Error(box("Target module '\(package_graph.target_module_name)' not found in resolved module graph"));
+        return Result[PreparedCompilation].Error("Target module '\(package_graph.target_module_name)' not found in resolved module graph");
     };
     let default_output_dir = package_config_path.into_path().dir_name();
     return Result[PreparedCompilation].Ok(make_prepared_compilation(
@@ -746,7 +749,7 @@ file_private let prepare_package_compilation(options InvocationOptions) Result[P
 
 file_private let prepare_single_file_compilation(options InvocationOptions) Result[PreparedCompilation] = {
     let entry_file_path = options.entry_file_path or else {
-        return Result[PreparedCompilation].Error(box("missing input file or --package-config"));
+        return Result[PreparedCompilation].Error("missing input file or --package-config");
     };
 
     let mutable resolver = ModuleResolver.new();
@@ -769,7 +772,7 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
             let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, List[String].new());
             let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
             let std_prepared = load_manifest_modules_into_prepared(
-                &mutable resolver,
+                resolver,
                 filtered_std_manifest,
                 ResolvedPackageKind.Std(),
                 Option[String].None(),
@@ -796,7 +799,7 @@ file_private let prepare_single_file_compilation(options InvocationOptions) Resu
         user_pairs,
         merged_graph,
         display_name,
-        artifact_base_name,
+        artifact_base_name.to_string(),
         linked_libraries,
         default_output_dir,
         user_unit.root_module().path_string(),
@@ -862,7 +865,8 @@ file_private let run_resolve_module(options InvocationOptions) Int = {
     println("root module path: \(graph.root_module_path)");
     println("module paths (\(graph.module_paths.count())):");
     for module_path in graph.module_paths then {
-        println("  - \(module_path.join_to_string("."))");
+        let module_path_text = module_path.join_to_string(".");
+        println("  - \(module_path_text)");
     };
     println("source files (\(graph.source_files.count())):");
     for source_file in graph.source_files then {
@@ -958,7 +962,7 @@ file_private let build_c_output_path(artifact_base_name String, default_output_d
 };
 
 type MIRLoweringOutput(
-    mir_program Option[*mutable MIRProgram],
+    mir_program Option[MIRProgram],
     context CompilerContext,
     diagnostics DiagnosticCollector,
 );
@@ -969,7 +973,7 @@ type MonomorphizationOutput(
 );
 
 file_private let empty_typed_program() TypedProgram = {
-    return TypedProgram(List[* TypedDecl].new(), Dict[UInt, String].new());
+    return TypedProgram(List[TypedDecl].new(), Dict[UInt, String].new());
 };
 
 file_private let empty_body_checker_output() BodyCheckerOutput = {
@@ -981,6 +985,7 @@ file_private let empty_body_checker_output() BodyCheckerOutput = {
         MethodTable.new(),
         TraitRegistry.new(),
         Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        Dict[String, ConformanceWitness].new(),
         DiagnosticCollector.new(),
         GenericTemplateRegistry.new(),
         Set[InstantiationRequest].new(),
@@ -999,11 +1004,12 @@ file_private let monomorphize_after_typecheck(mutable result BodyCheckerOutput, 
         result.method_table,
         result.trait_registry,
         result.conformance_index,
+        result.conformance_witnesses,
     );
     typed_program = empty_typed_program();
     result = empty_body_checker_output();
 
-    let built_program = (&mutable mono).monomorphize();
+    let built_program = mono.monomorphize();
     if mono.diagnostics().has_errors() then {
         return MonomorphizationOutput(Option[MonomorphizedProgram].None(), mono.diagnostics());
     };
@@ -1017,17 +1023,17 @@ file_private let lower_mir_after_typecheck(mutable result BodyCheckerOutput, mut
     if mono_output.diagnostics.has_errors() then {
         context.drop_concrete_bodies();
         context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[*mutable MIRProgram].None(), context, mono_output.diagnostics);
+        return MIRLoweringOutput(Option[MIRProgram].None(), context, mono_output.diagnostics);
     };
     let mutable mono_program = mono_output.mono_program.unwrap();
 
     trace_phase(display_name + ": mir");
-    let lowered_mir = lower_monomorphized_program_releasing_source(mono_program, &mutable context);
+    let lowered_mir = lower_monomorphized_program_releasing_source(mono_program, context);
     let mir_program = lowered_mir.mir_program;
     if lowered_mir.diagnostics.has_errors() then {
         context.drop_concrete_bodies();
         context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, lowered_mir.diagnostics);
+        return MIRLoweringOutput(Option[MIRProgram].Some(mir_program), context, lowered_mir.diagnostics);
     };
     let verifier = MIRVerifier.new(mir_program);
     let mutable diagnostics = lowered_mir.diagnostics;
@@ -1035,7 +1041,7 @@ file_private let lower_mir_after_typecheck(mutable result BodyCheckerOutput, mut
         diagnostics.push(make_diagnostic(DiagnosticStage.Other(), display_name, it.message()));
         context.drop_concrete_bodies();
         context.drop_codegen_unused_metadata();
-        return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, diagnostics);
+        return MIRLoweringOutput(Option[MIRProgram].Some(mir_program), context, diagnostics);
     };
 
     // MIR lowering has consumed the concrete body caches; release them
@@ -1043,13 +1049,13 @@ file_private let lower_mir_after_typecheck(mutable result BodyCheckerOutput, mut
     context.drop_concrete_bodies();
     context.drop_codegen_unused_metadata();
 
-    return MIRLoweringOutput(Option[*mutable MIRProgram].Some(mir_program), context, DiagnosticCollector.new());
+    return MIRLoweringOutput(Option[MIRProgram].Some(mir_program), context, DiagnosticCollector.new());
 };
 
 type EmitCGenerationInput(
     output_path Path,
     linked_libraries List[String],
-    mir_program *mutable MIRProgram,
+    mir_program MIRProgram,
     context CompilerContext,
 );
 
@@ -1122,10 +1128,10 @@ file_private let prepare_emit_c_generation_input(options InvocationOptions, phas
     ));
 };
 
-file_private let generate_c_from_mir(mir_program *mutable MIRProgram, context CompilerContext, phase_prefix String) String = {
+file_private let generate_c_from_mir(mir_program MIRProgram, context CompilerContext, phase_prefix String) String = {
     let mutable concrete_mir_program = mir_program;
 
-    let mutable cg = box(CodeGen.new(concrete_mir_program, context));
+    let mutable cg = CodeGen.new(concrete_mir_program, context);
     cg.validate_codegen_inputs();
     cg.generate_prelude_into_buffer();
     cg.emit_mir_function_implementations();
@@ -1144,7 +1150,7 @@ file_private let emit_c(options InvocationOptions, phase_prefix String) Option[P
     trace_phase(phase_prefix + ": codegen");
     let generated_c = generate_c_from_mir(generation_input.mir_program, generation_input.context, phase_prefix);
 
-    write_text_file(generation_input.output_path, generated_c) or else {
+    write_text_file(generation_input.output_path, content: generated_c) or else {
         eprintln("failed to write output file: \(generation_input.output_path.to_string()): \(it.message())");
         return Option[Pair[Path, List[String]]].None();
     };

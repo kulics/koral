@@ -1,12 +1,12 @@
 given TypeChecker {
-    module_private pattern_binding_symbol(self, name String, is_mutable Bool, subject_type Type, scope Scope, span SourceSpan) * Symbol = {
+    module_private pattern_binding_symbol(self, name String, is_mutable Bool, subject_type Type, scope Scope, span SourceSpan) Symbol = {
         if name == "_" then {
             let kind = if is_mutable then SymbolKind.Variable(VariableKind.MutableValue()) else SymbolKind.Variable(VariableKind.Value());
             let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable());
-            return box(Symbol(def_id, subject_type, kind));
+            return Symbol(def_id, subject_type, kind);
         };
         return when scope.lookup_local(name) in {
-            .Some(existing) then box(existing),
+            .Some(existing) then existing,
             .None() then {
                 let kind = if is_mutable then SymbolKind.Variable(VariableKind.MutableValue()) else SymbolKind.Variable(VariableKind.Value());
                 let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable());
@@ -14,7 +14,7 @@ given TypeChecker {
                 context.set_span(def_id, span);
                 let sym = Symbol(def_id, subject_type, kind);
                 scope.define(self.context(), sym);
-                yield box(sym);
+                yield sym;
             },
         };
     };
@@ -22,17 +22,17 @@ given TypeChecker {
     module_private get_enum_case_tag_index(self, subject_type Type, case_name String) UInt = {
         let zero UInt = 0;
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id(def_id(UInt), case_name),
-            .GenericEnum(template, _) then when self.storage.generic_templates.lookup_enum(template) in {
+            .GenericEnum(template, _, _) then when self.storage.generic_templates.lookup_enum(template) in {
                 .Some(enum_template) then self.context().enum_case_tag_index_by_raw_id(enum_template.def_id.id, case_name),
                 .None() then zero,
             },
@@ -43,17 +43,17 @@ given TypeChecker {
     module_private pattern_match_subject_type(self, subject_type Type) Type = {
         let _ = self;
         return when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
     };
 
-    module_private pattern_requires_raw_subject(self, pattern * PatternNode) Bool = {
+    module_private pattern_requires_raw_subject(self, pattern PatternNode) Bool = {
         return when pattern in {
             .TraitObjectType(_, _) then true,
             .TraitObjectTypeBinding(_, _, _, _) then true,
@@ -78,8 +78,8 @@ given TypeChecker {
 
     module_private resolve_trait_object_pattern_target_type(self, target_type_node TypeNode, subject_type Type, span SourceSpan) Type = {
         let subject_is_mutable = when subject_type in {
-            .ReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Bool].Some(false) else Option[Bool].None(),
-            .MutableReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Bool].Some(true) else Option[Bool].None(),
+            .ReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Bool].Some(false) else Option[Bool].None(),
+            .MutableReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Bool].Some(true) else Option[Bool].None(),
             _ then Option[Bool].None(),
         };
         when subject_is_mutable in {
@@ -93,10 +93,10 @@ given TypeChecker {
         let resolved_target = self.resolve_type(target_type_node);
         return when resolved_target in {
             .ReferenceType(inner) then {
-                if self.is_valid_trait_object_pattern_concrete_type(*inner) then {
+                if self.is_valid_trait_object_pattern_concrete_type(inner) then {
                     yield resolved_target;
                 };
-                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(*inner))'", span);
+                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(inner))'", span);
                 yield Type.Unknown();
             },
             .MutableReferenceType(inner) then {
@@ -104,14 +104,21 @@ given TypeChecker {
                     self.push_diagnostic_at_span("Trait object type pattern '\(type_to_string(resolved_target))' requires a mutable trait object subject", span);
                     return Type.Unknown();
                 };
-                if self.is_valid_trait_object_pattern_concrete_type(*inner) then {
+                if self.is_valid_trait_object_pattern_concrete_type(inner) then {
                     yield resolved_target;
                 };
-                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(*inner))'", span);
+                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(inner))'", span);
+                yield Type.Unknown();
+            },
+            .StructureType(_) or .EnumType(_) or .OpaqueType(_) or .GenericStruct(_, _, _) or .GenericEnum(_, _, _) then {
+                if self.is_valid_trait_object_pattern_concrete_type(resolved_target) then {
+                    yield resolved_target;
+                };
+                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(resolved_target))'", span);
                 yield Type.Unknown();
             },
             _ then {
-                self.push_diagnostic_at_span("Trait object type pattern must be '*Type' or '*mutable Type', got '\(type_to_string(resolved_target))'", span);
+                self.push_diagnostic_at_span("Trait object type pattern must be a concrete type name or a trait name, got '\(type_to_string(resolved_target))'", span);
                 yield Type.Unknown();
             },
         };
@@ -123,8 +130,8 @@ given TypeChecker {
             .StructureType(_) then true,
             .EnumType(_) then true,
             .OpaqueType(_) then true,
-            .GenericStruct(_, _) then true,
-            .GenericEnum(_, _) then true,
+            .GenericStruct(_, _, _) then true,
+            .GenericEnum(_, _, _) then true,
             _ then false,
         };
     };
@@ -167,7 +174,7 @@ given TypeChecker {
         return TypedPattern.IntegerLiteral("0");
     };
 
-    module_private lower_typed_pattern(self, pattern * PatternNode, subject_type Type, scope Scope) TypedPattern = {
+    module_private lower_typed_pattern(self, pattern PatternNode, subject_type Type, scope Scope) TypedPattern = {
         return when pattern in {
             .Wildcard(_) then TypedPattern.Wildcard(),
             .Variable(name, is_mutable, span) then {
@@ -188,18 +195,18 @@ given TypeChecker {
             .ComparisonPattern(op, value, _) then TypedPattern.ComparisonPattern(op, value),
             .AndPattern(left, right, _) then {
                 yield TypedPattern.AndPattern(
-                    box(self.lower_typed_pattern(left, subject_type, scope)),
-                    box(self.lower_typed_pattern(right, subject_type, scope))
+                    self.lower_typed_pattern(left, subject_type, scope),
+                    self.lower_typed_pattern(right, subject_type, scope)
                 );
             },
             .OrPattern(left, right, _) then {
                 yield TypedPattern.OrPattern(
-                    box(self.lower_typed_pattern(left, subject_type, scope)),
-                    box(self.lower_typed_pattern(right, subject_type, scope))
+                    self.lower_typed_pattern(left, subject_type, scope),
+                    self.lower_typed_pattern(right, subject_type, scope)
                 );
             },
             .NotPattern(inner, _) then {
-                yield TypedPattern.NotPattern(box(self.lower_typed_pattern(inner, subject_type, scope)));
+                yield TypedPattern.NotPattern(self.lower_typed_pattern(inner, subject_type, scope));
             },
             .EnumCase(case_name, elements, _) then {
                 // When subject is a struct type, redirect .StructName(...) to StructPattern
@@ -208,17 +215,17 @@ given TypeChecker {
                     self.validate_named_pattern_arguments(elements, struct_param_specs);
                     let ordered_elements = self.reorder_pattern_elements(elements, struct_param_specs);
                     let field_types = self.get_struct_pattern_field_types(subject_type, case_name);
-                    let mutable typed_elements = List[* TypedPatternElement].new();
+                    let mutable typed_elements = List[TypedPatternElement].new();
                     let mutable i UInt = 0;
                     for elem in ordered_elements then {
-                        let field_type = when field_types.get(i) in {
+                        let mutable field_type = when field_types.get(i) in {
                             .Some(t) then t,
                             .None() then Type.Unknown(),
                         };
-                        typed_elements.push(box(TypedPatternElement(
+                        typed_elements.push(TypedPatternElement(
                             elem.label,
-                            box(self.lower_typed_pattern(elem.pattern, field_type, scope))
-                        )));
+                            self.lower_typed_pattern(elem.pattern, field_type, scope)
+                        ));
                         i += 1;
                     };
                     yield TypedPattern.StructPattern(case_name, typed_elements);
@@ -228,17 +235,17 @@ given TypeChecker {
                     let ordered_elements = self.reorder_pattern_elements(elements, param_specs);
                     let case_field_types = self.get_enum_case_field_types(subject_type, case_name);
                     let tag_index = self.get_enum_case_tag_index(subject_type, case_name);
-                    let mutable typed_elements = List[* TypedPatternElement].new();
+                    let mutable typed_elements = List[TypedPatternElement].new();
                     let mutable i UInt = 0;
                     for elem in ordered_elements then {
-                        let field_type = when case_field_types.get(i) in {
+                        let mutable field_type = when case_field_types.get(i) in {
                             .Some(t) then t,
                             .None() then Type.Unknown(),
                         };
-                        typed_elements.push(box(TypedPatternElement(
+                        typed_elements.push(TypedPatternElement(
                             elem.label,
-                            box(self.lower_typed_pattern(elem.pattern, field_type, scope))
-                        )));
+                            self.lower_typed_pattern(elem.pattern, field_type, scope)
+                        ));
                         i += 1;
                     };
                     yield TypedPattern.EnumCase(case_name, tag_index, typed_elements);
@@ -249,17 +256,17 @@ given TypeChecker {
                 self.validate_named_pattern_arguments(elements, param_specs);
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs);
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name);
-                let mutable typed_elements = List[* TypedPatternElement].new();
+                let mutable typed_elements = List[TypedPatternElement].new();
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
-                    let field_type = when field_types.get(i) in {
+                    let mutable field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
-                    typed_elements.push(box(TypedPatternElement(
+                    typed_elements.push(TypedPatternElement(
                         elem.label,
-                        box(self.lower_typed_pattern(elem.pattern, field_type, scope))
-                    )));
+                        self.lower_typed_pattern(elem.pattern, field_type, scope)
+                    ));
                     i += 1;
                 };
                 yield TypedPattern.StructPattern(type_name, typed_elements);
@@ -267,7 +274,7 @@ given TypeChecker {
         };
     };
 
-    module_private bind_pattern_vars(self, pattern * PatternNode, subject_type Type, scope Scope) Void = {
+    module_private bind_pattern_vars(self, pattern PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, is_mutable, span) then {
                 if not (name == "_") then {
@@ -284,7 +291,7 @@ given TypeChecker {
                     let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable());
                     let mutable context = self.context();
                     context.set_span(def_id, span);
-                    let bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span);
+                    let mutable bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span);
                     scope.define(self.context(), Symbol(def_id, bound_type, kind));
                 };
             },
@@ -294,7 +301,7 @@ given TypeChecker {
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name);
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
-                    let field_type = when case_field_types.get(i) in {
+                    let mutable field_type = when case_field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
@@ -308,7 +315,7 @@ given TypeChecker {
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name);
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
-                    let field_type = when field_types.get(i) in {
+                    let mutable field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
@@ -330,7 +337,7 @@ given TypeChecker {
         };
     };
 
-    module_private ensure_pattern_bindings_present(self, pattern * PatternNode, subject_type Type, scope Scope) Void = {
+    module_private ensure_pattern_bindings_present(self, pattern PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, is_mutable, span) then {
                 if not (name == "_") then {
@@ -350,7 +357,7 @@ given TypeChecker {
                         let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable());
                         let mutable context = self.context();
                         context.set_span(def_id, span);
-                        let bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span);
+                        let mutable bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span);
                         scope.define(self.context(), Symbol(def_id, bound_type, kind));
                     };
                 };
@@ -362,7 +369,7 @@ given TypeChecker {
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name);
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
-                    let field_type = when case_field_types.get(i) in {
+                    let mutable field_type = when case_field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
@@ -380,7 +387,7 @@ given TypeChecker {
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name);
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
-                    let field_type = when field_types.get(i) in {
+                    let mutable field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
@@ -418,7 +425,8 @@ given TypeChecker {
                     DiagnosticStage.Semantic(),
                     self.storage.file_path,
                     "Pattern cannot mix positional and labeled arguments"
-                )
+                
+            )
             );
             return;
         };
@@ -442,7 +450,8 @@ given TypeChecker {
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
                                 "Unknown constructor label '\(label)' for pattern"
-                            )
+                            
+                        )
                         );
                         return;
                     };
@@ -452,7 +461,8 @@ given TypeChecker {
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
                                 "Duplicate constructor label '\(label)'"
-                            )
+                            
+                        )
                         );
                         return;
                     };
@@ -469,7 +479,8 @@ given TypeChecker {
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
                         "Missing constructor field '\(spec.name)' in pattern"
-                    )
+                    
+                )
                 );
                 return;
             };
@@ -525,17 +536,17 @@ given TypeChecker {
 
     module_private get_enum_case_field_types(self, subject_type Type, case_name String) List[Type] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
         let raw_case_params = when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id(def_id(UInt), case_name),
-            .GenericEnum(template, _) then when self.storage.generic_templates.lookup_enum(template) in {
+            .GenericEnum(template, _, _) then when self.storage.generic_templates.lookup_enum(template) in {
                 .Some(enum_template) then self.context().enum_case_params_by_raw_id(enum_template.def_id.id, case_name),
                 .None() then List[EnumCaseParam].new(),
             },
@@ -543,7 +554,7 @@ given TypeChecker {
         };
         let mutable bindings = Dict[String, Type].new();
         when inner_type in {
-            .GenericEnum(template_name, args) then {
+            .GenericEnum(template_name, _, args) then {
                 if self.storage.generic_templates.lookup_enum(template_name) is .Some(enum_template) then {
                     let mutable i UInt = 0;
                     let param_count = enum_template.type_parameters.count();
@@ -551,7 +562,7 @@ given TypeChecker {
                     let n = if param_count < arg_count then param_count else arg_count;
                     while i < n then {
                         let tp = enum_template.type_parameters[i];
-                        bindings.insert(tp.name, (*args[i]));
+                        bindings.insert(tp.name, (args[i]));
                         i += 1;
                     };
                 };
@@ -560,7 +571,7 @@ given TypeChecker {
         };
         let mutable result = List[Type].new();
         for p in raw_case_params then {
-            let concrete_param_type = self.apply_type_bindings(p.param_type, bindings);
+            let mutable concrete_param_type = self.apply_type_bindings(p.param_type, bindings);
             result.push(concrete_param_type);
         };
         return result;
@@ -568,17 +579,17 @@ given TypeChecker {
 
     module_private get_enum_case_param_specs(self, subject_type Type, case_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(def_id(UInt), case_name),
-            .GenericEnum(template, _) then when self.storage.generic_templates.lookup_enum(template) in {
+            .GenericEnum(template, _, _) then when self.storage.generic_templates.lookup_enum(template) in {
                 .Some(enum_template) then self.context().enum_case_param_specs_by_raw_id(enum_template.def_id.id, case_name),
                 .None() then List[FunctionParamSpec].new(),
             },
@@ -588,12 +599,12 @@ given TypeChecker {
 
     module_private get_struct_pattern_field_types(self, subject_type Type, type_name String) List[Type] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
 
@@ -648,7 +659,7 @@ given TypeChecker {
                 };
                 yield result;
             },
-            .GenericStruct(template, args) then {
+            .GenericStruct(template, _, args) then {
                 let mutable result = List[Type].new();
                 if template == type_name then {
                     when self.storage.generic_templates.lookup_struct(template) in {
@@ -661,7 +672,7 @@ given TypeChecker {
                                 let n = if param_count < arg_count then param_count else arg_count;
                                 while i < n then {
                                     let tp = struct_template.type_parameters[i];
-                                    bindings.insert(tp.name, (*args[i]));
+                                    bindings.insert(tp.name, (args[i]));
                                     i += 1;
                                 };
                                 for field in fields then {
@@ -681,12 +692,12 @@ given TypeChecker {
 
     module_private get_struct_pattern_owner_def_id(self, subject_type Type, type_name String) Option[DefId] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
 
@@ -695,7 +706,7 @@ given TypeChecker {
                 let actual_name = self.context().get_name(def_id) or else self.context().type_display_name(inner_type);
                 yield if actual_name == type_name then Option[DefId].Some(def_id) else Option[DefId].None();
             },
-            .GenericStruct(template, _) then {
+            .GenericStruct(template, _, _) then {
                 yield if template == type_name then when self.storage.generic_templates.lookup_struct(template) in {
                     .Some(struct_template) then Option[DefId].Some(struct_template.def_id),
                     .None() then Option[DefId].None(),
@@ -726,7 +737,8 @@ given TypeChecker {
                                             DiagnosticStage.Semantic(),
                                             self.storage.file_path,
                                             "Cannot access \(access_label) field '\(field.name)' of type '\(type_name)' in destructuring pattern"
-                                        )
+                                        
+                                    )
                                     );
                                     return false;
                                 },
@@ -744,12 +756,12 @@ given TypeChecker {
 
     module_private get_struct_pattern_param_specs(self, subject_type Type, type_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
 
@@ -769,7 +781,7 @@ given TypeChecker {
                 };
                 yield specs;
             },
-            .GenericStruct(template, _) then {
+            .GenericStruct(template, _, _) then {
                 let mutable specs = List[FunctionParamSpec].new();
                 if template == type_name then {
                     when self.storage.generic_templates.lookup_struct(template) in {
@@ -792,12 +804,12 @@ given TypeChecker {
 
     module_private infer_for_pattern_item_type(self, iter_type Type) Type = {
         let inner_iter_type = when iter_type in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then iter_type,
         };
 

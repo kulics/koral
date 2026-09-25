@@ -32,7 +32,7 @@ public type SymbolImportEdge(
 
 // ── ImportGraph ───────────────────────────────────────────────────────────────
 
-public type ImportGraph(
+public type mutable ImportGraph(
     mutable edges List[ImportEdge],
     mutable symbol_imports List[SymbolImportEdge],
 );
@@ -45,12 +45,12 @@ given ImportGraph {
         );
     };
 
-    public add_module_import(*mutable self, from List[String], to List[String], kind ImportKind, source_file Option[String]) Void = {
+    public add_module_import(self, from List[String], to List[String], kind ImportKind, source_file Option[String]) Void = {
         self.edges.push(ImportEdge(from, to, kind, source_file));
     };
 
     public add_symbol_import(
-        *mutable self,
+        self,
         module List[String],
         target List[String],
         symbol String,
@@ -63,7 +63,7 @@ given ImportGraph {
 
     // 合并另一个 ImportGraph 的所有边
     // 用于将标准库导入图合并到用户代码导入图
-    public merge(*mutable self, other ImportGraph) Void = {
+    public merge(self, other ImportGraph) Void = {
         for edge in other.edges then {
             self.edges.push(edge);
         };
@@ -125,7 +125,7 @@ public type LoadedNode(
 // ── ModuleInfo ────────────────────────────────────────────────────────────────
 
 // Mutable module state lives in storage so ModuleInfo can be passed by value.
-module_private type ModuleInfoStorage(
+module_private type mutable ModuleInfoStorage(
     path List[String],
     entry_file String,
     is_external Bool,
@@ -133,17 +133,17 @@ module_private type ModuleInfoStorage(
     mutable global_nodes List[LoadedNode],
 );
 
-public type ModuleInfo(module_private mutable storage *mutable ModuleInfoStorage);
+public type mutable ModuleInfo(module_private mutable storage ModuleInfoStorage);
 
 given ModuleInfo {
     public new(path List[String], entry_file String, is_external Bool) ModuleInfo = {
-        let s = box(ModuleInfoStorage(
+        let s = ModuleInfoStorage(
             path,
             entry_file,
             is_external,
             [],
             [],
-        ));
+        );
         return ModuleInfo(s);
     };
 
@@ -154,14 +154,15 @@ given ModuleInfo {
     public global_nodes(self) List[LoadedNode] = self.storage.global_nodes;
 
     public path_string(self) String = {
-        let mutable out = "";
+        let mutable out = StringBuilder.new();
+        out.push_string("");
         let mutable first = true;
         for seg in self.storage.path then {
             if not first then { out.push_byte('.');};
             out.push_string(seg);
             first = false;
         };
-        return out;
+        return out.to_string();
     };
 
     public directory(self) String = {
@@ -187,7 +188,7 @@ given ModuleInfo {
 
 // ── CompilationUnit ───────────────────────────────────────────────────────────
 
-module_private type CompilationUnitStorage(
+module_private type mutable CompilationUnitStorage(
     root_module ModuleInfo,
     mutable loaded_module_paths List[String],
     mutable loaded_modules List[ModuleInfo],
@@ -195,17 +196,17 @@ module_private type CompilationUnitStorage(
     mutable parsed_defaults Dict[String, String],
 );
 
-public type CompilationUnit(module_private mutable storage *mutable CompilationUnitStorage);
+public type mutable CompilationUnit(module_private mutable storage CompilationUnitStorage);
 
 given CompilationUnit {
     public new(root_module ModuleInfo) CompilationUnit = {
-        let s = box(CompilationUnitStorage(
+        let s = CompilationUnitStorage(
             root_module,
             [root_module.path_string()],
             [root_module],
             ImportGraph.new(),
             Dict[String, String].new()
-        ));
+        );
         return CompilationUnit(s);
     };
 
@@ -331,7 +332,7 @@ public let source_file_matches(stored Option[String], current Option[String]) Bo
     };
 
 file_private let normalize_source_file_for_match(path String) String = {
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     for ch in path.to_runes() then {
         if ch == '\\' then {
             out.push_byte('/');
@@ -339,19 +340,20 @@ file_private let normalize_source_file_for_match(path String) String = {
             out.push_rune(ch);
         };
     };
-    return out;
+    return out.to_string();
 };
 
 // Join path segments with separator
 public let join_path(segments List[String], sep String) String = {
-    let mutable out = "";
+    let mutable out = StringBuilder.new();
+    out.push_string("");
     let mutable first = true;
     for seg in segments then {
         if not first then { out.push_string(sep);};
         out.push_string(seg);
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
 // Validate module name: lowercase letter start, only [a-z0-9_]

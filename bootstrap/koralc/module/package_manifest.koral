@@ -59,29 +59,29 @@ public type ResolvedPackageGraph(
     std_root_module_name Option[String],
 );
 
-file_private let load_manifest_string_array(value * JsonValue, path String) Result[List[String]] = {
-    let arr = (*value).as_array() or else {
-        return Result[List[String]].Error(box("Invalid manifest field '\(path)': expected string array"));
+file_private let load_manifest_string_array(value JsonValue, path String) Result[List[String]] = {
+    let arr = value.as_array() or else {
+        return Result[List[String]].Error("Invalid manifest field '\(path)': expected string array");
     };
     let mutable out List[String] = [];
     for i in 0..<arr.count() then {
-        let item = (*arr[i]).as_string() or else {
-            return Result[List[String]].Error(box("Invalid manifest field '\(path)[\(i)]': expected string"));
+        let item = arr[i].as_string() or else {
+            return Result[List[String]].Error("Invalid manifest field '\(path)[\(i)]': expected string");
         };
         out.push(item);
     };
     return Result[List[String]].Ok(out);
 };
 
-file_private let load_manifest_string_dict(value * JsonValue, path String) Result[Dict[String, String]] = {
-    let obj = (*value).as_object() or else {
-        return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path)': expected object"));
+file_private let load_manifest_string_dict(value JsonValue, path String) Result[Dict[String, String]] = {
+    let obj = value.as_object() or else {
+        return Result[Dict[String, String]].Error("Invalid manifest field '\(path)': expected object");
     };
     let mutable out = Dict[String, String].new();
     let mutable iter = obj.iterator();
     while iter.next() is .Some(entry) then {
-        let str_value = (*entry.second).as_string() or else {
-            return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path).\(entry.first)': expected string"));
+        let str_value = entry.second.as_string() or else {
+            return Result[Dict[String, String]].Error("Invalid manifest field '\(path).\(entry.first)': expected string");
         };
         out.insert(entry.first, str_value);
     };
@@ -142,7 +142,7 @@ public let default_target_module_name(manifest PackageManifest) Result[String] =
         };
     };
 
-    return Result[String].Error(box("missing default target module; pass --target-module"));
+    return Result[String].Error("missing default target module; pass --target-module");
 };
 
 public let load_package_manifest(manifest_path String) Result[PackageManifest] = {
@@ -151,26 +151,26 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         .Error(_) then manifest_path,
     };
     if not path_exist(absolute_manifest_path.into_path()) then {
-        return Result[PackageManifest].Error(box("Manifest file not found: \(absolute_manifest_path)"));
+        return Result[PackageManifest].Error("Manifest file not found: \(absolute_manifest_path)");
     };
 
     let text = read_text_file(absolute_manifest_path.into_path()) or return;
     let json = JsonValue.parse(text) or return;
     let obj = json.as_object() or else {
-        return Result[PackageManifest].Error(box("Invalid manifest JSON: \(absolute_manifest_path)"));
+        return Result[PackageManifest].Error("Invalid manifest JSON: \(absolute_manifest_path)");
     };
 
     let name_ref = json.get_field("name") or else {
-        return Result[PackageManifest].Error(box("Invalid manifest field 'name': missing required string"));
+        return Result[PackageManifest].Error("Invalid manifest field 'name': missing required string");
     };
-    let name = (*name_ref).as_string() or else {
-        return Result[PackageManifest].Error(box("Invalid manifest field 'name': expected string"));
+    let name = name_ref.as_string() or else {
+        return Result[PackageManifest].Error("Invalid manifest field 'name': expected string");
     };
 
     let default_target_module_name = when json.get_field("entry") in {
         .Some(entry_ref) then {
-            let value = (*entry_ref).as_string() or else {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': expected string"));
+            let value = entry_ref.as_string() or else {
+                return Result[PackageManifest].Error("Invalid manifest field 'entry': expected string");
             };
             yield Option[String].Some(value);
         },
@@ -185,17 +185,17 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
     let mutable dependencies = Dict[String, PackageDependencyConfig].new();
     when json.get_field("dependencies") in {
         .Some(dep_ref) then {
-            let dep_obj = (*dep_ref).as_object() or else {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies': expected object"));
+            let dep_obj = dep_ref.as_object() or else {
+                return Result[PackageManifest].Error("Invalid manifest field 'dependencies': expected object");
             };
             let mutable iter = dep_obj.iterator();
             while iter.next() is .Some(dep_entry) then {
-                let dep_json = *(dep_entry.second);
+                let dep_json = dep_entry.second;
                 let dep_name_ref = dep_json.get_field("name") or else {
-                    return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies.\(dep_entry.first).name': missing required string"));
+                    return Result[PackageManifest].Error("Invalid manifest field 'dependencies.\(dep_entry.first).name': missing required string");
                 };
-                let dep_name = (*dep_name_ref).as_string() or else {
-                    return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies.\(dep_entry.first).name': expected string"));
+                let dep_name = dep_name_ref.as_string() or else {
+                    return Result[PackageManifest].Error("Invalid manifest field 'dependencies.\(dep_entry.first).name': expected string");
                 };
                 let module_aliases = when dep_json.get_field("module_aliases") in {
                     .Some(value_ref) then load_manifest_string_dict(value_ref, "dependencies.\(dep_entry.first).module_aliases") or return,
@@ -210,21 +210,21 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
     let mutable modules = Dict[String, PackageModuleConfig].new();
     when json.get_field("modules") in {
         .Some(modules_ref) then {
-            let modules_obj = (*modules_ref).as_object() or else {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'modules': expected object"));
+            let modules_obj = modules_ref.as_object() or else {
+                return Result[PackageManifest].Error("Invalid manifest field 'modules': expected object");
             };
             let mutable iter = modules_obj.iterator();
             while iter.next() is .Some(module_entry) then {
                 let module_name = module_entry.first;
                 let path_segments = parse_manifest_module_name(module_name) or else {
-                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name)': module name must be lower_snake segments joined by '::'"));
+                    return Result[PackageManifest].Error("Invalid manifest field 'modules.\(module_name)': module name must be lower_snake segments joined by '::'");
                 };
-                let module_json = *(module_entry.second);
+                let module_json = module_entry.second;
                 let entry_ref = module_json.get_field("entry") or else {
-                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name).entry': missing required string"));
+                    return Result[PackageManifest].Error("Invalid manifest field 'modules.\(module_name).entry': missing required string");
                 };
-                let entry_rel = (*entry_ref).as_string() or else {
-                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name).entry': expected string"));
+                let entry_rel = entry_ref.as_string() or else {
+                    return Result[PackageManifest].Error("Invalid manifest field 'modules.\(module_name).entry': expected string");
                 };
                 let entry_abs = absolute_manifest_path.into_path().dir_name().join(entry_rel).normalize().to_string();
                 let requires = when module_json.get_field("requires") in {
@@ -244,15 +244,15 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
     when default_target_module_name in {
         .Some(module_name) then {
             if parse_manifest_module_name(module_name) is .None() then {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': expected module full name such as 'app' or 'app::main'"));
+                return Result[PackageManifest].Error("Invalid manifest field 'entry': expected module full name such as 'app' or 'app::main'");
             };
             if modules.get(module_name) is .None() then {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': default target module '\(module_name)' is not declared in 'modules'"));
+                return Result[PackageManifest].Error("Invalid manifest field 'entry': default target module '\(module_name)' is not declared in 'modules'");
             };
         },
         .None() then {
             if modules.count() > 1 then {
-                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': required when manifest declares multiple modules"));
+                return Result[PackageManifest].Error("Invalid manifest field 'entry': required when manifest declares multiple modules");
             };
         },
     };
@@ -271,7 +271,7 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
 file_private let add_manifest_modules(
     manifest PackageManifest,
     package_kind ResolvedPackageKind,
-    modules_by_name *mutable Dict[String, ResolvedModuleSpec],
+    modules_by_name Dict[String, ResolvedModuleSpec],
 ) Void = {
     let mutable iter = manifest.modules.iterator();
     while iter.next() is .Some(entry) then {
@@ -322,26 +322,26 @@ file_private let build_dependency_alias_rules(
             let alias_name = alias_entry.second;
 
             let published_segments = parse_manifest_module_name(published_name) or else {
-                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                return Result[List[ResolvedModuleAliasRule]].Error(
                     "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': published module name must be lower_snake segments joined by '::'"
-                ));
+                );
             };
             let alias_segments = parse_manifest_module_name(alias_name) or else {
-                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                return Result[List[ResolvedModuleAliasRule]].Error(
                     "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': alias must be lower_snake segments joined by '::'"
-                ));
+                );
             };
 
             if dep_manifest.modules.get(published_name) is .None() then {
-                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                return Result[List[ResolvedModuleAliasRule]].Error(
                     "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': dependency '\(dep_entry.first)' does not publish module '\(published_name)'"
-                ));
+                );
             };
 
             if claimed_alias_names.contains(alias_name) then {
-                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                return Result[List[ResolvedModuleAliasRule]].Error(
                     "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': alias '\(alias_name)' conflicts with an existing module name"
-                ));
+                );
             };
             claimed_alias_names.push(alias_name);
 
@@ -409,29 +409,30 @@ file_private let rewrite_module_requirement_names(
 file_private let validate_resolved_module_graph(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
-    visited *mutable List[String],
-    stack *mutable List[String],
+    visited List[String],
+    stack List[String],
 ) Result[Void] = {
     if visited.contains(name) then {
         return Result[Void].Ok({});
     };
     if stack.contains(name) then {
-        let mutable cycle = stack.join_to_string(" -> ");
+        let mutable cycle = StringBuilder.new();
+        cycle.push_string(stack.join_to_string(" -> "));
         if not cycle.is_empty() then {
             cycle.push_string(" -> ");
         };
         cycle.push_string(name);
-        return Result[Void].Error(box("Cyclic module dependency: \(cycle)"));
+        return Result[Void].Error("Cyclic module dependency: \(cycle.to_string())");
     };
 
     let spec = modules_by_name.get(name) or else {
-        return Result[Void].Error(box("Target module '\(name)' not found in resolved module graph"));
+        return Result[Void].Error("Target module '\(name)' not found in resolved module graph");
     };
 
     stack.push(name);
     for requirement in spec.requires then {
         if modules_by_name.get(requirement) is .None() then {
-            return Result[Void].Error(box("Module '\(name)' depends on unknown module '\(requirement)'"));
+            return Result[Void].Error("Module '\(name)' depends on unknown module '\(requirement)'");
         };
         let _ = validate_resolved_module_graph(modules_by_name, requirement, visited, stack) or return;
     };
@@ -473,7 +474,7 @@ public let load_resolved_package_graph(
 ) Result[ResolvedPackageGraph] = {
     let root_manifest = load_package_manifest(root_manifest_path) or return;
     let mutable modules_by_name = Dict[String, ResolvedModuleSpec].new();
-    add_manifest_modules(root_manifest, ResolvedPackageKind.Root(), &mutable modules_by_name);
+    add_manifest_modules(root_manifest, ResolvedPackageKind.Root(), modules_by_name);
     let mutable dependency_manifests = Dict[String, PackageManifest].new();
 
     let mutable resolved_std_manifest_path = Option[String].None();
@@ -481,7 +482,7 @@ public let load_resolved_package_graph(
     when std_manifest_path in {
         .Some(path) then {
             let std_manifest = load_package_manifest(path) or return;
-            add_manifest_modules(std_manifest, ResolvedPackageKind.Std(), &mutable modules_by_name);
+            add_manifest_modules(std_manifest, ResolvedPackageKind.Std(), modules_by_name);
             resolved_std_manifest_path = Option[String].Some(std_manifest.manifest_path);
             let mutable iter = std_manifest.modules.iterator();
             while iter.next() is .Some(entry) then {
@@ -504,7 +505,7 @@ public let load_resolved_package_graph(
                 };
                 let dep_manifest = load_package_manifest(dep_manifest_path) or return;
                 dependency_manifests.insert(dep_entry.first, dep_manifest);
-                add_manifest_modules(dep_manifest, ResolvedPackageKind.Dependency(dep_entry.first), &mutable modules_by_name);
+                add_manifest_modules(dep_manifest, ResolvedPackageKind.Dependency(dep_entry.first), modules_by_name);
             };
         },
         .None() then {},
@@ -541,7 +542,7 @@ public let load_resolved_package_graph(
     };
 
     if modules_by_name.get(target_module_name) is .None() then {
-        return Result[ResolvedPackageGraph].Error(box("Target module '\(target_module_name)' not found in resolved module graph"));
+        return Result[ResolvedPackageGraph].Error("Target module '\(target_module_name)' not found in resolved module graph");
     };
 
     let module_count = modules_by_name.count();
@@ -549,7 +550,7 @@ public let load_resolved_package_graph(
     let mutable stack = List[String].with_capacity(module_count);
     let mutable iter = modules_by_name.iterator();
     while iter.next() is .Some(entry) then {
-        let _ = validate_resolved_module_graph(modules_by_name, entry.first, &mutable visited, &mutable stack) or return;
+        let _ = validate_resolved_module_graph(modules_by_name, entry.first, visited, stack) or return;
     };
 
     let reachable = collect_reachable_modules(modules_by_name, target_module_name);

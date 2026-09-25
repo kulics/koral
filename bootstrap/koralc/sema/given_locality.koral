@@ -29,20 +29,20 @@ public type GivenOwner(
 
 public type GivenLocalityChecker(
     context CompilerContext,
-    trait_registry * TraitRegistry,
+    trait_registry TraitRegistry,
     current_module_path List[String],
-    generic_templates * GenericTemplateRegistry,
-    global_scope * Scope,
+    generic_templates GenericTemplateRegistry,
+    global_scope Scope,
 );
 
 given GivenLocalityChecker {
 
     public new(
         context CompilerContext,
-        trait_registry * TraitRegistry,
+        trait_registry TraitRegistry,
         current_module_path List[String],
-        generic_templates * GenericTemplateRegistry,
-        global_scope * Scope,
+        generic_templates GenericTemplateRegistry,
+        global_scope Scope,
     ) GivenLocalityChecker = {
         return GivenLocalityChecker(context, trait_registry, current_module_path, generic_templates, global_scope);
     };
@@ -97,8 +97,17 @@ given GivenLocalityChecker {
 
     file_private resolve_type_owner(self, t Type) Option[GivenOwner] = {
         return when t in {
-            .ReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("Ref")),
+            .ReferenceType(inner) then {
+                if inner is .TraitObject(_, _, _) then {
+                    return self.resolve_type_owner(inner);
+                };
+                yield Option[GivenOwner].Some(self.type_modifier_owner("Ref"));
+            },
+            .MutableReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("MutRef")),
+            .BorrowedReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("Ref")),
+            .MutableBorrowedReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("MutRef")),
             .PointerType(_) then Option[GivenOwner].Some(self.type_modifier_owner("Ptr")),
+            .MutablePointerType(_) then Option[GivenOwner].Some(self.type_modifier_owner("MutPtr")),
             .WeakReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("WeakRef")),
             .MutableWeakReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("MutWeakRef")),
             .StructureType(def_id) then {
@@ -134,9 +143,9 @@ given GivenLocalityChecker {
                 };
                 yield Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path));
             },
-            .GenericStruct(template, _) then self.resolve_generic_base_owner(template),
-            .GenericEnum(template, _) then self.resolve_generic_base_owner(template),
-            .TraitObject(name, _) then self.resolve_trait_owner(name),
+            .GenericStruct(template, _, _) then self.resolve_generic_base_owner(template),
+            .GenericEnum(template, _, _) then self.resolve_generic_base_owner(template),
+            .TraitObject(name, _, _) then self.resolve_trait_owner(name),
             // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
             _ then Option[GivenOwner].None(),
         };
@@ -195,19 +204,19 @@ given GivenLocalityChecker {
 
     file_private format_module_path(self, path List[String]) String = {
         if path.is_empty() then { return "<root>";};
-        let mutable result = String.new();
+        let mutable result = StringBuilder.new();
         let mutable first = true;
         for p in path then {
             if not first then { result.push_byte('.');};
             result.push_string(p);
             first = false;
         };
-        return result;
+        return result.to_string();
     };
 
     file_private type_modifier_owner(self, display_name String) GivenOwner = {
         let mutable std_path = List[String].new();
-        std_path.push("std");
+        std_path.push("Std");
         return GivenOwner(GivenOwnerKind.TypeOwner(), display_name, std_path);
     };
 };

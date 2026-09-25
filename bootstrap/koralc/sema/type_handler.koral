@@ -56,11 +56,11 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
         .WeakReferenceType(_) then TypeHandlerKind.WeakReference(),
         .MutableWeakReferenceType(_) then TypeHandlerKind.WeakReference(),
         .GenericParameter(_) then TypeHandlerKind.GenericParameter(),
-        .GenericStruct(_, _) then TypeHandlerKind.GenericStruct(),
-        .GenericEnum(_, _) then TypeHandlerKind.GenericEnum(),
+        .GenericStruct(_, _, _) then TypeHandlerKind.GenericStruct(),
+        .GenericEnum(_, _, _) then TypeHandlerKind.GenericEnum(),
         .ModuleType(_) then TypeHandlerKind.Module(),
         .OpaqueType(_) then TypeHandlerKind.Opaque(),
-        .TraitObject(_, _) then TypeHandlerKind.Reference(),
+        .TraitObject(_, _, _) then TypeHandlerKind.Reference(),
         .TypeVar(_) then TypeHandlerKind.TypeVariable(),
         .Unknown() then TypeHandlerKind.Primitive(),
     };
@@ -69,7 +69,7 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
 // ── TypeHandlerResult types ───────────────────────────────────────────────────
 
 /// 类型成员信息
-public type TypeMemberInfo(
+public type mutable TypeMemberInfo(
     name String,
     member_type Type,
     is_mutable Bool,
@@ -88,8 +88,8 @@ public let type_needs_copy(t Type) Bool = {
         .FunctionType(_, _) then true,
         .WeakReferenceType(_) then true,
         .MutableWeakReferenceType(_) then true,
-        .GenericStruct(_, _) then true,
-        .GenericEnum(_, _) then true,
+        .GenericStruct(_, _, _) then true,
+        .GenericEnum(_, _, _) then true,
         _ then false,
     };
 };
@@ -106,9 +106,9 @@ public let type_needs_drop(t Type) Bool = {
         .FunctionType(_, _) then true,
         .WeakReferenceType(_) then true,
         .MutableWeakReferenceType(_) then true,
-        .GenericStruct(_, _) then true,
-        .GenericEnum(_, _) then true,
-        .TraitObject(_, _) then true,
+        .GenericStruct(_, _, _) then true,
+        .GenericEnum(_, _, _) then true,
+        .TraitObject(_, _, _) then true,
         .TypeVar(_) then true,
         _ then false,
     };
@@ -137,9 +137,9 @@ public let primitive_c_type_name(t Type) String = {
 };
 
 /// 检查类型是否包含泛型参数（递归检查，带循环检测）
-public let type_contains_generic_parameter(t Type, context * CompilerContext) Bool = {
+public let type_contains_generic_parameter(t Type, context CompilerContext) Bool = {
     let mutable visited = Set[UInt].new();
-    return type_contains_generic_parameter_internal(t, context, &mutable visited);
+    return type_contains_generic_parameter_internal(t, context, visited);
 };
 
 /// 仅检查类型表面是否仍提及未解析的泛型占位。
@@ -147,20 +147,20 @@ public let type_contains_generic_parameter(t Type, context * CompilerContext) Bo
 /// 这与 `type_contains_generic_parameter` 的语义不同：它不会递归展开
 /// 已定义的结构体/枚举，只用于判断当前类型节点是否还未完全具体化。
 public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
-    let mutable worklist = List[* Type].new();
-    worklist.push(box(t));
+    let mutable worklist = List[Type].new();
+    worklist.push(t);
 
     while not worklist.is_empty() then {
         let current_opt = worklist.pop();
         if current_opt is .None() then { break;};
         let current = current_opt.unwrap();
-        when *current in {
+        when current in {
             .GenericParameter(_) then { return true;},
             .TypeVar(_) then { return true;},
             .FunctionType(params, ret) then {
                 worklist.push(ret);
                 for entry in params then {
-                    worklist.push(box(entry.param_type));
+                    worklist.push(entry.param_type);
                 };
             },
             .ReferenceType(inner) then { worklist.push(inner);},
@@ -169,12 +169,12 @@ public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
             .MutablePointerType(inner) then { worklist.push(inner);},
             .WeakReferenceType(inner) then { worklist.push(inner);},
             .MutableWeakReferenceType(inner) then { worklist.push(inner);},
-            .GenericStruct(_, args) then {
+            .GenericStruct(_, _, args) then {
                 for a in args then {
                     worklist.push(a);
                 };
             },
-            .GenericEnum(_, args) then {
+            .GenericEnum(_, _, args) then {
                 for a in args then {
                     worklist.push(a);
                 };
@@ -187,13 +187,13 @@ public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
 
 /// Returns the children types that need to be checked for generic parameters.
 /// This is used by the iterative version to avoid deep recursion.
-file_private let collect_type_children(t Type, context * CompilerContext, visited *mutable Set[UInt]) List[* Type] = {
-    let mutable children = List[* Type].new();
+file_private let collect_type_children(t Type, context CompilerContext, visited Set[UInt]) List[Type] = {
+    let mutable children = List[Type].new();
     when t in {
         .FunctionType(params, ret) then {
             children.push(ret);
             for entry in params then {
-                children.push(box(entry.param_type));
+                children.push(entry.param_type);
             };
         },
         .ReferenceType(inner) then { children.push(inner);},
@@ -209,12 +209,12 @@ file_private let collect_type_children(t Type, context * CompilerContext, visite
                 visited.insert(def_id.id);
                 when context.get_type_arguments(def_id) in {
                     .Some(args) then {
-                        for a in args then { children.push(box(a));};
+                        for a in args then { children.push(a);};
                     },
                     .None() then {
                         when context.get_struct_fields(def_id) in {
                             .Some(fields) then {
-                                for f in fields then { children.push(box(f.field_type));};
+                                for f in fields then { children.push(f.field_type);};
                             },
                             .None() then {},
                         };
@@ -227,13 +227,13 @@ file_private let collect_type_children(t Type, context * CompilerContext, visite
                 visited.insert(def_id.id);
                 when context.get_type_arguments(def_id) in {
                     .Some(args) then {
-                        for a in args then { children.push(box(a));};
+                        for a in args then { children.push(a);};
                     },
                     .None() then {
                         when context.get_enum_cases(def_id) in {
                             .Some(cases) then {
                                 for c in cases then {
-                                    for p in c.params then { children.push(box(p.param_type));};
+                                    for p in c.params then { children.push(p.param_type);};
                                 };
                             },
                             .None() then {},
@@ -242,10 +242,10 @@ file_private let collect_type_children(t Type, context * CompilerContext, visite
                 };
             };
         },
-        .GenericStruct(_, args) then {
+        .GenericStruct(_, _, args) then {
             for a in args then { children.push(a);};
         },
-        .GenericEnum(_, args) then {
+        .GenericEnum(_, _, args) then {
             for a in args then { children.push(a);};
         },
         _ then {},
@@ -255,19 +255,19 @@ file_private let collect_type_children(t Type, context * CompilerContext, visite
 
 /// Iterative version of type_contains_generic_parameter_internal.
 /// Uses an explicit worklist to avoid stack overflow on deeply nested types.
-file_private let type_contains_generic_parameter_internal(t Type, context * CompilerContext, visited *mutable Set[UInt]) Bool = {
-    let mutable worklist = List[* Type].new();
-    worklist.push(box(t));
+file_private let type_contains_generic_parameter_internal(t Type, context CompilerContext, visited Set[UInt]) Bool = {
+    let mutable worklist = List[Type].new();
+    worklist.push(t);
 
     while not worklist.is_empty() then {
         let current_opt = worklist.pop();
         if current_opt is .None() then { break;};
         let current = current_opt.unwrap();
-        when *current in {
+        when current in {
             .GenericParameter(_) then { return true;},
             .TypeVar(_) then { return true;},
             _ then {
-                let children = collect_type_children(*current, context, visited);
+                let children = collect_type_children(current, context, visited);
                 for child in children then {
                     worklist.push(child);
                 };

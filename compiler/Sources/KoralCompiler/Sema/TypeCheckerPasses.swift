@@ -1230,10 +1230,11 @@ extension TypeChecker {
           }
         }
 
+        let storedMethods = methods.map { registeredMethodDeclaration($0) }
         var existingBlocks = traitToolBlocks[traitName] ?? []
         for block in existingBlocks {
           for existingMethod in block.methods {
-            if methods.contains(where: { $0.name == existingMethod.name }) {
+            if storedMethods.contains(where: { $0.name == existingMethod.name }) {
               throw SemanticError.duplicateDefinition(existingMethod.name, span: span)
             }
           }
@@ -1242,7 +1243,7 @@ extension TypeChecker {
           TraitToolBlock(
             traitName: traitName,
             traitTypeParams: typeParams,
-            methods: methods
+            methods: storedMethods
           )
         )
         traitToolBlocks[traitName] = existingBlocks
@@ -1410,8 +1411,9 @@ extension TypeChecker {
 
         // Pre-register method signatures (without checking bodies)
         for method in methods {
+          let registeredMethod = registeredMethodDeclaration(method)
           let methodType = try withNewScope {
-            for typeParam in method.typeParameters {
+            for typeParam in registeredMethod.typeParameters {
               currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
@@ -1425,8 +1427,8 @@ extension TypeChecker {
             )
             currentScope.define("self", selfBindingType, mutable: receiverMutable)
 
-            let returnType = try resolveTypeNode(method.returnType)
-            let params = try method.parameters.map { param -> Parameter in
+            let returnType = try resolveTypeNode(registeredMethod.returnType)
+            let params = try registeredMethod.parameters.map { param -> Parameter in
               let resolvedParamType = try resolveTypeNode(param.type)
               let paramType = adjustReceiverParameterType(
                 paramName: param.name,
@@ -1444,35 +1446,36 @@ extension TypeChecker {
           }
 
           let methodSymbol = makeGlobalSymbol(
-            name: method.name,
+            name: registeredMethod.name,
             type: methodType,
             kind: .function,
-            access: method.access
+            access: registeredMethod.access,
+            preferredDefId: registeredMethod.defId
           )
           registerReceiverStyleMethod(
             methodSymbol,
-            parameters: method.parameters,
-            declaredName: method.name,
+            parameters: registeredMethod.parameters,
+            declaredName: registeredMethod.name,
             owner: .extensionTemplate(ownerName: typeName)
           )
 
-          if method.typeParameters.isEmpty {
+          if registeredMethod.typeParameters.isEmpty {
             // Check for duplicate method name on this type
-            if extensionMethods[typeName]![method.name] != nil {
-              throw SemanticError.duplicateDefinition(method.name, span: span)
+            if extensionMethods[typeName]![registeredMethod.name] != nil {
+              throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
             }
 
-            extensionMethods[typeName]![method.name] = methodSymbol
+            extensionMethods[typeName]![registeredMethod.name] = methodSymbol
           } else {
-            let existsInGeneric = genericExtensionMethods[typeName]!.contains(where: { $0.method.name == method.name })
-            let existsInIntrinsic = (genericIntrinsicExtensionMethods[typeName] ?? []).contains(where: { $0.method.name == method.name })
+            let existsInGeneric = genericExtensionMethods[typeName]!.contains(where: { $0.method.name == registeredMethod.name })
+            let existsInIntrinsic = (genericIntrinsicExtensionMethods[typeName] ?? []).contains(where: { $0.method.name == registeredMethod.name })
             if existsInGeneric || existsInIntrinsic {
-              throw SemanticError.duplicateDefinition(method.name, span: span)
+              throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
             }
 
             genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
-              method: method,
+              method: registeredMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
               modulePath: currentModulePath,
@@ -1599,6 +1602,17 @@ extension TypeChecker {
       }
 
       if !methods.isEmpty {
+        let preRegisteredMethods: [MethodDeclaration]
+        if let traitInfo = visibleTraitInfo(traitName) {
+          let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
+          preRegisteredMethods = methods.map { method in
+            let requirementAccess = requirementByName[method.name]?.access ?? method.access
+            return registeredMethodDeclaration(method, access: requirementAccess)
+          }
+        } else {
+          preRegisteredMethods = methods.map { registeredMethodDeclaration($0) }
+        }
+
         var hasExistingMethodSignature = false
 
         if !typeParams.isEmpty {
@@ -1630,9 +1644,11 @@ extension TypeChecker {
           }()
           if let typeName {
             let existingConcrete = Set((extensionMethods[typeName] ?? [:]).keys)
-            hasExistingMethodSignature = methods.contains { existingConcrete.contains($0.name) }
-            // Track trait conformance method sources and detect ambiguity across traits
-            for method in methods {
+            hasExistingMethodSignature = preRegisteredMethods.contains { existingConcrete.contains($0.name) }
+            // Track concrete extension slots by method declaration identity so one
+            // declaration reaching the same type through multiple trait paths can
+            // be reused without being reported as ambiguous.
+            for method in preRegisteredMethods {
               if extensionMethodTraitSources[typeName] == nil {
                 extensionMethodTraitSources[typeName] = [:]
               }
@@ -1640,37 +1656,20 @@ extension TypeChecker {
                 extensionMethodTraitSources[typeName]![method.name] = []
               }
               let existingSources = extensionMethodTraitSources[typeName]![method.name]!
-              if !existingSources.contains(traitName) {
+              if !existingSources.contains(method.defId) {
                 // If another trait already provides this method, it's ambiguous
                 if existingConcrete.contains(method.name) && !existingSources.isEmpty {
                   throw SemanticError(.generic(
                     "Ambiguous method '\(method.name)' for type '\(typeName)' via trait extensions"
                   ), span: span)
                 }
-                extensionMethodTraitSources[typeName]![method.name]!.append(traitName)
+                extensionMethodTraitSources[typeName]![method.name]!.append(method.defId)
               }
             }
           }
         }
 
         if !hasExistingMethodSignature {
-          let preRegisteredMethods: [MethodDeclaration]
-          if let traitInfo = visibleTraitInfo(traitName) {
-            let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
-            preRegisteredMethods = methods.map { method in
-              let requirementAccess = requirementByName[method.name]?.access ?? method.access
-              return MethodDeclaration(
-                name: method.name,
-                typeParameters: method.typeParameters,
-                parameters: method.parameters,
-                returnType: method.returnType,
-                body: method.body,
-                access: requirementAccess
-              )
-            }
-          } else {
-            preRegisteredMethods = methods
-          }
           try collectGivenSignatures(
             .givenDeclaration(typeParams: typeParams, type: typeNode, methods: preRegisteredMethods, span: span),
             enforceTypeDeclarationModuleLocality: false
@@ -3158,7 +3157,8 @@ extension TypeChecker {
           parameters: method.parameters,
           returnType: method.returnType,
           body: method.body,
-          access: requirement.access
+          access: requirement.access,
+          defId: method.defId
         )
 
         let (functionType, params, returnType) = try buildImplMethodInfo(method)
@@ -3320,7 +3320,8 @@ extension TypeChecker {
           name: toolMethod.name,
           type: functionType,
           kind: .function,
-          access: toolMethod.access
+          access: toolMethod.access,
+          preferredDefId: toolMethod.defId
         )
         registerReceiverStyleMethod(
           toolSymbol,

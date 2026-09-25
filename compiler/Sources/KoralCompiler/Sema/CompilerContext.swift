@@ -106,7 +106,8 @@ public final class CompilerContext: @unchecked Sendable {
         access: AccessModifier = .module_private,
         span: SourceSpan = .unknown,
         packageID: String = "",
-        isMutable: Bool = false
+        isMutable: Bool = false,
+        preferredDefId: DefId? = nil
     ) -> Symbol {
         let defKind: DefKind
         switch kind {
@@ -125,7 +126,9 @@ public final class CompilerContext: @unchecked Sendable {
         }
 
         let defId: DefId
-        if access == .file_private {
+        if let preferredDefId, preferredDefId.isValid {
+            defId = preferredDefId
+        } else if access == .file_private {
             defId = defIdMap.lookupExact(
                 modulePath: modulePath,
                 name: name,

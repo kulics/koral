@@ -24,12 +24,37 @@ public type MethodDeclaration(
     params List[TemplateParam],
     return_type TypeNode,
     span SourceSpan,
+    // Declaration identity — see GivenMember.def_id. Assigned once at collection,
+    // carried through every instantiation.
+    def_id DefId,
+);
+
+// `given Trait { ... }` entity methods are looked up through trait constraints,
+// independently from generic extension templates.
+public type TraitToolBlock(
+    trait_name String,
+    type_params List[TypeParameterDecl],
+    methods List[GivenMember],
+    source_file String,
+    module_path List[String],
+    package_id String,
+);
+
+public type TraitToolMethodEntry(
+    source_trait_name String,
+    method GivenMember,
+    type_params List[TypeParameterDecl],
+    source_file String,
+    module_path List[String],
+    package_id String,
 );
 
 // ── Template field / case / param helpers ─────────────────────────────────────
 
 // A field in a generic struct template (name + TypeNode so the type can be
 // resolved against concrete type arguments at instantiation time).
+// No `mutable` fields — per RFC 4.2 these are plain value types (Swift has them
+// as ordinary structs). `is_mutable` below is a field NAME, not a mutable field.
 public type TemplateField(
     access AccessModifier,
     name String,
@@ -69,6 +94,7 @@ public type IntrinsicExtensionEntry(
 // Compact representation of a trait declaration, carried through the
 // monomorphization phase and forwarded to CodeGen for vtable generation.
 public type TraitDeclInfo(
+    def_id DefId,
     name String,
     type_params List[TypeParameterDecl],
     parent_traits List[ParentTraitConstraint],
@@ -94,6 +120,11 @@ public type ReceiverMethodDispatchInfo(
     method_name String,
     owner Option[ReceiverMethodOwner],
     conformance_trait_name Option[String],
+    // Definition identity of the trait this method belongs to (Swift
+    // ReceiverMethodDispatchInfo.conformanceTraitDefId). Trait identity must be
+    // matched by DefId, not by name — name matching is what forces the
+    // `ends_with(".Drop")` suffix guessing and collapses two same-named traits.
+    conformance_trait_def_id Option[DefId],
 );
 
 // ── Generic template types ────────────────────────────────────────────────────
@@ -112,40 +143,45 @@ public type GenericEnumTemplate(
     cases List[TemplateCase],
 );
 
-public type GenericFunctionTemplate(
+public type mutable GenericFunctionTemplate(
     def_id DefId,
     name String,
     type_parameters List[TypeParameterDecl],
     parameters List[TemplateParam],
     return_type TypeNode,
-    mutable checked_body Option[* TypedExpr],
+    mutable checked_body Option[TypedExpr],
     mutable checked_parameters Option[List[Symbol]],
     mutable checked_return_type Option[Type],
 );
 
-public type GenericExtensionMethodTemplate(
+public type mutable GenericExtensionMethodTemplate(
     type_params List[TypeParameterDecl],
     method MethodDeclaration,
     conformance_trait_name Option[String],
+    // Swift GenericExtensionMethodTemplate.conformanceTraitDefId — the trait's
+    // declaration identity. Use this for anything that decides "which trait does
+    // this method belong to"; conformance_trait_name is display-only.
+    conformance_trait_def_id Option[DefId],
     conformance_target_type Option[Type],
     conformance_trait_args List[Type],
     uses_trait_type_params Bool,
     source_file String,
     module_path List[String],
     package_id String,
-    mutable checked_body Option[* TypedExpr],
+    mutable checked_body Option[TypedExpr],
     mutable checked_parameters Option[List[Symbol]],
     mutable checked_return_type Option[Type],
 );
 
 // ── GenericTemplateRegistry ───────────────────────────────────────────────────
 
-public type GenericTemplateRegistry(
+public type mutable GenericTemplateRegistry(
     mutable struct_templates Dict[String, GenericStructTemplate],
     mutable enum_templates Dict[String, GenericEnumTemplate],
-    mutable function_templates Dict[String, * GenericFunctionTemplate],
-    mutable extension_methods Dict[String, List[* GenericExtensionMethodTemplate]],
+    mutable function_templates Dict[String, GenericFunctionTemplate],
+    mutable extension_methods Dict[String, List[GenericExtensionMethodTemplate]],
     mutable intrinsic_extension_methods Dict[String, List[IntrinsicExtensionEntry]],
+    mutable trait_tool_blocks Dict[String, List[TraitToolBlock]],
     mutable traits Dict[String, TraitDeclInfo],
     mutable concrete_extension_methods Dict[String, Dict[String, Symbol]],
     mutable intrinsic_generic_types Set[String],
@@ -158,13 +194,16 @@ public type GenericTemplateRegistry(
 given GenericTemplateRegistry {
     file_private select_extension_method(
         self,
-        templates List[* GenericExtensionMethodTemplate],
+        templates List[GenericExtensionMethodTemplate],
         method_name String,
         method_type_arg_count Option[UInt],
         extension_type_arg_count Option[UInt],
-    ) Option[* GenericExtensionMethodTemplate] = {
-        let mutable first_match = Option[* GenericExtensionMethodTemplate].None();
-        let mutable first_checked_return = Option[* GenericExtensionMethodTemplate].None();
+    ) Option[GenericExtensionMethodTemplate] = {
+        // Swift Monomorphizer.selectExtensionTemplate: prefer a candidate whose
+        // body has been checked, else the first candidate. The previous extra
+        // "has a checked_return_type" tier existed only to rank entries that a
+        // name-keyed registry could not tell apart.
+        let mutable first_match = Option[GenericExtensionMethodTemplate].None();
         for template_ref in templates then {
             if template_ref.method.name <> method_name then {
                 continue;
@@ -179,6 +218,8 @@ given GenericTemplateRegistry {
             };
             when extension_type_arg_count in {
                 .Some(count) then {
+                    // Swift Monomorphizer.selectExtensionTemplate filters
+                    // `ext.typeParams.count != extensionTypeArgCount` unconditionally.
                     if template_ref.type_params.count() <> count then {
                         continue;
                     };
@@ -186,22 +227,16 @@ given GenericTemplateRegistry {
                 .None() then {},
             };
             if template_ref.checked_body is .Some(_) then {
-                return Option[* GenericExtensionMethodTemplate].Some(template_ref);
-            };
-            if template_ref.checked_return_type is .Some(_) and first_checked_return is .None() then {
-                first_checked_return = Option[* GenericExtensionMethodTemplate].Some(template_ref);
+                return Option[GenericExtensionMethodTemplate].Some(template_ref);
             };
             when first_match in {
                 .Some(_) then {},
                 .None() then {
-                    first_match = Option[* GenericExtensionMethodTemplate].Some(template_ref);
+                    first_match = Option[GenericExtensionMethodTemplate].Some(template_ref);
                 },
             };
         };
-        return when first_checked_return in {
-            .Some(template_ref) then Option[* GenericExtensionMethodTemplate].Some(template_ref),
-            .None() then first_match,
-        };
+        return first_match;
     };
 
     // Create an empty registry.
@@ -209,9 +244,10 @@ given GenericTemplateRegistry {
         return GenericTemplateRegistry(
             Dict[String, GenericStructTemplate].new(),
             Dict[String, GenericEnumTemplate].new(),
-            Dict[String, * GenericFunctionTemplate].new(),
-            Dict[String, List[* GenericExtensionMethodTemplate]].new(),
+            Dict[String, GenericFunctionTemplate].new(),
+            Dict[String, List[GenericExtensionMethodTemplate]].new(),
             Dict[String, List[IntrinsicExtensionEntry]].new(),
+            Dict[String, List[TraitToolBlock]].new(),
             Dict[String, TraitDeclInfo].new(),
             Dict[String, Dict[String, Symbol]].new(),
             Set[String].new(),
@@ -223,62 +259,38 @@ given GenericTemplateRegistry {
     };
 
     // Resolve a trait name with suffix matching (consolidated from 8 duplicate sites).
-    public resolve_trait_name(*self, candidate String) Option[String] = {
+    public resolve_trait_name(self, candidate String) Option[String] = {
         if self.traits.contains_key(candidate) then {
             return Option[String].Some(candidate);
-        };
-        for entry in self.traits.iterator() then {
-            let key = entry.first;
-            if key.ends_with(".\(candidate)") or candidate.ends_with(".\(key)") then {
-                return Option[String].Some(key);
-            };
         };
         return Option[String].None();
     };
 
     // Resolve a struct template name with suffix matching.
-    public resolve_struct_name(*self, candidate String) Option[String] = {
+    public resolve_struct_name(self, candidate String) Option[String] = {
         if self.struct_templates.contains_key(candidate) then {
             return Option[String].Some(candidate);
-        };
-        for entry in self.struct_templates.iterator() then {
-            let key = entry.first;
-            if key.ends_with(".\(candidate)") or candidate.ends_with(".\(key)") then {
-                return Option[String].Some(key);
-            };
         };
         return Option[String].None();
     };
 
     // Resolve an enum template name with suffix matching.
-    public resolve_enum_name(*self, candidate String) Option[String] = {
+    public resolve_enum_name(self, candidate String) Option[String] = {
         if self.enum_templates.contains_key(candidate) then {
             return Option[String].Some(candidate);
-        };
-        for entry in self.enum_templates.iterator() then {
-            let key = entry.first;
-            if key.ends_with(".\(candidate)") or candidate.ends_with(".\(key)") then {
-                return Option[String].Some(key);
-            };
         };
         return Option[String].None();
     };
 
     // Resolve a function template name with suffix matching.
-    public resolve_function_name(*self, candidate String) Option[String] = {
+    public resolve_function_name(self, candidate String) Option[String] = {
         if self.function_templates.contains_key(candidate) then {
             return Option[String].Some(candidate);
-        };
-        for entry in self.function_templates.iterator() then {
-            let key = entry.first;
-            if key.ends_with(".\(candidate)") or candidate.ends_with(".\(key)") then {
-                return Option[String].Some(key);
-            };
         };
         return Option[String].None();
     };
 
-    public resolve_function_name_in_module(*self, candidate String, module_path List[String]) Option[String] = {
+    public resolve_function_name_in_module(self, candidate String, module_path List[String]) Option[String] = {
         let qualified = qualified_trait_key(module_path, candidate);
         if self.function_templates.contains_key(qualified) then {
             return Option[String].Some(qualified);
@@ -288,58 +300,94 @@ given GenericTemplateRegistry {
 
     // Look up a generic struct template by name.
     public lookup_struct(self, name String) Option[GenericStructTemplate] = {
-        return self.struct_templates.get(name);
+        return when self.resolve_struct_name(name) in {
+            .Some(resolved_name) then self.struct_templates.get(resolved_name),
+            .None() then Option[GenericStructTemplate].None(),
+        };
+    };
+
+    public lookup_struct_def_id(self, name String) DefId = {
+        return when self.resolve_struct_name(name) in {
+            .Some(resolved_name) then when self.struct_templates.get(resolved_name) in {
+                .Some(template) then template.def_id,
+                .None() then def_id_invalid(),
+            },
+            .None() then def_id_invalid(),
+        };
     };
 
     // Look up a generic enum template by name.
     public lookup_enum(self, name String) Option[GenericEnumTemplate] = {
-        return self.enum_templates.get(name);
+        return when self.resolve_enum_name(name) in {
+            .Some(resolved_name) then self.enum_templates.get(resolved_name),
+            .None() then Option[GenericEnumTemplate].None(),
+        };
+    };
+
+    public lookup_enum_def_id(self, name String) DefId = {
+        return when self.resolve_enum_name(name) in {
+            .Some(resolved_name) then when self.enum_templates.get(resolved_name) in {
+                .Some(template) then template.def_id,
+                .None() then def_id_invalid(),
+            },
+            .None() then def_id_invalid(),
+        };
     };
 
     // Look up a generic function template by name.
-    public lookup_function(self, name String) Option[* GenericFunctionTemplate] = {
+    public lookup_function(self, name String) Option[GenericFunctionTemplate] = {
         return self.function_templates.get(name);
     };
 
-    public lookup_function_in_module(self, name String, module_path List[String]) Option[* GenericFunctionTemplate] = {
+    public lookup_function_in_module(self, name String, module_path List[String]) Option[GenericFunctionTemplate] = {
         let qualified = qualified_trait_key(module_path, name);
         return when self.function_templates.get(qualified) in {
-            .Some(template) then Option[* GenericFunctionTemplate].Some(template),
+            .Some(template) then Option[GenericFunctionTemplate].Some(template),
             .None() then self.function_templates.get(name),
+        };
+    };
+
+    public lookup_trait_by_def_id(self, def_id DefId) Option[TraitDeclInfo] = {
+        for entry in self.traits then {
+            if entry.second.def_id == def_id then {
+                return Option[TraitDeclInfo].Some(entry.second);
+            };
+        };
+        return Option[TraitDeclInfo].None();
+    };
+
+    public lookup_trait_in_module(self, name String, module_path List[String]) Option[TraitDeclInfo] = {
+        let qualified = qualified_trait_key(module_path, name);
+        return when self.traits.get(qualified) in {
+            .Some(info) then Option[TraitDeclInfo].Some(info),
+            .None() then self.traits.get(name),
         };
     };
 
     // Look up a generic function template by DefId.
     // This avoids collisions when different modules contain helper functions
     // with the same textual name.
-    public lookup_function_by_def_id(self, def_id DefId) Option[* GenericFunctionTemplate] = {
+    public lookup_function_by_def_id(self, def_id DefId) Option[GenericFunctionTemplate] = {
         for entry in self.function_templates then {
             let template_ref = entry.second;
             if template_ref.def_id.id == def_id.id then {
-                return Option[* GenericFunctionTemplate].Some(template_ref);
+                return Option[GenericFunctionTemplate].Some(template_ref);
             };
         };
-        return Option[* GenericFunctionTemplate].None();
+        return Option[GenericFunctionTemplate].None();
     };
 
     // Look up all generic extension method templates for a given type/template name.
-    public lookup_extension_methods(self, name String) Option[List[* GenericExtensionMethodTemplate]] = {
+    public lookup_extension_methods(self, name String) Option[List[GenericExtensionMethodTemplate]] = {
         when self.extension_methods.get(name) in {
             .Some(templates) then {
-                return Option[List[* GenericExtensionMethodTemplate]].Some(templates);
+                return Option[List[GenericExtensionMethodTemplate]].Some(templates);
             },
             .None() then {},
         };
-        if name.contains("[") then {
-            return Option[List[* GenericExtensionMethodTemplate]].None();
-        };
-        for entry in self.extension_methods then {
-            let key = entry.first;
-            if key.ends_with("]\(name)") or key.ends_with(".\(name)") or name.ends_with(".\(key)") then {
-                return Option[List[* GenericExtensionMethodTemplate]].Some(entry.second);
-            };
-        };
-        return Option[List[* GenericExtensionMethodTemplate]].None();
+        // Exact key only. Swift looks up `extensionMethods[baseName]` directly;
+        // there is no suffix sweep to paper over disagreeing keys.
+        return Option[List[GenericExtensionMethodTemplate]].None();
     };
 
     public lookup_extension_method(
@@ -348,7 +396,7 @@ given GenericTemplateRegistry {
         method_name String,
         method_type_arg_count Option[UInt],
         extension_type_arg_count Option[UInt],
-    ) Option[* GenericExtensionMethodTemplate] = {
+    ) Option[GenericExtensionMethodTemplate] = {
         when self.extension_methods.get(name) in {
             .Some(templates) then {
                 return self.select_extension_method(
@@ -360,20 +408,7 @@ given GenericTemplateRegistry {
             },
             .None() then {},
         };
-        if name.contains("[") then {
-            return Option[* GenericExtensionMethodTemplate].None();
-        };
-        for entry in self.extension_methods then {
-            let key = entry.first;
-            if key.ends_with("]\(name)") or key.ends_with(".\(name)") or name.ends_with(".\(key)") then {
-                return self.select_extension_method(
-                    entry.second,
-                    method_name,
-                    method_type_arg_count,
-                    extension_type_arg_count,
-                );
-            };
-        };
-        return Option[* GenericExtensionMethodTemplate].None();
+        // Exact key only — see lookup_extension_methods.
+        return Option[GenericExtensionMethodTemplate].None();
     };
 };

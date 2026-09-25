@@ -1,9 +1,11 @@
 // Method table: maps (type_key -> method_name -> Symbol)
 // Used to resolve method calls on concrete types.
 
+using std::os { env };
+
 // Key for looking up methods on a type.
 // We use the string representation of the type as the key.
-public type MethodTable(
+public type mutable MethodTable(
     mutable methods Dict[String, Dict[String, Symbol]],
     // Tracks method names that have been registered from multiple sources
     // (e.g., two different traits). Key: "type_key::method_name"
@@ -11,20 +13,60 @@ public type MethodTable(
     // Tracks concrete/intrinsic given methods that should win over trait
     // extension ambiguity during direct receiver lookup.
     mutable inherent_keys Set[String],
+    // Declaration identity of each trait that has provided a given
+    // (type_key, method_name). Key: "type_key::method_name". This is the
+    // DefId form of Swift's `extensionMethodTraitSources[typeName][methodName]`.
+    mutable method_sources Dict[String, List[DefId]],
 );
 
 given MethodTable {
     public new() MethodTable = {
-        return MethodTable(Dict[String, Dict[String, Symbol]].new(), Set[String].new(), Set[String].new());
+        return MethodTable(Dict[String, Dict[String, Symbol]].new(), Set[String].new(), Set[String].new(), Dict[String, List[DefId]].new());
     };
 
-    public register(*mutable self, type_key String, method_name String, method Symbol) Void = {
+    // Registers a method for a type. Identity is the METHOD's declaration DefId
+    // (`method.def_id`), not its name and not the trait's name.
+    //
+    // Swift approximates this with `extensionMethodTraitSources[typeName][methodName]
+    // = [traitName]` (TypeCheckerPasses.swift:1638): the same trait arriving twice is
+    // a re-registration, two different traits providing one name is ambiguous. Trait
+    // identity is not enough here — a single tool method inherited along several
+    // trait paths arrives under more than one trait, so it would look ambiguous while
+    // `given Ord { clamp }` is one declaration. The method's own declaration DefId is
+    // the identity that actually separates the two cases:
+    //
+    //   one declaration, many arrivals  -> same DefId  -> overwrite
+    //   two declarations, same name     -> two DefIds  -> ambiguous
+    public register(self, type_key String, method_name String, method Symbol) Void = {
+        self.register_with_source(type_key, method_name, method, method.def_id);
+    };
+
+    public register_with_source(self, type_key String, method_name String, method Symbol, source_def_id DefId) Void = {
+        let source_key = type_key + "::" + method_name;
+        let mutable source_list = self.method_sources.get(source_key) or else List[DefId].new();
+        let mutable already_known = false;
+        for existing_source in source_list then {
+            if existing_source == source_def_id then {
+                already_known = true;
+            };
+        };
+        if method_name == "clamp" and env("KORAL_DEBUG_CLAMP") is .Some(debug_value) and (debug_value == "1" or debug_value == "true" or debug_value == "TRUE") then {
+            let known_label = if already_known then "yes" else "no";
+            eprintln("[clamp-register] key=\(source_key) callable=\(method.def_id.id.to_string()) source=\(source_def_id.id.to_string()) existing=\(source_list.count().to_string()) known=\(known_label)");
+        };
+        if not already_known then {
+            if not source_list.is_empty() then {
+                // A different declaration already provides this name for this type.
+                self.conflict_keys.insert(source_key);
+                if method_name == "clamp" and env("KORAL_DEBUG_CLAMP") is .Some(debug_value) and (debug_value == "1" or debug_value == "true" or debug_value == "TRUE") then {
+                    eprintln("[clamp-conflict] key=\(source_key) new_source=\(source_def_id.id.to_string())");
+                };
+            };
+            source_list.push(source_def_id);
+            self.method_sources.insert(source_key, source_list);
+        };
         when self.methods.get(type_key) in {
             .Some(existing) then {
-                if existing.get(method_name) is .Some(_) then {
-                    // Method already registered -- potential conflict
-                    self.conflict_keys.insert(type_key + "::" + method_name);
-                };
                 let mutable m = existing;
                 m.insert(method_name, method);
                 self.methods.insert(type_key, m);
@@ -44,7 +86,7 @@ given MethodTable {
         return .None();
     };
 
-    public mark_inherent(*mutable self, type_key String, method_name String) Void = {
+    public mark_inherent(self, type_key String, method_name String) Void = {
         self.inherent_keys.insert(type_key + "::" + method_name);
     };
 

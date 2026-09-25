@@ -5,12 +5,25 @@
 public type DefId(id UInt);
 
 public let qualified_trait_key(module_path List[String], name String) String = {
-    return if module_path.is_empty() then name else {
-        let mutable out = module_path.join_to_string(".");
-        out.push_byte('.');
-        out.push_string(name);
-        yield out;
+    if module_path.is_empty() then { return name; };
+    let mutable out = StringBuilder.new();
+    let mutable first = true;
+    for part in module_path then {
+        if not first then { out.push_byte('.'); };
+        out.push_string(part);
+        first = false;
     };
+    out.push_byte('.');
+    out.push_string(name);
+    return out.to_string();
+};
+
+// Swift `SemaUtils.isBuiltinTrait` — `Any` and `mutable` are constraint
+// keywords, not declarations. They impose no requirements and have no methods,
+// so every trait flattener must accept them and yield an empty method set
+// instead of reporting "Undefined trait: Any".
+public let is_builtin_trait(name String) Bool = {
+    return name == "Any" or name == "mutable";
 };
 
 given DefId as Eq {
@@ -20,6 +33,16 @@ given DefId as Eq {
 given DefId as Hash {
     public hash(self) UInt = self.id;
 };
+
+given DefId {
+    /// Whether this identifies a real declaration. `def_id_invalid()` (id 0)
+    /// is the sentinel for "declaration identity not yet resolved".
+    public is_valid(self) Bool = self.id <> 0(UInt);
+};
+
+/// Sentinel for types whose declaration identity is not yet resolved.
+/// `DefIdMap.next_id` must remain >= 1 so id 0 is never a real allocation.
+public let def_id_invalid() DefId = DefId(0);
 
 public type DefKind {
     TypeDef(kind TypeDefKind),
@@ -76,7 +99,7 @@ public type MethodKind {
 };
 
 /// 符号详细信息（存储在 DefIdMap 中）
-public type SymbolInfo(
+public type mutable SymbolInfo(
     symbol_type Type,
     kind SymbolKind,
     method_kind MethodKind,
@@ -93,6 +116,7 @@ public type StructTypeInfo(
     is_generic_instantiation Bool,
     type_arguments Option[List[Type]],
     template_name Option[String],
+    template_def_id DefId,
 );
 
 /// 枚举类型详细信息
@@ -101,6 +125,7 @@ public type EnumTypeInfo(
     is_generic_instantiation Bool,
     type_arguments Option[List[Type]],
     template_name Option[String],
+    template_def_id DefId,
 );
 
 public type Symbol(
@@ -118,7 +143,7 @@ given Symbol {
 // ── DefIdMap ──────────────────────────────────────────────────────────────────
 
 // Struct field metadata
-public type StructField(
+public type mutable StructField(
     name String,
     field_type Type,
     is_mutable Bool,
@@ -133,7 +158,7 @@ public type EnumCaseParam(
     named Bool,
 );
 
-public type FunctionParamSpec(
+public type mutable FunctionParamSpec(
     name String,
     is_mutable Bool,
     named Bool,
@@ -159,7 +184,7 @@ public type EnumCaseInfo(
     params List[EnumCaseParam],
 );
 
-// Infer PassKind from a type (ref → ByReference, ref mutable → ByMutableReference, else → ByValue).
+// Infer PassKind from a type mutable (ref → ByReference, ref mutable → ByMutableReference, else → ByValue).
 public let pass_kind_from_type(t Type) FunctionParamPassKind = {
     return when t in {
         .ReferenceType(_) then FunctionParamPassKind.ByReference(),
@@ -175,25 +200,25 @@ public let make_function_param_entry(t Type) FunctionParamEntry = {
     return FunctionParamEntry(t, pass_kind_from_type(t));
 };
 
-// Convert a bare type list to a FunctionParamEntry list (backward compat helper).
-public let types_to_param_entries(types List[* Type]) List[* FunctionParamEntry] = {
-    let mutable entries = List[* FunctionParamEntry].with_capacity(types.count());
+// Convert a bare type mutable list to a FunctionParamEntry list (backward compat helper).
+public let types_to_param_entries(types List[Type]) List[FunctionParamEntry] = {
+    let mutable entries = List[FunctionParamEntry].with_capacity(types.count());
     for t in types then {
-        entries.push(box(make_function_param_entry(*t)));
+        entries.push(make_function_param_entry(t));
     };
     return entries;
 };
 
-// Build a FunctionType from bare type lists (backward compat helper).
-public let make_function_type(param_types List[* Type], return_type Type) Type = {
-    return Type.FunctionType(types_to_param_entries(param_types), box(return_type));
+// Build a FunctionType from bare type mutable lists (backward compat helper).
+public let make_function_type(param_types List[Type], return_type Type) Type = {
+    return Type.FunctionType(types_to_param_entries(param_types), return_type);
 };
 
-// Extract bare type list from FunctionParamEntry list (backward compat helper).
-public let param_entry_types(entries List[* FunctionParamEntry]) List[* Type] = {
-    let mutable types = List[* Type].with_capacity(entries.count());
+// Extract bare type mutable list from FunctionParamEntry list (backward compat helper).
+public let param_entry_types(entries List[FunctionParamEntry]) List[Type] = {
+    let mutable types = List[Type].with_capacity(entries.count());
     for entry in entries then {
-        types.push(box(entry.param_type));
+        types.push(entry.param_type);
     };
     return types;
 };
@@ -205,7 +230,7 @@ public type ImportRecord(
 );
 
 // Central store for all DefId metadata.
-public type DefIdMap(
+public type mutable DefIdMap(
     mutable names Dict[UInt, String],
     mutable kinds Dict[UInt, DefKind],
     mutable struct_fields Dict[UInt, List[StructField]],
@@ -231,9 +256,13 @@ public type DefIdMap(
     mutable struct_generic_instantiation Dict[UInt, Bool],
     mutable struct_type_arguments Dict[UInt, List[Type]],
     mutable struct_template_names Dict[UInt, String],
+    mutable struct_template_def_ids Dict[UInt, DefId],
+    mutable generic_struct_template_def_ids Dict[String, DefId],
     mutable enum_generic_instantiation Dict[UInt, Bool],
     mutable enum_type_arguments Dict[UInt, List[Type]],
     mutable enum_template_names Dict[UInt, String],
+    mutable enum_template_def_ids Dict[UInt, DefId],
+    mutable generic_enum_template_def_ids Dict[String, DefId],
 
     // 导入记录
     mutable import_records Dict[UInt, ImportRecord],
@@ -247,8 +276,14 @@ public type DefIdMap(
     // 类型映射（DefId -> Type，用于占位类型或快速查找）
     mutable type_map Dict[UInt, Type],
 
-    // 标记禁止 `*e` 解引用的 nominal 类型
+    // 标记禁止 `e` 解引用的 nominal 类型
     mutable not_deref_types Set[UInt],
+
+    // nominal mutability（type mutable 标记）
+    mutable struct_mutables Dict[UInt, Bool],
+
+    // 显式 Drop conformance 标记
+    mutable explicit_drops Set[UInt],
 );
 
 given DefIdMap {
@@ -273,18 +308,24 @@ given DefIdMap {
             Dict[UInt, Bool].new(),
             Dict[UInt, List[Type]].new(),
             Dict[UInt, String].new(),
+            Dict[UInt, DefId].new(),
+            Dict[String, DefId].new(),
             Dict[UInt, Bool].new(),
             Dict[UInt, List[Type]].new(),
             Dict[UInt, String].new(),
+            Dict[UInt, DefId].new(),
+            Dict[String, DefId].new(),
             Dict[UInt, ImportRecord].new(),
             Dict[UInt, List[StructField]].new(),
             Dict[UInt, String].new(),
             Dict[UInt, Type].new(),
+            Set[UInt].new(),
+            Dict[UInt, Bool].new(),
             Set[UInt].new()
         );
     };
 
-    public allocate(*mutable self, name String, kind DefKind) DefId = {
+    public allocate(self, name String, kind DefKind) DefId = {
         let id = self.next_id;
         self.next_id += 1;
         self.names.insert(id, name);
@@ -295,7 +336,7 @@ given DefIdMap {
         return def_id;
     };
 
-    public allocate_unindexed(*mutable self, name String, kind DefKind) DefId = {
+    public allocate_unindexed(self, name String, kind DefKind) DefId = {
         let id = self.next_id;
         self.next_id += 1;
         self.names.insert(id, name);
@@ -304,7 +345,7 @@ given DefIdMap {
     };
 
     public allocate_full(
-        *mutable self,
+        self,
         name String,
         kind DefKind,
         module_path List[String],
@@ -334,101 +375,102 @@ given DefIdMap {
                 self.name_to_def_id.insert(key_without_file, def_id);
             },
         };
-
         return def_id;
     };
 
-    public get_name(*self, id DefId) Option[String] = {
+    public get_name(self, id DefId) Option[String] = {
         return self.names.get(id.id);
     };
 
-    public get_kind(*self, id DefId) Option[DefKind] = {
+    public get_kind(self, id DefId) Option[DefKind] = {
         return self.kinds.get(id.id);
     };
 
-    public get_module_path(*self, id DefId) Option[List[String]] = {
+    public get_module_path(self, id DefId) Option[List[String]] = {
         return self.module_paths.get(id.id);
     };
 
-    public get_source_file(*self, id DefId) Option[String] = {
+    public get_source_file(self, id DefId) Option[String] = {
         return self.source_files.get(id.id);
     };
 
-    public get_package_id(*self, id DefId) Option[String] = {
+    public get_package_id(self, id DefId) Option[String] = {
         return self.package_ids.get(id.id);
     };
 
-    public get_access(*self, id DefId) Option[AccessModifier] = {
+    public get_access(self, id DefId) Option[AccessModifier] = {
         return self.access_modifiers.get(id.id);
     };
 
-    public set_module_path(*mutable self, id DefId, module_path List[String]) Void = {
+    public set_module_path(self, id DefId, module_path List[String]) Void = {
         self.module_paths.insert(id.id, module_path);
     };
 
-    public set_source_file(*mutable self, id DefId, source_file String) Void = {
+    public set_source_file(self, id DefId, source_file String) Void = {
         self.source_files.insert(id.id, source_file);
     };
 
-    public set_package_id(*mutable self, id DefId, package_id String) Void = {
+    public set_package_id(self, id DefId, package_id String) Void = {
         self.package_ids.insert(id.id, package_id);
     };
 
-    public set_access(*mutable self, id DefId, access AccessModifier) Void = {
+    public set_access(self, id DefId, access AccessModifier) Void = {
         self.access_modifiers.insert(id.id, access);
     };
 
-    public get_span(*self, id DefId) Option[SourceSpan] = {
+    public get_span(self, id DefId) Option[SourceSpan] = {
         return self.spans.get(id.id);
     };
 
-    public set_span(*mutable self, id DefId, span SourceSpan) Void = {
+    public set_span(self, id DefId, span SourceSpan) Void = {
         if is_known_span(span) then {
             self.spans.insert(id.id, span);
         };
     };
 
-    public set_struct_fields(*mutable self, id DefId, fields List[StructField]) Void = {
+    public set_struct_fields(self, id DefId, fields List[StructField]) Void = {
         self.struct_fields.insert(id.id, fields);
     };
 
-    public get_struct_fields(*self, id DefId) Option[List[StructField]] = {
+    public get_struct_fields(self, id DefId) Option[List[StructField]] = {
         return self.struct_fields.get(id.id);
     };
 
-    public set_enum_cases(*mutable self, id DefId, cases List[EnumCaseInfo]) Void = {
+    public set_enum_cases(self, id DefId, cases List[EnumCaseInfo]) Void = {
         self.enum_cases.insert(id.id, cases);
     };
 
-    public get_enum_cases(*self, id DefId) Option[List[EnumCaseInfo]] = {
+    public get_enum_cases(self, id DefId) Option[List[EnumCaseInfo]] = {
         return self.enum_cases.get(id.id);
     };
 
-    public set_param_specs(*mutable self, id DefId, specs List[FunctionParamSpec]) Void = {
+    public set_param_specs(self, id DefId, specs List[FunctionParamSpec]) Void = {
         self.param_specs.insert(id.id, specs);
     };
 
-    public get_param_specs(*self, id DefId) Option[List[FunctionParamSpec]] = {
+    public get_param_specs(self, id DefId) Option[List[FunctionParamSpec]] = {
         return self.param_specs.get(id.id);
     };
 
     // Returns a human-readable display name for a type, using real names for struct/enum.
-    public type_display_name(*self, t Type) String = {
+    public type_display_name(self, t Type) String = {
         return when t in {
             .StructureType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
                 .None() then {
-                    let mutable out = "struct#";
+                    let mutable out = StringBuilder.new();
+                    out.push_string("struct#");
                     out.push_string(def_id.id.to_string());
-                    yield out;
+                    yield out.to_string();
                 },
             },
             .EnumType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
                 .None() then {
-                    let mutable out = "enum#";
+                    let mutable out = StringBuilder.new();
+                    out.push_string("enum#");
                     out.push_string(def_id.id.to_string());
-                    yield out;
+                    yield out.to_string();
                 },
             },
             _ then type_to_string(t),
@@ -438,7 +480,7 @@ given DefIdMap {
     // ── 名称查找 ──────────────────────────────────────────────────────────
 
     /// 根据模块路径和名称查找 DefId
-    public lookup(*self, module_path List[String], name String, source_file Option[String]) Option[DefId] = {
+    public lookup(self, module_path List[String], name String, source_file Option[String]) Option[DefId] = {
         // 如果提供了 source_file，先尝试带文件路径的键
         if source_file is .Some(sf) then {
             let key_with_file = self.make_key(module_path, name, Option[String].Some(sf));
@@ -451,32 +493,36 @@ given DefIdMap {
         return self.name_to_def_id.get(key_without_file);
     };
 
-    public lookup_exact(*self, module_path List[String], name String, source_file String) Option[DefId] = {
+    public lookup_exact(self, module_path List[String], name String, source_file String) Option[DefId] = {
         let key_with_file = self.make_key(module_path, name, Option[String].Some(source_file));
         return self.name_to_def_id.get(key_with_file);
     };
 
     /// 生成查找键
-    file_private make_key(*self, module_path List[String], name String, source_file Option[String]) String = {
-        let mutable result = if module_path.is_empty() then String.new() else module_path.join_to_string(".");
-        if not module_path.is_empty() then {
-            result.push_byte('.');
+    file_private make_key(self, module_path List[String], name String, source_file Option[String]) String = {
+        let mutable result = StringBuilder.new();
+        let mutable needs_dot = false;
+        for part in module_path then {
+            if needs_dot then { result.push_byte('.'); };
+            result.push_string(part);
+            needs_dot = true;
         };
+        if needs_dot then { result.push_byte('.'); };
         result.push_string(name);
         if source_file is .Some(sf) then {
             result.push_byte('@');
             result.push_string(sf);
         };
-        return result;
+        return result.to_string();
     };
 
     // ── 限定名 / C 标识符 ────────────────────────────────────────────────
 
     /// 获取限定名（module_path.name）
-    public get_qualified_name(*self, id DefId) Option[String] = {
+    public get_qualified_name(self, id DefId) Option[String] = {
         if self.names.get(id.id) is .Some(name) then {
             let module_path = if self.module_paths.get(id.id) is .Some(mod_path) then mod_path else List[String].new();
-            let mutable result = String.new();
+            let mutable result = StringBuilder.new();
             let mutable needs_separator = false;
             for part in module_path then {
                 if needs_separator then { result.push_byte('.');};
@@ -485,13 +531,13 @@ given DefIdMap {
             };
             if needs_separator then { result.push_byte('.');};
             result.push_string(name);
-            return Option[String].Some(result);
+            return Option[String].Some(result.to_string());
         };
         return Option[String].None();
     };
 
     /// 获取 C 标识符
-    public get_c_identifier(*self, id DefId) Option[String] = {
+    public get_c_identifier(self, id DefId) Option[String] = {
         if self.names.get(id.id) is .Some(name) then {
             let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .FilePrivate() else false;
             let source_file = when self.source_files.get(id.id) in {
@@ -503,7 +549,7 @@ given DefIdMap {
                 .None() then List[String].new(),
             };
 
-            let mutable result = String.new();
+            let mutable result = StringBuilder.new();
             let mutable needs_separator = false;
             if not module_path.is_empty() then {
                 for part in module_path then {
@@ -527,14 +573,14 @@ given DefIdMap {
             if needs_separator then { result.push_byte('_');};
             result.push_string(name);
 
-            return Option[String].Some(result);
+            return Option[String].Some(result.to_string());
         };
         return Option[String].None();
     };
 
     // ── 符号信息 ──────────────────────────────────────────────────────────
 
-    public set_symbol_info(*mutable self, id DefId, info SymbolInfo) Void = {
+    public set_symbol_info(self, id DefId, info SymbolInfo) Void = {
         self.symbol_types.insert(id.id, info.symbol_type);
         self.symbol_kinds.insert(id.id, info.kind);
         let mk = when info.method_kind in {
@@ -545,15 +591,15 @@ given DefIdMap {
         self.symbol_mutables.insert(id.id, info.is_mutable);
     };
 
-    public get_symbol_type(*self, id DefId) Option[Type] = {
+    public get_symbol_type(self, id DefId) Option[Type] = {
         return self.symbol_types.get(id.id);
     };
 
-    public get_symbol_kind(*self, id DefId) Option[SymbolKind] = {
+    public get_symbol_kind(self, id DefId) Option[SymbolKind] = {
         return self.symbol_kinds.get(id.id);
     };
 
-    public get_symbol_method_kind(*self, id DefId) Option[MethodKind] = {
+    public get_symbol_method_kind(self, id DefId) Option[MethodKind] = {
         if self.symbol_method_kinds.get(id.id) is .Some(v) then {
             if v == 0 then { return Option[MethodKind].Some(MethodKind.Normal());};
             return Option[MethodKind].Some(MethodKind.Drop());
@@ -561,7 +607,7 @@ given DefIdMap {
         return Option[MethodKind].None();
     };
 
-    public get_symbol_mutable(*self, id DefId) Option[Bool] = {
+    public get_symbol_mutable(self, id DefId) Option[Bool] = {
         return self.symbol_mutables.get(id.id);
     };
 
@@ -570,7 +616,7 @@ given DefIdMap {
     // Note: only symbol_types is cleared; symbol_kinds/symbol_method_kinds/
     // symbol_mutables must remain because monomorphization may still query
     // variable kind metadata from retained typed AST references.
-    public clear_variable_symbol_types_in_range(*mutable self, start_id UInt, end_exclusive UInt) Void = {
+    public clear_variable_symbol_types_in_range(self, start_id UInt, end_exclusive UInt) Void = {
         if end_exclusive <= start_id then {
             return;
         };
@@ -591,102 +637,215 @@ given DefIdMap {
 
     // ── 结构体/枚举类型详细信息 ─────────────────────────────────────────────
 
-    public set_struct_info(*mutable self, id DefId, info StructTypeInfo) Void = {
+    public set_struct_info(self, id DefId, info StructTypeInfo) Void = {
         self.struct_fields.insert(id.id, info.members);
         self.struct_generic_instantiation.insert(id.id, info.is_generic_instantiation);
         if info.type_arguments is .Some(args) then { self.struct_type_arguments.insert(id.id, args);};
         if info.template_name is .Some(tn) then { self.struct_template_names.insert(id.id, tn);};
+        if info.template_def_id.is_valid() then {
+            self.struct_template_def_ids.insert(id.id, info.template_def_id);
+            if info.template_name is .Some(tn) then {
+                self.generic_struct_template_def_ids.insert(tn, info.template_def_id);
+            };
+        };
     };
 
-    public set_enum_info(*mutable self, id DefId, info EnumTypeInfo) Void = {
+    public set_enum_info(self, id DefId, info EnumTypeInfo) Void = {
         self.enum_cases.insert(id.id, info.cases);
         self.enum_generic_instantiation.insert(id.id, info.is_generic_instantiation);
         if info.type_arguments is .Some(args) then { self.enum_type_arguments.insert(id.id, args);};
         if info.template_name is .Some(tn) then { self.enum_template_names.insert(id.id, tn);};
+        if info.template_def_id.is_valid() then {
+            self.enum_template_def_ids.insert(id.id, info.template_def_id);
+            if info.template_name is .Some(tn) then {
+                self.generic_enum_template_def_ids.insert(tn, info.template_def_id);
+            };
+        };
     };
 
-    public get_generic_instantiation(*self, id DefId) Option[Bool] = {
+    public get_generic_instantiation(self, id DefId) Option[Bool] = {
         if self.struct_generic_instantiation.get(id.id) is .Some(v) then {
             return Option[Bool].Some(v);
         };
         return self.enum_generic_instantiation.get(id.id);
     };
 
-    public get_type_arguments(*self, id DefId) Option[List[Type]] = {
+    public get_type_arguments(self, id DefId) Option[List[Type]] = {
         if self.struct_type_arguments.get(id.id) is .Some(args) then {
             return Option[List[Type]].Some(args);
         };
         return self.enum_type_arguments.get(id.id);
     };
 
-    public get_template_name(*self, id DefId) Option[String] = {
+    public get_template_name(self, id DefId) Option[String] = {
         if self.struct_template_names.get(id.id) is .Some(tn) then {
             return Option[String].Some(tn);
         };
         return self.enum_template_names.get(id.id);
     };
 
+    /// Get the DefId of the generic template this instantiation was created from.
+    /// Returns invalid DefId if not a generic instantiation.
+    public get_template_def_id(self, id DefId) DefId = {
+        if self.struct_template_def_ids.get(id.id) is .Some(tid) then {
+            return tid;
+        };
+        if self.enum_template_def_ids.get(id.id) is .Some(tid) then {
+            return tid;
+        };
+        return def_id_invalid();
+    };
+
+    public lookup_generic_struct_template_def_id(self, name String) Option[DefId] = {
+        return self.generic_struct_template_def_ids.get(name);
+    };
+
+    public lookup_generic_enum_template_def_id(self, name String) Option[DefId] = {
+        return self.generic_enum_template_def_ids.get(name);
+    };
+
     // ── 导入记录 ──────────────────────────────────────────────────────────
 
-    public record_import(*mutable self, imported_def_id DefId, original_def_id DefId, from_module List[String]) Void = {
+    public record_import(self, imported_def_id DefId, original_def_id DefId, from_module List[String]) Void = {
         self.import_records.insert(imported_def_id.id, ImportRecord(original_def_id, from_module));
     };
 
-    public get_original_def_id(*self, id DefId) Option[DefId] = {
+    public get_original_def_id(self, id DefId) Option[DefId] = {
         return if self.import_records.get(id.id) is .Some(record) then Option[DefId].Some(record.original_def_id) else Option[DefId].None();
     };
 
-    public is_imported(*self, id DefId) Bool = {
+    public is_imported(self, id DefId) Bool = {
         return self.import_records.get(id.id) is .Some(_);
     };
 
     // ── Foreign struct 字段 ───────────────────────────────────────────────
 
-    public set_foreign_struct_fields(*mutable self, id DefId, fields List[StructField]) Void = {
+    public set_foreign_struct_fields(self, id DefId, fields List[StructField]) Void = {
         self.foreign_struct_fields.insert(id.id, fields);
     };
 
-    public get_foreign_struct_fields(*self, id DefId) Option[List[StructField]] = {
+    public get_foreign_struct_fields(self, id DefId) Option[List[StructField]] = {
         return self.foreign_struct_fields.get(id.id);
     };
 
-    public is_foreign_struct(*self, id DefId) Bool = {
+    public is_foreign_struct(self, id DefId) Bool = {
         return self.foreign_struct_fields.get(id.id) is .Some(_);
     };
 
     // ── C 名称映射 ───────────────────────────────────────────────────────
 
-    public set_cname(*mutable self, id DefId, cname String) Void = {
+    public set_cname(self, id DefId, cname String) Void = {
         self.cname_map.insert(id.id, cname);
     };
 
-    public get_cname(*self, id DefId) Option[String] = {
+    public get_cname(self, id DefId) Option[String] = {
         return self.cname_map.get(id.id);
     };
 
     // ── 类型映射 ─────────────────────────────────────────────────────────
 
-    public add_type(*mutable self, id DefId, t Type) Void = {
+    public add_type(self, id DefId, t Type) Void = {
         self.type_map.insert(id.id, t);
     };
 
-    public lookup_type(*self, id DefId) Option[Type] = {
+    public lookup_type(self, id DefId) Option[Type] = {
         return self.type_map.get(id.id);
     };
 
-    public set_not_deref(*mutable self, id DefId) Void = {
+    public set_not_deref(self, id DefId) Void = {
         self.not_deref_types.insert(id.id);
     };
 
-    public is_not_deref(*self, id DefId) Bool = {
+    public is_not_deref(self, id DefId) Bool = {
         return self.not_deref_types.contains(id.id);
+    };
+
+    // ── Nominal Mutability（type mutable）──────────────────────────────
+
+    public set_struct_mutable(self, id DefId, is_mutable Bool) Void = {
+        self.struct_mutables.insert(id.id, is_mutable);
+    };
+
+    public is_struct_mutable(self, id DefId) Bool = {
+        return when self.struct_mutables.get(id.id) in {
+            .Some(v) then v,
+            .None() then false,
+        };
+    };
+
+    // ── Explicit Drop Conformance ──────────────────────────────────────
+
+    public set_explicit_drop(self, id DefId) Void = {
+        self.explicit_drops.insert(id.id);
+    };
+
+    public has_explicit_drop(self, id DefId) Bool = {
+        return self.explicit_drops.contains(id.id);
     };
 
     // ── 检查是否存在 ─────────────────────────────────────────────────────
 
-    public contains(*self, module_path List[String], name String, source_file Option[String]) Bool = {
+    public contains(self, module_path List[String], name String, source_file Option[String]) Bool = {
         return self.lookup(module_path, name, source_file) is .Some(_);
     };
+
+    /// 递归检查类型是否有非平凡 Drop（含字段/payload 递归）
+    public has_nontrivial_nominal_drop(self, def_id DefId) Bool = {
+        if self.has_explicit_drop(def_id) then {
+            return true;
+        };
+        if self.is_struct_mutable(def_id) then {
+            return true;
+        };
+        // 检查 struct 字段
+        if self.get_struct_fields(def_id) is .Some(fields) then {
+            for field in fields then {
+                if self.type_has_nontrivial_drop(field.field_type) then {
+                    return true;
+                };
+            };
+        };
+        // 检查 enum case payload
+        if self.get_enum_cases(def_id) is .Some(cases) then {
+            for case_info in cases then {
+                for param in case_info.params then {
+                    if self.type_has_nontrivial_drop(param.param_type) then {
+                        return true;
+                    };
+                };
+            };
+        };
+        return false;
+    };
+
+    /// 检查类型是否包含需要 Drop 的子类型
+    file_private type_has_nontrivial_drop(self, t Type) Bool = {
+        return when t in {
+            .StructureType(def_id) then self.has_nontrivial_nominal_drop(def_id),
+            .EnumType(def_id) then self.has_nontrivial_nominal_drop(def_id),
+            .GenericStruct(_, template_def_id, _) then {
+                let def_id = if template_def_id.is_valid() then Option[DefId].Some(template_def_id) else Option[DefId].None();
+                return when def_id in {
+                    .Some(d) then self.has_nontrivial_nominal_drop(d),
+                    .None() then false,
+                };
+            },
+            .GenericEnum(_, template_def_id, _) then {
+                let def_id = if template_def_id.is_valid() then Option[DefId].Some(template_def_id) else Option[DefId].None();
+                return when def_id in {
+                    .Some(d) then self.has_nontrivial_nominal_drop(d),
+                    .None() then false,
+                };
+            },
+            _ then false,
+        };
+    };
+};
+
+/// Nominal 类型的布局策略
+public type NominalLayoutKind {
+    Value(),
+    Managed(),
 };
 
 // ── Type ──────────────────────────────────────────────────────────────────────
@@ -710,30 +869,30 @@ public type Type {
     NeverType(),
 
     // Compound types
-    FunctionType(params List[* FunctionParamEntry], return_type * Type),
+    FunctionType(params List[FunctionParamEntry], return_type Type),
     StructureType(def_id DefId),
     EnumType(def_id DefId),
-    ReferenceType(inner * Type),
-    MutableReferenceType(inner * Type),
-    BorrowedReferenceType(inner * Type),
-    MutableBorrowedReferenceType(inner * Type),
-    PointerType(inner * Type),
-    MutablePointerType(inner * Type),
-    WeakReferenceType(inner * Type),
-    MutableWeakReferenceType(inner * Type),
+    ReferenceType(inner Type),
+    MutableReferenceType(inner Type),
+    BorrowedReferenceType(inner Type),
+    MutableBorrowedReferenceType(inner Type),
+    PointerType(inner Type),
+    MutablePointerType(inner Type),
+    WeakReferenceType(inner Type),
+    MutableWeakReferenceType(inner Type),
     OpaqueType(def_id DefId),
 
-    // Generics
+    // Generics — `template`/`trait_name` is display-only; the DefId is the identity.
     GenericParameter(name String),
-    GenericStruct(template String, args List[* Type]),
-    GenericEnum(template String, args List[* Type]),
+    GenericStruct(template String, template_def_id DefId, args List[Type]),
+    GenericEnum(template String, template_def_id DefId, args List[Type]),
     ModuleType(info ModuleSymbolInfo),
 
     // Trait object
-    TraitObject(trait_name String, type_args List[* Type]),
+    TraitObject(trait_name String, trait_def_id DefId, type_args List[Type]),
 
     // Type inference variable
-    TypeVar(tv * TypeVariable),
+    TypeVar(tv TypeVariable),
 
     // Unknown / inference placeholder (used for error recovery)
     Unknown(),
@@ -762,35 +921,35 @@ file_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
         when current in {
             .ReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.Reference());
-                current = *inner;
+                current = inner;
             },
             .MutableReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.MutableReference());
-                current = *inner;
+                current = inner;
             },
             .BorrowedReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.BorrowedReference());
-                current = *inner;
+                current = inner;
             },
             .MutableBorrowedReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.MutableBorrowedReference());
-                current = *inner;
+                current = inner;
             },
             .PointerType(inner) then {
                 wrappers.push(TypeStringWrapperKind.Pointer());
-                current = *inner;
+                current = inner;
             },
             .MutablePointerType(inner) then {
                 wrappers.push(TypeStringWrapperKind.MutablePointer());
-                current = *inner;
+                current = inner;
             },
             .WeakReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.WeakReference());
-                current = *inner;
+                current = inner;
             },
             .MutableWeakReferenceType(inner) then {
                 wrappers.push(TypeStringWrapperKind.MutableWeakReference());
-                current = *inner;
+                current = inner;
             },
             _ then { break;},
         };
@@ -800,117 +959,103 @@ file_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
 
 file_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
     return when kind in {
-        .Reference() then "* ",
+        .Reference() then "*",
         .MutableReference() then "*mutable ",
         .BorrowedReference() then "ref ",
         .MutableBorrowedReference() then "ref mutable ",
         .Pointer() then "*unsafe ",
         .MutablePointer() then "*unsafe mutable ",
-        .WeakReference() then "?* ",
+        .WeakReference() then "?*",
         .MutableWeakReference() then "?*mutable ",
     };
 };
 
-file_private let join_type_ref_list(types List[* Type]) String = {
-    let mutable out = String.new();
+file_private let join_type_ref_list(types List[Type]) String = {
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for item in types then {
         if not first then { out.push_string(", ");};
-        out.push_string(type_to_string(*item));
+        out.push_string(type_to_string(item));
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
-file_private let join_param_entry_list(entries List[* FunctionParamEntry]) String = {
-    let mutable out = String.new();
+file_private let join_param_entry_list(entries List[FunctionParamEntry]) String = {
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for entry in entries then {
         if not first then { out.push_string(", ");};
         out.push_string(type_to_string(entry.param_type));
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
-file_private let join_type_ref_key_list(types List[* Type]) String = {
-    let mutable out = String.new();
+file_private let join_type_ref_key_list(types List[Type]) String = {
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for item in types then {
         if not first then { out.push_string(",");};
-        out.push_string(stable_type_key(*item));
+        out.push_string(stable_type_key(item));
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
-file_private let join_param_entry_key_list(entries List[* FunctionParamEntry]) String = {
-    let mutable out = String.new();
+file_private let join_param_entry_key_list(entries List[FunctionParamEntry]) String = {
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for entry in entries then {
         if not first then { out.push_string(",");};
         out.push_string(stable_type_key(entry.param_type));
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
 public let stable_type_key(t Type) String = {
     return when t in {
-        .IntType() then "I",
-        .Int8Type() then "I8",
-        .Int16Type() then "I16",
-        .Int32Type() then "I32",
-        .Int64Type() then "I64",
-        .UIntType() then "U",
-        .UInt8Type() then "U8",
-        .UInt16Type() then "U16",
-        .UInt32Type() then "U32",
-        .UInt64Type() then "U64",
-        .Float32Type() then "F32",
-        .Float64Type() then "F64",
-        .BoolType() then "B",
-        .VoidType() then "V",
-        .NeverType() then "N",
+        .IntType() then "Int",
+        .Int8Type() then "Int8",
+        .Int16Type() then "Int16",
+        .Int32Type() then "Int32",
+        .Int64Type() then "Int64",
+        .UIntType() then "UInt",
+        .UInt8Type() then "UInt8",
+        .UInt16Type() then "UInt16",
+        .UInt32Type() then "UInt32",
+        .UInt64Type() then "UInt64",
+        .Float32Type() then "Float32",
+        .Float64Type() then "Float64",
+        .BoolType() then "Bool",
+        .VoidType() then "Void",
+        .NeverType() then "Never",
         .FunctionType(params, return_type) then {
-            let mutable out = "Fn(";
-            out.push_string(join_param_entry_key_list(params));
-            out.push_string(")->");
-            out.push_string(stable_type_key(*return_type));
-            yield out;
+            yield "Fn(" + join_param_entry_key_list(params) + ")->" + stable_type_key(return_type);
         },
-        .StructureType(def_id) then {
-            let mutable out = "S#";
-            out.push_string(def_id.id.to_string());
-            yield out;
+        .StructureType(def_id) then "S#" + def_id.id.to_string(),
+        .EnumType(def_id) then "E#" + def_id.id.to_string(),
+        .ReferenceType(inner) then "Ref(\(stable_type_key(inner)))",
+        .MutableReferenceType(inner) then "MutRef(\(stable_type_key(inner)))",
+        .BorrowedReferenceType(inner) then "BorrowRef(\(stable_type_key(inner)))",
+        .MutableBorrowedReferenceType(inner) then "BorrowMutRef(\(stable_type_key(inner)))",
+        .PointerType(inner) then "Ptr(\(stable_type_key(inner)))",
+        .MutablePointerType(inner) then "MutPtr(\(stable_type_key(inner)))",
+        .WeakReferenceType(inner) then "WeakRef(\(stable_type_key(inner)))",
+        .MutableWeakReferenceType(inner) then "MutWeakRef(\(stable_type_key(inner)))",
+        .OpaqueType(def_id) then "Opaque#" + def_id.id.to_string(),
+        .GenericParameter(name) then "Param(\(name))",
+        .GenericStruct(template, template_def_id, args) then "GS(\(template))#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
+        .GenericEnum(template, template_def_id, args) then "GE(\(template))#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
+        .ModuleType(info) then "M(\(info.module_path.join_to_string(".")))",
+        .TraitObject(trait_name, trait_def_id, type_args) then {
+            if type_args.is_empty() then {
+                yield "TO(\(trait_name))#\(trait_def_id.id)";
+            };
+            yield "TO(\(trait_name))#\(trait_def_id.id)[\(join_type_ref_key_list(type_args))]";
         },
-        .EnumType(def_id) then {
-            let mutable out = "E#";
-            out.push_string(def_id.id.to_string());
-            yield out;
-        },
-        .ReferenceType(inner) then "R(\(stable_type_key(*inner)))",
-        .MutableReferenceType(inner) then "MR(\(stable_type_key(*inner)))",
-        .BorrowedReferenceType(inner) then "BR",
-        .MutableBorrowedReferenceType(inner) then "BMR",
-        .PointerType(inner) then "P(\(stable_type_key(*inner)))",
-        .MutablePointerType(inner) then "MP(\(stable_type_key(*inner)))",
-        .WeakReferenceType(inner) then "W(\(stable_type_key(*inner)))",
-        .MutableWeakReferenceType(inner) then "MW(\(stable_type_key(*inner)))",
-        .OpaqueType(def_id) then {
-            let mutable out = "O#";
-            out.push_string(def_id.id.to_string());
-            yield out;
-        },
-        .GenericParameter(name) then "GP(\(name))",
-        .GenericStruct(template, args) then "GS(\(template)<\(join_type_ref_key_list(args))>)",
-        .GenericEnum(template, args) then "GE(\(template)<\(join_type_ref_key_list(args))>)",
-        .ModuleType(info) then {
-            let path = if info.module_path.is_empty() then "root" else info.module_path.join_to_string(".");
-            yield "M(\(path))";
-        },
-        .TraitObject(trait_name, type_args) then "TO(\(trait_name)<\(join_type_ref_key_list(type_args))>)",
-        .TypeVar(tv) then "TV(\((*tv).id))",
+        .TypeVar(tv) then "TV#\(tv.id)",
         .Unknown() then "Unknown",
     };
 };
@@ -946,7 +1091,7 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
                 yield "Func(...) ...";
             };
             let next_depth = depth + 1(UInt);
-            let mutable out = "Func(";
+            let mutable out = StringBuilder.new(); out.push_string("Func(");
             let mutable first = true;
             for entry in params then {
                 if not first then { out.push_string(", ");};
@@ -955,220 +1100,346 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
             };
             out.push_byte(')');
             out.push_byte(' ');
-            out.push_string(type_to_string_impl(*return_type, next_depth));
-            return out;
+            out.push_string(type_to_string_impl(return_type, next_depth));
+            return out.to_string();
         },
         .StructureType(def_id) then {
-            let mutable out = "struct#";
+            let mutable out = StringBuilder.new();
+            out.push_string("struct#");
             out.push_string(def_id.id.to_string());
-            yield out;
+            yield out.to_string();
         },
         .EnumType(def_id) then {
-            let mutable out = "enum#";
+            let mutable out = StringBuilder.new();
+            out.push_string("enum#");
             out.push_string(def_id.id.to_string());
-            yield out;
+            yield out.to_string();
         },
         .ReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "* ...";
+                yield "...";
             };
-            let mutable out = "* ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .MutableReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "*mutable ...";
+                yield "...";
             };
-            let mutable out = "*mutable ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .BorrowedReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "* ...";
+                yield "ref ...";
             };
-            let mutable out = "* ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("ref ");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .MutableBorrowedReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "*mutable ...";
+                yield "ref mutable ...";
             };
-            let mutable out = "*mutable ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("ref mutable ");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .PointerType(inner) then {
             if depth > 200(UInt) then {
                 yield "*unsafe ...";
             };
-            let mutable out = "*unsafe ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("*unsafe ");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .MutablePointerType(inner) then {
             if depth > 200(UInt) then {
                 yield "*unsafe mutable ...";
             };
-            let mutable out = "*unsafe mutable ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("*unsafe mutable ");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .WeakReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "?* ...";
+                yield "?...";
             };
-            let mutable out = "?* ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("?");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .MutableWeakReferenceType(inner) then {
             if depth > 200(UInt) then {
-                yield "?*mutable ...";
+                yield "?...";
             };
-            let mutable out = "?*mutable ";
-            out.push_string(type_to_string_impl(*inner, depth + 1(UInt)));
-            yield out;
+            let mutable out = StringBuilder.new();
+            out.push_string("?");
+            out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
+            yield out.to_string();
         },
         .OpaqueType(def_id) then {
-            let mutable out = "opaque#";
+            let mutable out = StringBuilder.new();
+            out.push_string("opaque#");
             out.push_string(def_id.id.to_string());
-            yield out;
+            yield out.to_string();
         },
         .GenericParameter(name) then name,
-        .GenericStruct(template, args) then {
+        .GenericStruct(template, _, args) then {
             if depth > 200(UInt) then {
                 yield template + "[...]";
             };
             let next_depth = depth + 1(UInt);
-            let mutable out = template;
+            let mutable out = StringBuilder.new();
+            out.push_string(template);
             out.push_byte('[');
             let mutable first = true;
             for item in args then {
                 if not first then { out.push_string(", ");};
-                out.push_string(type_to_string_impl(*item, next_depth));
+                out.push_string(type_to_string_impl(item, next_depth));
                 first = false;
             };
             out.push_byte(']');
-            return out;
+            return out.to_string();
         },
-        .GenericEnum(template, args) then {
+        .GenericEnum(template, _, args) then {
             if depth > 200(UInt) then {
                 yield template + "[...]";
             };
             let next_depth = depth + 1(UInt);
-            let mutable out = template;
+            let mutable out = StringBuilder.new();
+            out.push_string(template);
             out.push_byte('[');
             let mutable first = true;
             for item in args then {
                 if not first then { out.push_string(", ");};
-                out.push_string(type_to_string_impl(*item, next_depth));
+                out.push_string(type_to_string_impl(item, next_depth));
                 first = false;
             };
             out.push_byte(']');
-            return out;
+            return out.to_string();
         },
         .ModuleType(info) then {
             yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".");
         },
-        .TraitObject(trait_name, _) then trait_name,
-        .TypeVar(tv) then (*tv).display(),
+        .TraitObject(trait_name, _, _) then trait_name,
+        .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
     };
     if chain.wrappers.is_empty() then {
         return inner_string;
     };
 
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     for wrapper in chain.wrappers then {
         out.push_string(type_string_wrapper_prefix(wrapper));
     };
     out.push_string(inner_string);
-    return out;
+    return out.to_string();
 };
 
-file_private let stable_hash_combine_string(seed UInt, text String) UInt = {
-    let mutable hash = seed.combine_hash(text.count());
+public let stable_hash_combine_value(seed UInt, value UInt) UInt = {
+    let folded = value.wrapping_add(11400714819323198485(UInt));
+    return (seed ^ folded).wrapping_mul(1099511628211(UInt));
+};
+
+public let stable_hash_combine_string(seed UInt, text String) UInt = {
+    let mutable hash = stable_hash_combine_value(seed, text.count());
     for byte in text.bytes() then {
-        hash = hash.combine_hash(byte(UInt));
+        hash = stable_hash_combine_value(hash, byte(UInt));
     };
-    return hash.combine_hash(255);
+    return stable_hash_combine_value(hash, 255(UInt));
 };
 
-file_private let stable_hash_combine_string_list(seed UInt, values List[String]) UInt = {
-    let mutable hash = seed.combine_hash(values.count());
-    for value in values then {
-        hash = stable_hash_combine_string(hash, value);
+file_private let stable_type_hash_parameter(entry FunctionParamEntry) UInt = {
+    let mutable hash = 14695981039346656037(UInt);
+    hash = stable_hash_combine_value(hash, 1(UInt));
+    hash = stable_hash_combine_value(hash, stable_type_hash(entry.param_type));
+    let pass_kind = when entry.pass_kind in {
+        .ByValue() then 1(UInt),
+        .ByReference() then 2(UInt),
+        .ByMutableReference() then 3(UInt),
+    };
+    return stable_hash_combine_value(hash, pass_kind);
+};
+
+public let stable_type_hash(t Type) UInt = {
+    let mutable hash = 14695981039346656037(UInt);
+    when t in {
+        .IntType() then { hash = stable_hash_combine_value(hash, 1(UInt)); },
+        .Int8Type() then { hash = stable_hash_combine_value(hash, 2(UInt)); },
+        .Int16Type() then { hash = stable_hash_combine_value(hash, 3(UInt)); },
+        .Int32Type() then { hash = stable_hash_combine_value(hash, 4(UInt)); },
+        .Int64Type() then { hash = stable_hash_combine_value(hash, 5(UInt)); },
+        .UIntType() then { hash = stable_hash_combine_value(hash, 6(UInt)); },
+        .UInt8Type() then { hash = stable_hash_combine_value(hash, 7(UInt)); },
+        .UInt16Type() then { hash = stable_hash_combine_value(hash, 8(UInt)); },
+        .UInt32Type() then { hash = stable_hash_combine_value(hash, 9(UInt)); },
+        .UInt64Type() then { hash = stable_hash_combine_value(hash, 10(UInt)); },
+        .Float32Type() then { hash = stable_hash_combine_value(hash, 11(UInt)); },
+        .Float64Type() then { hash = stable_hash_combine_value(hash, 12(UInt)); },
+        .BoolType() then { hash = stable_hash_combine_value(hash, 13(UInt)); },
+        .VoidType() then { hash = stable_hash_combine_value(hash, 14(UInt)); },
+        .NeverType() then { hash = stable_hash_combine_value(hash, 15(UInt)); },
+        .FunctionType(params, return_type) then {
+            hash = stable_hash_combine_value(hash, 16(UInt));
+            hash = stable_hash_combine_value(hash, params.count());
+            for entry in params then {
+                hash = stable_hash_combine_value(hash, stable_type_hash_parameter(entry));
+            };
+            hash = stable_hash_combine_value(hash, stable_type_hash(return_type));
+        },
+        .StructureType(def_id) then {
+            hash = stable_hash_combine_value(hash, 17(UInt));
+            hash = stable_hash_combine_value(hash, def_id.id);
+        },
+        .ReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 18(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .MutableReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 19(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .BorrowedReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 32(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 33(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .PointerType(inner) then {
+            hash = stable_hash_combine_value(hash, 20(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .MutablePointerType(inner) then {
+            hash = stable_hash_combine_value(hash, 21(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .WeakReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 22(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .MutableWeakReferenceType(inner) then {
+            hash = stable_hash_combine_value(hash, 23(UInt));
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .GenericParameter(name) then {
+            hash = stable_hash_combine_value(hash, 24(UInt));
+            hash = stable_hash_combine_string(hash, name);
+        },
+        .EnumType(def_id) then {
+            hash = stable_hash_combine_value(hash, 25(UInt));
+            hash = stable_hash_combine_value(hash, def_id.id);
+        },
+        .GenericStruct(template, template_def_id, args) then {
+            hash = stable_hash_combine_value(hash, 26(UInt));
+            hash = stable_hash_combine_value(hash, if template_def_id.is_valid() then template_def_id.id else 0(UInt));
+            hash = stable_hash_combine_string(hash, template);
+            hash = stable_hash_combine_value(hash, args.count());
+            for arg in args then {
+                hash = stable_hash_combine_value(hash, stable_type_hash(arg));
+            };
+        },
+        .GenericEnum(template, template_def_id, args) then {
+            hash = stable_hash_combine_value(hash, 27(UInt));
+            hash = stable_hash_combine_value(hash, if template_def_id.is_valid() then template_def_id.id else 0(UInt));
+            hash = stable_hash_combine_string(hash, template);
+            hash = stable_hash_combine_value(hash, args.count());
+            for arg in args then {
+                hash = stable_hash_combine_value(hash, stable_type_hash(arg));
+            };
+        },
+        .OpaqueType(def_id) then {
+            hash = stable_hash_combine_value(hash, 28(UInt));
+            hash = stable_hash_combine_value(hash, def_id.id);
+        },
+        .ModuleType(info) then {
+            hash = stable_hash_combine_value(hash, 29(UInt));
+            hash = stable_hash_combine_value(hash, info.module_path.count());
+            for part in info.module_path then {
+                hash = stable_hash_combine_string(hash, part);
+            };
+        },
+        .TypeVar(tv) then {
+            hash = stable_hash_combine_value(hash, 30(UInt));
+            hash = stable_hash_combine_value(hash, tv.id);
+        },
+        .TraitObject(trait_name, trait_def_id, type_args) then {
+            hash = stable_hash_combine_value(hash, 31(UInt));
+            hash = stable_hash_combine_value(hash, if trait_def_id.is_valid() then trait_def_id.id else 0(UInt));
+            hash = stable_hash_combine_string(hash, trait_name);
+            hash = stable_hash_combine_value(hash, type_args.count());
+            for arg in type_args then {
+                hash = stable_hash_combine_value(hash, stable_type_hash(arg));
+            };
+        },
+        .Unknown() then { hash = stable_hash_combine_value(hash, 34(UInt)); },
     };
     return hash;
 };
 
-public let stable_type_hash(t Type) UInt = {
-    return when t in {
-        .IntType() then 1,
-        .Int8Type() then 2,
-        .Int16Type() then 3,
-        .Int32Type() then 4,
-        .Int64Type() then 5,
-        .UIntType() then 6,
-        .UInt8Type() then 7,
-        .UInt16Type() then 8,
-        .UInt32Type() then 9,
-        .UInt64Type() then 10,
-        .Float32Type() then 11,
-        .Float64Type() then 12,
-        .BoolType() then 13,
-        .VoidType() then 14,
-        .NeverType() then 15,
-        .FunctionType(params, return_type) then {
-            let mutable hash = 16(UInt).combine_hash(params.count());
-            for entry in params then {
-                hash = hash.combine_hash((*entry).hash());
-            };
-            hash = hash.combine_hash(stable_type_hash(*return_type));
-            yield hash;
-        },
-        .StructureType(def_id) then 17(UInt).combine_hash(def_id.id),
-        .EnumType(def_id) then 18(UInt).combine_hash(def_id.id),
-        .ReferenceType(inner) then 19(UInt).combine_hash(stable_type_hash(*inner)),
-        .MutableReferenceType(inner) then 20(UInt).combine_hash(stable_type_hash(*inner)),
-        .BorrowedReferenceType(inner) then 32(UInt).combine_hash(stable_type_hash(*inner)),
-        .MutableBorrowedReferenceType(inner) then 33(UInt).combine_hash(stable_type_hash(*inner)),
-        .PointerType(inner) then 21(UInt).combine_hash(stable_type_hash(*inner)),
-        .MutablePointerType(inner) then 22(UInt).combine_hash(stable_type_hash(*inner)),
-        .WeakReferenceType(inner) then 23(UInt).combine_hash(stable_type_hash(*inner)),
-        .MutableWeakReferenceType(inner) then 24(UInt).combine_hash(stable_type_hash(*inner)),
-        .OpaqueType(def_id) then 25(UInt).combine_hash(def_id.id),
-        .GenericParameter(name) then stable_hash_combine_string(26, name),
-        .GenericStruct(template, args) then {
-            let mutable hash = stable_hash_combine_string(27, template);
-            hash = hash.combine_hash(args.count());
-            for arg in args then {
-                hash = hash.combine_hash(stable_type_hash(*arg));
-            };
-            yield hash;
-        },
-        .GenericEnum(template, args) then {
-            let mutable hash = stable_hash_combine_string(28, template);
-            hash = hash.combine_hash(args.count());
-            for arg in args then {
-                hash = hash.combine_hash(stable_type_hash(*arg));
-            };
-            yield hash;
-        },
-        .ModuleType(info) then stable_hash_combine_string_list(29, info.module_path),
-        .TraitObject(trait_name, type_args) then {
-            let mutable hash = stable_hash_combine_string(30, trait_name);
-            hash = hash.combine_hash(type_args.count());
-            for arg in type_args then {
-                hash = hash.combine_hash(stable_type_hash(*arg));
-            };
-            yield hash;
-        },
-        .TypeVar(tv) then 31(UInt).combine_hash((*tv).id),
-        .Unknown() then 32,
+public type IndirectionFamily {
+    ManagedReference(),
+    WeakReference(),
+    RawPointer(),
+};
+
+given IndirectionFamily as Eq {
+    public equals(self, other IndirectionFamily) Bool = when self in {
+        .ManagedReference() then other is .ManagedReference(),
+        .WeakReference() then other is .WeakReference(),
+        .RawPointer() then other is .RawPointer(),
+    };
+};
+
+public type IndirectionInfo(
+    family IndirectionFamily,
+    inner Type,
+    is_mutable Bool,
+);
+
+public type CompatibleIndirectionInners(
+    expected_inner Type,
+    actual_inner Type,
+);
+
+given Type {
+    public indirection_info(self) Option[IndirectionInfo] = {
+        return when self in {
+            .ReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.ManagedReference(), inner, false)),
+            .MutableReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.ManagedReference(), inner, true)),
+            .BorrowedReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.ManagedReference(), inner, false)),
+            .MutableBorrowedReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.ManagedReference(), inner, true)),
+            .WeakReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.WeakReference(), inner, false)),
+            .MutableWeakReferenceType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.WeakReference(), inner, true)),
+            .PointerType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.RawPointer(), inner, false)),
+            .MutablePointerType(inner) then Option[IndirectionInfo].Some(IndirectionInfo(IndirectionFamily.RawPointer(), inner, true)),
+            _ then Option[IndirectionInfo].None(),
+        };
+    };
+
+    public compatible_indirection_inners(self, actual Type) Option[CompatibleIndirectionInners] = {
+        let expected = self.indirection_info() or else {
+            return Option[CompatibleIndirectionInners].None();
+        };
+        let actual_info = actual.indirection_info() or else {
+            return Option[CompatibleIndirectionInners].None();
+        };
+        if expected.family <> actual_info.family or (expected.is_mutable and not actual_info.is_mutable) then {
+            return Option[CompatibleIndirectionInners].None();
+        };
+        return Option[CompatibleIndirectionInners].Some(
+            CompatibleIndirectionInners(expected.inner, actual_info.inner)
+        );
     };
 };
 
@@ -1198,7 +1469,7 @@ given FunctionParamEntry as Eq {
 
 given FunctionParamEntry as Hash {
 
-    public hash(self) UInt = stable_type_hash(self.param_type).combine_hash(self.pass_kind.hash());
+    public hash(self) UInt = stable_type_hash_parameter(self);
 };
 
 given ModuleSymbolInfo as Eq {
@@ -1208,7 +1479,7 @@ given ModuleSymbolInfo as Eq {
 
 given ModuleSymbolInfo as Hash {
 
-    public hash(self) UInt = stable_hash_combine_string_list(1, self.module_path);
+    public hash(self) UInt = stable_type_hash(Type.ModuleType(self));
 };
 
 given Type as Eq {
@@ -1230,7 +1501,7 @@ given Type as Eq {
         .VoidType() then other is .VoidType(),
         .NeverType() then other is .NeverType(),
         .FunctionType(params, return_type) then when other in {
-            .FunctionType(other_params, other_return_type) then params == other_params and *return_type == *other_return_type,
+            .FunctionType(other_params, other_return_type) then params == other_params and return_type == other_return_type,
             _ then false,
         },
         .StructureType(def_id) then when other in {
@@ -1242,35 +1513,35 @@ given Type as Eq {
             _ then false,
         },
         .ReferenceType(inner) then when other in {
-            .ReferenceType(other_inner) then *inner == *other_inner,
+            .ReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .MutableReferenceType(inner) then when other in {
-            .MutableReferenceType(other_inner) then *inner == *other_inner,
+            .MutableReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .BorrowedReferenceType(inner) then when other in {
-            .BorrowedReferenceType(other_inner) then *inner == *other_inner,
+            .BorrowedReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .MutableBorrowedReferenceType(inner) then when other in {
-            .MutableBorrowedReferenceType(other_inner) then *inner == *other_inner,
+            .MutableBorrowedReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .PointerType(inner) then when other in {
-            .PointerType(other_inner) then *inner == *other_inner,
+            .PointerType(other_inner) then inner == other_inner,
             _ then false,
         },
         .MutablePointerType(inner) then when other in {
-            .MutablePointerType(other_inner) then *inner == *other_inner,
+            .MutablePointerType(other_inner) then inner == other_inner,
             _ then false,
         },
         .WeakReferenceType(inner) then when other in {
-            .WeakReferenceType(other_inner) then *inner == *other_inner,
+            .WeakReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .MutableWeakReferenceType(inner) then when other in {
-            .MutableWeakReferenceType(other_inner) then *inner == *other_inner,
+            .MutableWeakReferenceType(other_inner) then inner == other_inner,
             _ then false,
         },
         .OpaqueType(def_id) then when other in {
@@ -1281,24 +1552,39 @@ given Type as Eq {
             .GenericParameter(other_name) then name == other_name,
             _ then false,
         },
-        .GenericStruct(template, args) then when other in {
-            .GenericStruct(other_template, other_args) then template == other_template and args == other_args,
+        .GenericStruct(template, template_def_id, args) then when other in {
+            .GenericStruct(other_template, other_template_def_id, other_args) then {
+                if args <> other_args then {
+                    return false;
+                };
+                yield if template_def_id.is_valid() and other_template_def_id.is_valid() then template_def_id == other_template_def_id else template == other_template;
+            },
             _ then false,
         },
-        .GenericEnum(template, args) then when other in {
-            .GenericEnum(other_template, other_args) then template == other_template and args == other_args,
+        .GenericEnum(template, template_def_id, args) then when other in {
+            .GenericEnum(other_template, other_template_def_id, other_args) then {
+                if args <> other_args then {
+                    return false;
+                };
+                yield if template_def_id.is_valid() and other_template_def_id.is_valid() then template_def_id == other_template_def_id else template == other_template;
+            },
             _ then false,
         },
         .ModuleType(info) then when other in {
             .ModuleType(other_info) then info == other_info,
             _ then false,
         },
-        .TraitObject(trait_name, type_args) then when other in {
-            .TraitObject(other_trait_name, other_type_args) then trait_name == other_trait_name and type_args == other_type_args,
+        .TraitObject(trait_name, trait_def_id, type_args) then when other in {
+            .TraitObject(other_trait_name, other_trait_def_id, other_type_args) then {
+                if type_args <> other_type_args then {
+                    return false;
+                };
+                yield if trait_def_id.is_valid() and other_trait_def_id.is_valid() then trait_def_id == other_trait_def_id else trait_name == other_trait_name;
+            },
             _ then false,
         },
         .TypeVar(tv) then when other in {
-            .TypeVar(other_tv) then (*tv).id == (*other_tv).id,
+            .TypeVar(other_tv) then tv.id == (other_tv).id,
             _ then false,
         },
         .Unknown() then other is .Unknown(),
@@ -1311,32 +1597,29 @@ given Type as Hash {
 };
 
 // ── Type Interning ──────────────────────────────────────────────────────────
-// Global type cache to deduplicate identical compound types.
-// This eliminates redundant box() allocations when the same type is
-// constructed multiple times (e.g., during type resolution, substitution).
-// The cache key is the stable_type_key of the type.
+// Global type cache to deduplicate identical compound type values.
+// Since Type is now a value type, the interner returns Type values directly.
 
-public type TypeInterner(
-    mutable cache Dict[String, * Type],
+public type mutable TypeInterner(
+    mutable cache Dict[String, Type],
 );
 
 given TypeInterner {
     public new() TypeInterner = {
-        return TypeInterner(Dict[String, * Type].new());
+        return TypeInterner(Dict[String, Type].new());
     };
 
-    // Intern a type: return a cached ref if identical type exists,
-    // otherwise box it and cache. This eliminates duplicate heap allocations.
-    public intern(*mutable self, t Type) * Type = {
+    // Intern a type: return a cached value if identical type exists,
+    // otherwise cache it and return.
+    public intern(self, t Type) Type = {
         let key = stable_type_key(t);
         when self.cache.get(key) in {
             .Some(existing) then {
                 return existing;
             },
             .None() then {
-                let ref_t = box(t);
-                self.cache.insert(key, ref_t);
-                return ref_t;
+                self.cache.insert(key, t);
+                return t;
             },
         };
     };
@@ -1345,8 +1628,6 @@ given TypeInterner {
 // Type interner stored in CompilerContext to avoid module-level mutable.
 // Access via context.type_interner.intern(t).
 
-public let intern_type(t Type) * Type = {
-    // Fallback: use plain box if no interner is available.
-    // The TypeChecker should set up the interner on CompilerContext.
-    return box(t);
+public let intern_type(t Type) Type = {
+    return t;
 };

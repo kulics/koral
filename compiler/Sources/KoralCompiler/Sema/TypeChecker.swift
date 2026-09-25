@@ -133,8 +133,10 @@ public class TypeChecker {
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
-  // TypeName -> MethodName -> [TraitName]: tracks which traits provide extension methods for ambiguity detection
-  var extensionMethodTraitSources: [String: [String: [String]]] = [:]
+  // TypeName -> MethodName -> [MethodDefId]: tracks which method declarations
+  // provide an extension slot so repeated trait paths can reuse the same source
+  // without being treated as ambiguous.
+  var extensionMethodTraitSources: [String: [String: [DefId]]] = [:]
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
@@ -1104,7 +1106,8 @@ public class TypeChecker {
     name: String,
     type: Type,
     kind: SymbolKind,
-    access: AccessModifier
+    access: AccessModifier,
+    preferredDefId: DefId? = nil
   ) -> Symbol {
     let isMutable: Bool
     switch kind {
@@ -1123,7 +1126,35 @@ public class TypeChecker {
       access: access,
       span: currentSpan,
       packageID: currentPackageID,
-      isMutable: isMutable
+      isMutable: isMutable,
+      preferredDefId: preferredDefId
+    )
+  }
+
+  func registeredMethodDeclaration(
+    _ method: MethodDeclaration,
+    access: AccessModifier? = nil
+  ) -> MethodDeclaration {
+    let resolvedAccess = access ?? method.access
+    let defId = method.defId.isValid
+      ? method.defId
+      : context.allocateDefId(
+          modulePath: currentModulePath,
+          name: method.name,
+          kind: .function,
+          sourceFile: currentSourceFile,
+          access: resolvedAccess,
+          packageID: currentPackageID,
+          span: currentSpan
+        )
+    return MethodDeclaration(
+      name: method.name,
+      typeParameters: method.typeParameters,
+      parameters: method.parameters,
+      returnType: method.returnType,
+      body: method.body,
+      access: resolvedAccess,
+      defId: defId
     )
   }
 

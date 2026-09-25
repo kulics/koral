@@ -1,8 +1,8 @@
 type MIRValueCleanup(name String, cleanup_type Type);
 
-type MIRValueEmission(expression String, cleanup Option[* MIRValueCleanup]);
+type MIRValueEmission(expression String, cleanup Option[MIRValueCleanup]);
 
-type MIRPlaceAccess(path String, control String, cleanup Option[* MIRValueCleanup]);
+type MIRPlaceAccess(path String, control String, cleanup Option[MIRValueCleanup]);
 
 type MIRLocalLifetimePlan(
     root_locals List[MIRLocalID],
@@ -14,21 +14,16 @@ type MIRLocalLifetimePlan(
 
 type MIRFunctionEmitPlan(
     local_names List[String],
-    local_names_by_id *mutable Dict[UInt, String],
-    non_owning_local_ids * Dict[UInt, Bool],
-    tracked_init_locals * Dict[UInt, Bool],
-    lifetime_plan * MIRLocalLifetimePlan,
+    local_names_by_id Dict[UInt, String],
+    non_owning_local_ids Dict[UInt, Bool],
+    tracked_init_locals Dict[UInt, Bool],
+    lifetime_plan MIRLocalLifetimePlan,
 );
 
 file_private let is_borrowed_reference_like_type(t Type) Bool = {
-    return when t in {
-        .ReferenceType(_) then true,
-        .MutableReferenceType(_) then true,
-        .BorrowedReferenceType(_) then true,
-        .MutableBorrowedReferenceType(_) then true,
-        .WeakReferenceType(_) then true,
-        .MutableWeakReferenceType(_) then true,
-        _ then false,
+    return when t.indirection_info() in {
+        .Some(info) then info.family is .ManagedReference() or info.family is .WeakReference(),
+        .None() then false,
     };
 };
 
@@ -40,7 +35,7 @@ file_private let is_reference_like_type(t Type) Bool = {
         .MutableBorrowedReferenceType(_) then true,
         .WeakReferenceType(_) then true,
         .MutableWeakReferenceType(_) then true,
-        .TraitObject(_, _) then true,
+        .TraitObject(_, _, _) then true,
         _ then false,
     };
 };
@@ -53,7 +48,7 @@ file_private let is_non_owning_local_value(value MIRValue, target_type Type) Boo
     };
 };
 
-file_private let compute_non_owning_mir_locals(function * MIRFunction) * Dict[UInt, Bool] = {
+file_private let compute_non_owning_mir_locals(function MIRFunction) Dict[UInt, Bool] = {
     let mutable saw_assignment_by_local = Dict[UInt, Bool].new();
     let mutable all_non_owning_by_local = Dict[UInt, Bool].new();
 
@@ -94,10 +89,10 @@ file_private let compute_non_owning_mir_locals(function * MIRFunction) * Dict[UI
             result.insert(local.id.raw_value, true);
         };
     };
-    return box(result);
+    return result;
 };
 
-file_private let mir_active_scope_contains(active_scopes * List[MIRScopeID], scope MIRScopeID) Bool = {
+file_private let mir_active_scope_contains(active_scopes List[MIRScopeID], scope MIRScopeID) Bool = {
     for active_scope in active_scopes then {
         if active_scope.raw_value == scope.raw_value then {
             return true;
@@ -107,7 +102,7 @@ file_private let mir_active_scope_contains(active_scopes * List[MIRScopeID], sco
 };
 
 file_private let mir_parent_scope(
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     scope MIRScopeID,
 ) Option[MIRScopeID] = {
     return when parent_scope_by_scope.get(scope.raw_value) in {
@@ -117,9 +112,9 @@ file_private let mir_parent_scope(
 };
 
 file_private let mir_nearest_active_common_scope(
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     existing_scope MIRScopeID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Option[MIRScopeID] = {
     let mutable scope_opt = Option[MIRScopeID].Some(existing_scope);
     while scope_opt is .Some(_) then {
@@ -136,14 +131,14 @@ file_private let mir_nearest_active_common_scope(
 };
 
 file_private let mir_record_local_use(
-    shared_use_scope_by_local *mutable Dict[UInt, MIRScopeID],
-    first_use_block_by_local *mutable Dict[UInt, UInt],
-    multiple_use_blocks_by_local *mutable Dict[UInt, Bool],
-    tracked_drop_local_ids * Dict[UInt, Bool],
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local Dict[UInt, MIRScopeID],
+    first_use_block_by_local Dict[UInt, UInt],
+    multiple_use_blocks_by_local Dict[UInt, Bool],
+    tracked_drop_local_ids Dict[UInt, Bool],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     local MIRLocalID,
     block MIRBlockID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Void = {
     when tracked_drop_local_ids.get(local.raw_value) in {
         .Some(_) then {
@@ -179,14 +174,14 @@ file_private let mir_record_local_use(
 };
 
 file_private let mir_walk_operand_uses(
-    shared_use_scope_by_local *mutable Dict[UInt, MIRScopeID],
-    first_use_block_by_local *mutable Dict[UInt, UInt],
-    multiple_use_blocks_by_local *mutable Dict[UInt, Bool],
-    tracked_drop_local_ids * Dict[UInt, Bool],
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local Dict[UInt, MIRScopeID],
+    first_use_block_by_local Dict[UInt, UInt],
+    multiple_use_blocks_by_local Dict[UInt, Bool],
+    tracked_drop_local_ids Dict[UInt, Bool],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     operand MIROperand,
     block MIRBlockID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Void = {
     when operand in {
         .Local(local) then mir_record_local_use(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, local, block, active_scopes),
@@ -195,89 +190,77 @@ file_private let mir_walk_operand_uses(
 };
 
 file_private let mir_walk_place_uses(
-    shared_use_scope_by_local *mutable Dict[UInt, MIRScopeID],
-    first_use_block_by_local *mutable Dict[UInt, UInt],
-    multiple_use_blocks_by_local *mutable Dict[UInt, Bool],
-    tracked_drop_local_ids * Dict[UInt, Bool],
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local Dict[UInt, MIRScopeID],
+    first_use_block_by_local Dict[UInt, UInt],
+    multiple_use_blocks_by_local Dict[UInt, Bool],
+    tracked_drop_local_ids Dict[UInt, Bool],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     place MIRPlace,
     block MIRBlockID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Void = {
     when place in {
         .Local(local) then mir_record_local_use(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, local, block, active_scopes),
         .Global(_) then {},
-        .Field(base, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *base, block, active_scopes),
-        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *base, block, active_scopes),
-        .Deref(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *base, block, active_scopes),
-        .PointerElement(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *base, block, active_scopes),
+        .Field(base, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base, block, active_scopes),
+        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base, block, active_scopes),
+        .Deref(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base, block, active_scopes),
+        .PointerElement(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base, block, active_scopes),
     };
 };
 
 file_private let mir_walk_intrinsic_uses(
-    shared_use_scope_by_local *mutable Dict[UInt, MIRScopeID],
-    first_use_block_by_local *mutable Dict[UInt, UInt],
-    multiple_use_blocks_by_local *mutable Dict[UInt, Bool],
-    tracked_drop_local_ids * Dict[UInt, Bool],
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local Dict[UInt, MIRScopeID],
+    first_use_block_by_local Dict[UInt, UInt],
+    multiple_use_blocks_by_local Dict[UInt, Bool],
+    tracked_drop_local_ids Dict[UInt, Bool],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     intrinsic_node MIRIntrinsic,
     block MIRBlockID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Void = {
     when intrinsic_node in {
-        .AllocMemory(count, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *count, block, active_scopes),
-        .DeallocMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes),
+        .AllocMemory(count, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count, block, active_scopes),
+        .DeallocMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer, block, active_scopes),
         .CopyMemory(dest, source, count) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *dest, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *source, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *count, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, dest, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, source, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count, block, active_scopes);
         },
         .MoveMemory(dest, source, count) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *dest, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *source, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *count, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, dest, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, source, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count, block, active_scopes);
         },
-        .IsUniqueMutable(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .RefCount(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .MakeRef(pointer, owner, _) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *owner, block, active_scopes);
-        },
-        .MakeMutRef(pointer, owner, _) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *owner, block, active_scopes);
-        },
-        .DowngradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .DowngradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .UpgradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .UpgradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .TraitObjectMatches(value, _, _, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
-        .TraitObjectDowncast(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
+        .DowngradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
+        .UpgradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
+        .TraitObjectMatches(value, _, _, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
+        .TraitObjectDowncast(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
         .InitMemory(pointer, value) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes);
         },
-        .DeinitMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes),
-        .TakeMemory(pointer, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes),
+        .DeinitMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer, block, active_scopes),
+        .TakeMemory(pointer, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer, block, active_scopes),
         .NullPtr(_) then {},
         .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *out_handle, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *out_tid, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *closure, block, active_scopes);
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *stack_size, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, out_handle, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, out_tid, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, closure, block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, stack_size, block, active_scopes);
         },
     };
 };
 
 file_private let mir_walk_value_uses(
-    shared_use_scope_by_local *mutable Dict[UInt, MIRScopeID],
-    first_use_block_by_local *mutable Dict[UInt, UInt],
-    multiple_use_blocks_by_local *mutable Dict[UInt, Bool],
-    tracked_drop_local_ids * Dict[UInt, Bool],
-    parent_scope_by_scope * Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local Dict[UInt, MIRScopeID],
+    first_use_block_by_local Dict[UInt, UInt],
+    multiple_use_blocks_by_local Dict[UInt, Bool],
+    tracked_drop_local_ids Dict[UInt, Bool],
+    parent_scope_by_scope Dict[UInt, MIRScopeID],
     value MIRValue,
     block MIRBlockID,
-    active_scopes * List[MIRScopeID],
+    active_scopes List[MIRScopeID],
 ) Void = {
     when value in {
         .Operand(operand) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operand, block, active_scopes),
@@ -290,25 +273,25 @@ file_private let mir_walk_value_uses(
         .Call(call) then {
             mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, call.callee, block, active_scopes);
             for argument in call.arguments then {
-                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *argument, block, active_scopes);
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument, block, active_scopes);
             };
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *field, block, active_scopes);
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, field, block, active_scopes);
             };
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
-                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *argument, block, active_scopes);
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument, block, active_scopes);
             };
         },
-        .EnumTag(tag) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *(tag.subject), block, active_scopes),
-        .TraitObjectConversion(conversion) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *(conversion.inner), block, active_scopes),
+        .EnumTag(tag) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, tag.subject, block, active_scopes),
+        .TraitObjectConversion(conversion) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, conversion.inner, block, active_scopes),
         .TraitMethodCall(call) then {
-            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *(call.receiver), block, active_scopes);
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, call.receiver, block, active_scopes);
             for argument in call.arguments then {
-                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *argument, block, active_scopes);
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument, block, active_scopes);
             };
         },
         .Ref(place, _, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block, active_scopes),
@@ -323,25 +306,25 @@ file_private let mir_walk_value_uses(
     };
 };
 
-type MIRFunctionCodeEmitter(
-    codegen *mutable CodeGen,
-    function * MIRFunction,
+type mutable MIRFunctionCodeEmitter(
+    codegen CodeGen,
+    function MIRFunction,
     mutable local_names List[String],
-    mutable local_names_by_id *mutable Dict[UInt, String],
-    mutable non_owning_local_ids * Dict[UInt, Bool],
-    mutable tracked_init_locals * Dict[UInt, Bool],
-    mutable lifetime_plan * MIRLocalLifetimePlan,
+    mutable local_names_by_id Dict[UInt, String],
+    mutable non_owning_local_ids Dict[UInt, Bool],
+    mutable tracked_init_locals Dict[UInt, Bool],
+    mutable lifetime_plan MIRLocalLifetimePlan,
     mutable lambda_counter UInt,
-    mutable nested_definitions String,
+    mutable nested_definitions StringBuilder,
     mutable current_owner_callable_name_cache_prefix Option[String],
     mutable callable_name_cache Dict[UInt, String],
     mutable consumed_locals Dict[UInt, Bool],
 );
 
 file_private let build_mir_function_emit_plan(
-    codegen * CodeGen,
-    function * MIRFunction,
-) * MIRFunctionEmitPlan = {
+    codegen CodeGen,
+    function MIRFunction,
+) MIRFunctionEmitPlan = {
     let mutable local_names = List[String].new();
     let mutable local_names_by_id = Dict[UInt, String].new();
     let mutable non_owning_local_ids = compute_non_owning_mir_locals(function);
@@ -371,17 +354,17 @@ file_private let build_mir_function_emit_plan(
     };
 
     let lifetime_plan = build_mir_lifetime_plan(function, codegen, tracked_init_locals);
-    return box(MIRFunctionEmitPlan(
+    return MIRFunctionEmitPlan(
         local_names,
-        box(local_names_by_id),
+        local_names_by_id,
         non_owning_local_ids,
-        box(tracked_init_locals),
+        tracked_init_locals,
         lifetime_plan,
-    ));
+    );
 };
 
 given MIRFunctionCodeEmitter {
-    public new(codegen *mutable CodeGen, function * MIRFunction, plan * MIRFunctionEmitPlan) MIRFunctionCodeEmitter = {
+    public new(codegen CodeGen, function MIRFunction, plan MIRFunctionEmitPlan) MIRFunctionCodeEmitter = {
         return MIRFunctionCodeEmitter(
             codegen,
             function,
@@ -391,7 +374,7 @@ given MIRFunctionCodeEmitter {
             plan.tracked_init_locals,
             plan.lifetime_plan,
             0(UInt),
-            String.new(),
+            StringBuilder.new(),
             when codegen.current_function_owner_type in {
                 .Some(owner_type) then Option[String].Some(codegen.concrete_receiver_lookup_key(owner_type)),
                 .None() then Option[String].None(),
@@ -401,23 +384,23 @@ given MIRFunctionCodeEmitter {
         );
     };
 
-    public emit_body(*mutable self) Void = {
+    public emit_body(self) Void = {
         self.emit_local_declarations();
         for block in self.function.blocks then {
             self.emit_block(block);
         };
     };
 
-    public emit_body_and_get_nested_definitions(*mutable self) String = {
+    public emit_body_and_get_nested_definitions(self) String = {
         self.emit_body();
         return self.get_nested_definitions();
     };
 
-    public get_nested_definitions(*self) String = {
-        return self.nested_definitions;
+    public get_nested_definitions(self) String = {
+        return self.nested_definitions.to_string();
     };
 
-    module_private callable_name_for_symbol(*mutable self, symbol * Symbol) String = {
+    module_private callable_name_for_symbol(self, symbol Symbol) String = {
         when self.callable_name_cache.get(symbol.def_id.id) in {
             .Some(name) then { return name;},
             .None() then {},
@@ -448,28 +431,34 @@ given MIRFunctionCodeEmitter {
         return name;
     };
 
-    module_private local_info(*self, local_id MIRLocalID) Option[* MIRLocal] = {
+    module_private local_info(self, local_id MIRLocalID) Option[MIRLocal] = {
         for local in self.function.locals then {
             if local.id.raw_value == local_id.raw_value then {
-                return Option[* MIRLocal].Some(local);
+                return Option[MIRLocal].Some(local);
             };
         };
-        return Option[* MIRLocal].None();
+        return Option[MIRLocal].None();
     };
 
-    module_private init_flag(*self, local_id MIRLocalID) Option[String] = {
+    module_private init_flag(self, local_id MIRLocalID) Option[String] = {
         if self.tracked_init_locals.get(local_id.raw_value) is .Some(_) then {
             return Option[String].Some("__mir_init_\(local_id.raw_value)");
         };
         return Option[String].None();
     };
 
-    module_private emit_local_declarations(*mutable self) Void = {
+    module_private emit_local_declarations(self) Void = {
         for local in self.function.locals then {
-            if local.storage is not .Parameter() and local.storage is not .Capture() and not self.codegen.type_is_void_or_never(local.local_type) then {
+            if local.storage is not .Parameter() and local.storage is not .Capture() then {
+                let mutable c_type = self.codegen.c_type_name(local.local_type);
+                // Skip void/unknown locals — C does not allow void variables.
+                // Use a placeholder name that will be replaced with "(void)0" when referenced.
+                if c_type == "void" then {
+                    c_type = "intptr_t";
+                };
                 let name = self.local_name(local.id);
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string(self.codegen.c_type_name(local.local_type));
+                self.codegen.buffer.push_string(c_type);
                 self.codegen.buffer.push_string(" ");
                 self.codegen.buffer.push_string(name);
                 self.codegen.buffer.push_string(";\n");
@@ -491,7 +480,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_block(*mutable self, block * MIRBasicBlock) Void = {
+    module_private emit_block(self, block MIRBasicBlock) Void = {
         let preserved_return_local = when block.terminator in {
             .ReturnValue(operand_opt) then when operand_opt in {
                 .Some(operand) then self.local_id_from_operand(operand),
@@ -507,8 +496,7 @@ given MIRFunctionCodeEmitter {
         if wraps_block then {
             self.codegen.buffer.push_string(self.block_label(block.id));
             self.codegen.buffer.push_string(": {\n");
-            let saved_indent = self.codegen.indent;
-            self.codegen.indent = "\(self.codegen.indent)    ";
+            self.codegen.push_indent_level();
             for statement in block.statements then {
                 when statement in {
                     .ScopeExit(scope) then self.emit_scope_cleanup_preserving(scope, preserved_return_local),
@@ -516,7 +504,7 @@ given MIRFunctionCodeEmitter {
                 };
             };
             self.emit_terminator(block.terminator);
-            self.codegen.indent = saved_indent;
+            self.codegen.pop_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("}\n");
             return;
@@ -532,7 +520,7 @@ given MIRFunctionCodeEmitter {
         self.emit_terminator(block.terminator);
     };
 
-    module_private emit_statement(*mutable self, statement * MIRStatement) Void = {
+    module_private emit_statement(self, statement MIRStatement) Void = {
         when statement in {
             .Declare(_) then {},
             .Assign(place, value) then self.emit_assign(place, value),
@@ -547,7 +535,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_terminator(*mutable self, terminator MIRTerminator) Void = {
+    module_private emit_terminator(self, terminator MIRTerminator) Void = {
         when terminator in {
             .Goto(block) then self.emit_goto(block),
             .Branch(condition, then_block, else_block) then {
@@ -569,8 +557,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string("switch (");
                 self.codegen.buffer.push_string(switch_expr);
                 self.codegen.buffer.push_string(") {\n");
-                let saved_indent = self.codegen.indent;
-                self.codegen.indent = "\(self.codegen.indent)    ";
+                self.codegen.push_indent_level();
                 for switch_case in cases then {
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string("case ");
@@ -588,7 +575,7 @@ given MIRFunctionCodeEmitter {
                     },
                     .None() then self.codegen.buffer.push_string("default: __builtin_unreachable();\n"),
                 };
-                self.codegen.indent = saved_indent;
+                self.codegen.pop_indent_level();
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("}\n");
             },
@@ -600,14 +587,14 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_goto(*mutable self, block MIRBlockID) Void = {
+    module_private emit_goto(self, block MIRBlockID) Void = {
         self.codegen.add_indent();
         self.codegen.buffer.push_string("goto ");
         self.codegen.buffer.push_string(self.block_label(block));
         self.codegen.buffer.push_string(";\n");
     };
 
-    module_private emit_assign(*mutable self, place MIRPlace, value MIRValue) Void = {
+    module_private emit_assign(self, place MIRPlace, value MIRValue) Void = {
         let access = self.emit_place_access(place);
         let emission = self.emit_value(value);
         let target_type = self.type_of_place(place);
@@ -683,7 +670,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private is_void_constant(*self, value MIRValue) Bool = {
+    module_private is_void_constant(self, value MIRValue) Bool = {
         return when value in {
             .Operand(operand) then when operand in {
                 .Constant(constant) then when constant in {
@@ -696,21 +683,21 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private is_deref_place(*self, place MIRPlace) Bool = {
+    module_private is_deref_place(self, place MIRPlace) Bool = {
         return when place in {
             .Deref(_, _) then true,
-            .Field(base, _) then self.is_deref_place(*base),
-            .EnumPayload(base, _, _, _, _) then self.is_deref_place(*base),
+            .Field(base, _) then self.is_deref_place(base),
+            .EnumPayload(base, _, _, _, _) then self.is_deref_place(base),
             .Local(_) then false,
             .Global(_) then false,
             .PointerElement(_, _) then false,
         };
     };
 
-    module_private emit_compound_assign(*mutable self, assignment MIRCompoundAssignment) Void = {
+    module_private emit_compound_assign(self, assignment MIRCompoundAssignment) Void = {
         let access = self.emit_place_access(assignment.target);
         let emission = self.emit_value(assignment.value);
-        let target_type = self.type_of_place(assignment.target);
+        let mutable target_type = self.type_of_place(assignment.target);
         // Use checked shift for integer types to avoid C undefined behavior
         // when shift amount >= bit width.
         if (assignment.operator_kind is .LeftShiftAssign() or assignment.operator_kind is .RightShiftAssign()) and self.codegen.is_integer_type(target_type) then {
@@ -740,7 +727,7 @@ given MIRFunctionCodeEmitter {
         self.emit_residual_cleanups(emission, true);
     };
 
-    module_private compound_op_to_c(*self, op CompoundAssignmentOperator) String = {
+    module_private compound_op_to_c(self, op CompoundAssignmentOperator) String = {
         return when op in {
             .AddAssign() then "+=",
             .SubtractAssign() then "-=",
@@ -755,9 +742,9 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_drop(*mutable self, place MIRPlace) Void = {
+    module_private emit_drop(self, place MIRPlace) Void = {
         let access = self.emit_place_access(place);
-        let drop_type = self.type_of_place(place);
+        let mutable drop_type = self.type_of_place(place);
         when self.local_target_id(place) in {
             .Some(local_id) then when self.init_flag(local_id) in {
                 .Some(flag) then self.emit_guarded_drop(flag, drop_type, access.path),
@@ -766,16 +753,39 @@ given MIRFunctionCodeEmitter {
             .None() then {
                 self.codegen.add_indent();
                 self.codegen.append_drop_statement(drop_type, access.path);
+                // Swift emitDrop: dropping a sub-place (e.g. a discarded pair field)
+                // must invalidate the root local, otherwise the container is dropped
+                // a second time at scope exit and the payload is released twice.
+                when self.root_local_of_place(place) in {
+                    .Some(local) then self.set_init_flag(local, false),
+                    .None() then {},
+                };
             },
         };
         self.emit_cleanup(access.cleanup);
     };
 
-    module_private emit_retain(*mutable self, value MIRValue) Void = {
+    module_private emit_retain(self, value MIRValue) Void = {
         let emission = self.emit_value_source(value);
-        let value_type = self.type_of_value(value);
+        let mutable value_type = self.type_of_value(value);
         when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(_, _) then {
+            .ReferenceType(_) then {
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string("if (((");
+                self.codegen.buffer.push_string(emission.expression);
+                self.codegen.buffer.push_string(").control)) { __koral_retain(((");
+                self.codegen.buffer.push_string(emission.expression);
+                self.codegen.buffer.push_string(").control)); }\n");
+            },
+            .MutableReferenceType(_) then {
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string("if (((");
+                self.codegen.buffer.push_string(emission.expression);
+                self.codegen.buffer.push_string(").control)) { __koral_retain(((");
+                self.codegen.buffer.push_string(emission.expression);
+                self.codegen.buffer.push_string(").control)); }\n");
+            },
+            .TraitObject(_, _, _) then {
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("if (((");
                 self.codegen.buffer.push_string(emission.expression);
@@ -803,16 +813,16 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(emission.cleanup);
     };
 
-    module_private emit_release(*mutable self, value MIRValue) Void = {
+    module_private emit_release(self, value MIRValue) Void = {
         let emission = self.emit_value_source(value);
         self.codegen.add_indent();
         self.codegen.append_drop_statement(self.type_of_value(value), emission.expression);
         self.emit_cleanup(emission.cleanup);
     };
 
-    module_private emit_evaluate(*mutable self, value MIRValue) Void = {
+    module_private emit_evaluate(self, value MIRValue) Void = {
         let emission = self.emit_value(value);
-        let value_type = self.type_of_value(value);
+        let mutable value_type = self.type_of_value(value);
         if self.codegen.needs_drop(value_type) then {
             when value in {
                 .Operand(.Local(local_id)) then when self.init_flag(local_id) in {
@@ -830,11 +840,11 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_scope_cleanup(*mutable self, scope MIRScopeID) Void = {
+    module_private emit_scope_cleanup(self, scope MIRScopeID) Void = {
         self.emit_scope_cleanup_preserving(scope, Option[MIRLocalID].None());
     };
 
-    module_private emit_scope_cleanup_preserving(*mutable self, scope MIRScopeID, preserved Option[MIRLocalID]) Void = {
+    module_private emit_scope_cleanup_preserving(self, scope MIRScopeID, preserved Option[MIRLocalID]) Void = {
         when self.lifetime_plan.locals_by_scope.get(scope.raw_value) in {
             .Some(locals) then {
                 let mutable i = locals.count();
@@ -860,11 +870,11 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_return(*mutable self, operand Option[MIROperand]) Void = {
+    module_private emit_return(self, operand Option[MIROperand]) Void = {
         when operand in {
             .Some(op) then {
                 let raw_emission = self.emit_operand_value(op);
-                let return_type = self.type_of_operand(op);
+                let mutable return_type = self.type_of_operand(op);
                 let emission = raw_emission;
                 let should_copy = self.should_copy_returned_operand(op, return_type);
                 let return_expression = if should_copy then {
@@ -909,7 +919,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_root_cleanup(*mutable self, preserved Option[MIRLocalID]) Void = {
+    module_private emit_root_cleanup(self, preserved Option[MIRLocalID]) Void = {
         let mutable i = self.function.locals.count();
         while i > 0 then {
             i -= 1;
@@ -924,24 +934,23 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_guarded_drop(*mutable self, flag String, drop_type Type, expression String) Void = {
+    module_private emit_guarded_drop(self, flag String, drop_type Type, expression String) Void = {
         self.codegen.add_indent();
         self.codegen.buffer.push_string("if (");
         self.codegen.buffer.push_string(flag);
         self.codegen.buffer.push_string(") {\n");
-        let saved_indent = self.codegen.indent;
-        self.codegen.indent = "\(self.codegen.indent)    ";
+        self.codegen.push_indent_level();
         self.codegen.add_indent();
         self.codegen.append_drop_statement(drop_type, expression);
         self.codegen.add_indent();
         self.codegen.buffer.push_string(flag);
         self.codegen.buffer.push_string(" = 0;\n");
-        self.codegen.indent = saved_indent;
+        self.codegen.pop_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string("}\n");
     };
 
-    module_private emit_value(*mutable self, value MIRValue) MIRValueEmission = {
+    module_private emit_value(self, value MIRValue) MIRValueEmission = {
         return when value in {
             .Operand(operand) then self.emit_operand_value(operand),
             .PlaceRead(place, ownership) then self.emit_place_read(place, ownership, false),
@@ -961,7 +970,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_value_source(*mutable self, value MIRValue) MIRValueEmission = {
+    module_private emit_value_source(self, value MIRValue) MIRValueEmission = {
         return when value in {
             .PlaceRead(place, ownership) then {
                 let result = self.emit_place_read(place, ownership, true);
@@ -971,12 +980,12 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_operand_value(*mutable self, operand MIROperand) MIRValueEmission = {
+    module_private emit_operand_value(self, operand MIROperand) MIRValueEmission = {
         let expression = self.emit_operand_expression(operand);
-        return MIRValueEmission(expression, Option[* MIRValueCleanup].None());
+        return MIRValueEmission(expression, Option[MIRValueCleanup].None());
     };
 
-    module_private emit_operand_expression(*mutable self, operand MIROperand) String = {
+    module_private emit_operand_expression(self, operand MIROperand) String = {
         return when operand in {
             .Local(local) then self.local_name(local),
             .Function(symbol) then self.codegen.callable_c_name(symbol),
@@ -984,7 +993,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private constant_expression(*mutable self, constant MIRConstant) String = {
+    module_private constant_expression(self, constant MIRConstant) String = {
         return when constant in {
             .Integer(value, _) then self.codegen.sanitize_c_numeric_literal(value),
             .Float(value, _) then self.codegen.sanitize_c_numeric_literal(value),
@@ -994,9 +1003,9 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_place_read(*mutable self, place MIRPlace, ownership MIROwnershipUse, source_mode Bool) MIRValueEmission = {
+    module_private emit_place_read(self, place MIRPlace, ownership MIROwnershipUse, source_mode Bool) MIRValueEmission = {
         let access = self.emit_place_access(place);
-        let place_type = self.type_of_place(place);
+        let mutable place_type = self.type_of_place(place);
         if ownership is .Move() then {
             self.consume_moved_place(place);
         };
@@ -1009,11 +1018,11 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, place_type));
     };
 
-    module_private emit_binary(*mutable self, operation MIRBinaryOperation) MIRValueEmission = {
+    module_private emit_binary(self, operation MIRBinaryOperation) MIRValueEmission = {
         let left = self.emit_operand_expression(operation.left);
         let right = self.emit_operand_expression(operation.right);
         let result_type = operation.result_type;
-        let c_type = self.codegen.c_type_name(result_type);
+        let mutable c_type = self.codegen.c_type_name(result_type);
         let expression = when operation.operator_kind in {
             .Arithmetic(op, checked) then {
                 let expr = if checked and self.codegen.is_integer_type(result_type) then self.codegen.next_temp_with_call_2(c_type, self.codegen.checked_arithmetic_func_name(op, result_type), left, right) else self.codegen.next_temp_with_infix_init(c_type, left, self.codegen.arithmetic_op_to_c(op), right);
@@ -1032,7 +1041,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type));
     };
 
-    module_private wrapping_arithmetic_func_name(*self, op ArithmeticOperator, t Type) String = {
+    module_private wrapping_arithmetic_func_name(self, op ArithmeticOperator, t Type) String = {
         let op_name = when op in {
             .Add() then "add",
             .Subtract() then "sub",
@@ -1043,7 +1052,7 @@ given MIRFunctionCodeEmitter {
         return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))";
     };
 
-    module_private wrapping_shift_func_name(*self, op BitwiseOperator, t Type) String = {
+    module_private wrapping_shift_func_name(self, op BitwiseOperator, t Type) String = {
         let op_name = when op in {
             .LeftShift() then "shl",
             .RightShift() then "shr",
@@ -1052,7 +1061,7 @@ given MIRFunctionCodeEmitter {
         return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))";
     };
 
-    module_private call_arguments_match_function_type(*self, arguments List[* MIRValue], function_type Type) Bool = {
+    module_private call_arguments_match_function_type(self, arguments List[MIRValue], function_type Type) Bool = {
         return when function_type in {
             .FunctionType(params, _) then {
                 if params.count() <> arguments.count() then {
@@ -1060,8 +1069,8 @@ given MIRFunctionCodeEmitter {
                 };
                 let mutable i UInt = 0;
                 while i < arguments.count() then {
-                    let expected_param_type = self.codegen.function_type_param_type(function_type, i) or else Type.Unknown();
-                    let actual_param_type = self.type_of_value((*arguments[i]));
+                    let mutable expected_param_type = self.codegen.function_type_param_type(function_type, i) or else Type.Unknown();
+                    let mutable actual_param_type = self.type_of_value(arguments[i]);
                     let expected_key = self.codegen.concrete_layout_key_for_type(self.codegen.concretize_codegen_type(expected_param_type));
                     let actual_key = self.codegen.concrete_layout_key_for_type(self.codegen.concretize_codegen_type(actual_param_type));
                     if expected_key <> actual_key then {
@@ -1075,7 +1084,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_unary(*mutable self, operation MIRUnaryOperation) MIRValueEmission = {
+    module_private emit_unary(self, operation MIRUnaryOperation) MIRValueEmission = {
         let operand = self.emit_operand_expression(operation.operand);
         let result_type = operation.result_type;
         let expression = when operation.operator_kind in {
@@ -1085,53 +1094,53 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type));
     };
 
-    module_private emit_call(*mutable self, call MIRCall) MIRValueEmission = {
+    module_private emit_call(self, call MIRCall) MIRValueEmission = {
         let has_ownerships = call.argument_ownerships.count() == call.arguments.count();
         when call.callee in {
             .Function(symbol) then {
                 let function_name = self.callable_name_for_symbol(symbol);
-                let function_type = self.codegen.context.get_function_type(symbol.def_id) or else symbol.symbol_type;
+                let mutable function_type = self.codegen.context.get_function_type(symbol.def_id) or else symbol.symbol_type;
                 if call.arguments.count() == 0 then {
                     let expression = self.emit_direct_call_0(function_name, call.result_type);
                     return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type));
                 };
                 if call.arguments.count() == 1 then {
                     let ownership = if has_ownerships then call.argument_ownerships[0(UInt)] else MIROwnershipUse.Move();
-                    let emission = self.emit_direct_call_argument((*call.arguments[0(UInt)]), ownership);
+                    let emission = self.emit_direct_call_argument(call.arguments[0(UInt)], ownership);
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
-                    let arg_type = self.type_of_value((*call.arguments[0(UInt)]));
-                    let expected_param_type = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown();
+                    let mutable arg_type = self.type_of_value(call.arguments[0(UInt)]);
+                    let mutable expected_param_type = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown();
                     let needs_wrap = is_borrowed_reference_like_type(expected_param_type) and not is_borrowed_reference_like_type(arg_type);
                     let final_emission = if needs_wrap then self.wrap_value_as_stack_borrow(emission.expression, arg_type, expected_param_type) else self.unwrap_reference_like_argument_if_needed(emission, arg_type, expected_param_type);
                     let expression = self.emit_direct_call_1(function_name, final_emission.expression, call.result_type);
                     if ownership is .Move() or ownership is .Take() then {
-                        self.consume_moved_source((*call.arguments[0(UInt)]));
+                        self.consume_moved_source(call.arguments[0(UInt)]);
                     };
-                    self.emit_residual_cleanups(final_emission, self.call_arg_consumed(ownership, (*call.arguments[0(UInt)])));
+                    self.emit_residual_cleanups(final_emission, self.call_arg_consumed(ownership, call.arguments[0(UInt)]));
                     return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type));
                 };
                 if call.arguments.count() == 2 then {
                     let first_ownership = if has_ownerships then call.argument_ownerships[0(UInt)] else MIROwnershipUse.Move();
                     let second_ownership = if has_ownerships then call.argument_ownerships[1(UInt)] else MIROwnershipUse.Move();
-                    let first_emission = self.emit_direct_call_argument((*call.arguments[0(UInt)]), first_ownership);
-                    let second_emission = self.emit_direct_call_argument((*call.arguments[1(UInt)]), second_ownership);
+                    let first_emission = self.emit_direct_call_argument(call.arguments[0(UInt)], first_ownership);
+                    let second_emission = self.emit_direct_call_argument(call.arguments[1(UInt)], second_ownership);
                     // Auto-wrap borrowed reference parameters.
-                    let first_type = self.type_of_value((*call.arguments[0(UInt)]));
-                    let second_type = self.type_of_value((*call.arguments[1(UInt)]));
+                    let mutable first_type = self.type_of_value(call.arguments[0(UInt)]);
+                    let mutable second_type = self.type_of_value(call.arguments[1(UInt)]);
                     let first_expected = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown();
                     let second_expected = self.codegen.function_type_param_type(function_type, 1(UInt)) or else Type.Unknown();
                     let first = if is_borrowed_reference_like_type(first_expected) and not is_borrowed_reference_like_type(first_type) then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected) else self.unwrap_reference_like_argument_if_needed(first_emission, first_type, first_expected);
                     let second = if is_borrowed_reference_like_type(second_expected) and not is_borrowed_reference_like_type(second_type) then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected) else self.unwrap_reference_like_argument_if_needed(second_emission, second_type, second_expected);
                     let expression = self.emit_direct_call_2(function_name, first.expression, second.expression, call.result_type);
                     if first_ownership is .Move() or first_ownership is .Take() then {
-                        self.consume_moved_source((*call.arguments[0(UInt)]));
+                        self.consume_moved_source(call.arguments[0(UInt)]);
                     };
                     if second_ownership is .Move() or second_ownership is .Take() then {
-                        self.consume_moved_source((*call.arguments[1(UInt)]));
+                        self.consume_moved_source(call.arguments[1(UInt)]);
                     };
-                    self.emit_residual_cleanups(first, self.call_arg_consumed(first_ownership, (*call.arguments[0(UInt)])));
-                    self.emit_residual_cleanups(second, self.call_arg_consumed(second_ownership, (*call.arguments[1(UInt)])));
+                    self.emit_residual_cleanups(first, self.call_arg_consumed(first_ownership, call.arguments[0(UInt)]));
+                    self.emit_residual_cleanups(second, self.call_arg_consumed(second_ownership, call.arguments[1(UInt)]));
                     return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type));
                 };
             },
@@ -1142,7 +1151,7 @@ given MIRFunctionCodeEmitter {
         let fn_param_types = when call.callee in {
             .Function(sym) then {
                 let mutable pts = List[Type].new();
-                let function_type = self.codegen.context.get_function_type(sym.def_id) or else sym.symbol_type;
+                let mutable function_type = self.codegen.context.get_function_type(sym.def_id) or else sym.symbol_type;
                 when function_type in {
                     .FunctionType(params, _) then {
                         for p in params then { pts.push(p.param_type);};
@@ -1161,10 +1170,10 @@ given MIRFunctionCodeEmitter {
             let arg = call.arguments[arg_i];
             let ownership = if has_ownerships then call.argument_ownerships[arg_i] else MIROwnershipUse.Move();
             ownerships.push(ownership);
-            let emission = self.emit_direct_call_argument(*arg, ownership);
+            let emission = self.emit_direct_call_argument(arg, ownership);
             // Auto-wrap: if the function parameter expects a borrowed reference
             // but the argument is a raw value, wrap it in a stack borrow.
-            let arg_type = self.type_of_value(*arg);
+            let mutable arg_type = self.type_of_value(arg);
             let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_borrowed_reference_like_type(arg_type);
             if needs_wrap then {
                 let wrapped = self.wrap_value_as_stack_borrow(emission.expression, arg_type, fn_param_types[arg_i]);
@@ -1188,20 +1197,20 @@ given MIRFunctionCodeEmitter {
         while consume_i < call.arguments.count() then {
             let ownership = ownerships[consume_i];
             if ownership is .Move() or ownership is .Take() then {
-                self.consume_moved_source((*call.arguments[consume_i]));
+                self.consume_moved_source(call.arguments[consume_i]);
             };
             consume_i += 1;
         };
         let mutable cleanup_i UInt = 0;
         while cleanup_i < emissions.count() then {
-            self.emit_residual_cleanups(emissions[cleanup_i], self.call_arg_consumed(ownerships[cleanup_i], (*call.arguments[cleanup_i])));
+            self.emit_residual_cleanups(emissions[cleanup_i], self.call_arg_consumed(ownerships[cleanup_i], call.arguments[cleanup_i]));
             cleanup_i += 1;
         };
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type));
     };
 
-    module_private emit_direct_call_argument(*mutable self, value MIRValue, ownership MIROwnershipUse) MIRValueEmission = {
-        let value_type = self.type_of_value(value);
+    module_private emit_direct_call_argument(self, value MIRValue, ownership MIROwnershipUse) MIRValueEmission = {
+        let mutable value_type = self.type_of_value(value);
         return when ownership in {
             .Copy() then {
                 let emission = self.emit_value(value);
@@ -1228,12 +1237,55 @@ given MIRFunctionCodeEmitter {
                 };
             },
             .Borrow() then self.emit_value_source(value),
-            .Move() then self.emit_value_source(value),
-            .Take() then self.emit_value_source(value),
+            .Move() then {
+                let emission = self.emit_value_source(value);
+                // When passing a managed nominal value that was read from another
+                // managed nominal (as a field), we must retain it.  The callee
+                // will drop the value; without a retain the payload's reference
+                // to the nested field will have an under-counted refcount.
+                if self.is_nested_managed_nominal_field_read(value) then {
+                    let mutable field_type = self.type_of_value(value);
+                    let temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(field_type));
+                    self.codegen.append_copy_or_move_assignment(field_type, emission.expression, temp, true);
+                    self.emit_cleanup(emission.cleanup);
+                    yield MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, field_type));
+                } else {
+                    yield emission;
+                };
+            },
+            .Take() then {
+                let emission = self.emit_value_source(value);
+                if self.is_nested_managed_nominal_field_read(value) then {
+                    let mutable field_type = self.type_of_value(value);
+                    let temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(field_type));
+                    self.codegen.append_copy_or_move_assignment(field_type, emission.expression, temp, true);
+                    self.emit_cleanup(emission.cleanup);
+                    yield MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, field_type));
+                } else {
+                    yield emission;
+                };
+            },
         };
     };
 
-    module_private call_arg_consumed(*self, ownership MIROwnershipUse, value MIRValue) Bool = {
+    /// Returns true if `value` is a PlaceRead of a managed nominal field
+    /// from another managed nominal type (base type is managed nominal and
+    /// field type is also managed nominal).
+    module_private is_nested_managed_nominal_field_read(self, value MIRValue) Bool = {
+        return when value in {
+            .PlaceRead(place, _) then when place in {
+                .Field(base, _) then {
+                    let base_type = self.type_of_place(base);
+                    let field_type = self.type_of_place(place);
+                    return if self.codegen.uses_managed_nominal_representation(base_type) and self.codegen.uses_managed_nominal_representation(field_type) then self.codegen.needs_drop(field_type) else false;
+                },
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    module_private call_arg_consumed(self, ownership MIROwnershipUse, value MIRValue) Bool = {
         return when ownership in {
             .Move() or .Take() then true,
             .Copy() then when value in {
@@ -1244,7 +1296,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_direct_call_0(*mutable self, function_name String, return_type Type) String = {
+    module_private emit_direct_call_0(self, function_name String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent();
             self.codegen.buffer.push_string(function_name);
@@ -1254,7 +1306,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_0(self.codegen.c_type_name(return_type), function_name);
     };
 
-    module_private emit_direct_call_1(*mutable self, function_name String, arg String, return_type Type) String = {
+    module_private emit_direct_call_1(self, function_name String, arg String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent();
             self.codegen.buffer.push_string(function_name);
@@ -1266,7 +1318,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_1(self.codegen.c_type_name(return_type), function_name, arg);
     };
 
-    module_private emit_direct_call_2(*mutable self, function_name String, first_arg String, second_arg String, return_type Type) String = {
+    module_private emit_direct_call_2(self, function_name String, first_arg String, second_arg String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent();
             self.codegen.buffer.push_string(function_name);
@@ -1280,7 +1332,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_2(self.codegen.c_type_name(return_type), function_name, first_arg, second_arg);
     };
 
-    module_private emit_direct_call(*mutable self, function_name String, arguments List[String], return_type Type) String = {
+    module_private emit_direct_call(self, function_name String, arguments List[String], return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent();
             self.codegen.buffer.push_string(function_name);
@@ -1292,7 +1344,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_args(self.codegen.c_type_name(return_type), function_name, arguments);
     };
 
-    module_private emit_closure_call(*mutable self, closure_expr String, callee_type Type, arguments List[String], return_type Type) String = {
+    module_private emit_closure_call(self, closure_expr String, callee_type Type, arguments List[String], return_type Type) String = {
         let mutable param_types = List[String].new();
         when callee_type in {
             .FunctionType(params, _) then for param in params then { param_types.push(self.codegen.c_type_name(param.param_type));},
@@ -1303,7 +1355,7 @@ given MIRFunctionCodeEmitter {
         with_capture_parts.push("void*");
         for p in param_types then { with_capture_parts.push(p);};
         let with_capture_sig = join_strings(with_capture_parts, ", ");
-        let return_c_type = self.codegen.c_type_name(return_type);
+        let mutable return_c_type = self.codegen.c_type_name(return_type);
         let mutable args_with_env = List[String].new();
         args_with_env.push("\(closure_expr).env");
         for arg in arguments then { args_with_env.push(arg);};
@@ -1312,7 +1364,7 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string("if (");
             self.codegen.buffer.push_string(closure_expr);
             self.codegen.buffer.push_string(".env == NULL) {\n");
-            self.codegen.indent = "\(self.codegen.indent)    ";
+            self.codegen.push_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("((");
             self.codegen.buffer.push_string(return_c_type);
@@ -1323,11 +1375,10 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string(".fn))(");
             self.codegen.push_joined_strings(arguments, ", ");
             self.codegen.buffer.push_string(");\n");
-            let then_trimmed_indent_len = self.codegen.indent.count() - 4(UInt);
-            self.codegen.indent = self.codegen.indent.substring(..then_trimmed_indent_len);
+            self.codegen.pop_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("} else {\n");
-            self.codegen.indent = "\(self.codegen.indent)    ";
+            self.codegen.push_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("((");
             self.codegen.buffer.push_string(return_c_type);
@@ -1338,8 +1389,7 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string(".fn))(");
             self.codegen.push_joined_strings(args_with_env, ", ");
             self.codegen.buffer.push_string(");\n");
-            let else_trimmed_indent_len = self.codegen.indent.count() - 4(UInt);
-            self.codegen.indent = self.codegen.indent.substring(..else_trimmed_indent_len);
+            self.codegen.pop_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("}\n");
             return "";
@@ -1349,7 +1399,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string("if (");
         self.codegen.buffer.push_string(closure_expr);
         self.codegen.buffer.push_string(".env == NULL) {\n");
-        self.codegen.indent = "\(self.codegen.indent)    ";
+        self.codegen.push_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
         self.codegen.buffer.push_string(" = ((");
@@ -1361,11 +1411,10 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".fn))(");
         self.codegen.push_joined_strings(arguments, ", ");
         self.codegen.buffer.push_string(");\n");
-        let then_result_trimmed_indent_len = self.codegen.indent.count() - 4(UInt);
-        self.codegen.indent = self.codegen.indent.substring(..then_result_trimmed_indent_len);
+        self.codegen.pop_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string("} else {\n");
-        self.codegen.indent = "\(self.codegen.indent)    ";
+        self.codegen.push_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
         self.codegen.buffer.push_string(" = ((");
@@ -1377,19 +1426,68 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".fn))(");
         self.codegen.push_joined_strings(args_with_env, ", ");
         self.codegen.buffer.push_string(");\n");
-        let else_result_trimmed_indent_len = self.codegen.indent.count() - 4(UInt);
-        self.codegen.indent = self.codegen.indent.substring(..else_result_trimmed_indent_len);
+        self.codegen.pop_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string("}\n");
         return result;
     };
 
-    module_private emit_aggregate(*mutable self, aggregate MIRAggregate) MIRValueEmission = {
+    module_private emit_aggregate(self, aggregate MIRAggregate) MIRValueEmission = {
+        let struct_fields_opt = when aggregate.aggregate_type in {
+            .StructureType(def_id) then self.codegen.context.get_struct_fields(def_id),
+            .GenericStruct(template, _, _) then when self.codegen.find_type_def_id_by_layout_or_template(aggregate.aggregate_type, template) in {
+                .Some(def_id) then self.codegen.context.get_struct_fields(def_id),
+                .None() then Option[List[StructField]].None(),
+            },
+            _ then Option[List[StructField]].None(),
+        };
+        when struct_fields_opt in {
+            .Some(fields) then {
+                if fields.count() == aggregate.fields.count() and self.codegen.uses_managed_nominal_representation(aggregate.aggregate_type) then {
+                    let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(aggregate.aggregate_type));
+                    let payload_type = self.codegen.managed_payload_type_name(aggregate.aggregate_type);
+                    let nominal_name = self.codegen.nominal_type_c_name(aggregate.aggregate_type);
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type)));\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(nominal_name)_payload_drop;\n");
+                    let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
+                    let mutable index UInt = 0;
+                    while index < aggregate.fields.count() and index < fields.count() then {
+                        let value = aggregate.fields[index];
+                        let member = fields[index];
+                        let emission = self.emit_value(value);
+                        let field_name = self.codegen.sanitize_codegen_identifier(member.name);
+                        let assigned_expression = self.adapt_expression_for_target_type(
+                            emission.expression,
+                            self.type_of_value(value),
+                            member.field_type,
+                            false,
+                            value is .Operand(.Function(_)),
+                        );
+                        self.codegen.append_copy_or_move_assignment(member.field_type, assigned_expression, "\(payload_expr)->\(field_name)", self.should_copy_borrowed_aggregate_field(value));
+                        self.consume_moved_source(value);
+                        self.emit_residual_cleanups(emission, true);
+                        index += 1;
+                    };
+                    return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, aggregate.aggregate_type));
+                };
+            },
+            .None() then {},
+        };
         let mutable fields = List[String].new();
         let mutable emissions = List[MIRValueEmission].new();
         for field in aggregate.fields then {
-            self.consume_moved_source(*field);
-            let emission = self.emit_value(*field);
+            self.consume_moved_source(field);
+            let emission = self.emit_value(field);
             emissions.push(emission);
             fields.push(emission.expression);
         };
@@ -1398,7 +1496,49 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, aggregate.aggregate_type));
     };
 
-    module_private emit_enum_case(*mutable self, construction MIREnumConstruction) MIRValueEmission = {
+    module_private emit_enum_case(self, construction MIREnumConstruction) MIRValueEmission = {
+        if self.codegen.uses_managed_nominal_representation(construction.enum_type) then {
+            let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(construction.enum_type));
+            let payload_type = self.codegen.managed_payload_type_name(construction.enum_type);
+            let nominal_name = self.codegen.nominal_type_c_name(construction.enum_type);
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type)));\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(nominal_name)_payload_drop;\n");
+            let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
+            let case_info = self.enum_case_info(construction.enum_type, construction.case_name);
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("\(payload_expr)->tag = \(case_info.first.to_string());\n");
+            let member_base = "\(payload_expr)->data.\(self.codegen.sanitize_codegen_identifier(construction.case_name))";
+            let mutable argument_index UInt = 0;
+            for field in case_info.second then {
+                if not self.codegen.type_is_void(field.param_type) then {
+                    let arg_value = construction.arguments[argument_index];
+                    let emission = self.emit_value(arg_value);
+                    let field_dest = "\(member_base).\(self.codegen.sanitize_codegen_identifier(field.name))";
+                    let assigned_expression = self.adapt_expression_for_target_type(
+                        emission.expression,
+                        self.type_of_value(arg_value),
+                        field.param_type,
+                        false,
+                        arg_value is .Operand(.Function(_)),
+                    );
+                    self.codegen.append_copy_or_move_assignment(field.param_type, assigned_expression, field_dest, self.should_copy_borrowed_aggregate_field(arg_value));
+                    self.consume_moved_source(arg_value);
+                    self.emit_residual_cleanups(emission, true);
+                    argument_index += 1;
+                };
+            };
+            return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, construction.enum_type));
+        };
         let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(construction.enum_type));
         let case_info = self.enum_case_info(construction.enum_type, construction.case_name);
         self.codegen.add_indent();
@@ -1409,7 +1549,7 @@ given MIRFunctionCodeEmitter {
         let mutable argument_index UInt = 0;
         for field in case_info.second then {
             if not self.codegen.type_is_void(field.param_type) then {
-                let arg_value = (*construction.arguments[argument_index]);
+                let arg_value = construction.arguments[argument_index];
                 let emission = self.emit_value(arg_value);
                 let field_dest = "\(expression).data.\(self.codegen.sanitize_codegen_identifier(construction.case_name)).\(self.codegen.sanitize_codegen_identifier(field.name))";
                 let assigned_expression = self.adapt_expression_for_target_type(
@@ -1419,7 +1559,7 @@ given MIRFunctionCodeEmitter {
                     false,
                     arg_value is .Operand(.Function(_)),
                 );
-                self.codegen.append_copy_or_move_assignment(field.param_type, assigned_expression, field_dest, false);
+                self.codegen.append_copy_or_move_assignment(field.param_type, assigned_expression, field_dest, self.should_copy_borrowed_aggregate_field(arg_value));
                 self.consume_moved_source(arg_value);
                 self.emit_residual_cleanups(emission, true);
                 argument_index += 1;
@@ -1428,35 +1568,41 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, construction.enum_type));
     };
 
-    module_private emit_enum_tag(*mutable self, tag MIREnumTag) MIRValueEmission = {
-        let subject = self.emit_value_source(*(tag.subject));
-        let subject_expr = when self.type_of_value(*(tag.subject)) in {
-            .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            .MutableReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            .BorrowedReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            .MutableBorrowedReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            .WeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            .MutableWeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(*inner))*)\(subject.expression).ptr)",
-            _ then subject.expression,
+    module_private emit_enum_tag(self, tag MIREnumTag) MIRValueEmission = {
+        let subject = self.emit_value_source(tag.subject);
+        let mutable tag_expr = "\(subject.expression).tag";
+        if self.codegen.uses_managed_nominal_representation(tag.enum_type) then {
+            let payload_type = self.codegen.managed_payload_type_name(tag.enum_type);
+            tag_expr = "((struct \(payload_type)*)\(subject.expression).ptr)->tag";
+        } else {
+            when self.type_of_value(tag.subject) in {
+                .ReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .MutableReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .BorrowedReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .MutableBorrowedReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .WeakReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .MutableWeakReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                _ then {},
+            };
         };
-        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.IntType()), "\(subject_expr).tag");
+        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.IntType()), tag_expr);
         self.emit_cleanup(subject.cleanup);
-        return MIRValueEmission(expression, Option[* MIRValueCleanup].None());
+        return MIRValueEmission(expression, Option[MIRValueCleanup].None());
     };
 
-    module_private emit_trait_object_conversion(*mutable self, conversion MIRTraitObjectConversion) MIRValueEmission = {
-        let inner = self.emit_value_source(*(conversion.inner));
-        let inner_type = self.type_of_value(*(conversion.inner));
+    module_private emit_trait_object_conversion(self, conversion MIRTraitObjectConversion) MIRValueEmission = {
+        let inner = self.emit_value_source(conversion.inner);
+        let mutable inner_type = self.type_of_value(conversion.inner);
         let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow();
-        // If inner is a scalar type (not a ref), we need to heap-allocate it first
+        // If inner is a scalar type mutable (not a ref), we need to heap-allocate it first
         let is_ref_type = when inner_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _, _) then true,
             _ then false,
         };
         let mutable ref_expression = inner.expression;
         if not is_ref_type then {
             // Merged layout: allocate control block + payload in one malloc
-            let pointee_c_type = self.codegen.c_type_name(inner_type);
+            let mutable pointee_c_type = self.codegen.c_type_name(inner_type);
             let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref");
             self.codegen.add_indent();
             self.codegen.buffer.push_string(ref_temp);
@@ -1524,47 +1670,53 @@ given MIRFunctionCodeEmitter {
         };
         let expression = self.codegen.generate_trait_object_conversion_from_ref_value(ref_expression, conversion.trait_name, self.codegen.mir_type_args_to_ref_list(conversion.trait_type_args), conversion.concrete_type, should_retain);
         if conversion.source_ownership is .Move() then {
-            self.consume_moved_source(*(conversion.inner));
+            self.consume_moved_source(conversion.inner);
         };
         self.emit_residual_cleanups(inner, conversion.source_ownership is .Move());
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, conversion.result_type));
     };
 
-    module_private trait_object_target_name(*self, t Type) Option[String] = {
+    module_private trait_object_target_name(self, t Type) Option[String] = {
         return when t in {
-            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
-            .ReferenceType(inner) then self.trait_object_target_name(*inner),
-            .MutableReferenceType(inner) then self.trait_object_target_name(*inner),
-            .BorrowedReferenceType(inner) then self.trait_object_target_name(*inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_object_target_name(*inner),
+            .TraitObject(trait_name, _, _) then Option[String].Some(trait_name),
+            .ReferenceType(inner) then self.trait_object_target_name(inner),
+            .MutableReferenceType(inner) then self.trait_object_target_name(inner),
+            .BorrowedReferenceType(inner) then self.trait_object_target_name(inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_object_target_name(inner),
             _ then Option[String].None(),
         };
     };
 
-    module_private trait_object_target_type_args(*self, t Type) List[*Type] = {
+    module_private trait_object_target_type_args(self, t Type) List[Type] = {
         return when t in {
-            .TraitObject(_, args) then args,
-            .ReferenceType(inner) then self.trait_object_target_type_args(*inner),
-            .MutableReferenceType(inner) then self.trait_object_target_type_args(*inner),
-            .BorrowedReferenceType(inner) then self.trait_object_target_type_args(*inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_object_target_type_args(*inner),
-            _ then List[*Type].new(),
+            .TraitObject(_, _, args) then args,
+            .ReferenceType(inner) then self.trait_object_target_type_args(inner),
+            .MutableReferenceType(inner) then self.trait_object_target_type_args(inner),
+            .BorrowedReferenceType(inner) then self.trait_object_target_type_args(inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_object_target_type_args(inner),
+            _ then List[Type].new(),
         };
     };
 
-    module_private trait_object_source_concrete_type(*self, t Type) Option[Type] = {
+    module_private trait_object_source_concrete_type(self, t Type) Option[Type] = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(*inner),
-            .MutableReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(*inner),
-            .BorrowedReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(*inner),
-            .MutableBorrowedReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(*inner),
+            .ReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
+            .MutableReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
+            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
+            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
+            // In the simplified type system, concrete types can be directly
+            // assigned to trait object fields without going through references.
+            .StructureType(_) then Option[Type].Some(t),
+            .EnumType(_) then Option[Type].Some(t),
+            .GenericStruct(_, _, _) then Option[Type].Some(t),
+            .GenericEnum(_, _, _) then Option[Type].Some(t),
             _ then Option[Type].None(),
         };
     };
 
     module_private adapt_expression_for_target_type(
-        *mutable self,
+        self,
         expression String,
         source_type Type,
         target_type Type,
@@ -1580,42 +1732,71 @@ given MIRFunctionCodeEmitter {
         };
         return when self.trait_object_target_name(target_type) in {
             .Some(trait_name) then when self.trait_object_source_concrete_type(source_type) in {
-                .Some(concrete_type) then self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, self.trait_object_target_type_args(target_type), concrete_type, retain_source),
+                .Some(concrete_type) then {
+                    // If the source is not a reference-like type, we need to wrap it
+                    // in a __koral_Ref first (allocate control + payload).
+                    let is_ref = when source_type in {
+                        .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .TraitObject(_, _, _) then true,
+                        _ then false,
+                    };
+                    if is_ref then {
+                        yield self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, self.trait_object_target_type_args(target_type), concrete_type, retain_source);
+                    } else {
+                        // Non-managed or managed nominal: wrap in __koral_Ref
+                        let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref");
+                        let c_type = self.codegen.c_type_name(source_type);
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string(ref_temp);
+                        self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(\(c_type)));\n");
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string(ref_temp);
+                        self.codegen.buffer.push_string(".ptr = (char*)\(ref_temp).control + sizeof(struct __koral_Control);\n");
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->strong_count = 1;\n");
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->weak_count = 0;\n");
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->ptr = \(ref_temp).ptr;\n");
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string("*(\(c_type)*)\(ref_temp).ptr = \(expression);\n");
+                        yield self.codegen.generate_trait_object_conversion_from_ref_value(ref_temp, trait_name, self.trait_object_target_type_args(target_type), concrete_type, false);
+                    };
+                },
                 .None() then expression,
             },
             .None() then expression,
         };
     };
 
-    module_private emit_trait_method_call(*mutable self, call MIRTraitMethodCall) MIRValueEmission = {
-        let receiver = self.emit_value_source(*(call.receiver));
+    module_private emit_trait_method_call(self, call MIRTraitMethodCall) MIRValueEmission = {
+        let receiver = self.emit_value_source(call.receiver);
         let mutable arg_values = List[String].new();
         let mutable arg_types = List[Type].new();
         let mutable idx UInt = 0;
         while idx < call.arguments.count() then {
-            let emission = self.emit_value_source((*call.arguments[idx]));
+            let emission = self.emit_value_source(call.arguments[idx]);
             arg_values.push(emission.expression);
-            arg_types.push(self.type_of_value((*call.arguments[idx])));
+            arg_types.push(self.type_of_value(call.arguments[idx]));
             if call.argument_ownerships[idx] is .Move() then {
-                self.consume_moved_source((*call.arguments[idx]));
+                self.consume_moved_source(call.arguments[idx]);
             };
             self.emit_residual_cleanups(emission, call.argument_ownerships[idx] is .Move());
             idx += 1;
         };
         let expression = self.emit_trait_method_call_abi(receiver.expression, call.receiver_ownership, call.trait_name, self.type_list_to_ref_list(call.trait_type_args), call.method_name, call.method_index, arg_values, arg_types, call.result_type);
         if call.receiver_ownership is .Move() then {
-            self.consume_moved_source(*(call.receiver));
+            self.consume_moved_source(call.receiver);
         };
         self.emit_residual_cleanups(receiver, call.receiver_ownership is .Move());
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type));
     };
 
     module_private emit_trait_method_call_abi(
-        *mutable self,
+        self,
         receiver_result String,
         receiver_ownership MIROwnershipUse,
         trait_name String,
-        trait_type_args List[* Type],
+        trait_type_args List[Type],
         method_name String,
         method_index Int,
         arg_values List[String],
@@ -1642,12 +1823,12 @@ given MIRFunctionCodeEmitter {
             };
         };
 
-        let effective_return_type = when result_type in { .Unknown() then signature_return_type, _ then result_type };
+        let mutable effective_return_type = when result_type in { .Unknown() then signature_return_type, _ then result_type };
         let mutable method_param_types = List[String].new();
         method_param_types.push("struct __koral_Ref");
         let mutable arg_index UInt = 0;
         while arg_index < arg_values.count() then {
-            let expected_type = if arg_index + 1 < signature_param_types.count() then signature_param_types[arg_index + 1] else arg_types[arg_index];
+            let mutable expected_type = if arg_index + 1 < signature_param_types.count() then signature_param_types[arg_index + 1] else arg_types[arg_index];
             method_param_types.push(self.codegen.c_type_name(expected_type));
             arg_index += 1;
         };
@@ -1662,8 +1843,9 @@ given MIRFunctionCodeEmitter {
         call_args.push(ref_var);
         for arg in arg_values then { call_args.push(arg);};
         let sanitized_method = self.codegen.sanitize_codegen_identifier(dispatch_method_name);
-        let return_c_type = self.codegen.c_type_name(effective_return_type);
-        let method_field_type = "\(return_c_type) (*\(sanitized_method))(\(join_strings(method_param_types, ", ")) )";
+        let mutable return_c_type = self.codegen.c_type_name(effective_return_type);
+        let method_param_types_text = join_strings(method_param_types, ", ");
+        let mutable method_field_type = "\(return_c_type) (*\(sanitized_method))(\(method_param_types_text) )";
         let vtable_struct = self.vtable_prefix_struct_type_for_mir_method(members, dispatch_method_name, method_field_type);
         let vt_call_target = "((\(vtable_struct)*)\(receiver_result).vtable)->\(sanitized_method)";
         if self.codegen.type_is_void_or_never(effective_return_type) then {
@@ -1677,13 +1859,14 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_args(return_c_type, vt_call_target, call_args);
     };
 
-    module_private vtable_prefix_struct_type_for_mir_method(*self, members List[MIRTraitVTableMethod], method_name String, method_field_type String) String = {
-        let mutable code = "struct { ";
+    module_private vtable_prefix_struct_type_for_mir_method(self, members List[MIRTraitVTableMethod], method_name String, method_field_type String) String = {
+        let mutable code = StringBuilder.new();
+        code.push_string("struct { ");
         if members.is_empty() then {
             code.push_string(method_field_type);
             code.push_string("; ");
             code.push_string("}");
-            return code;
+            return code.to_string();
         };
         for member in members then {
             let field_name = self.codegen.sanitize_codegen_identifier(member.name);
@@ -1697,17 +1880,17 @@ given MIRFunctionCodeEmitter {
             code.push_string(")(); ");
         };
         code.push_string("}");
-        return code;
+        return code.to_string();
     };
 
     // Wrap a raw value expression in a stack-borrow __koral_Ref.
     // Used when a function expects a borrowed reference but the MIR passes a raw value.
-    module_private unwrap_reference_like_argument_if_needed(*mutable self, emission MIRValueEmission, arg_type Type, expected_type Type) MIRValueEmission = {
+    module_private unwrap_reference_like_argument_if_needed(self, emission MIRValueEmission, arg_type Type, expected_type Type) MIRValueEmission = {
         if not is_borrowed_reference_like_type(arg_type) or is_borrowed_reference_like_type(expected_type) then {
             return emission;
         };
 
-        let expected_c_type = self.codegen.c_type_name(expected_type);
+        let mutable expected_c_type = self.codegen.c_type_name(expected_type);
         let expression = when expected_type in {
             .StructureType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
             .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
@@ -1716,7 +1899,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, emission.cleanup);
     };
 
-    module_private wrap_value_as_stack_borrow(*mutable self, value_expr String, value_type Type, ref_type Type) MIRValueEmission = {
+    module_private wrap_value_as_stack_borrow(self, value_expr String, value_type Type, ref_type Type) MIRValueEmission = {
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(ref_type));
         // Create a temporary to hold the value so we can take its address.
         let value_temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(value_type));
@@ -1733,18 +1916,19 @@ given MIRFunctionCodeEmitter {
         self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
         self.codegen.buffer.push_string(".control = NULL;\n");
-        return MIRValueEmission(result, Option[* MIRValueCleanup].None());
+        return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
 
-    module_private emit_reference(*mutable self, place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation) MIRValueEmission = {
-        let result_type = self.type_of_ref(place, kind);
+    module_private emit_reference(self, place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation) MIRValueEmission = {
+        let mutable result_type = self.type_of_ref(place, kind);
         return when allocation in {
-            .HeapOwned() then self.emit_heap_reference(place, result_type),
+            .HeapOwned() then self.emit_heap_reference(place, result_type, allocation),
+            .HeapOwnedMove() then self.emit_heap_reference(place, result_type, allocation),
             .StackBorrow() then self.emit_borrowed_reference(place, result_type),
         };
     };
 
-    module_private emit_borrowed_reference(*mutable self, place MIRPlace, result_type Type) MIRValueEmission = {
+    module_private emit_borrowed_reference(self, place MIRPlace, result_type Type) MIRValueEmission = {
         let access = self.emit_place_access(place);
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
         self.codegen.add_indent();
@@ -1758,15 +1942,18 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(access.control);
         self.codegen.buffer.push_string(";\n");
         self.emit_cleanup(access.cleanup);
-        return MIRValueEmission(result, Option[* MIRValueCleanup].None());
+        return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
 
-    module_private emit_heap_reference(*mutable self, place MIRPlace, result_type Type) MIRValueEmission = {
+    module_private emit_heap_reference(self, place MIRPlace, result_type Type, allocation MIRReferenceAllocation) MIRValueEmission = {
         let access = self.emit_place_access(place);
-        let pointee_type = self.type_of_place(place);
-        let pointee_c_type = self.codegen.c_type_name(pointee_type);
+        let mutable pointee_type = self.type_of_place(place);
+        let mutable pointee_c_type = self.codegen.c_type_name(pointee_type);
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
-        let should_transfer = self.can_transfer_owned_heap_reference(place);
+        // Ownership transfer is an explicit signal from lowering (Swift: `allocation == .heapOwnedMove`),
+        // not an inference about the source place. A move bit-copies the pointee and consumes the
+        // source so it is not dropped again; a copy retains via the type's copy helper.
+        let should_transfer = allocation is .HeapOwnedMove();
         // Merged layout: allocate control block + payload in one malloc
         self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
@@ -1836,22 +2023,15 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
     };
 
-    module_private can_transfer_owned_heap_reference(*self, place MIRPlace) Bool = {
-        return when place in {
-            .Local(local) then self.init_flag(local) is .Some(_) and not self.consumed_locals.contains_key(local.raw_value),
-            _ then false,
-        };
-    };
-
-    module_private emit_pointer(*mutable self, place MIRPlace) MIRValueEmission = {
+    module_private emit_pointer(self, place MIRPlace) MIRValueEmission = {
         let access = self.emit_place_access(place);
-        let pointer_type = self.type_of_pointer(place);
+        let mutable pointer_type = self.type_of_pointer(place);
         let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(pointer_type), "&\(access.path)");
         self.emit_cleanup(access.cleanup);
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, pointer_type));
     };
 
-    module_private is_float_cast_source_type(*self, t Type) Bool = {
+    module_private is_float_cast_source_type(self, t Type) Bool = {
         let _ = self;
         return when t in {
             .Float32Type() then true,
@@ -1860,7 +2040,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private is_signed_int_cast_target_type(*self, t Type) Bool = {
+    module_private is_signed_int_cast_target_type(self, t Type) Bool = {
         let _ = self;
         return when t in {
             .Int8Type() then true,
@@ -1872,7 +2052,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private is_unsigned_int_cast_target_type(*self, t Type) Bool = {
+    module_private is_unsigned_int_cast_target_type(self, t Type) Bool = {
         let _ = self;
         return when t in {
             .UInt8Type() then true,
@@ -1884,7 +2064,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private float_cast_target_bounds(*self, t Type) Option[Pair[String, String]] = {
+    module_private float_cast_target_bounds(self, t Type) Option[Pair[String, String]] = {
         let _ = self;
         return when t in {
             .Int8Type() then Option[Pair[String, String]].Some(Pair[String, String]("INT8_MIN", "INT8_MAX")),
@@ -1901,10 +2081,10 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_cast_operand(*mutable self, operand MIROperand, target_type Type) MIRValueEmission = {
+    module_private emit_cast_operand(self, operand MIROperand, target_type Type) MIRValueEmission = {
         let source = self.emit_operand_value(operand);
-        let source_type = self.type_of_operand(operand);
-        let target_c_type = self.codegen.c_type_name(target_type);
+        let mutable source_type = self.type_of_operand(operand);
+        let mutable target_c_type = self.codegen.c_type_name(target_type);
         let expression = if self.is_float_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(target_type) or self.is_unsigned_int_cast_target_type(target_type)) then when self.float_cast_target_bounds(target_type) in {
             .Some(bounds) then {
                 let float_value = self.codegen.next_temp_with_init("double", "(double)\(source.expression)");
@@ -1922,11 +2102,11 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, target_type));
     };
 
-    module_private emit_intrinsic(*mutable self, node MIRIntrinsic) MIRValueEmission = {
+    module_private emit_intrinsic(self, node MIRIntrinsic) MIRValueEmission = {
         return when node in {
             .AllocMemory(count, result_type) then {
-                let count_emission = self.emit_value_source(*count);
-                let element_type = self.pointer_element_type(result_type);
+                let count_emission = self.emit_value_source(count);
+                let mutable element_type = self.pointer_element_type(result_type);
                 let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(expression);
@@ -1936,94 +2116,98 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(self.codegen.c_type_name(element_type));
                 self.codegen.buffer.push_string("));\n");
                 self.emit_cleanup(count_emission.cleanup);
-                yield MIRValueEmission(expression, Option[* MIRValueCleanup].None());
+                yield MIRValueEmission(expression, Option[MIRValueCleanup].None());
             },
             .DeallocMemory(pointer) then {
-                let p = self.emit_value_source(*pointer);
+                let p = self.emit_value_source(pointer);
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("free(");
                 self.codegen.buffer.push_string(p.expression);
                 self.codegen.buffer.push_string(");\n");
                 self.emit_cleanup(p.cleanup);
-                yield MIRValueEmission("", Option[* MIRValueCleanup].None());
+                yield MIRValueEmission("", Option[MIRValueCleanup].None());
             },
-            .CopyMemory(dest, source, count) then self.emit_memory_transfer("memcpy", *dest, *source, *count),
-            .MoveMemory(dest, source, count) then self.emit_memory_transfer("memmove", *dest, *source, *count),
-            .IsUniqueMutable(value) then self.emit_is_unique(*value),
-            .RefCount(value) then self.emit_ref_count(*value),
-            .MakeRef(pointer, owner, result_type) then self.emit_make_ref(*pointer, *owner, result_type),
-            .MakeMutRef(pointer, owner, result_type) then self.emit_make_ref(*pointer, *owner, result_type),
-            .DowngradeRef(value, result_type) then self.emit_downgrade_ref(*value, result_type),
-            .DowngradeMutRef(value, result_type) then self.emit_downgrade_ref(*value, result_type),
-            .UpgradeRef(value, result_type) then self.emit_upgrade_ref(*value, result_type),
-            .UpgradeMutRef(value, result_type) then self.emit_upgrade_ref(*value, result_type),
+            .CopyMemory(dest, source, count) then self.emit_memory_transfer("memcpy", dest, source, count),
+            .MoveMemory(dest, source, count) then self.emit_memory_transfer("memmove", dest, source, count),
+            .DowngradeRef(value, result_type) then self.emit_downgrade_ref(value, result_type),
+            .UpgradeRef(value, result_type) then self.emit_upgrade_ref(value, result_type),
             .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
-                let emission = self.emit_value_source(*value);
+                let emission = self.emit_value_source(value);
                 let concrete_c_name = self.codegen.concrete_type_c_name_fallback(concrete_type) or else self.codegen.sanitize_codegen_identifier(self.codegen.c_type_name(concrete_type));
                 let vtable_name = self.codegen.vtable_instance_name(trait_name, concrete_c_name);
                 let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.BoolType()), "(\(emission.expression).vtable == &\(vtable_name))");
                 let _ = trait_type_args;
                 self.emit_cleanup(emission.cleanup);
-                yield MIRValueEmission(expression, Option[* MIRValueCleanup].None());
+                yield MIRValueEmission(expression, Option[MIRValueCleanup].None());
             },
             .TraitObjectDowncast(value, result_type) then {
-                let emission = self.emit_value_source(*value);
+                let emission = self.emit_value_source(value);
                 let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("\(expression).ptr = \(emission.expression).ptr;\n");
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("\(expression).control = \(emission.expression).control;\n");
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (\(expression).control) { __koral_retain(\(expression).control); }\n");
+                if self.codegen.uses_managed_nominal_representation(result_type) then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(expression).ptr = \(emission.expression).ptr;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(expression).control = \(emission.expression).control;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("if (\(expression).control) { __koral_retain(\(expression).control); }\n");
+                } else {
+                    let concrete_c_type = self.codegen.c_type_name(result_type);
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(expression) = *(\(concrete_c_type)*)\(emission.expression).ptr;\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("if (\(emission.expression).control) { __koral_retain(\(emission.expression).control); }\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("if (\(emission.expression).control) { __koral_release(\(emission.expression).control); }\n");
+                };
                 self.emit_cleanup(emission.cleanup);
                 yield MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type));
             },
             .InitMemory(pointer, value) then {
-                let p = self.emit_value_source(*pointer);
-                let v = self.emit_value_source(*value);
-                let element_type = self.pointer_element_type(self.type_of_value(*pointer));
+                let p = self.emit_value_source(pointer);
+                let v = self.emit_value_source(value);
+                let mutable element_type = self.pointer_element_type(self.type_of_value(pointer));
                 self.codegen.append_copy_assignment(element_type, v.expression, "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)");
-                self.consume_moved_source(*value);
+                self.consume_moved_source(value);
                 self.emit_cleanup(p.cleanup);
                 self.emit_residual_cleanups(v, true);
-                yield MIRValueEmission("", Option[* MIRValueCleanup].None());
+                yield MIRValueEmission("", Option[MIRValueCleanup].None());
             },
             .DeinitMemory(pointer) then {
-                let p = self.emit_value_source(*pointer);
-                let element_type = self.pointer_element_type(self.type_of_value(*pointer));
+                let p = self.emit_value_source(pointer);
+                let mutable element_type = self.pointer_element_type(self.type_of_value(pointer));
                 self.codegen.add_indent();
                 self.codegen.append_drop_statement(element_type, "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)");
                 self.emit_cleanup(p.cleanup);
-                yield MIRValueEmission("", Option[* MIRValueCleanup].None());
+                yield MIRValueEmission("", Option[MIRValueCleanup].None());
             },
             .TakeMemory(pointer, result_type) then {
-                let p = self.emit_value_source(*pointer);
+                let p = self.emit_value_source(pointer);
                 let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "*(\(self.codegen.c_type_name(result_type))*)\(p.expression)");
                 self.emit_cleanup(p.cleanup);
                 yield MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type));
             },
             .NullPtr(result_type) then {
                 let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "NULL");
-                yield MIRValueEmission(expression, Option[* MIRValueCleanup].None());
+                yield MIRValueEmission(expression, Option[MIRValueCleanup].None());
             },
-            .SpawnThread(out_handle, out_tid, closure, stack_size) then self.emit_spawn_thread(*out_handle, *out_tid, *closure, *stack_size),
+            .SpawnThread(out_handle, out_tid, closure, stack_size) then self.emit_spawn_thread(out_handle, out_tid, closure, stack_size),
         };
     };
 
-    module_private emit_lambda(*mutable self, lambda MIRLambda) MIRValueEmission = {
+    module_private emit_lambda(self, lambda MIRLambda) MIRValueEmission = {
         // Resolve capture sources to C expression paths
         let mutable capture_source_overrides = Dict[UInt, String].new();
-        let mutable capture_source_cleanups = List[* MIRValueCleanup].new();
+        let mutable capture_source_cleanups = List[MIRValueCleanup].new();
         let mutable ci UInt = 0;
         while ci < lambda.captures.count() then {
             let capture = lambda.captures[ci];
             let source = lambda.capture_sources[ci];
             let capture_emission = when capture.symbol_type in {
-                .ReferenceType(inner_ref) then if self.type_of_place(source) == *inner_ref then self.emit_heap_reference(source, capture.symbol_type) else {
+                .ReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref then self.emit_heap_reference(source, capture.symbol_type, MIRReferenceAllocation.HeapOwned()) else {
                         let access = self.emit_place_access(source);
                         yield MIRValueEmission(access.path, access.cleanup);
                     },
-                .MutableReferenceType(inner_ref) then if self.type_of_place(source) == *inner_ref then self.emit_borrowed_reference(source, capture.symbol_type) else {
+                .MutableReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref then self.emit_borrowed_reference(source, capture.symbol_type) else {
                         let access = self.emit_place_access(source);
                         yield MIRValueEmission(access.path, access.cleanup);
                     },
@@ -2042,17 +2226,17 @@ given MIRFunctionCodeEmitter {
         let closure = self.generate_lambda_expression(lambda, capture_source_overrides);
         // Clean up capture source cleanups
         for cleanup_ref in capture_source_cleanups then {
-            self.emit_cleanup(Option[* MIRValueCleanup].Some(cleanup_ref));
+            self.emit_cleanup(Option[MIRValueCleanup].Some(cleanup_ref));
         };
         return MIRValueEmission(closure, self.cleanup_for_temporary_result(closure, lambda.lambda_type));
     };
 
-    module_private generate_lambda_expression(*mutable self, lambda MIRLambda, capture_source_overrides Dict[UInt, String]) String = {
+    module_private generate_lambda_expression(self, lambda MIRLambda, capture_source_overrides Dict[UInt, String]) String = {
         let lambda_name = self.next_lambda_name();
         // Extract function parameters and return type from lambda_type
         let (function_params, return_type) = when lambda.lambda_type in {
-            .FunctionType(params, ret) then (params, *ret),
-            _ then (List[* FunctionParamEntry].new(), Type.VoidType()),
+            .FunctionType(params, ret) then (params, ret),
+            _ then (List[FunctionParamEntry].new(), Type.VoidType()),
         };
 
         if lambda.captures.is_empty() then {
@@ -2075,12 +2259,12 @@ given MIRFunctionCodeEmitter {
         let mutable ci UInt = 0;
         while ci < lambda.captures.count() then {
             let capture = lambda.captures[ci];
-            let field_name = self.capture_field_name(*capture);
+            let field_name = self.capture_field_name(capture);
             let source = capture_source_overrides.get(capture.def_id.id) or else "";
             let dest = "\(env_var)->\(field_name)";
             when capture.symbol_type in {
                 .ReferenceType(inner_ref) then {
-                    let pointee_type = *inner_ref;
+                    let pointee_type = inner_ref;
                     let pointee_c_type = self.codegen.c_type_name(pointee_type);
                     let source_ptr = self.codegen.next_temp_with_decl("void*");
                     self.codegen.add_indent();
@@ -2177,7 +2361,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_init("struct __koral_Closure", "{ .fn = (void*)\(lambda_name), .env = \(env_var), .drop = __koral_\(env_struct_name)_drop }");
     };
 
-    module_private generate_no_capture_lambda_function(*mutable self, name String, params List[* Symbol], function_params List[* FunctionParamEntry], return_type Type, mir_function * MIRFunction) Void = {
+    module_private generate_no_capture_lambda_function(self, name String, params List[Symbol], function_params List[FunctionParamEntry], return_type Type, mir_function MIRFunction) Void = {
         let plan = build_mir_function_emit_plan(self.codegen, mir_function);
         let mutable parameter_local_names = List[String].new();
         for local in mir_function.locals then {
@@ -2192,21 +2376,22 @@ given MIRFunctionCodeEmitter {
         let mutable pi UInt = 0;
         while pi < params.count() then {
             let param = params[pi];
-            let c_type = if pi < function_params.count() then self.codegen.c_type_name(function_params[pi].param_type) else self.codegen.c_type_name(param.symbol_type);
+            let mutable c_type = if pi < function_params.count() then self.codegen.c_type_name(function_params[pi].param_type) else self.codegen.c_type_name(param.symbol_type);
             let param_name = if pi < parameter_local_names.count() then parameter_local_names[pi] else self.codegen.c_identifier_for_symbol(param);
             param_parts.push("\(c_type) \(param_name)");
             pi += 1;
         };
         let param_str = if param_parts.is_empty() then "void" else join_strings(param_parts, ", ");
-        let return_c_type = self.codegen.c_type_name(return_type);
+        let mutable return_c_type = self.codegen.c_type_name(return_type);
 
         let saved_indent = self.codegen.indent;
-        self.codegen.indent = "    ";
+        self.codegen.indent = StringBuilder.new();
+        self.codegen.indent.push_string("    ");
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan);
         let saved_buffer = self.codegen.buffer;
         let mutable body_buffer = CodegenBuffer.new();
         self.codegen.buffer = body_buffer;
-        let inner_nested = (&mutable body_emitter).emit_body_and_get_nested_definitions();
+        let inner_nested = (body_emitter).emit_body_and_get_nested_definitions();
         let body_text = self.codegen.buffer.into_string();
         self.codegen.buffer = saved_buffer;
         self.codegen.indent = saved_indent;
@@ -2217,7 +2402,7 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n");
     };
 
-    module_private generate_capture_lambda_function(*mutable self, name String, env_struct_name String, params List[* Symbol], function_params List[* FunctionParamEntry], return_type Type, captures List[* Symbol], capture_source_overrides Dict[UInt, String], mir_function * MIRFunction) Void = {
+    module_private generate_capture_lambda_function(self, name String, env_struct_name String, params List[Symbol], function_params List[FunctionParamEntry], return_type Type, captures List[Symbol], capture_source_overrides Dict[UInt, String], mir_function MIRFunction) Void = {
         let plan = build_mir_function_emit_plan(self.codegen, mir_function);
         let mutable parameter_local_names = List[String].new();
         for local in mir_function.locals then {
@@ -2233,23 +2418,24 @@ given MIRFunctionCodeEmitter {
         let mutable pi UInt = 0;
         while pi < params.count() then {
             let param = params[pi];
-            let c_type = if pi < function_params.count() then self.codegen.c_type_name(function_params[pi].param_type) else self.codegen.c_type_name(param.symbol_type);
+            let mutable c_type = if pi < function_params.count() then self.codegen.c_type_name(function_params[pi].param_type) else self.codegen.c_type_name(param.symbol_type);
             let param_name = if pi < parameter_local_names.count() then parameter_local_names[pi] else self.codegen.c_identifier_for_symbol(param);
             param_parts.push("\(c_type) \(param_name)");
             pi += 1;
         };
         let param_str = join_strings(param_parts, ", ");
-        let return_c_type = self.codegen.c_type_name(return_type);
+        let mutable return_c_type = self.codegen.c_type_name(return_type);
 
         let saved_indent = self.codegen.indent;
-        self.codegen.indent = "    ";
+        self.codegen.indent = StringBuilder.new();
+        self.codegen.indent.push_string("    ");
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan);
         let saved_buffer = self.codegen.buffer;
         let mutable body_buffer = CodegenBuffer.new();
         self.codegen.buffer = body_buffer;
         // Override local names for captured variables
         for capture in captures then {
-            let capture_name = "__captured->\(self.capture_field_name(*capture))";
+            let capture_name = "__captured->\(self.capture_field_name(capture))";
             for local in mir_function.locals then {
                 when local.symbol in {
                     .Some(symbol) then {
@@ -2261,7 +2447,7 @@ given MIRFunctionCodeEmitter {
                 };
             };
         };
-        let inner_nested = (&mutable body_emitter).emit_body_and_get_nested_definitions();
+        let inner_nested = (body_emitter).emit_body_and_get_nested_definitions();
         let body_text = self.codegen.buffer.into_string();
         self.codegen.buffer = saved_buffer;
         self.codegen.indent = saved_indent;
@@ -2273,13 +2459,13 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n");
     };
 
-    module_private generate_lambda_env_struct(*mutable self, env_struct_name String, captures List[* Symbol]) Void = {
+    module_private generate_lambda_env_struct(self, env_struct_name String, captures List[Symbol]) Void = {
         // Generate env struct definition
         self.nested_definitions.push_string("struct \(env_struct_name) {\n");
         self.nested_definitions.push_string("    _Atomic intptr_t __refcount;\n");
         for capture in captures then {
-            let field_name = self.capture_field_name(*capture);
-            let c_type = self.codegen.c_type_name(capture.symbol_type);
+            let field_name = self.capture_field_name(capture);
+            let mutable c_type = self.codegen.c_type_name(capture.symbol_type);
             self.nested_definitions.push_string("    \(c_type) \(field_name);\n");
         };
         self.nested_definitions.push_string("};\n");
@@ -2288,7 +2474,7 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("static void __koral_\(env_struct_name)_drop(void* raw_env) {\n");
         self.nested_definitions.push_string("    struct \(env_struct_name)* env = (struct \(env_struct_name)*)raw_env;\n");
         for capture in captures then {
-            let field_name = self.capture_field_name(*capture);
+            let field_name = self.capture_field_name(capture);
             if self.codegen.needs_drop(capture.symbol_type) then {
                 let saved_buffer = self.codegen.buffer;
                 self.codegen.buffer = CodegenBuffer.new();
@@ -2302,115 +2488,132 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n");
     };
 
-    module_private emit_place_access(*mutable self, place MIRPlace) MIRPlaceAccess = {
+    module_private emit_place_access(self, place MIRPlace) MIRPlaceAccess = {
         return when place in {
             .Local(local) then {
                 let name = self.local_name(local);
-                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[* MIRValueCleanup].None());
+                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[MIRValueCleanup].None());
             },
             .Global(def_id) then {
                 let name = when self.codegen.context.get_symbol(def_id) in {
                     .Some(symbol) then self.codegen.c_identifier_for_symbol_value(symbol),
                     .None() then self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(self.context_name(def_id)),
                 };
-                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[* MIRValueCleanup].None());
+                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[MIRValueCleanup].None());
             },
             .Field(base, field) then {
-                let base_access = self.emit_place_access(*base);
-                let field_name = self.codegen.sanitize_codegen_identifier(self.codegen.context.symbol_name(*field));
-                let path = when self.type_of_place(*base) in {
-                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
-                        let mutable path = String.new();
-                        path.push_string("(*(");
-                        path.push_string(self.codegen.c_type_name(*inner));
-                        path.push_string("*)");
-                        path.push_string(base_access.path);
-                        path.push_string(".ptr).");
-                        path.push_string(field_name);
-                        yield path;
+                let base_access = self.emit_place_access(base);
+                let field_name = self.codegen.sanitize_codegen_identifier(self.codegen.context.symbol_name(field));
+                let base_type = self.type_of_place(base);
+                let mutable path = "";
+                let mutable control = base_access.control;
+                if self.codegen.uses_managed_nominal_representation(base_type) then {
+                    let payload_type = self.codegen.managed_payload_type_name(base_type);
+                    path = "((struct \(payload_type)*)\(base_access.path).ptr)->\(field_name)";
+                    control = "\(base_access.path).control";
+                } else when base_type in {
+                    .ReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .MutableReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .BorrowedReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .MutableBorrowedReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .WeakReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .MutableWeakReferenceType(inner) then {
+                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
+                    },
+                    .PointerType(pointee) then {
+                        if self.codegen.uses_managed_nominal_representation(pointee) then {
+                            let payload_type = self.codegen.managed_payload_type_name(pointee);
+                            path = "((struct \(payload_type)*)\(base_access.path)->ptr)->\(field_name)";
+                        } else {
+                            path = "\(base_access.path)->\(field_name)";
+                        };
+                        control = "NULL";
+                    },
+                    .MutablePointerType(pointee) then {
+                        if self.codegen.uses_managed_nominal_representation(pointee) then {
+                            let payload_type = self.codegen.managed_payload_type_name(pointee);
+                            path = "((struct \(payload_type)*)\(base_access.path)->ptr)->\(field_name)";
+                        } else {
+                            path = "\(base_access.path)->\(field_name)";
+                        };
+                        control = "NULL";
                     },
                     _ then {
-                        let mutable path = String.new();
-                        path.push_string(base_access.path);
-                        path.push_string(".");
-                        path.push_string(field_name);
-                        yield path;
+                        path = "\(base_access.path).\(field_name)";
                     },
                 };
-                yield MIRPlaceAccess(path, base_access.control, base_access.cleanup);
+                yield MIRPlaceAccess(path, control, base_access.cleanup);
             },
             .EnumPayload(base, case_name, field_name, _, _) then {
-                let base_access = self.emit_place_access(*base);
-                let payload_base = when self.type_of_place(*base) in {
-                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
-                        let mutable payload_base = String.new();
-                        payload_base.push_string("(*(");
-                        payload_base.push_string(self.codegen.c_type_name(*inner));
-                        payload_base.push_string("*)");
-                        payload_base.push_string(base_access.path);
-                        payload_base.push_string(".ptr)");
-                        yield payload_base;
-                    },
-                    _ then base_access.path,
+                let base_access = self.emit_place_access(base);
+                let base_type = self.type_of_place(base);
+                let mutable path = "\(base_access.path).data.\(self.codegen.sanitize_codegen_identifier(case_name)).\(self.codegen.sanitize_codegen_identifier(field_name))";
+                if self.codegen.uses_managed_nominal_representation(base_type) then {
+                    let payload_type = self.codegen.managed_payload_type_name(base_type);
+                    path = "((struct \(payload_type)*)\(base_access.path).ptr)->data.\(self.codegen.sanitize_codegen_identifier(case_name)).\(self.codegen.sanitize_codegen_identifier(field_name))";
                 };
-                let mutable path = String.new();
-                path.push_string(payload_base);
-                path.push_string(".data.");
-                path.push_string(self.codegen.sanitize_codegen_identifier(case_name));
-                path.push_string(".");
-                path.push_string(self.codegen.sanitize_codegen_identifier(field_name));
                 yield MIRPlaceAccess(path, base_access.control, base_access.cleanup);
             },
             .Deref(base, pointee) then {
-                let base_emission = self.emit_value_source(*base);
-                let base_type = self.type_of_value(*base);
+                let base_emission = self.emit_value_source(base);
+                let mutable base_type = self.type_of_value(base);
                 yield when base_type in {
                     .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {
                         when self.trait_object_target_name(pointee) in {
                             .Some(_) then {
-                                let mutable control = String.new();
+                                let mutable control = StringBuilder.new();
                                 control.push_string(base_emission.expression);
                                 control.push_string(".control");
-                                yield MIRPlaceAccess(base_emission.expression, control, base_emission.cleanup);
+                                yield MIRPlaceAccess(base_emission.expression, control.to_string(), base_emission.cleanup);
                             },
                             .None() then {},
                         };
-                        let mutable path = String.new();
+                        let mutable path = StringBuilder.new();
                         path.push_string("(*(");
                         path.push_string(self.codegen.c_type_name(pointee));
                         path.push_string("*)");
                         path.push_string(base_emission.expression);
                         path.push_string(".ptr)");
-                        let mutable control = String.new();
+                        let mutable control = StringBuilder.new();
                         control.push_string(base_emission.expression);
                         control.push_string(".control");
-                        yield MIRPlaceAccess(path, control, base_emission.cleanup);
+                          yield MIRPlaceAccess(path.to_string(), control.to_string(), base_emission.cleanup);
                     },
                     _ then {
-                        let mutable path = String.new();
+                        let mutable path = StringBuilder.new();
                         path.push_string("(*(");
                         path.push_string(self.codegen.c_type_name(pointee));
                         path.push_string("*)");
                         path.push_string(base_emission.expression);
                         path.push_string(")");
-                        yield MIRPlaceAccess(path, "NULL", base_emission.cleanup);
+                        yield MIRPlaceAccess(path.to_string(), "NULL", base_emission.cleanup);
                     },
                 };
             },
             .PointerElement(base, element) then {
-                let base_emission = self.emit_value_source(*base);
-                let mutable path = String.new();
+                let base_emission = self.emit_value_source(base);
+                let mutable path = StringBuilder.new();
                 path.push_string("(*(");
                 path.push_string(self.codegen.c_type_name(element));
                 path.push_string("*)");
                 path.push_string(base_emission.expression);
                 path.push_string(")");
-                yield MIRPlaceAccess(path, "NULL", base_emission.cleanup);
+                yield MIRPlaceAccess(path.to_string(), "NULL", base_emission.cleanup);
             },
         };
     };
 
-    module_private type_of_place(*self, place MIRPlace) Type = {
+    module_private type_of_place(self, place MIRPlace) Type = {
         return when place in {
             .Local(local) then when self.local_info(local) in { .Some(info) then info.local_type, .None() then Type.Unknown() },
             .Global(def_id) then self.codegen.context.get_symbol_type(def_id) or else Type.Unknown(),
@@ -2421,7 +2624,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private type_of_value(*self, value MIRValue) Type = {
+    module_private type_of_value(self, value MIRValue) Type = {
         return when value in {
             .Operand(operand) then self.type_of_operand(operand),
             .PlaceRead(place, _) then self.type_of_place(place),
@@ -2441,7 +2644,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private type_of_operand(*self, operand MIROperand) Type = {
+    module_private type_of_operand(self, operand MIROperand) Type = {
         return when operand in {
             .Local(local) then when self.local_info(local) in { .Some(info) then info.local_type, .None() then Type.Unknown() },
             .Function(symbol) then symbol.symbol_type,
@@ -2455,29 +2658,23 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private type_of_ref(*self, place MIRPlace, kind MIRReferenceKind) Type = {
+    module_private type_of_ref(self, place MIRPlace, kind MIRReferenceKind) Type = {
         let inner = self.type_of_place(place);
         return when kind in {
-            .Mutable() then Type.MutableReferenceType(box(inner)),
-            .Weak() then Type.WeakReferenceType(box(inner)),
-            .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
-            .Shared() then Type.ReferenceType(box(inner)),
+            .Mutable() then Type.MutableReferenceType(inner),
+            .Weak() then Type.WeakReferenceType(inner),
+            .MutableWeak() then Type.MutableWeakReferenceType(inner),
+            .Shared() then Type.ReferenceType(inner),
         };
     };
 
-    module_private type_of_pointer(*self, place MIRPlace) Type = Type.PointerType(box(self.type_of_place(place)));
+    module_private type_of_pointer(self, place MIRPlace) Type = Type.PointerType(self.type_of_place(place));
 
-    module_private type_of_intrinsic(*self, node MIRIntrinsic) Type = {
+    module_private type_of_intrinsic(self, node MIRIntrinsic) Type = {
         return when node in {
             .AllocMemory(_, result_type) then result_type,
-            .IsUniqueMutable(_) then Type.BoolType(),
-            .RefCount(_) then Type.UIntType(),
-            .MakeRef(_, _, result_type) then result_type,
-            .MakeMutRef(_, _, result_type) then result_type,
             .DowngradeRef(_, result_type) then result_type,
-            .DowngradeMutRef(_, result_type) then result_type,
             .UpgradeRef(_, result_type) then result_type,
-            .UpgradeMutRef(_, result_type) then result_type,
             .TraitObjectMatches(_, _, _, _) then Type.BoolType(),
             .TraitObjectDowncast(_, result_type) then result_type,
             .TakeMemory(_, result_type) then result_type,
@@ -2487,10 +2684,10 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private local_target_id(*self, place MIRPlace) Option[MIRLocalID] = when place in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() };
-    module_private local_id_from_operand(*self, operand MIROperand) Option[MIRLocalID] = when operand in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() };
+    module_private local_target_id(self, place MIRPlace) Option[MIRLocalID] = when place in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() };
+    module_private local_id_from_operand(self, operand MIROperand) Option[MIRLocalID] = when operand in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() };
 
-    module_private computed_local_name(*self, local MIRLocal) String = {
+    module_private computed_local_name(self, local MIRLocal) String = {
         return when local.storage in {
             .Parameter() then when local.symbol in {
                 .Some(symbol) then self.codegen.c_identifier_for_symbol(symbol),
@@ -2504,18 +2701,18 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private local_name(*self, local MIRLocalID) String = {
+    module_private local_name(self, local MIRLocalID) String = {
         return when self.local_names_by_id.get(local.raw_value) in {
             .Some(name) then name,
             .None() then when self.local_info(local) in {
-                .Some(info) then self.computed_local_name(*info),
+                .Some(info) then self.computed_local_name(info),
                 .None() then if local.raw_value < self.local_names.count() then self.local_names[local.raw_value] else "__mir_local_\(local.raw_value)",
             },
         };
     };
-    module_private block_label(*self, block MIRBlockID) String = "__mir_bb_\(block.raw_value)";
+    module_private block_label(self, block MIRBlockID) String = "__mir_bb_\(block.raw_value)";
 
-    module_private is_parameter_operand(*self, operand MIROperand) Bool = {
+    module_private is_parameter_operand(self, operand MIROperand) Bool = {
         return when operand in {
             .Local(local) then when self.local_info(local) in {
                 .Some(info) then info.storage is .Parameter(),
@@ -2525,16 +2722,16 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private root_local_of_place(*self, place MIRPlace) Option[MIRLocalID] = {
+    module_private root_local_of_place(self, place MIRPlace) Option[MIRLocalID] = {
         return when place in {
             .Local(local) then Option[MIRLocalID].Some(local),
-            .Field(base, _) then self.root_local_of_place(*base),
-            .EnumPayload(base, _, _, _, _) then self.root_local_of_place(*base),
+            .Field(base, _) then self.root_local_of_place(base),
+            .EnumPayload(base, _, _, _, _) then self.root_local_of_place(base),
             _ then Option[MIRLocalID].None(),
         };
     };
 
-    module_private consume_moved_place(*mutable self, place MIRPlace) Void = {
+    module_private consume_moved_place(self, place MIRPlace) Void = {
         when self.root_local_of_place(place) in {
             .Some(local) then {
                 self.set_init_flag(local, false);
@@ -2544,7 +2741,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private consume_moved_source(*mutable self, value MIRValue) Void = {
+    module_private consume_moved_source(self, value MIRValue) Void = {
         when value in {
             .Operand(.Local(local)) then self.set_init_flag(local, false),
             .PlaceRead(place, ownership) then {
@@ -2552,25 +2749,50 @@ given MIRFunctionCodeEmitter {
                     self.consume_moved_place(place);
                 };
             },
-            // Heap-owned ref values already decide whether ownership transfer is
-            // allowed inside emit_heap_reference(). Consuming again here would
-            // incorrectly treat field/member-path boxing as moving the root local.
-            .Ref(_, _, _) then {},
+            .Cast(operand, target_type) then {
+                let source_type = self.type_of_value(MIRValue.Operand(operand));
+                if self.is_ownership_preserving_cast(source_type, target_type) then {
+                    self.consume_moved_source(MIRValue.Operand(operand));
+                };
+            },
+            .Ref(place, _, allocation) then {
+                if allocation is .HeapOwnedMove() then {
+                    self.consume_moved_place(place);
+                };
+            },
             _ then {},
         };
     };
 
-    module_private next_lambda_name(*mutable self) String = {
+    module_private should_copy_borrowed_aggregate_field(self, value MIRValue) Bool = {
+        return when value in {
+            .PlaceRead(_, ownership) then ownership is .Borrow(),
+            _ then false,
+        };
+    };
+
+    module_private is_ownership_preserving_cast(self, source_type Type, target_type Type) Bool = {
+        return when source_type in {
+            .ReferenceType(_) then target_type is .ReferenceType(_) or target_type is .MutableReferenceType(_),
+            .MutableReferenceType(_) then target_type is .ReferenceType(_) or target_type is .MutableReferenceType(_),
+            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or target_type is .MutableWeakReferenceType(_),
+            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or target_type is .MutableWeakReferenceType(_),
+            .MutablePointerType(_) then target_type is .PointerType(_) or target_type is .MutablePointerType(_),
+            _ then source_type == target_type,
+        };
+    };
+
+    module_private next_lambda_name(self) String = {
         let name = "__koral_lambda_\(self.function.identifier.def_id.id)_\(self.lambda_counter)";
         self.lambda_counter += 1;
         return name;
     };
 
-    module_private capture_field_name(*self, symbol Symbol) String = {
+    module_private capture_field_name(self, symbol Symbol) String = {
         return self.codegen.c_identifier_for_symbol_value(symbol);
     };
 
-    module_private should_copy_returned_operand(*self, operand MIROperand, operand_type Type) Bool = {
+    module_private should_copy_returned_operand(self, operand MIROperand, operand_type Type) Bool = {
         if not self.codegen.needs_drop(operand_type) then { return false;};
         return when operand in {
             .Local(local) then when self.local_info(local) in {
@@ -2581,7 +2803,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private set_init_flag(*mutable self, local MIRLocalID, value Bool) Void = {
+    module_private set_init_flag(self, local MIRLocalID, value Bool) Void = {
         when self.init_flag(local) in {
             .Some(flag) then {
                 self.codegen.add_indent();
@@ -2594,14 +2816,14 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private cleanup_for_temporary_result(*self, expression String, cleanup_type Type) Option[* MIRValueCleanup] = {
+    module_private cleanup_for_temporary_result(self, expression String, cleanup_type Type) Option[MIRValueCleanup] = {
         if not expression.is_empty() and self.codegen.needs_drop(cleanup_type) then {
-            return Option[* MIRValueCleanup].Some(box(MIRValueCleanup(expression, cleanup_type)));
+            return Option[MIRValueCleanup].Some(MIRValueCleanup(expression, cleanup_type));
         };
-        return Option[* MIRValueCleanup].None();
+        return Option[MIRValueCleanup].None();
     };
 
-    module_private emit_cleanup(*mutable self, cleanup Option[* MIRValueCleanup]) Void = {
+    module_private emit_cleanup(self, cleanup Option[MIRValueCleanup]) Void = {
         when cleanup in {
             .Some(item) then {
                 self.codegen.add_indent();
@@ -2611,7 +2833,7 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private emit_residual_cleanups(*mutable self, emission MIRValueEmission, consumed Bool) Void = {
+    module_private emit_residual_cleanups(self, emission MIRValueEmission, consumed Bool) Void = {
         when emission.cleanup in {
             .Some(cleanup) then {
                 if consumed and cleanup.name == emission.expression then {
@@ -2624,26 +2846,32 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private control_expression(*self, value_type Type, value String) String = {
+    module_private control_expression(self, value_type Type, value String) String = {
+        if self.codegen.uses_managed_nominal_representation(value_type) then {
+            let mutable control = StringBuilder.new();
+            control.push_string(value);
+            control.push_string(".control");
+            return control.to_string();
+        };
         return when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then {
-                let mutable control = String.new();
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _, _) then {
+                let mutable control = StringBuilder.new();
                 control.push_string(value);
                 control.push_string(".control");
-                yield control;
+                yield control.to_string();
             },
             _ then "NULL",
         };
     };
 
-    module_private context_name(*self, def_id DefId) String = self.codegen.context.get_name(def_id) or else "global_\(def_id.id)";
+    module_private context_name(self, def_id DefId) String = self.codegen.context.get_name(def_id) or else "global_\(def_id.id)";
 
-    module_private switch_case_expression(*mutable self, constant MIRConstant) String = self.constant_expression(constant);
+    module_private switch_case_expression(self, constant MIRConstant) String = self.constant_expression(constant);
 
-    module_private enum_case_info(*self, enum_type Type, case_name String) Pair[UInt, List[EnumCaseParam]] = {
+    module_private enum_case_info(self, enum_type Type, case_name String) Pair[UInt, List[EnumCaseParam]] = {
         let def_id = when enum_type in {
             .EnumType(id) then id,
-            .GenericEnum(template, _) then self.codegen.find_type_def_id_by_layout_or_template(enum_type, template) or else DefId(0(UInt)),
+            .GenericEnum(template, _, _) then self.codegen.find_type_def_id_by_layout_or_template(enum_type, template) or else DefId(0(UInt)),
             _ then DefId(0(UInt)),
         };
         when self.codegen.context.get_enum_cases(def_id) in {
@@ -2659,20 +2887,20 @@ given MIRFunctionCodeEmitter {
         return Pair[UInt, List[EnumCaseParam]](0(UInt), List[EnumCaseParam].new());
     };
 
-    module_private type_list_to_ref_list(*self, args List[Type]) List[* Type] = {
+    module_private type_list_to_ref_list(self, args List[Type]) List[Type] = {
         let _ = self;
-        let mutable out = List[* Type].new();
-        for arg in args then { out.push(box(arg));};
+        let mutable out = List[Type].new();
+        for arg in args then { out.push(arg);};
         return out;
     };
 
-    module_private pointer_element_type(*self, pointer_type Type) Type = when pointer_type in { .PointerType(inner) then *inner, .MutablePointerType(inner) then *inner, _ then Type.VoidType() };
+    module_private pointer_element_type(self, pointer_type Type) Type = when pointer_type in { .PointerType(inner) then inner, .MutablePointerType(inner) then inner, _ then Type.VoidType() };
 
-    module_private emit_memory_transfer(*mutable self, function_name String, dest MIRValue, source MIRValue, count MIRValue) MIRValueEmission = {
+    module_private emit_memory_transfer(self, function_name String, dest MIRValue, source MIRValue, count MIRValue) MIRValueEmission = {
         let d = self.emit_value_source(dest);
         let s = self.emit_value_source(source);
         let c = self.emit_value_source(count);
-        let element_type = self.pointer_element_type(self.type_of_value(dest));
+        let mutable element_type = self.pointer_element_type(self.type_of_value(dest));
         self.codegen.add_indent();
         self.codegen.buffer.push_string(function_name);
         self.codegen.buffer.push_string("(");
@@ -2687,93 +2915,28 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(d.cleanup);
         self.emit_cleanup(s.cleanup);
         self.emit_cleanup(c.cleanup);
-        return MIRValueEmission("", Option[* MIRValueCleanup].None());
+        return MIRValueEmission("", Option[MIRValueCleanup].None());
     };
 
-    module_private emit_is_unique(*mutable self, value MIRValue) MIRValueEmission = {
-        let emission = self.emit_value_source(value);
-        let result = self.codegen.next_temp_with_decl("int");
-        let value_type = self.type_of_value(value);
-        let control = when value_type in {
-            .MutablePointerType(_) or .PointerType(_) then "((struct __koral_Ref*)\(emission.expression))->control",
-            _ then self.control_expression(value_type, emission.expression),
-        };
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(" = 0;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("if (");
-        self.codegen.buffer.push_string(control);
-        self.codegen.buffer.push_string(") { ");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(" = (atomic_load(&((struct __koral_Control*)");
-        self.codegen.buffer.push_string(control);
-        self.codegen.buffer.push_string(")->strong_count) == 1); }\n");
-        self.emit_cleanup(emission.cleanup);
-        return MIRValueEmission(result, Option[* MIRValueCleanup].None());
-    };
-
-    module_private emit_ref_count(*mutable self, value MIRValue) MIRValueEmission = {
-        let emission = self.emit_value_source(value);
-        let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(Type.UIntType()));
-        let value_type = self.type_of_value(value);
-        let control = when value_type in {
-            .MutablePointerType(_) or .PointerType(_) then "((struct __koral_Ref*)\(emission.expression))->control",
-            _ then self.control_expression(value_type, emission.expression),
-        };
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(" = 0;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("if (");
-        self.codegen.buffer.push_string(control);
-        self.codegen.buffer.push_string(") { ");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(" = (");
-        self.codegen.buffer.push_string(self.codegen.c_type_name(Type.UIntType()));
-        self.codegen.buffer.push_string(")atomic_load(&((struct __koral_Control*)");
-        self.codegen.buffer.push_string(control);
-        self.codegen.buffer.push_string(")->strong_count); }\n");
-        self.emit_cleanup(emission.cleanup);
-        return MIRValueEmission(result, Option[* MIRValueCleanup].None());
-    };
-
-    module_private emit_make_ref(*mutable self, pointer MIRValue, owner MIRValue, result_type Type) MIRValueEmission = {
-        let p = self.emit_value_source(pointer);
-        let o = self.emit_value_source(owner);
-        let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".ptr = (void*)");
-        self.codegen.buffer.push_string(p.expression);
-        self.codegen.buffer.push_string(";\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control = ");
-        self.codegen.buffer.push_string(o.expression);
-        self.codegen.buffer.push_string(".control;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("if (");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control) { __koral_retain(");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control); }\n");
-        self.emit_cleanup(p.cleanup);
-        self.emit_cleanup(o.cleanup);
-        return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
-    };
-
-    module_private emit_runtime_unary_ref(*mutable self, function_name String, value MIRValue, result_type Type) MIRValueEmission = {
+    module_private emit_runtime_unary_ref(self, function_name String, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value);
         let result = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "\(function_name)(\(emission.expression))");
         self.emit_cleanup(emission.cleanup);
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
     };
 
-    module_private emit_downgrade_ref(*mutable self, value MIRValue, result_type Type) MIRValueEmission = {
+    module_private emit_downgrade_ref(self, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value);
-        return when self.type_of_value(value) in {
-            .ReferenceType(inner) then if *inner is .TraitObject(_, _) then {
+        let value_type = self.type_of_value(value);
+        // For managed nominal types, convert to __koral_Ref before calling downgrade.
+        if self.codegen.uses_managed_nominal_representation(value_type) then {
+            let ref_expr = "(struct __koral_Ref){.ptr = \(emission.expression).ptr, .control = \(emission.expression).control}";
+            let result = self.codegen.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(ref_expr))");
+            self.emit_cleanup(emission.cleanup);
+            return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
+        };
+        return when value_type in {
+            .ReferenceType(inner) then if inner is .TraitObject(_, _, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef");
                 let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef");
                 self.codegen.add_indent();
@@ -2796,7 +2959,7 @@ given MIRFunctionCodeEmitter {
                 self.emit_cleanup(emission.cleanup);
                 yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
-            .MutableReferenceType(inner) then if *inner is .TraitObject(_, _) then {
+            .MutableReferenceType(inner) then if inner is .TraitObject(_, _, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef");
                 let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef");
                 self.codegen.add_indent();
@@ -2819,7 +2982,7 @@ given MIRFunctionCodeEmitter {
                 self.emit_cleanup(emission.cleanup);
                 yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
-            .BorrowedReferenceType(inner) then if *inner is .TraitObject(_, _) then {
+            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef");
                 let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef");
                 self.codegen.add_indent();
@@ -2842,7 +3005,7 @@ given MIRFunctionCodeEmitter {
                 self.emit_cleanup(emission.cleanup);
                 yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
-            .MutableBorrowedReferenceType(inner) then if *inner is .TraitObject(_, _) then {
+            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef");
                 let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef");
                 self.codegen.add_indent();
@@ -2870,7 +3033,7 @@ given MIRFunctionCodeEmitter {
     };
 
     module_private emit_runtime_unary_ref_from_emission(
-        *mutable self,
+        self,
         function_name String,
         emission MIRValueEmission,
         result_type Type,
@@ -2880,94 +3043,59 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
     };
 
-    module_private emit_upgrade_ref(*mutable self, value MIRValue, result_type Type) MIRValueEmission = {
+    module_private emit_upgrade_ref(self, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value);
         let success = self.codegen.next_temp_with_decl("int");
-        return when self.type_of_value(value) in {
-            .WeakReferenceType(inner) then if *inner is .TraitObject(_, _) then {
-                let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))");
-                let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (");
-                self.codegen.buffer.push_string(success);
-                self.codegen.buffer.push_string(") {\n");
-                self.codegen.with_indent(() -> {
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".tag = 1;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.ptr = ");
-                    self.codegen.buffer.push_string(upgraded);
-                    self.codegen.buffer.push_string(".ptr;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.control = ");
-                    self.codegen.buffer.push_string(upgraded);
-                    self.codegen.buffer.push_string(".control;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.vtable = ");
-                    self.codegen.buffer.push_string(emission.expression);
-                    self.codegen.buffer.push_string(".vtable;\n")
-                ;});
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("} else {\n");
-                self.codegen.with_indent(() -> {
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".tag = 0;\n")
-                ;});
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("}\n");
-                self.emit_cleanup(emission.cleanup);
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
-            } else self.emit_plain_upgrade_ref(emission, success, result_type),
-            .MutableWeakReferenceType(inner) then if *inner is .TraitObject(_, _) then {
-                let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))");
-                let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (");
-                self.codegen.buffer.push_string(success);
-                self.codegen.buffer.push_string(") {\n");
-                self.codegen.with_indent(() -> {
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".tag = 1;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.ptr = ");
-                    self.codegen.buffer.push_string(upgraded);
-                    self.codegen.buffer.push_string(".ptr;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.control = ");
-                    self.codegen.buffer.push_string(upgraded);
-                    self.codegen.buffer.push_string(".control;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".data.Some.value.vtable = ");
-                    self.codegen.buffer.push_string(emission.expression);
-                    self.codegen.buffer.push_string(".vtable;\n")
-                ;});
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("} else {\n");
-                self.codegen.with_indent(() -> {
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(result);
-                    self.codegen.buffer.push_string(".tag = 0;\n")
-                ;});
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("}\n");
-                self.emit_cleanup(emission.cleanup);
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
-            } else self.emit_plain_upgrade_ref(emission, success, result_type),
-            _ then self.emit_plain_upgrade_ref(emission, success, result_type),
+        let value_type = self.type_of_value(value);
+        let is_trait_weak = when value_type in {
+            .WeakReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .MutableWeakReferenceType(inner) then inner is .TraitObject(_, _, _),
+            _ then false,
         };
+        if is_trait_weak then {
+            let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))");
+            let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("if (");
+            self.codegen.buffer.push_string(success);
+            self.codegen.buffer.push_string(") {\n");
+            self.codegen.push_indent_level();
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".tag = 1;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".data.Some.value.ptr = ");
+            self.codegen.buffer.push_string(upgraded);
+            self.codegen.buffer.push_string(".ptr;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".data.Some.value.control = ");
+            self.codegen.buffer.push_string(upgraded);
+            self.codegen.buffer.push_string(".control;\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".data.Some.value.vtable = ");
+            self.codegen.buffer.push_string(emission.expression);
+            self.codegen.buffer.push_string(".vtable;\n");
+            self.codegen.pop_indent_level();
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("} else {\n");
+            self.codegen.push_indent_level();
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".tag = 0;\n");
+            self.codegen.pop_indent_level();
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("}\n");
+            self.emit_cleanup(emission.cleanup);
+            return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
+        };
+        return self.emit_plain_upgrade_ref(emission, success, result_type);
     };
 
     module_private emit_plain_upgrade_ref(
-        *mutable self,
+        self,
         emission MIRValueEmission,
         success String,
         result_type Type,
@@ -2977,20 +3105,36 @@ given MIRFunctionCodeEmitter {
         self.codegen.add_indent();
         self.codegen.buffer.push_string("if (");
         self.codegen.buffer.push_string(success);
-        self.codegen.buffer.push_string(") { ");
+        self.codegen.buffer.push_string(") {\n");
+        self.codegen.push_indent_level();
+        self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".tag = 1; ");
+        self.codegen.buffer.push_string(".tag = 1;\n");
+        self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".data.Some.value = ");
+        self.codegen.buffer.push_string(".data.Some.value.ptr = ");
         self.codegen.buffer.push_string(upgraded);
-        self.codegen.buffer.push_string("; } else { ");
+        self.codegen.buffer.push_string(".ptr;\n");
+        self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".tag = 0; }\n");
+        self.codegen.buffer.push_string(".data.Some.value.control = ");
+        self.codegen.buffer.push_string(upgraded);
+        self.codegen.buffer.push_string(".control;\n");
+        self.codegen.pop_indent_level();
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("} else {\n");
+        self.codegen.push_indent_level();
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(result);
+        self.codegen.buffer.push_string(".tag = 0;\n");
+        self.codegen.pop_indent_level();
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("}\n");
         self.emit_cleanup(emission.cleanup);
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
     };
 
-    module_private emit_spawn_thread(*mutable self, out_handle MIRValue, out_tid MIRValue, closure MIRValue, stack_size MIRValue) MIRValueEmission = {
+    module_private emit_spawn_thread(self, out_handle MIRValue, out_tid MIRValue, closure MIRValue, stack_size MIRValue) MIRValueEmission = {
         let h = self.emit_value_source(out_handle);
         let t = self.emit_value_source(out_tid);
         let c = self.emit_value_source(closure);
@@ -3000,22 +3144,22 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(t.cleanup);
         self.emit_cleanup(c.cleanup);
         self.emit_cleanup(s.cleanup);
-        return MIRValueEmission(result, Option[* MIRValueCleanup].None());
+        return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
 };
 
 file_private let join_strings(values List[String], separator String) String = {
-    let mutable out = String.new();
+    let mutable out = StringBuilder.new();
     let mutable first = true;
     for value in values then {
         if not first then { out.push_string(separator);};
         out.push_string(value);
         first = false;
     };
-    return out;
+    return out.to_string();
 };
 
-file_private let build_mir_lifetime_plan(function * MIRFunction, codegen * CodeGen, tracked_init_locals Dict[UInt, Bool]) * MIRLocalLifetimePlan = {
+file_private let build_mir_lifetime_plan(function MIRFunction, codegen CodeGen, tracked_init_locals Dict[UInt, Bool]) MIRLocalLifetimePlan = {
     let mutable tracked_drop_local_ids = Dict[UInt, Bool].new();
     let mutable has_tracked_drop_locals = false;
     for local in function.locals then {
@@ -3036,13 +3180,13 @@ file_private let build_mir_lifetime_plan(function * MIRFunction, codegen * CodeG
                 hoisted_declaration_locals.push(local.id);
             };
         };
-        return box(MIRLocalLifetimePlan(
+        return MIRLocalLifetimePlan(
             List[MIRLocalID].new(),
             Dict[UInt, List[MIRLocalID]].new(),
             hoisted_declaration_locals,
             Dict[UInt, List[MIRLocalID]].new(),
             Dict[UInt, Bool].new()
-        ));
+        );
     };
 
     let mutable root_locals = List[MIRLocalID].new();
@@ -3083,28 +3227,28 @@ file_private let build_mir_lifetime_plan(function * MIRFunction, codegen * CodeG
                     if not active_scopes.is_empty() then {
                         declared_scope_by_local.insert(local_id.raw_value, active_scopes[active_scopes.count() - 1(UInt)]);
                     };
-                    mir_record_local_use(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, local_id, block.id, &mutable active_scopes);
+                    mir_record_local_use(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, local_id, block.id, active_scopes);
                 },
                 .Assign(place, value) then {
-                    mir_walk_place_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, place, block.id, &mutable active_scopes);
-                    mir_walk_value_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, value, block.id, &mutable active_scopes);
+                    mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block.id, active_scopes);
+                    mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block.id, active_scopes);
                 },
                 .CompoundAssign(assignment) then {
-                    mir_walk_place_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, assignment.target, block.id, &mutable active_scopes);
-                    mir_walk_value_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, assignment.value, block.id, &mutable active_scopes);
+                    mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, assignment.target, block.id, active_scopes);
+                    mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, assignment.value, block.id, active_scopes);
                 },
-                .Drop(place) then mir_walk_place_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, place, block.id, &mutable active_scopes),
-                .Retain(value) then mir_walk_value_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, value, block.id, &mutable active_scopes),
-                .Release(value) then mir_walk_value_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, value, block.id, &mutable active_scopes),
-                .Evaluate(value) then mir_walk_value_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, value, block.id, &mutable active_scopes),
+                .Drop(place) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block.id, active_scopes),
+                .Retain(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block.id, active_scopes),
+                .Release(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block.id, active_scopes),
+                .Evaluate(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block.id, active_scopes),
                 .DebugSource(_) then {},
             };
         };
         when block.terminator in {
-            .Branch(condition, _, _) then mir_walk_operand_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, condition, block.id, &mutable active_scopes),
-            .SwitchValue(operand, _, _) then mir_walk_operand_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, operand, block.id, &mutable active_scopes),
+            .Branch(condition, _, _) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, condition, block.id, active_scopes),
+            .SwitchValue(operand, _, _) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operand, block.id, active_scopes),
             .ReturnValue(operand) then when operand in {
-                .Some(op) then mir_walk_operand_uses(&mutable shared_use_scope_by_local, &mutable first_use_block_by_local, &mutable multiple_use_blocks_by_local, &mutable tracked_drop_local_ids, &mutable parent_scope_by_scope, op, block.id, &mutable active_scopes),
+                .Some(op) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, op, block.id, active_scopes),
                 .None() then {},
             },
             _ then {},
@@ -3128,7 +3272,7 @@ file_private let build_mir_lifetime_plan(function * MIRFunction, codegen * CodeG
                     .None() then false,
                 };
                 if retained_scope then { break;};
-                scope = mir_parent_scope(&mutable parent_scope_by_scope, scope_id);
+                scope = mir_parent_scope(parent_scope_by_scope, scope_id);
             };
             when scope in {
                 .Some(scope_id) then {
@@ -3167,17 +3311,17 @@ file_private let build_mir_lifetime_plan(function * MIRFunction, codegen * CodeG
             };
         };
     };
-    return box(MIRLocalLifetimePlan(
+    return MIRLocalLifetimePlan(
         root_locals,
         locals_by_scope,
         hoisted_declaration_locals,
         block_local_declarations_by_block,
         block_local_declaration_locals
-    ));
+    );
 };
 
 given CodeGen {
-    module_private receiver_owner_type_from_typed_params(*self, params List[TypedParam]) Option[Type] = {
+    module_private receiver_owner_type_from_typed_params(self, params List[TypedParam]) Option[Type] = {
         let _ = self;
         if params.is_empty() then {
             return Option[Type].None();
@@ -3187,24 +3331,24 @@ given CodeGen {
             return Option[Type].None();
         };
         return when first_param.param_type in {
-            .ReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableReferenceType(inner) then Option[Type].Some(*inner),
-            .BorrowedReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableBorrowedReferenceType(inner) then Option[Type].Some(*inner),
-            .WeakReferenceType(inner) then Option[Type].Some(*inner),
-            .MutableWeakReferenceType(inner) then Option[Type].Some(*inner),
+            .ReferenceType(inner) then Option[Type].Some(inner),
+            .MutableReferenceType(inner) then Option[Type].Some(inner),
+            .BorrowedReferenceType(inner) then Option[Type].Some(inner),
+            .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
+            .WeakReferenceType(inner) then Option[Type].Some(inner),
+            .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
             _ then Option[Type].Some(first_param.param_type),
         };
     };
 
-    public emit_mir_function_body(*mutable self, function * MIRFunction) String = {
+    public emit_mir_function_body(self, function MIRFunction) String = {
         let saved_indent = self.indent;
-        self.indent = "    ";
+        self.indent = StringBuilder.new(); self.indent.push_string("    ");
         let plan = build_mir_function_emit_plan(self, function);
         let mutable emitter = MIRFunctionCodeEmitter.new(self, function, plan);
         let saved_buffer = self.buffer;
         self.buffer = CodegenBuffer.new();
-        let nested = (&mutable emitter).emit_body_and_get_nested_definitions();
+        let nested = (emitter).emit_body_and_get_nested_definitions();
         let body_text = self.buffer.into_string();
         self.buffer = saved_buffer;
         if not nested.is_empty() then {
@@ -3214,7 +3358,7 @@ given CodeGen {
         return body_text;
     };
 
-    public emit_mir_global_function(*mutable self, function * MIRFunction) Void = {
+    public emit_mir_global_function(self, function MIRFunction) Void = {
         let c_name = self.callable_c_name(function.identifier);
         if self.emitted_function_names.contains(c_name) then { return;};
         self.emitted_function_names.insert(c_name);
@@ -3223,7 +3367,7 @@ given CodeGen {
         self.current_owner_callable_c_name_cache = Dict[String, String].new();
         let declared_return_type = self.mir_function_return_type(function);
         if self.type_contains_generic(declared_return_type) or self.params_contain_generic(function.params) then {
-            panic("Generic MIR function body reached codegen: \(self.context.symbol_name(*(function.identifier))) :: \(self.context.type_display_name(function.identifier.symbol_type))");
+            panic("Generic MIR function body reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))");
         };
 
         let saved_owner_type = self.current_function_owner_type;
@@ -3241,8 +3385,8 @@ given CodeGen {
 
             // Emit nested definitions (lambda functions, env structs) before the function
             if not self.nested_function_definitions.is_empty() then {
-                self.buffer.push_string(self.nested_function_definitions);
-                self.nested_function_definitions = String.new();
+                self.buffer.push_string(self.nested_function_definitions.to_string());
+                self.nested_function_definitions = StringBuilder.new();
             };
 
             self.buffer.push_string(return_c_type);

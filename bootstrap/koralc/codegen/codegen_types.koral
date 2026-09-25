@@ -25,58 +25,58 @@ file_private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
-    module_private register_type_declaration_for_used_type(*mutable self, decl_map *mutable Dict[String, TypeDeclaration], seen *mutable Set[String], t Type) Void = {
-        let concrete_type = self.concretize_codegen_type(t);
+    module_private register_type_declaration_for_used_type(self, decl_map Dict[String, TypeDeclaration], seen Set[String], t Type) Void = {
+        let mutable concrete_type = self.concretize_codegen_type(t);
         let visit_key = self.concrete_layout_key_for_type(concrete_type);
         if seen.contains(visit_key) then { return;};
         seen.insert(visit_key);
 
         when concrete_type in {
             .ReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .MutableReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .BorrowedReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .MutableBorrowedReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .PointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .MutablePointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .WeakReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .MutableWeakReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, *inner);
+                self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
             .FunctionType(params, return_type) then {
                 for entry in params then {
                     self.register_type_declaration_for_used_type(decl_map, seen, entry.param_type);
                 };
-                self.register_type_declaration_for_used_type(decl_map, seen, *return_type);
+                self.register_type_declaration_for_used_type(decl_map, seen, return_type);
                 return;
             },
             .StructureType(def_id) then {
                 when self.concrete_struct_fields_from_def(def_id) in {
                     .Some(fields) then {
-                        let c_name = self.c_identifier_for_symbol(box(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol())));
+                        let c_name = self.c_identifier_for_symbol(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol()));
                         if not decl_map.contains_key(c_name) then {
-                            decl_map.insert(c_name, TypeDeclaration.Structure(c_name, fields));
+                            decl_map.insert(c_name, TypeDeclaration.Structure(c_name, concrete_type, fields, self.uses_managed_nominal_representation(concrete_type)));
                         };
                         for field in fields then {
                             self.register_type_declaration_for_used_type(decl_map, seen, field.field_type);
@@ -89,9 +89,9 @@ given CodeGen {
             .EnumType(def_id) then {
                 when self.concrete_enum_cases_from_def(def_id) in {
                     .Some(cases) then {
-                        let c_name = self.c_identifier_for_symbol(box(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol())));
+                        let c_name = self.c_identifier_for_symbol(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol()));
                         if not decl_map.contains_key(c_name) then {
-                            decl_map.insert(c_name, TypeDeclaration.Enum(c_name, cases));
+                            decl_map.insert(c_name, TypeDeclaration.Enum(c_name, concrete_type, cases, self.uses_managed_nominal_representation(concrete_type)));
                         };
                         for case_info in cases then {
                             for field in case_info.fields then {
@@ -103,7 +103,7 @@ given CodeGen {
                 };
                 return;
             },
-            .GenericStruct(template, _) then {
+            .GenericStruct(template, _, _) then {
                 when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
                     .Some(def_id) then {
                         self.register_type_declaration_for_used_type(decl_map, seen, Type.StructureType(def_id));
@@ -112,7 +112,7 @@ given CodeGen {
                 };
                 return;
             },
-            .GenericEnum(template, _) then {
+            .GenericEnum(template, _, _) then {
                 when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
                     .Some(def_id) then {
                         self.register_type_declaration_for_used_type(decl_map, seen, Type.EnumType(def_id));
@@ -125,49 +125,49 @@ given CodeGen {
         };
     };
 
-    module_private collect_used_type_declarations(*mutable self, decl_map *mutable Dict[String, TypeDeclaration]) Void = {
+    module_private collect_used_type_declarations(self, decl_map Dict[String, TypeDeclaration]) Void = {
         let mutable seen = Set[String].new();
 
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(_, params, return_type) then {
                     for param in params then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, param.param_type);
+                        self.register_type_declaration_for_used_type(decl_map, seen, param.param_type);
                     };
-                    self.register_type_declaration_for_used_type(decl_map, &mutable seen, return_type);
+                    self.register_type_declaration_for_used_type(decl_map, seen, return_type);
                 },
                 .ForeignStruct(_, fields) then {
                     for field in fields then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, field.field_type);
+                        self.register_type_declaration_for_used_type(decl_map, seen, field.field_type);
                     };
                 },
-                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, &mutable seen, decl_type),
-                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, &mutable seen, decl_type),
+                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen, decl_type),
+                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen, decl_type),
                 .StructDeclaration(_, fields) then {
                     for field in fields then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, field.field_type);
+                        self.register_type_declaration_for_used_type(decl_map, seen, field.field_type);
                     };
                 },
                 .EnumDeclaration(_, cases) then {
                     for case_info in cases then {
                         for field in case_info.fields then {
-                            self.register_type_declaration_for_used_type(decl_map, &mutable seen, field.field_type);
+                            self.register_type_declaration_for_used_type(decl_map, seen, field.field_type);
                         };
                     };
                 },
                 .Function(_, params, return_type, _) then {
                     for param in params then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, param.param_type);
+                        self.register_type_declaration_for_used_type(decl_map, seen, param.param_type);
                     };
-                    self.register_type_declaration_for_used_type(decl_map, &mutable seen, return_type);
+                    self.register_type_declaration_for_used_type(decl_map, seen, return_type);
                 },
                 .Given(target_type, _, trait_type_args, methods) then {
-                    self.register_type_declaration_for_used_type(decl_map, &mutable seen, target_type);
+                    self.register_type_declaration_for_used_type(decl_map, seen, target_type);
                     for trait_arg in trait_type_args then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, trait_arg);
+                        self.register_type_declaration_for_used_type(decl_map, seen, trait_arg);
                     };
                     for method in methods then {
-                        self.register_type_declaration_for_used_type(decl_map, &mutable seen, method.symbol_type);
+                        self.register_type_declaration_for_used_type(decl_map, seen, method.symbol_type);
                     };
                 },
                 .TraitVTable(_) then {},
@@ -178,11 +178,11 @@ given CodeGen {
 
         for function_ref in self.program.functions then {
             for param in function_ref.params then {
-                self.register_type_declaration_for_used_type(decl_map, &mutable seen, param.param_type);
+                self.register_type_declaration_for_used_type(decl_map, seen, param.param_type);
             };
-            self.register_type_declaration_for_used_type(decl_map, &mutable seen, function_ref.return_type);
+            self.register_type_declaration_for_used_type(decl_map, seen, function_ref.return_type);
             for local in function_ref.locals then {
-                self.register_type_declaration_for_used_type(decl_map, &mutable seen, local.local_type);
+                self.register_type_declaration_for_used_type(decl_map, seen, local.local_type);
             };
         };
 
@@ -253,67 +253,221 @@ given CodeGen {
     /// 生成结构体类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_type_declaration(*mutable self, name String, fields List[TypedField]) Void = {
+    module_private append_managed_nominal_copy_function(self, name String) Void = {
+        self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("struct \(name) result = *self;\n");
+        self.add_indent();
+        self.buffer.push_string("if (result.control) { __koral_retain(result.control); }\n");
+        self.add_indent();
+        self.buffer.push_string("return result;\n");
+        self.pop_indent_level();
+        self.buffer.push_string("}\n\n");
+    };
+
+    module_private append_managed_nominal_drop_function(self, name String) Void = {
+        self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("if (self->control) { __koral_release(self->control); }\n");
+        self.pop_indent_level();
+        self.buffer.push_string("}\n\n");
+    };
+
+    module_private append_managed_nominal_user_drop_prelude(self, name String, user_drop String) Void = {
+        self.add_indent();
+        self.buffer.push_string("struct \(name) __koral_self;\n");
+        self.add_indent();
+        self.buffer.push_string("__koral_self.ptr = raw_payload;\n");
+        self.add_indent();
+        self.buffer.push_string("__koral_self.control = NULL;\n");
+        self.add_indent();
+        self.buffer.push_string("{\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("void \(user_drop)(struct \(name)*);\n");
+        self.add_indent();
+        self.buffer.push_string("\(user_drop)(&__koral_self);\n");
+        self.pop_indent_level();
+        self.add_indent();
+        self.buffer.push_string("}\n");
+    };
+
+    module_private append_managed_struct_payload_drop_function(self, name String, fields List[TypedField]) Void = {
+        let payload_name = "__koral_payload_\(name)";
+        self.buffer.push_string("static void __koral_\(name)_payload_drop(void* raw_payload) {\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("struct \(payload_name)* self = (struct \(payload_name)*)raw_payload;\n");
+        when self.user_defined_drop_for_type_name(name) in {
+            .Some(user_drop) then self.append_managed_nominal_user_drop_prelude(name, user_drop),
+            .None() then {},
+        };
+        for field in fields then {
+            if self.needs_drop(field.field_type) then {
+                let field_c_name = self.sanitize_codegen_identifier(field.name);
+                self.add_indent();
+                self.append_drop_statement(field.field_type, "self->\(field_c_name)");
+            };
+        };
+        self.pop_indent_level();
+        self.buffer.push_string("}\n\n");
+    };
+
+    module_private append_managed_enum_payload_drop_function(self, name String, cases List[TypedEnumCase]) Void = {
+        let payload_name = "__koral_payload_\(name)";
+        self.buffer.push_string("static void __koral_\(name)_payload_drop(void* raw_payload) {\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("struct \(payload_name)* self = (struct \(payload_name)*)raw_payload;\n");
+        when self.user_defined_drop_for_type_name(name) in {
+            .Some(user_drop) then self.append_managed_nominal_user_drop_prelude(name, user_drop),
+            .None() then {},
+        };
+        self.add_indent();
+        self.buffer.push_string("switch (self->tag) {\n");
+        let mutable case_index UInt = 0;
+        for case_info in cases then {
+            let case_c_name = self.sanitize_codegen_identifier(case_info.name);
+            self.add_indent();
+            self.buffer.push_string("case \(case_index): // \(case_info.name)\n");
+            for field in case_info.fields then {
+                if self.needs_drop(field.field_type) then {
+                    let field_c_name = self.sanitize_codegen_identifier(field.name);
+                    let field_path = "self->data.\(case_c_name).\(field_c_name)";
+                    self.add_indent();
+                    self.append_drop_statement(field.field_type, field_path);
+                };
+            };
+            self.add_indent();
+            self.buffer.push_string("    break;\n");
+            case_index += 1;
+        };
+        self.add_indent();
+        self.buffer.push_string("}\n");
+        self.pop_indent_level();
+        self.buffer.push_string("}\n\n");
+    };
+
+    module_private generate_managed_type_declaration(self, name String, fields List[TypedField]) Void = {
+        let payload_name = "__koral_payload_\(name)";
+        self.buffer.push_string("struct \(payload_name) {\n");
+        self.push_indent_level();
+        for field in fields then {
+            self.add_indent();
+            let field_c_type = self.c_type_name(field.field_type);
+            let field_c_name = self.sanitize_codegen_identifier(field.name);
+            self.buffer.push_string("\(field_c_type) \(field_c_name);\n");
+        };
+        self.pop_indent_level();
+        self.buffer.push_string("};\n\n");
+        self.append_managed_nominal_copy_function(name);
+        self.append_managed_struct_payload_drop_function(name, fields);
+        self.append_managed_nominal_drop_function(name);
+    };
+
+    module_private generate_managed_enum_declaration(self, name String, cases List[TypedEnumCase]) Void = {
+        let payload_name = "__koral_payload_\(name)";
+        self.buffer.push_string("struct \(payload_name) {\n");
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("intptr_t tag;\n");
+        self.add_indent();
+        self.buffer.push_string("union {\n");
+        self.push_indent_level();
+        for case_info in cases then {
+            let case_c_name = self.sanitize_codegen_identifier(case_info.name);
+            self.add_indent();
+            self.buffer.push_string("struct {\n");
+            self.push_indent_level();
+            for f in case_info.fields then {
+                when f.field_type in {
+                    .VoidType() then {},
+                    _ then {
+                        let f_c_name = self.sanitize_codegen_identifier(f.name);
+                        let f_c_type = self.storage_c_type_name(f.field_type);
+                        self.add_indent();
+                        self.buffer.push_string("\(f_c_type) \(f_c_name);\n");
+                    },
+                };
+            };
+            self.pop_indent_level();
+            self.add_indent();
+            self.buffer.push_string("} \(case_c_name);\n");
+        };
+        self.pop_indent_level();
+        self.add_indent();
+        self.buffer.push_string("} data;\n");
+        self.pop_indent_level();
+        self.buffer.push_string("};\n\n");
+        self.append_managed_nominal_copy_function(name);
+        self.append_managed_enum_payload_drop_function(name, cases);
+        self.append_managed_nominal_drop_function(name);
+    };
+
+    public generate_type_declaration(self, name String, fields List[TypedField], managed Bool) Void = {
+        if managed then {
+            self.generate_managed_type_declaration(name, fields);
+            return;
+        };
         // 生成结构体定义
         self.buffer.push_string("struct \(name) {\n");
-        self.with_indent(() -> {
-            for field in fields then {
-                self.add_indent();
-                let field_c_type = self.storage_c_type_name(field.field_type);
-                let field_c_name = self.sanitize_codegen_identifier(field.name);
-                self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
-            ;};
-        });
+        self.push_indent_level();
+        for field in fields then {
+            self.add_indent();
+            let field_c_type = self.storage_c_type_name(field.field_type);
+            let field_c_name = self.sanitize_codegen_identifier(field.name);
+            self.buffer.push_string("\(field_c_type) \(field_c_name);\n");
+        };
+        self.pop_indent_level();
         self.buffer.push_string("};\n\n");
 
         // 生成 copy 函数
         self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n");
-        self.with_indent(() -> {
-            self.add_indent();
-            self.buffer.push_string("struct \(name) result;\n");
-            for field in fields then {
-                let field_c_name = self.sanitize_codegen_identifier(field.name);
-                self.append_copy_assignment(
-                    field.field_type,
-                    "self->\(field_c_name)",
-                    "result.\(field_c_name)"
-                )
-            ;};
-            self.add_indent();
-            self.buffer.push_string("return result;\n")
-        ;});
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("struct \(name) result;\n");
+        for field in fields then {
+            let field_c_name = self.sanitize_codegen_identifier(field.name);
+            self.append_copy_assignment(
+                field.field_type,
+                "self->\(field_c_name)",
+                "result.\(field_c_name)"
+            );
+        };
+        self.pop_indent_level();
+        self.add_indent();
+        self.buffer.push_string("return result;\n");
         self.buffer.push_string("}\n\n");
 
         // 生成 drop 函数
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
-        self.with_indent(() -> {
-            // 调用用户定义的 drop（如果存在）
-            when self.user_defined_drop_for_type_name(name) in {
-                .Some(user_drop) then {
-                    // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
-                    let user_drop_name = user_drop;
-                    self.add_indent();
-                    self.buffer.push_string("{\n");
-                    self.with_indent(() -> {
-                        self.add_indent();
-                        self.buffer.push_string("void \(user_drop_name)(struct \(name)*);\n");
-                        self.add_indent();
-                        self.buffer.push_string("\(user_drop_name)(self);\n")
-                    ;});
-                    self.add_indent();
-                    self.buffer.push_string("}\n")
-                ;},
-                .None() then {},
+        self.push_indent_level();
+        // 调用用户定义的 drop（如果存在）
+        when self.user_defined_drop_for_type_name(name) in {
+            .Some(user_drop) then {
+                // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
+                let user_drop_name = user_drop;
+                self.add_indent();
+                self.buffer.push_string("{\n");
+                self.push_indent_level();
+
+                self.pop_indent_level();
+                self.add_indent();
+                self.buffer.push_string("}\n")
+            ;},
+            .None() then {},
+        };
+        // 逐字段 drop
+        for field in fields then {
+            let field_c_name = self.sanitize_codegen_identifier(field.name);
+            if self.needs_drop(field.field_type) then {
+                self.add_indent();
+                self.append_drop_statement(field.field_type, "self->\(field_c_name)");
             };
-            // 逐字段 drop
-            for field in fields then {
-                let field_c_name = self.sanitize_codegen_identifier(field.name);
-                if self.needs_drop(field.field_type) then {
-                    self.add_indent();
-                    self.append_drop_statement(field.field_type, "self->\(field_c_name)")
-                ;};
-            };
-        });
+        };
+        self.pop_indent_level();
         self.buffer.push_string("}\n\n");
     };
 
@@ -322,139 +476,130 @@ given CodeGen {
     /// 生成枚举类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_enum_declaration(*mutable self, name String, cases List[TypedEnumCase]) Void = {
+    public generate_enum_declaration(self, name String, cases List[TypedEnumCase], managed Bool) Void = {
+        if managed then {
+            self.generate_managed_enum_declaration(name, cases);
+            return;
+        };
         // 生成枚举结构体定义
         self.buffer.push_string("struct \(name) {\n");
-        self.with_indent(() -> {
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("intptr_t tag;\n");
+        self.add_indent();
+        self.buffer.push_string("union {\n");
+        self.push_indent_level();
+        for case_info in cases then {
+            let case_c_name = self.sanitize_codegen_identifier(case_info.name);
             self.add_indent();
-            self.buffer.push_string("intptr_t tag;\n");
-            self.add_indent();
-            self.buffer.push_string("union {\n");
-            self.with_indent(() -> {
-                for case_info in cases then {
-                    let case_c_name = self.sanitize_codegen_identifier(case_info.name);
-                    let mutable has_non_void = false;
-                    for f in case_info.fields then {
-                        when f.field_type in {
-                            .VoidType() then {},
-                            _ then { has_non_void = true;},
-                        };
-                    };
-                    if has_non_void then {
+            self.buffer.push_string("struct {\n");
+            self.push_indent_level();
+            for f in case_info.fields then {
+                when f.field_type in {
+                    .VoidType() then {},
+                    _ then {
+                        let f_c_name = self.sanitize_codegen_identifier(f.name);
+                        let f_c_type = self.storage_c_type_name(f.field_type);
                         self.add_indent();
-                        self.buffer.push_string("struct {\n");
-                        self.with_indent(() -> {
-                            for f in case_info.fields then {
-                                when f.field_type in {
-                                    .VoidType() then {},
-                                    _ then {
-                                        self.add_indent();
-                                        let f_c_type = if is_void_like_type(f.field_type) then "char" else self.storage_c_type_name(f.field_type);
-                                        let f_c_name = self.sanitize_codegen_identifier(f.name);
-                                        self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
-                                    ;},
-                                };
-                            };
-                        });
-                        self.add_indent();
-                        self.buffer.push_string("} \(case_c_name);\n")
-                    ;} else {
-                        self.add_indent();
-                        self.buffer.push_string("struct {} \(case_c_name);\n")
-                    ;};
+                        self.buffer.push_string("\(f_c_type) \(f_c_name);\n");
+                    },
                 };
-            });
+            };
+            self.pop_indent_level();
             self.add_indent();
-            self.buffer.push_string("} data;\n")
-        ;});
+            self.buffer.push_string("} \(case_c_name);\n");
+        };
+        self.pop_indent_level();
+        self.add_indent();
+        self.buffer.push_string("} data;\n");
+        self.pop_indent_level();
         self.buffer.push_string("};\n\n");
 
         // 生成 copy 函数
         self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n");
-        self.with_indent(() -> {
+        self.push_indent_level();
+        self.add_indent();
+        self.buffer.push_string("struct \(name) result;\n");
+        self.add_indent();
+        self.buffer.push_string("result.tag = self->tag;\n");
+        self.add_indent();
+        self.buffer.push_string("switch (self->tag) {\n");
+        let mutable case_index UInt = 0;
+        for case_info in cases then {
+            let case_c_name = self.sanitize_codegen_identifier(case_info.name);
             self.add_indent();
-            self.buffer.push_string("struct \(name) result;\n");
-            self.add_indent();
-            self.buffer.push_string("result.tag = self->tag;\n");
-            self.add_indent();
-            self.buffer.push_string("switch (self->tag) {\n");
-            let mutable case_index UInt = 0;
-            for case_info in cases then {
-                let case_c_name = self.sanitize_codegen_identifier(case_info.name);
-                self.add_indent();
-                self.buffer.push_string("case \(case_index): // \(case_info.name)\n");
-                let mutable non_void_fields = List[TypedEnumCaseField].new();
-                for f in case_info.fields then {
-                    when f.field_type in {
-                        .VoidType() then {},
-                        _ then { non_void_fields.push(f);},
-                    };
+            self.buffer.push_string("case \(case_index): // \(case_info.name)\n");
+            let mutable non_void_fields = List[TypedEnumCaseField].new();
+            for f in case_info.fields then {
+                when f.field_type in {
+                    .VoidType() then {},
+                    _ then { non_void_fields.push(f);},
                 };
-                for f in non_void_fields then {
-                    let f_c_name = self.sanitize_codegen_identifier(f.name);
-                    let src = "self->data.\(case_c_name).\(f_c_name)";
-                    let dst = "result.data.\(case_c_name).\(f_c_name)";
-                    self.append_copy_assignment(f.field_type, src, dst)
-                ;};
-                self.add_indent();
-                self.buffer.push_string("    break;\n");
-                case_index += 1
-            ;};
-            self.add_indent();
-            self.buffer.push_string("}\n");
-            self.add_indent();
-            self.buffer.push_string("return result;\n")
-        ;});
-        self.buffer.push_string("}\n\n");
-
-        // 生成 drop 函数
-        self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
-        self.with_indent(() -> {
-            when self.user_defined_drop_for_type_name(name) in {
-                .Some(user_drop) then {
-                    let user_drop_name = user_drop;
-                    self.add_indent();
-                    self.buffer.push_string("{\n");
-                    self.with_indent(() -> {
-                        self.add_indent();
-                        self.buffer.push_string("void \(user_drop_name)(struct \(name)*);\n");
-                        self.add_indent();
-                        self.buffer.push_string("\(user_drop_name)(self);\n")
-                    ;});
-                    self.add_indent();
-                    self.buffer.push_string("}\n")
-                ;},
-                .None() then {},
+            };
+            for f in non_void_fields then {
+                let f_c_name = self.sanitize_codegen_identifier(f.name);
+                let src = "self->data.\(case_c_name).\(f_c_name)";
+                let dst = "result.data.\(case_c_name).\(f_c_name)";
+                self.append_copy_assignment(f.field_type, src, dst);
             };
             self.add_indent();
-            self.buffer.push_string("switch (self->tag) {\n");
-            let mutable case_index UInt = 0;
-            for case_info in cases then {
-                let case_c_name = self.sanitize_codegen_identifier(case_info.name);
-                self.add_indent();
-                self.buffer.push_string("case \(case_index): // \(case_info.name)\n");
-                let mutable non_void_fields = List[TypedEnumCaseField].new();
-                for f in case_info.fields then {
-                    when f.field_type in {
-                        .VoidType() then {},
-                        _ then { non_void_fields.push(f);},
-                    };
-                };
-                for f in non_void_fields then {
-                    if self.needs_drop(f.field_type) then {
-                        let f_c_name = self.sanitize_codegen_identifier(f.name);
-                        let field_path = "self->data.\(case_c_name).\(f_c_name)";
-                        self.add_indent();
-                        self.append_drop_statement(f.field_type, field_path)
-                    ;};
-                };
-                self.add_indent();
-                self.buffer.push_string("    break;\n");
-                case_index += 1
-            ;};
+            self.buffer.push_string("    break;\n");
+            case_index += 1;
+        };
+        self.add_indent();
+        self.buffer.push_string("}\n");
+        self.add_indent();
+        self.buffer.push_string("return result;\n");
+    self.buffer.push_string("}\n\n");
+
+    // 生成 drop 函数
+    self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
+    self.push_indent_level();
+    when self.user_defined_drop_for_type_name(name) in {
+        .Some(user_drop) then {
+            let user_drop_name = user_drop;
+            self.add_indent();
+            self.buffer.push_string("{\n");
+            self.push_indent_level();
+            self.add_indent();
+            self.buffer.push_string("void \(user_drop_name)(struct \(name)*);\n");
+            self.add_indent();
+            self.buffer.push_string("\(user_drop_name)(self);\n");
+            self.pop_indent_level();
             self.add_indent();
             self.buffer.push_string("}\n")
-        ;});
+        ;},
+        .None() then {},
+    };
+    self.add_indent();
+    self.buffer.push_string("switch (self->tag) {\n");
+        case_index = 0;
+        for case_info in cases then {
+            let case_c_name = self.sanitize_codegen_identifier(case_info.name);
+            self.add_indent();
+            self.buffer.push_string("case \(case_index): // \(case_info.name)\n");
+            let mutable non_void_fields = List[TypedEnumCaseField].new();
+            for f in case_info.fields then {
+                when f.field_type in {
+                    .VoidType() then {},
+                    _ then { non_void_fields.push(f);},
+                };
+            };
+            for f in non_void_fields then {
+                if self.needs_drop(f.field_type) then {
+                    let f_c_name = self.sanitize_codegen_identifier(f.name);
+                    let field_path = "self->data.\(case_c_name).\(f_c_name)";
+                    self.add_indent();
+                    self.append_drop_statement(f.field_type, field_path);
+                };
+            };
+            self.add_indent();
+            self.buffer.push_string("    break;\n");
+            case_index += 1;
+        };
+        self.add_indent();
+        self.buffer.push_string("}\n");
+        self.pop_indent_level();
         self.buffer.push_string("}\n\n");
     };
 
@@ -463,32 +608,32 @@ given CodeGen {
     /// 生成 foreign struct 定义（无 copy/drop 函数）
     ///
     /// Requirements: 3.5
-    public generate_foreign_struct_declaration(*mutable self, name String, fields List[TypedField]) Void = {
+    public generate_foreign_struct_declaration(self, name String, fields List[TypedField]) Void = {
         self.buffer.push_string("struct \(name) {\n");
-        self.with_indent(() -> {
-            for field in fields then {
-                self.add_indent();
-                let field_c_type = self.storage_c_type_name(field.field_type);
-                let field_c_name = self.sanitize_codegen_identifier(field.name);
-                self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
-            ;};
-        });
+        self.push_indent_level();
+        for field in fields then {
+            self.add_indent();
+            let mutable field_c_type = self.storage_c_type_name(field.field_type);
+            let field_c_name = self.sanitize_codegen_identifier(field.name);
+            self.buffer.push_string("\(field_c_type) \(field_c_name);\n");
+        };
+        self.pop_indent_level();
         self.buffer.push_string("};\n\n");
     };
 
     // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
 
-    public collect_and_sort_type_declarations(*mutable self) List[TypeDeclaration] = {
+    public collect_and_sort_type_declarations(self) List[TypeDeclaration] = {
         let mutable decl_map = Dict[String, TypeDeclaration].new();
 
         for global in self.program.globals then {
             when global in {
                 .StructDeclaration(identifier, fields) then {
                     let c_name = self.c_identifier_for_symbol(identifier);
-                    let candidate = TypeDeclaration.Structure(c_name, fields);
+                    let candidate = TypeDeclaration.Structure(c_name, identifier.symbol_type, fields, self.uses_managed_nominal_representation(identifier.symbol_type));
                     when decl_map.get(c_name) in {
                         .Some(existing) then when existing in {
-                            .Structure(_, existing_fields) then {
+                            .Structure(_, _, existing_fields, _) then {
                                 if existing_fields.count() < fields.count() then {
                                     decl_map.insert(c_name, candidate);
                                 };
@@ -500,10 +645,10 @@ given CodeGen {
                 },
                 .EnumDeclaration(identifier, cases) then {
                     let c_name = self.c_identifier_for_symbol(identifier);
-                    let candidate = TypeDeclaration.Enum(c_name, cases);
+                    let candidate = TypeDeclaration.Enum(c_name, identifier.symbol_type, cases, self.uses_managed_nominal_representation(identifier.symbol_type));
                     when decl_map.get(c_name) in {
                         .Some(existing) then when existing in {
-                            .Enum(_, existing_cases) then {
+                            .Enum(_, _, existing_cases, _) then {
                                 if existing_cases.count() < cases.count() then {
                                     decl_map.insert(c_name, candidate);
                                 };
@@ -515,10 +660,10 @@ given CodeGen {
                 },
                 .ForeignStruct(identifier, fields) then {
                     let c_name = self.c_identifier_for_symbol(identifier);
-                    let candidate = TypeDeclaration.ForeignStructure(c_name, fields);
+                    let candidate = TypeDeclaration.ForeignStructure(c_name, identifier.symbol_type, fields);
                     when decl_map.get(c_name) in {
                         .Some(existing) then when existing in {
-                            .ForeignStructure(_, existing_fields) then {
+                            .ForeignStructure(_, _, existing_fields) then {
                                 if existing_fields.count() < fields.count() then {
                                     decl_map.insert(c_name, candidate);
                                 };
@@ -532,7 +677,7 @@ given CodeGen {
             };
         };
 
-        self.collect_used_type_declarations(&mutable decl_map);
+        self.collect_used_type_declarations(decl_map);
 
         // 第二步：构建依赖图
         let mutable all_names = List[String].new();
@@ -571,13 +716,14 @@ given CodeGen {
         // 第三步：Kahn 拓扑排序
         let mutable result = List[TypeDeclaration].new();
         let mutable remaining = all_names.count();
+        let mutable processed = Set[String].new();
 
         while remaining > 0 then {
             // 收集所有零入度节点，按名称排序
             let mutable zero_in = List[String].new();
             for n in all_names then {
                 let deg = in_degree.get(n) or else 0(UInt);
-                if deg == 0 then {
+                if deg == 0 and not processed.contains(n) then {
                     zero_in.push(n);
                 };
             };
@@ -586,11 +732,12 @@ given CodeGen {
                 // 存在循环依赖，按原始顺序输出剩余节点
                 for n in all_names then {
                     let deg = in_degree.get(n) or else 0(UInt);
-                    if deg > 0 then {
+                    if deg > 0 and not processed.contains(n) then {
                         when decl_map.get(n) in {
                             .Some(decl) then { result.push(decl);},
                             .None() then {},
                         };
+                        processed.insert(n);
                         in_degree.insert(n, 0);
                         remaining -= 1;
                     };
@@ -603,8 +750,8 @@ given CodeGen {
                         .Some(decl) then { result.push(decl);},
                         .None() then {},
                     };
-                    // 标记为已处理（入度设为大数）
-                    in_degree.insert(n, 9999999(UInt));
+                    processed.insert(n);
+                    in_degree.insert(n, 0);
                     remaining -= 1;
                     // 减少后继节点的入度
                     let successors = dependents.get(n) or else List[String].new();
@@ -625,53 +772,115 @@ given CodeGen {
     // ── 辅助：获取类型声明的依赖集合 ─────────────────────────────────────────
 
     /// 获取一个类型声明所依赖的其他类型名称集合
+    module_private type_requires_complete_definition(self, t Type) Bool = {
+        let concrete = self.concretize_codegen_type(t);
+        return when concrete in {
+            .StructureType(_) then not self.uses_managed_nominal_representation(concrete),
+            .EnumType(_) then not self.uses_managed_nominal_representation(concrete),
+            .GenericStruct(_, _, _) then not self.uses_managed_nominal_representation(concrete),
+            .GenericEnum(_, _, _) then not self.uses_managed_nominal_representation(concrete),
+            _ then false,
+        };
+    };
+
+    module_private push_type_dependency_name(
+        self,
+        deps List[String],
+        seen Set[String],
+        decl_map Dict[String, TypeDeclaration],
+        self_name String,
+        dep_name String,
+    ) Void = {
+        let _ = self;
+        if dep_name <> self_name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
+            deps.push(dep_name);
+            seen.insert(dep_name);
+        };
+    };
+
+    module_private record_direct_type_dependency(
+        self,
+        deps List[String],
+        seen Set[String],
+        decl_map Dict[String, TypeDeclaration],
+        self_name String,
+        t Type,
+    ) Void = {
+        let concrete = self.concretize_codegen_type(t);
+        if not self.type_requires_complete_definition(concrete) then {
+            return;
+        };
+        when self.c_name_for_type(concrete) in {
+            .Some(dep_name) then self.push_type_dependency_name(deps, seen, decl_map, self_name, dep_name),
+            .None() then {},
+        };
+    };
+
+    module_private record_dependencies_from_type(
+        self,
+        deps List[String],
+        seen Set[String],
+        decl_map Dict[String, TypeDeclaration],
+        self_name String,
+        t Type,
+    ) Void = {
+        let concrete = self.concretize_codegen_type(t);
+        // Swift CodeGen.requiresCompleteNominalDefinition: a managed nominal's C
+        // struct is only `{void* ptr; void* control;}` — an opaque handle that does
+        // not mention its payload at all. So referencing one never forces it to be
+        // declared first. Recording those edges is what created the
+        // `List_Koralc_Token` / `Koralc_Token` ordering clusters; Swift avoids them
+        // structurally instead of sorting harder.
+        if self.uses_managed_nominal_representation(concrete) then {
+            return;
+        };
+        when concrete in {
+            .StructureType(_) then self.record_direct_type_dependency(deps, seen, decl_map, self_name, concrete),
+            .EnumType(_) then self.record_direct_type_dependency(deps, seen, decl_map, self_name, concrete),
+            // For generic instantiations, only the concrete container type itself
+            // needs a complete definition before this declaration. The generic
+            // arguments are stored as pointers inside containers like List[T]
+            // (T* source) and Dict[K,V] (DictBucket[K,V]* buckets), so they do
+            // not need to appear earlier. Recording arg edges here creates
+            // artificial cycles for recursive token/pattern/json graphs.
+            .GenericStruct(_, _, _) then self.record_direct_type_dependency(deps, seen, decl_map, self_name, concrete),
+            .GenericEnum(_, _, _) then self.record_direct_type_dependency(deps, seen, decl_map, self_name, concrete),
+            // C allows pointers to incomplete types, so pointer fields should
+            // not force the pointee declaration to appear earlier. Recording
+            // those edges creates artificial cycles for container/storage types
+            // like List[T], Dict[K,V], and recursive token/pattern graphs.
+            .PointerType(_) then {},
+            .MutablePointerType(_) then {},
+            .ReferenceType(_) then {},
+            .MutableReferenceType(_) then {},
+            .BorrowedReferenceType(_) then {},
+            .MutableBorrowedReferenceType(_) then {},
+            .WeakReferenceType(_) then {},
+            .MutableWeakReferenceType(_) then {},
+            _ then {},
+        };
+    };
+
     get_type_dependencies(self, decl TypeDeclaration, decl_map Dict[String, TypeDeclaration]) List[String] = {
         let mutable deps = List[String].new();
         let mutable seen = Set[String].new();
 
         when decl in {
-            .Structure(name, fields) then {
+            .Structure(name, _, fields, _) then {
                 for field in fields then {
-                    let dep_name_opt = self.c_name_for_type(field.field_type);
-                    when dep_name_opt in {
-                        .Some(dep_name) then {
-                            if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
-                                deps.push(dep_name);
-                                seen.insert(dep_name);
-                            };
-                        },
-                        .None() then {},
-                    };
+                    self.record_dependencies_from_type(deps, seen, decl_map, name, field.field_type);
                 };
             },
-            .Enum(name, cases) then {
+            .Enum(name, _, cases, _) then {
                 for case_info in cases then {
                     for f in case_info.fields then {
-                        let dep_name_opt = self.c_name_for_type(f.field_type);
-                        when dep_name_opt in {
-                            .Some(dep_name) then {
-                                if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
-                                    deps.push(dep_name);
-                                    seen.insert(dep_name);
-                                };
-                            },
-                            .None() then {},
-                        };
+                        self.record_dependencies_from_type(deps, seen, decl_map, name, f.field_type);
                     };
                 };
             },
-            .ForeignStructure(name, fields) then {
+            .ForeignStructure(name, _, fields) then {
                 for field in fields then {
-                    let dep_name_opt = self.c_name_for_type(field.field_type);
-                    when dep_name_opt in {
-                        .Some(dep_name) then {
-                            if dep_name <> name and decl_map.contains_key(dep_name) and not seen.contains(dep_name) then {
-                                deps.push(dep_name);
-                                seen.insert(dep_name);
-                            };
-                        },
-                        .None() then {},
-                    };
+                    self.record_dependencies_from_type(deps, seen, decl_map, name, field.field_type);
                 };
             },
         };
@@ -682,52 +891,10 @@ given CodeGen {
     /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 EnumType 有效）
     c_name_for_type(self, t Type) Option[String] = {
         return when t in {
-            .StructureType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then Option[String].Some(n),
-                    .None() then {
-                        yield when self.context.get_name(def_id) in {
-                            .Some(n) then Option[String].Some(self.sanitize_codegen_identifier(n)),
-                            .None() then Option[String].None(),
-                        };
-                    },
-                };
-            },
-            .EnumType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then Option[String].Some(n),
-                    .None() then {
-                        yield when self.context.get_name(def_id) in {
-                            .Some(n) then Option[String].Some(self.sanitize_codegen_identifier(n)),
-                            .None() then Option[String].None(),
-                        };
-                    },
-                };
-            },
-            .GenericStruct(template, _) then {
-                // 泛型结构体：优先按单态化布局名查找 C 名称。
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_opt(def_id) in {
-                            .Some(n) then Option[String].Some(n),
-                            .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
-                        };
-                    },
-                    .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
-                };
-            },
-            .GenericEnum(template, _) then {
-                // 泛型枚举：优先按单态化布局名查找 C 名称。
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
-                    .Some(def_id) then {
-                        yield when self.c_identifier_opt(def_id) in {
-                            .Some(n) then Option[String].Some(n),
-                            .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
-                        };
-                    },
-                    .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
-                };
-            },
+            .StructureType(_) then self.concrete_type_c_name_fallback(t),
+            .EnumType(_) then self.concrete_type_c_name_fallback(t),
+            .GenericStruct(_, _, _) then self.concrete_type_c_name_fallback(t),
+            .GenericEnum(_, _, _) then self.concrete_type_c_name_fallback(t),
             _ then Option[String].None(),
         };
     };

@@ -12,18 +12,18 @@ public type AccessModifier {
 
 public type TypeParameter(
     name String,
-    constraints List[* TypeNode],
+    constraints List[TypeNode],
 );
 
 public type TypeNode {
     Identifier(name String),
-    Reference(inner * TypeNode, is_mutable Bool),
-    BorrowedReference(inner * TypeNode, is_mutable Bool),
-    Pointer(inner * TypeNode, is_mutable Bool),
-    WeakReference(inner * TypeNode, is_mutable Bool),
-    Generic(base String, args List[* TypeNode]),
+    Reference(inner TypeNode, is_mutable Bool),
+    BorrowedReference(inner TypeNode, is_mutable Bool),
+    Pointer(inner TypeNode, is_mutable Bool),
+    WeakReference(inner TypeNode, is_mutable Bool),
+    Generic(base String, args List[TypeNode]),
     InferredSelf(),
-    FunctionType(param_types List[* TypeNode], return_type * TypeNode),
+    FunctionType(param_types List[TypeNode], return_type TypeNode),
 };
 
 public type UnaryOperator {
@@ -103,16 +103,22 @@ public type GivenMember(
     access AccessModifier,
     params List[Param],
     return_type TypeNode,
-    body Option[* Expr],
+    body Option[Expr],
+    // Declaration identity of this method. Assigned once when the given block is
+    // collected and reused at every later materialization — never re-minted.
+    // Without it, "the same method arriving twice" and "two different methods with
+    // the same name" are indistinguishable, which is what forced the
+    // comparable / trait_same_name_method_conflict trade-off.
+    def_id DefId,
 );
 
 public type Decl {
-    LetDecl(access AccessModifier, name String, is_mutable Bool, type_name Option[TypeNode], initializer * Expr, span SourceSpan),
-    FunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, body * Expr, span SourceSpan),
+    LetDecl(access AccessModifier, name String, is_mutable Bool, type_name Option[TypeNode], initializer Expr, span SourceSpan),
+    FunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, body Expr, span SourceSpan),
     IntrinsicFunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, span SourceSpan),
     ForeignFunctionDecl(access AccessModifier, name String, params List[Param], return_type TypeNode, span SourceSpan),
     ForeignLetDecl(access AccessModifier, name String, is_mutable Bool, type_name TypeNode, span SourceSpan),
-    TypeStructDecl(access AccessModifier, name String, type_params List[TypeParameter], fields List[Field], span SourceSpan),
+    TypeStructDecl(access AccessModifier, name String, is_mutable_type Bool, type_params List[TypeParameter], fields List[Field], span SourceSpan),
     TypeEnumDecl(access AccessModifier, name String, type_params List[TypeParameter], cases List[EnumCase], span SourceSpan),
     TypeAliasDecl(access AccessModifier, name String, target TypeNode, span SourceSpan),
     IntrinsicTypeDecl(access AccessModifier, name String, type_params List[TypeParameter], span SourceSpan),
@@ -137,14 +143,14 @@ public type UsingModuleItem(
     alias Option[String],
 );
 
-public type Param(
+public type mutable Param(
     name String,
     is_mutable Bool,
     type_name TypeNode,
     named Bool,
 );
 
-public type Field(
+public type mutable Field(
     access AccessModifier,
     name String,
     is_mutable Bool,
@@ -165,22 +171,22 @@ public type EnumCase(
 
 public type InterpolatedStringPart {
     Literal(value String),
-    Expression(expr * Expr),
+    Expression(expr Expr),
 };
 
 public type WhenArm(
     pattern PatternNode,
-    body * Expr,
+    body Expr,
 );
 
 public type ExprPair(
-    first * Expr,
-    second * Expr,
+    first Expr,
+    second Expr,
 );
 
 public type PatternElement(
     label Option[String],
-    pattern * PatternNode,
+    pattern PatternNode,
 );
 
 public type LambdaParam(
@@ -201,12 +207,12 @@ public type PatternNode {
     EnumCase(case_name String, elements List[PatternElement], span SourceSpan),
     StructPattern(type_name String, elements List[PatternElement], span SourceSpan),
     ComparisonPattern(op ComparisonPatternOperator, value String, span SourceSpan),
-    AndPattern(left * PatternNode, right * PatternNode, span SourceSpan),
-    OrPattern(left * PatternNode, right * PatternNode, span SourceSpan),
-    NotPattern(pattern * PatternNode, span SourceSpan),
+    AndPattern(left PatternNode, right PatternNode, span SourceSpan),
+    OrPattern(left PatternNode, right PatternNode, span SourceSpan),
+    NotPattern(pattern PatternNode, span SourceSpan),
 };
 
-public type PairBindingElement(
+public type mutable PairBindingElement(
     name String,
     is_mutable Bool,
     type_name Option[TypeNode],
@@ -220,15 +226,15 @@ public type ForBindingPattern {
 };
 
 public type Statement {
-    LetStmt(name String, is_mutable Bool, type_name Option[TypeNode], value * Expr, span SourceSpan),
-    PairLetStmt(first PairBindingElement, second PairBindingElement, value * Expr, span SourceSpan),
-    AssignmentStmt(target * Expr, op Option[CompoundAssignmentOperator], value * Expr, span SourceSpan),
-    ExprStmt(expr * Expr, span SourceSpan),
-    ReturnStmt(value Option[* Expr], span SourceSpan),
+    LetStmt(name String, is_mutable Bool, type_name Option[TypeNode], value Expr, span SourceSpan),
+    PairLetStmt(first PairBindingElement, second PairBindingElement, value Expr, span SourceSpan),
+    AssignmentStmt(target Expr, op Option[CompoundAssignmentOperator], value Expr, span SourceSpan),
+    ExprStmt(expr Expr, span SourceSpan),
+    ReturnStmt(value Option[Expr], span SourceSpan),
     BreakStmt(span SourceSpan),
-    YieldStmt(value * Expr, span SourceSpan),
+    YieldStmt(value Expr, span SourceSpan),
     ContinueStmt(span SourceSpan),
-    DeferStmt(expr * Expr, span SourceSpan),
+    DeferStmt(expr Expr, span SourceSpan),
 };
 
 public type Expr {
@@ -239,48 +245,48 @@ public type Expr {
     RuneLiteral(value String, span SourceSpan),
     InterpolatedString(parts List[InterpolatedStringPart], span SourceSpan),
     BoolLiteral(value Bool, span SourceSpan),
-    CastExpr(type_node TypeNode, expr * Expr, span SourceSpan),
-    Unary(op UnaryOperator, expr * Expr, span SourceSpan),
-    RefExpr(expr * Expr, is_mutable Bool, span SourceSpan),
-    WeakrefExpr(inner * Expr, span SourceSpan),
-    PtrExpr(expr * Expr, is_mutable Bool, span SourceSpan),
-    DerefExpr(expr * Expr, span SourceSpan),
-    UnsafeDerefExpr(expr * Expr, span SourceSpan),
-    ArithmeticExpr(left * Expr, op ArithmeticOperator, right * Expr, span SourceSpan),
-    ComparisonExpr(left * Expr, op ComparisonOperator, right * Expr, span SourceSpan),
-    ComparisonChainExpr(operands List[* Expr], operators List[ComparisonOperator], span SourceSpan),
-    BitwiseExpr(left * Expr, op BitwiseOperator, right * Expr, span SourceSpan),
-    AndExpr(left * Expr, right * Expr, span SourceSpan),
-    OrExpr(left * Expr, right * Expr, span SourceSpan),
-    RangeExpr(op RangeOperator, left Option[* Expr], right Option[* Expr], span SourceSpan),
-    OrElseExpr(operand * Expr, default_expr * Expr, span SourceSpan),
-    OrReturnExpr(operand * Expr, span SourceSpan),
-    AndThenExpr(operand * Expr, transform_expr * Expr, span SourceSpan),
-    IsExpr(subject * Expr, pattern PatternNode, span SourceSpan),
-    IsNotExpr(subject * Expr, pattern PatternNode, span SourceSpan),
-    CollectionLiteral(elements List[* Expr], span SourceSpan),
+    CastExpr(type_node TypeNode, expr Expr, span SourceSpan),
+    Unary(op UnaryOperator, expr Expr, span SourceSpan),
+    RefExpr(expr Expr, is_mutable Bool, span SourceSpan),
+    WeakrefExpr(inner Expr, span SourceSpan),
+    PtrExpr(expr Expr, is_mutable Bool, span SourceSpan),
+    DerefExpr(expr Expr, span SourceSpan),
+    UnsafeDerefExpr(expr Expr, span SourceSpan),
+    ArithmeticExpr(left Expr, op ArithmeticOperator, right Expr, span SourceSpan),
+    ComparisonExpr(left Expr, op ComparisonOperator, right Expr, span SourceSpan),
+    ComparisonChainExpr(operands List[Expr], operators List[ComparisonOperator], span SourceSpan),
+    BitwiseExpr(left Expr, op BitwiseOperator, right Expr, span SourceSpan),
+    AndExpr(left Expr, right Expr, span SourceSpan),
+    OrExpr(left Expr, right Expr, span SourceSpan),
+    RangeExpr(op RangeOperator, left Option[Expr], right Option[Expr], span SourceSpan),
+    OrElseExpr(operand Expr, default_expr Expr, span SourceSpan),
+    OrReturnExpr(operand Expr, span SourceSpan),
+    AndThenExpr(operand Expr, transform_expr Expr, span SourceSpan),
+    IsExpr(subject Expr, pattern PatternNode, span SourceSpan),
+    IsNotExpr(subject Expr, pattern PatternNode, span SourceSpan),
+    CollectionLiteral(elements List[Expr], span SourceSpan),
     DictLiteral(entries List[ExprPair], span SourceSpan),
     EmptyLiteral(span SourceSpan),
-    NamedArgument(label String, expr * Expr, span SourceSpan),
-    Call(callee * Expr, args List[* Expr], span SourceSpan),
-    MemberPath(base * Expr, path List[String], span SourceSpan),
-    TraitQualificationExpr(base * Expr, trait_type TypeNode, span SourceSpan),
-    GenericMethodCall(base * Expr, method_type_args List[* TypeNode], method_name String, args List[* Expr], span SourceSpan),
-    QualifiedMethodCall(base * Expr, trait_type TypeNode, method_name String, args List[* Expr], span SourceSpan),
-    QualifiedGenericMethodCall(base * Expr, trait_type TypeNode, method_type_args List[* TypeNode], method_name String, args List[* Expr], span SourceSpan),
-    GenericInstantiation(base String, type_args List[* TypeNode], span SourceSpan),
-    StaticMethodCall(type_name String, type_args List[* TypeNode], method_name String, args List[* Expr], span SourceSpan),
-    SubscriptExpr(base * Expr, args List[* Expr], span SourceSpan),
+    NamedArgument(label String, expr Expr, span SourceSpan),
+    Call(callee Expr, args List[Expr], span SourceSpan),
+    MemberPath(base Expr, path List[String], span SourceSpan),
+    TraitQualificationExpr(base Expr, trait_type TypeNode, span SourceSpan),
+    GenericMethodCall(base Expr, method_type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
+    QualifiedMethodCall(base Expr, trait_type TypeNode, method_name String, args List[Expr], span SourceSpan),
+    QualifiedGenericMethodCall(base Expr, trait_type TypeNode, method_type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
+    GenericInstantiation(base String, type_args List[TypeNode], span SourceSpan),
+    StaticMethodCall(type_name String, type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
+    SubscriptExpr(base Expr, args List[Expr], span SourceSpan),
     Block(statements List[Statement], span SourceSpan),
-    IfExpr(condition * Expr, then_branch * Expr, else_branch Option[* Expr], span SourceSpan),
-    WhileExpr(condition * Expr, body * Expr, span SourceSpan),
-    ForExpr(pattern ForBindingPattern, iterable * Expr, body * Expr, span SourceSpan),
-    WhenExpr(subject * Expr, arms List[WhenArm], span SourceSpan),
-    LambdaExpr(params List[LambdaParam], return_type Option[TypeNode], body * Expr, span SourceSpan),
-    ImplicitMemberExpr(member_name String, args List[* Expr], span SourceSpan),
+    IfExpr(condition Expr, then_branch Expr, else_branch Option[Expr], span SourceSpan),
+    WhileExpr(condition Expr, body Expr, span SourceSpan),
+    ForExpr(pattern ForBindingPattern, iterable Expr, body Expr, span SourceSpan),
+    WhenExpr(subject Expr, arms List[WhenArm], span SourceSpan),
+    LambdaExpr(params List[LambdaParam], return_type Option[TypeNode], body Expr, span SourceSpan),
+    ImplicitMemberExpr(member_name String, args List[Expr], span SourceSpan),
 };
 
-public let pattern_span(pattern * PatternNode) SourceSpan = {
+public let pattern_span(pattern PatternNode) SourceSpan = {
     return when pattern in {
         .Wildcard(span) then span,
         .Variable(_, _, span) then span,
@@ -300,7 +306,7 @@ public let pattern_span(pattern * PatternNode) SourceSpan = {
     };
 };
 
-public let expr_span(expr * Expr) SourceSpan = {
+public let expr_span(expr Expr) SourceSpan = {
     return when expr in {
         .Identifier(_, span) then span,
         .IntegerLiteral(_, span) then span,

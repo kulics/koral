@@ -59,7 +59,7 @@ given Parser {
         };
     };
 
-    module_private expr_is_ordering_comparison(self, expr * Expr) Bool = {
+    module_private expr_is_ordering_comparison(self, expr Expr) Bool = {
         return when expr in {
             .ComparisonExpr(_, op, _, _) then when op in {
                 .Greater() then true,
@@ -73,11 +73,11 @@ given Parser {
         };
     };
 
-    module_private invalid_comparison_chain_error(self) Result[* Expr] = {
+    module_private invalid_comparison_chain_error(self) Result[Expr] = {
         return .Error(self.parser_error("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."));
     };
 
-    module_private parse_factor(*mutable self) Result[* Expr] = {
+    module_private parse_factor(self) Result[Expr] = {
         let mutable expr = self.parse_unary() or return;
 
         while true then {
@@ -85,17 +85,17 @@ given Parser {
                 .Star() then {
                     self.advance();
                     let rhs = self.parse_unary() or return;
-                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Multiply(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.ArithmeticExpr(expr, ArithmeticOperator.Multiply(), rhs, self.span_from_expr_start(expr));
                 },
                 .Slash() then {
                     self.advance();
                     let rhs = self.parse_unary() or return;
-                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Divide(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.ArithmeticExpr(expr, ArithmeticOperator.Divide(), rhs, self.span_from_expr_start(expr));
                 },
                 .Percent() then {
                     self.advance();
                     let rhs = self.parse_unary() or return;
-                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Remainder(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.ArithmeticExpr(expr, ArithmeticOperator.Remainder(), rhs, self.span_from_expr_start(expr));
                 },
                 _ then { break;},
             };
@@ -104,7 +104,7 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_term(*mutable self) Result[* Expr] = {
+    module_private parse_term(self) Result[Expr] = {
         let mutable expr = self.parse_factor() or return;
 
         while true then {
@@ -112,12 +112,12 @@ given Parser {
                 .Plus() then {
                     self.advance();
                     let rhs = self.parse_factor() or return;
-                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Add(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.ArithmeticExpr(expr, ArithmeticOperator.Add(), rhs, self.span_from_expr_start(expr));
                 },
                 .Minus() then {
                     self.advance();
                     let rhs = self.parse_factor() or return;
-                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Subtract(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.ArithmeticExpr(expr, ArithmeticOperator.Subtract(), rhs, self.span_from_expr_start(expr));
                 },
                 _ then { break;},
             };
@@ -126,7 +126,7 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_range(*mutable self) Result[* Expr] = {
+    module_private parse_range(self) Result[Expr] = {
         let mutable expr = self.parse_comparison() or return;
 
         while true then {
@@ -135,29 +135,29 @@ given Parser {
                     self.advance();
                     if self.can_start_range_bound(self.current().kind) and true then {
                         let rhs = self.parse_comparison() or return;
-                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)));
+                        expr = Expr.RangeExpr(RangeOperator.Closed(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr));
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)));
+                        expr = Expr.RangeExpr(RangeOperator.From(), .Some(expr), Option[Expr].None(), self.span_from_expr_start(expr));
                     };
                 },
                 .RangeLess() then {
                     self.advance();
                     let rhs = self.parse_comparison() or return;
-                    expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)));
+                    expr = Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr));
                 },
                 .LessRange() then {
                     self.advance();
                     if self.can_start_range_bound(self.current().kind) and true then {
                         let rhs = self.parse_comparison() or return;
-                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)));
+                        expr = Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr));
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)));
+                        expr = Expr.RangeExpr(RangeOperator.FromOpen(), .Some(expr), Option[Expr].None(), self.span_from_expr_start(expr));
                     };
                 },
                 .LessRangeLess() then {
                     self.advance();
                     let rhs = self.parse_comparison() or return;
-                    expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)));
+                    expr = Expr.RangeExpr(RangeOperator.Open(), .Some(expr), .Some(rhs), self.span_from_expr_start(expr));
                 },
                 _ then { break;},
             };
@@ -166,7 +166,7 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_shift(*mutable self) Result[* Expr] = {
+    module_private parse_shift(self) Result[Expr] = {
         let mutable expr = self.parse_term() or return;
 
         while true then {
@@ -174,12 +174,12 @@ given Parser {
                 .LeftShift() then {
                     self.advance();
                     let rhs = self.parse_term() or return;
-                    expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.LeftShift(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.BitwiseExpr(expr, BitwiseOperator.LeftShift(), rhs, self.span_from_expr_start(expr));
                 },
                 .RightShift() then {
                     self.advance();
                     let rhs = self.parse_term() or return;
-                    expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.RightShift(), box(*rhs), self.span_from_expr_start(expr)));
+                    expr = Expr.BitwiseExpr(expr, BitwiseOperator.RightShift(), rhs, self.span_from_expr_start(expr));
                 },
                 _ then { break;},
             };
@@ -188,43 +188,43 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_bitwise_and(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_and(self) Result[Expr] = {
         let mutable expr = self.parse_range() or return;
 
         while self.current().kind is .Ampersand() then {
             self.advance();
             let rhs = self.parse_range() or return;
-            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitAnd(), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.BitwiseExpr(expr, BitwiseOperator.BitAnd(), rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_bitwise_xor(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_xor(self) Result[Expr] = {
         let mutable expr = self.parse_bitwise_and() or return;
 
         while self.current().kind is .Caret() then {
             self.advance();
             let rhs = self.parse_bitwise_and() or return;
-            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitXor(), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.BitwiseExpr(expr, BitwiseOperator.BitXor(), rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_bitwise_or(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_or(self) Result[Expr] = {
         let mutable expr = self.parse_bitwise_xor() or return;
 
         while self.current().kind is .Pipe() then {
             self.advance();
             let rhs = self.parse_bitwise_xor() or return;
-            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitOr(), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.BitwiseExpr(expr, BitwiseOperator.BitOr(), rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_comparison(*mutable self) Result[* Expr] = {
+    module_private parse_comparison(self) Result[Expr] = {
         let start = self.current();
         let expr = self.parse_shift() or return;
 
@@ -242,7 +242,7 @@ given Parser {
             if self.expr_is_ordering_comparison(rhs) then {
                 return self.invalid_comparison_chain_error();
             };
-            let result = box(Expr.ComparisonExpr(expr, op, rhs, self.span_from_expr_start(expr)));
+            let result = Expr.ComparisonExpr(expr, op, rhs, self.span_from_expr_start(expr));
             if self.comparison_kind_is_equality(self.current().kind) or self.comparison_kind_is_ordering(self.current().kind) then {
                 return self.invalid_comparison_chain_error();
             };
@@ -264,10 +264,10 @@ given Parser {
             if self.comparison_kind_is_equality(self.current().kind) then {
                 return self.invalid_comparison_chain_error();
             };
-            return .Ok(box(Expr.ComparisonExpr(expr, first_op, first_right, self.span_from_expr_start(expr))));
+            return .Ok(Expr.ComparisonExpr(expr, first_op, first_right, self.span_from_expr_start(expr)));
         };
 
-        let mutable operands = List[* Expr].new();
+        let mutable operands = List[Expr].new();
         operands.push(expr);
         operands.push(first_right);
         let mutable operators = List[ComparisonOperator].new();
@@ -288,12 +288,12 @@ given Parser {
             operators.push(next_op);
         };
 
-        return .Ok(box(Expr.ComparisonChainExpr(operands, operators, self.span_from_start(start))));
+        return .Ok(Expr.ComparisonChainExpr(operands, operators, self.span_from_start(start)));
     };
 
 
 
-    module_private parse_is(*mutable self) Result[* Expr] = {
+    module_private parse_is(self) Result[Expr] = {
         let mutable expr = self.parse_bitwise_or() or return;
 
 
@@ -303,27 +303,27 @@ given Parser {
             if self.current().kind is .KwNot() then {
                 self.advance();
                 let pattern = self.parse_single_pattern() or return;
-                return .Ok(box(Expr.IsNotExpr(expr, pattern, self.span_from_expr_start(expr))));
+                return .Ok(Expr.IsNotExpr(expr, pattern, self.span_from_expr_start(expr)));
             };
             let pattern = self.parse_single_pattern() or return;
-            return .Ok(box(Expr.IsExpr(expr, pattern, self.span_from_expr_start(expr))));
+            return .Ok(Expr.IsExpr(expr, pattern, self.span_from_expr_start(expr)));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_logical_not(*mutable self) Result[* Expr] = {
+    module_private parse_logical_not(self) Result[Expr] = {
         if self.current().kind is .KwNot() then {
             let start = self.current();
             self.advance();
             let operand = self.parse_is() or return;
-            return .Ok(box(Expr.Unary(UnaryOperator.Not(), operand, self.span_from_start(start))));
+            return .Ok(Expr.Unary(UnaryOperator.Not(), operand, self.span_from_start(start)));
         };
 
         return self.parse_is();
     };
 
-    module_private parse_and_then(*mutable self) Result[* Expr] = {
+    module_private parse_and_then(self) Result[Expr] = {
         let mutable expr = self.parse_and() or return;
 
         while self.current().kind is .KwAnd() then {
@@ -334,13 +334,13 @@ given Parser {
             self.advance();
             self.advance();
             let rhs = self.parse_and() or return;
-            expr = box(Expr.AndThenExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.AndThenExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_and(*mutable self) Result[* Expr] = {
+    module_private parse_and(self) Result[Expr] = {
         let mutable expr = self.parse_logical_not() or return;
 
         while self.current().kind is .KwAnd() then {
@@ -350,22 +350,24 @@ given Parser {
             };
             self.advance();
             let rhs = self.parse_logical_not() or return;
-            expr = box(Expr.AndExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or_else(*mutable self) Result[* Expr] = {
+    module_private parse_or_else(self) Result[Expr] = {
         let mutable expr = self.parse_or() or return;
 
         while self.current().kind is .KwOr() then {
-            let mutable next_text = "<none>";
+            let mutable next_text = StringBuilder.new();
+            next_text.push_string("<none>");
             if self.index + 1 < self.tokens.count() then {
-                next_text = token_text(self.tokens[self.index + 1]);
+                next_text = StringBuilder.new();
+                next_text.push_string(token_text(self.tokens[self.index + 1]));
             };
             let is_or_else = self.next_is_else();
-            self.parse_debug("parse_or_else saw or token=\(token_text(self.current())) next=\(next_text) is_or_else=\(is_or_else)");
+            self.parse_debug("parse_or_else saw or token=\(token_text(self.current())) next=\(next_text.to_string()) is_or_else=\(is_or_else)");
             if not is_or_else then {
                 break;
             };
@@ -373,23 +375,25 @@ given Parser {
             self.advance();
             self.parse_debug("parse_or_else consumed or/else current=\(token_text(self.current()))");
             let rhs = self.parse_or() or return;
-            expr = box(Expr.OrElseExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or(*mutable self) Result[* Expr] = {
+    module_private parse_or(self) Result[Expr] = {
         let mutable expr = self.parse_and_then() or return;
 
         while self.current().kind is .KwOr() then {
-            let mutable next_text = "<none>";
+            let mutable next_text = StringBuilder.new();
+            next_text.push_string("<none>");
             if self.index + 1 < self.tokens.count() then {
-                next_text = token_text(self.tokens[self.index + 1]);
+                next_text = StringBuilder.new();
+                next_text.push_string(token_text(self.tokens[self.index + 1]));
             };
             let next_is_else = self.next_is_else();
             let next_is_return = self.next_is_return();
-            self.parse_debug("parse_or saw or token=\(token_text(self.current())) next=\(next_text) next_is_else=\(next_is_else) next_is_return=\(next_is_return)");
+            self.parse_debug("parse_or saw or token=\(token_text(self.current())) next=\(next_text.to_string()) next_is_else=\(next_is_else) next_is_return=\(next_is_return)");
             if next_is_else then {
                 break;
             };
@@ -398,13 +402,13 @@ given Parser {
             };
             self.advance();
             let rhs = self.parse_and_then() or return;
-            expr = box(Expr.OrExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)));
+            expr = Expr.OrExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or_return(*mutable self) Result[* Expr] = {
+    module_private parse_or_return(self) Result[Expr] = {
         let mutable expr = self.parse_or_else() or return;
 
         while self.current().kind is .KwOr() then {
@@ -414,17 +418,17 @@ given Parser {
             };
             self.advance();
             self.advance();
-            expr = box(Expr.OrReturnExpr(box(*expr), self.span_from_expr_start(expr)));
+            expr = Expr.OrReturnExpr(expr, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_expression(*mutable self) Result[* Expr] = {
+    module_private parse_expression(self) Result[Expr] = {
         return self.parse_or_return();
     };
 
-    module_private parse_access_modifier(*mutable self, default AccessModifier) AccessModifier = {
+    module_private parse_access_modifier(self, default AccessModifier) AccessModifier = {
         when self.current().kind in {
             .KwPublic() then {
                 self.advance();
@@ -448,7 +452,7 @@ given Parser {
         };
     };
 
-    module_private parse_trait_member(*mutable self, trait_name String) Result[TraitMember] = {
+    module_private parse_trait_member(self, trait_name String) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public());
         let name = self.expect_identifier("trait member") or else {
             return .Error(self.parser_error("parse trait member error"));
@@ -475,7 +479,7 @@ given Parser {
         if not self.is_type_start() then {
             return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"));
         };
-        let return_type = self.parse_type() or else {
+        let mutable return_type = self.parse_type() or else {
             return .Error(self.parser_error("parse trait member return type error"));
         };
 
@@ -486,7 +490,7 @@ given Parser {
         return .Ok(TraitMember(name, type_params, access, params, return_type));
     };
 
-    module_private parse_given_member(*mutable self, allow_body Bool) Result[GivenMember] = {
+    module_private parse_given_member(self, allow_body Bool) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.ModulePrivate());
         let name = self.expect_identifier("given member") or else {
             return .Error(self.parser_error("parse given member error"));
@@ -516,28 +520,29 @@ given Parser {
         if not self.is_type_start() then {
             return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"));
         };
-        let return_type = self.parse_type() or else {
+        let mutable return_type = self.parse_type() or else {
             return .Error(self.parser_error("parse given member return type error"));
         };
 
-        let mutable body = Option[* Expr].None();
+        let mutable body = Option[Expr].None();
         if self.current().kind is .Assign() then {
             if not allow_body then {
                 return .Error(self.parser_error("intrinsic given member cannot have a body"));
             };
             self.advance();
             let expr = self.parse_expression_checked("given member body") or else {
-                let mutable message = "parse given member body error: ";
+                let mutable message = StringBuilder.new();
+                message.push_string("parse given member body error: ");
                 message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-                return .Error(self.parser_error_without_span(message));
+                return .Error(self.parser_error_without_span(message.to_string()));
             };
             body = .Some(expr);
         };
 
-        return .Ok(GivenMember(name, type_params, access, params, return_type, body));
+        return .Ok(GivenMember(name, type_params, access, params, return_type, body, def_id_invalid()));
     };
 
-    module_private parse_trait_members(*mutable self, trait_name String) Result[List[TraitMember]] = {
+    module_private parse_trait_members(self, trait_name String) Result[List[TraitMember]] = {
         let mutable members = List[TraitMember].new();
 
         while true then {
@@ -555,9 +560,10 @@ given Parser {
                 _ then {
                     let member = self.parse_trait_member(trait_name) or else {
                         let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it);
-                        let mutable message = "parse trait member error: ";
+                        let mutable message = StringBuilder.new();
+                        message.push_string("parse trait member error: ");
                         message.push_string(nested.message);
-                        return .Error(self.parser_error_at(message, self.current()));
+                        return .Error(self.parser_error_at(message.to_string(), self.current()));
                     };
                     let _ = self.require_semicolon() or return;
                     members.push(member);
@@ -568,7 +574,7 @@ given Parser {
         return .Ok(members);
     };
 
-    module_private parse_given_members(*mutable self, allow_body Bool) Result[List[GivenMember]] = {
+    module_private parse_given_members(self, allow_body Bool) Result[List[GivenMember]] = {
         let mutable members = List[GivenMember].new();
 
         while true then {
@@ -586,9 +592,10 @@ given Parser {
                 _ then {
                     let member = self.parse_given_member(allow_body) or else {
                         let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it);
-                        let mutable message = "parse given member error: ";
+                        let mutable message = StringBuilder.new();
+                        message.push_string("parse given member error: ");
                         message.push_string(nested.message);
-                        return .Error(self.parser_error_at(message, self.current()));
+                        return .Error(self.parser_error_at(message.to_string(), self.current()));
                     };
                     let _ = self.require_semicolon() or return;
                     members.push(member);
@@ -599,7 +606,7 @@ given Parser {
         return .Ok(members);
     };
 
-    module_private parse_module_using_items(*mutable self) Result[List[UsingModuleItem]] = {
+    module_private parse_module_using_items(self) Result[List[UsingModuleItem]] = {
         let mutable items = List[UsingModuleItem].new();
         let mutable saw_all_public = false;
 
@@ -674,7 +681,7 @@ given Parser {
         return .Ok(items);
     };
 
-    module_private parse_using_decl(*mutable self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_using_decl(self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
 
@@ -737,7 +744,7 @@ given Parser {
         return .Ok(Decl.ModuleUsingDecl(path_segments, items, self.span_from_start(start)));
     };
 
-    module_private parse_trait_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_trait_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
         let name = self.expect_identifier("trait declaration") or return;
@@ -775,13 +782,13 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
     };
 
-    module_private parse_given_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_given_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
         let type_params = self.parse_type_parameters() or else {
             return .Error(self.parser_error("parse given type parameter error"));
         };
-        let target_type = self.parse_type() or else {
+        let mutable target_type = self.parse_type() or else {
             return .Error(self.parser_error("parse given target type error"));
         };
 
@@ -798,7 +805,7 @@ given Parser {
         let mutable trait_type = Option[TypeNode].None();
         if self.current().kind is .KwAs() then {
             self.advance();
-            let parsed_trait_type = self.parse_type() or else {
+            let mutable parsed_trait_type = self.parse_type() or else {
                 return .Error(self.parser_error("parse given trait type error"));
             };
             trait_type = .Some(parsed_trait_type);
@@ -814,11 +821,11 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
     };
 
-    module_private parse_top_level_decl(*mutable self) Result[Decl] = {
+    module_private parse_top_level_decl(self) Result[Decl] = {
         let flags = self.parse_decl_flags();
 
         when flags.invalid_access_message in {
-            .Some(message) then { return .Error(self.parser_error_without_span(message));},
+            .Some(message) then { return .Error(self.parser_error_without_span(message.to_string()));},
             .None() then {},
         };
 
@@ -851,15 +858,16 @@ given Parser {
             },
             _ then {
                 let t = self.current();
-                let mutable message = "Unexpected top-level token '";
+                let mutable message = StringBuilder.new();
+                message.push_string("Unexpected top-level token '");
                 message.push_string(token_text(t));
                 message.push_byte('\'');
-                return .Error(self.parser_error_at(message, t));
+                return .Error(self.parser_error_at(message.to_string(), t));
             },
         };
     };
 
-    public parse_program(*mutable self) Result[Program] = {
+    public parse_program(self) Result[Program] = {
         let mutable declarations = List[Decl].new();
         let mutable has_non_using_decl = false;
 
@@ -895,9 +903,9 @@ given Parser {
 
 given Parser {
 
-    module_private parse_interpolated_string_expr(*mutable self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[* Expr] = {
+    module_private parse_interpolated_string_expr(self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[Expr] = {
         let mutable ast_parts = List[InterpolatedStringPart].new();
-        let mutable literal_value = String.new();
+        let mutable literal_value = StringBuilder.new();
         let mutable has_expression = false;
 
         for part in parts then {
@@ -908,37 +916,39 @@ given Parser {
                 },
                 .ExpressionTokens(expr_tokens) then {
                     let expr = self.parse_embedded_expression(expr_tokens) or else {
-                        let mutable message = "Invalid interpolation expression: ";
+                        let mutable message = StringBuilder.new();
+                        message.push_string("Invalid interpolation expression: ");
                         message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-                        return .Error(self.parser_error_without_span(message));
+                        return .Error(self.parser_error_without_span(message.to_string()));
                     };
-                    ast_parts.push(InterpolatedStringPart.Expression(box(*expr)));
+                    ast_parts.push(InterpolatedStringPart.Expression(expr));
                     has_expression = true;
                 },
             };
         };
 
         if not has_expression then {
-            return .Ok(box(Expr.StringLiteral(literal_value, span)));
+            return .Ok(Expr.StringLiteral(literal_value.to_string(), span));
         };
-        return .Ok(box(Expr.InterpolatedString(ast_parts, span)));
+        return .Ok(Expr.InterpolatedString(ast_parts, span));
     };
 
-    module_private parse_string_literal_expr(*mutable self, value String, span SourceSpan) Result[* Expr] = {
-        return .Ok(box(Expr.StringLiteral(value, span)));
+    module_private parse_string_literal_expr(self, value String, span SourceSpan) Result[Expr] = {
+        return .Ok(Expr.StringLiteral(value, span));
     };
 
-    module_private parse_embedded_expression(*mutable self, expr_tokens List[* Token]) Result[* Expr] = {
+    module_private parse_embedded_expression(self, expr_tokens List[Token]) Result[Expr] = {
         let mutable token_list = List[Token].new();
         for token_ref in expr_tokens then {
-            token_list.push(*token_ref);
+            token_list.push(token_ref);
         };
 
         let mutable nested = Parser.new_in_file(token_list, self.file_path);
         let expr = nested.parse_expression() or else {
-            let mutable message = "parse failed: ";
+            let mutable message = StringBuilder.new();
+            message.push_string("parse failed: ");
             message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-            return .Error(self.parser_error_without_span(message));
+            return .Error(self.parser_error_without_span(message.to_string()));
         };
 
         if not nested.is_eof() then {
@@ -1064,6 +1074,6 @@ public let parse_in_file(tokens List[Token], file_path String) Result[Program] =
     let mutable parser = Parser.new_in_file(tokens, file_path);
     return when parser.parse_program() in {
         .Ok(program) then Result[Program].Ok(program),
-        .Error(error) then Result[Program].Error(box(wrap_error_as_diagnostic(DiagnosticStage.Parser(), file_path, error))),
+        .Error(error) then Result[Program].Error(wrap_error_as_diagnostic(DiagnosticStage.Parser(), file_path, error)),
     };
 };

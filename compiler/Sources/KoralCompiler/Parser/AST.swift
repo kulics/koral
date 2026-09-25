@@ -297,6 +297,7 @@ public struct MethodDeclaration {
   public let returnType: TypeNode
   public let body: ExpressionNode
   public let access: AccessModifier
+  public let defId: DefId
 
   public init(
     name: String,
@@ -304,7 +305,8 @@ public struct MethodDeclaration {
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     body: ExpressionNode,
-    access: AccessModifier
+    access: AccessModifier,
+    defId: DefId = .invalid
   ) {
     self.name = name
     self.typeParameters = typeParameters
@@ -312,6 +314,7 @@ public struct MethodDeclaration {
     self.returnType = returnType
     self.body = body
     self.access = access
+    self.defId = defId
   }
 }
 /// A single binding inside a pair destructuring: `[mutable] name [Type]` or `_`

@@ -1,4 +1,6 @@
-﻿file_private type BuiltinSubscriptKind {
+﻿using std::os { env };
+
+file_private type BuiltinSubscriptKind {
     String(),
     List(element Type),
     Deque(element Type),
@@ -7,9 +9,11 @@
 };
 
 given TypeChecker {
-    module_private box_type(self, inner Type) * Type = {
+
+
+    module_private box_type(self, inner Type) Type = {
         let _ = self;
-        return box(inner);
+        return inner;
     };
 
     module_private method_param_specs(self, method Symbol) List[FunctionParamSpec] = {
@@ -26,14 +30,14 @@ given TypeChecker {
     module_private method_param_type(self, method Symbol, index UInt) Option[Type] = {
         return when method.symbol_type in {
             .FunctionType(params, _) then
-                if index < params.count() then Option[Type].Some((*params[index]).param_type) else Option[Type].None(),
+                if index < params.count() then Option[Type].Some((params[index]).param_type) else Option[Type].None(),
             _ then Option[Type].None(),
         };
     };
 
     module_private method_return_type(self, method Symbol) Type = {
         return when method.symbol_type in {
-            .FunctionType(_, return_type_ref) then *return_type_ref,
+            .FunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
@@ -100,7 +104,8 @@ given TypeChecker {
     };
 
     module_private bind_method_symbol_type(self, method Symbol, bindings Dict[String, Type]) Symbol = {
-        return Symbol(method.def_id, self.apply_type_bindings(method.symbol_type, bindings), method.kind);
+        let bound_type = self.apply_type_bindings(method.symbol_type, bindings);
+        return Symbol(method.def_id, bound_type, method.kind);
     };
 
     module_private method_param_types(self, method Symbol) List[Type] = {
@@ -125,10 +130,10 @@ given TypeChecker {
     module_private builtin_subscript_base_type(self, t Type) Type = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then *inner,
-            .MutableReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
             _ then t,
         };
     };
@@ -162,48 +167,48 @@ given TypeChecker {
                     .None() then Option[BuiltinSubscriptKind].None(),
                 };
             },
-            .GenericStruct(template_name, type_args) then {
+            .GenericStruct(template_name, _, type_args) then {
                 if template_name == "List" and type_args.count() == 1(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List((*type_args[0(UInt)])));
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List((type_args[0(UInt)])));
                 };
                 if template_name == "Deque" and type_args.count() == 1(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque((*type_args[0(UInt)])));
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque((type_args[0(UInt)])));
                 };
                 if template_name == "Dict" and type_args.count() == 2(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict((*type_args[0(UInt)]), (*type_args[1(UInt)])));
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict((type_args[0(UInt)]), (type_args[1(UInt)])));
                 };
                 yield Option[BuiltinSubscriptKind].None();
             },
-            .PointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(*inner, false)),
-            .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(*inner, true)),
+            .PointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, false)),
+            .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, true)),
             _ then Option[BuiltinSubscriptKind].None(),
         };
     };
 
-    module_private build_builtin_subscript_helper_call(self, base TypedExpr, args List[* TypedExpr], helper_name String) TypedExpr = {
+    module_private build_builtin_subscript_helper_call(self, base TypedExpr, args List[TypedExpr], helper_name String) TypedExpr = {
         let normalized_base_type = self.builtin_subscript_base_type(base.expr_type);
         self.maybe_record_extension_method_instantiation(normalized_base_type, helper_name, List[Type].new());
         let method = self.resolve_method_signature(normalized_base_type, helper_name) or else {
             self.push_diagnostic_at_span(
                 "Missing builtin subscript helper '\(helper_name)' for type '\(self.context().type_display_name(normalized_base_type))'",
-                self.typed_expr_span(box(base))
+                self.typed_expr_span(base)
             );
             return self.empty_typed_block(Type.Unknown());
         };
 
-        let expected_self_type = self.resolve_bound_method_self_type(base.expr_type, method);
+        let mutable expected_self_type = self.resolve_bound_method_self_type(base.expr_type, method);
         let prepared_base = self.prepare_call_receiver(base, expected_self_type);
         let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, helper_name);
         let param_types = self.resolve_signature_param_types(adapted_base.expr_type, method);
 
-        let mutable typed_args = List[* TypedExpr].new();
+        let mutable typed_args = List[TypedExpr].new();
         let mutable arg_idx UInt = 0;
         for arg_ref in args then {
-            let expected_arg_type = when param_types.get(arg_idx) in {
+            let mutable expected_arg_type = when param_types.get(arg_idx) in {
                 .Some(param_type) then Option[Type].Some(param_type),
                 .None() then Option[Type].None(),
             };
-            typed_args.push(box(self.adapt_expr_to_expected_type(*arg_ref, expected_arg_type)));
+            typed_args.push(self.adapt_expr_to_expected_type(arg_ref, expected_arg_type));
             arg_idx += 1;
         };
 
@@ -211,67 +216,67 @@ given TypeChecker {
         let mutable param_idx UInt = 1;
         while param_idx < self.method_param_count(method) and (param_idx - 1(UInt)) < typed_args.count() then {
             let param_type = self.method_param_type(method, param_idx) or else Type.Unknown();
-            self.infer_type_bindings(param_type, (*typed_args[param_idx - 1(UInt)]).expr_type, &mutable bindings);
+            self.infer_type_bindings(param_type, (typed_args[param_idx - 1(UInt)]).expr_type, bindings);
             param_idx += 1(UInt);
         };
 
         let bound_method = self.bind_method_symbol_type(method, bindings);
         let return_type = self.apply_type_bindings(self.method_return_type(method), bindings);
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(bound_method), List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(adapted_base, adapted_base.expr_type, bound_method, List[Type].new(), List[Type].new(), .None()),
             bound_method.symbol_type,
         );
-        let call_expr = make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type);
+        let call_expr = make_typed_expr(TypedExprKind.Call(callee, typed_args), return_type);
         return self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr);
     };
 
-    module_private resolve_builtin_subscript_as_reference(self, base TypedExpr, args List[* TypedExpr], is_mutable Bool) TypedExpr = {
+    module_private resolve_builtin_subscript_as_reference(self, base TypedExpr, args List[TypedExpr], is_mutable Bool) TypedExpr = {
         return when self.resolve_builtin_subscript_kind(base.expr_type) in {
             .Some(kind) then when kind in {
                 .String() then {
                     if is_mutable then {
-                        self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(base)));
-                        yield make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown());
+                        self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(base));
+                        yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown());
                     };
-                    let pointer_expr = self.lower_receiver_method_call_expr(base, "borrow_ptr", List[* TypedExpr].new());
-                    let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (*args[0(UInt)]);
+                    let pointer_expr = self.lower_receiver_method_call_expr(base, "borrow_ptr", List[TypedExpr].new());
+                    let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (args[0(UInt)]);
                     let pointer_base_type = self.builtin_subscript_base_type(pointer_expr.expr_type);
                     let offset_expr = make_typed_expr(
-                        TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(index_expr)),
+                        TypedExprKind.ArithmeticExpr(pointer_expr, ArithmeticOperator.Add(), index_expr),
                         pointer_base_type,
                     );
-                    let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), Type.UInt8Type());
-                    yield self.adapt_expr_to_expected_type(deref_expr, Option[Type].Some(Type.ReferenceType(box(Type.UInt8Type()))));
+                    let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), Type.UInt8Type());
+                    yield self.adapt_expr_to_expected_type(deref_expr, Option[Type].Some(Type.ReferenceType(Type.UInt8Type())));
                 },
                 .Dict(_, _) or .List(_) or .Deque(_) then {
                     let helper_name = if is_mutable then "__index_mut_ref" else "__index_ref";
                     yield self.build_builtin_subscript_helper_call(base, args, helper_name);
                 },
                 .Pointer(element_type, _) then {
-                    let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (*args[0(UInt)]);
+                    let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (args[0(UInt)]);
                     let pointer_base_type = self.builtin_subscript_base_type(base.expr_type);
                     let pointer_expr = when base.expr_type in {
-                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
-                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
-                        .BorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
-                        .MutableBorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
+                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(base), pointer_base_type),
+                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(base), pointer_base_type),
+                        .BorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(base), pointer_base_type),
+                        .MutableBorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(base), pointer_base_type),
                         _ then base,
                     };
                     let offset_expr = make_typed_expr(
-                        TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(index_expr)),
+                        TypedExprKind.ArithmeticExpr(pointer_expr, ArithmeticOperator.Add(), index_expr),
                         pointer_base_type,
                     );
-                    let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), element_type);
-                    let expected_ref_type = if is_mutable then Option[Type].Some(Type.MutableReferenceType(box(element_type))) else Option[Type].Some(Type.ReferenceType(box(element_type)));
+                    let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), element_type);
+                    let expected_ref_type = if is_mutable then Option[Type].Some(Type.MutableReferenceType(element_type)) else Option[Type].Some(Type.ReferenceType(element_type));
                     yield self.adapt_expr_to_expected_type(deref_expr, expected_ref_type);
                 },
             },
             .None() then {
                 self.push_diagnostic_at_span(
                     "subscript is only supported for String, List, Deque, Dict, and pointer types",
-                    self.typed_expr_span(box(base))
+                    self.typed_expr_span(base)
                 );
-                yield make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown());
+                yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown());
             },
         };
     };
@@ -281,12 +286,13 @@ given TypeChecker {
     };
 
     module_private push_ambiguous_trait_extension_method_diagnostic(self, base_type Type, method_name String) Void = {
-        let mutable msg = "Ambiguous method '";
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Ambiguous method '");
         msg.push_string(method_name);
         msg.push_string("' for type '");
         msg.push_string(self.context().type_display_name(base_type));
         msg.push_string("' via trait extensions");
-        self.push_diagnostic(msg);
+        self.push_diagnostic(msg.to_string());
     };
 
     module_private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
@@ -302,7 +308,7 @@ given TypeChecker {
                 let mutable i UInt = 0;
                 for param_name in info.type_params then {
                     if i < args.count() and args.get(i) is .Some(arg_ref) then {
-                        let resolved_arg = self.resolve_type_with_bindings(*arg_ref, bindings);
+                        let resolved_arg = self.resolve_type_with_bindings(arg_ref, bindings);
                         child.define_type(param_name, resolved_arg);
                     };
                     i += 1;
@@ -318,10 +324,10 @@ given TypeChecker {
     /// This is needed when resolving method signatures inherited from generic parent traits.
     module_private bind_ancestor_trait_type_params(self, trait_name String, self_type Type) Void = {
         let mutable visited = Set[String].new();
-        self.bind_ancestor_trait_type_params_recursive(trait_name, self_type, &mutable visited);
+        self.bind_ancestor_trait_type_params_recursive(trait_name, self_type, visited);
     };
 
-    module_private bind_ancestor_trait_type_params_recursive(self, trait_name String, self_type Type, visited *mutable Set[String]) Void = {
+    module_private bind_ancestor_trait_type_params_recursive(self, trait_name String, self_type Type, visited Set[String]) Void = {
         if visited.contains(trait_name) then { return;};
         visited.insert(trait_name);
         when self.storage.trait_registry.get(trait_name) in {
@@ -358,9 +364,9 @@ given TypeChecker {
 
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     module_private extract_option_result_inner(self, t Type) Type = {
-        if t is .GenericEnum(template, args) and (template == "Option" or template == "Result") then {
+        if t is .GenericEnum(template, _, args) and (template == "Option" or template == "Result") then {
             return when args.get(0) in {
-                .Some(arg_ref) then *arg_ref,
+                .Some(arg_ref) then arg_ref,
                 .None() then Type.Unknown(),
             };
         };
@@ -385,15 +391,15 @@ given TypeChecker {
             return err_fields[0(UInt)];
         };
         return when t in {
-            .GenericEnum(template, args) then
-                if template == "Result" and args.count() > 1 then (*args[1]) else self.extract_option_result_inner(t),
+            .GenericEnum(template, _, args) then
+                if template == "Result" and args.count() > 1 then (args[1]) else self.extract_option_result_inner(t),
             _ then self.extract_option_result_inner(t),
         };
     };
 
     module_private is_option_result_wrapper(self, t Type, template_name String) Bool = {
         when t in {
-            .GenericEnum(template, _) then {
+            .GenericEnum(template, _, _) then {
                 return template == template_name;
             },
             _ then {},
@@ -408,6 +414,17 @@ given TypeChecker {
         return false;
     };
 
+    module_private option_result_template_def_id(self, t Type, template_name String) DefId = {
+        return when t in {
+            .GenericEnum(template, template_def_id, _) then if template == template_name then template_def_id else def_id_invalid(),
+            .EnumType(def_id) then {
+                let template_def_id = self.context().get_template_def_id(def_id);
+                yield if self.context().get_template_name(def_id) is .Some(name) and name == template_name then template_def_id else def_id_invalid();
+            },
+            _ then def_id_invalid(),
+        };
+    };
+
     module_private compute_and_then_result_type(self, operand_type Type, transform_result_type Type) Type = {
         let has_ok = not self.get_enum_case_field_types(operand_type, "Ok").is_empty();
         let has_error = not self.get_enum_case_field_types(operand_type, "Error").is_empty();
@@ -415,9 +432,9 @@ given TypeChecker {
             if self.is_option_result_wrapper(transform_result_type, "Result") then {
                 return transform_result_type;
             };
-            let mutable args = List[* Type].new();
-            args.push(box(transform_result_type));
-            return Type.GenericEnum("Result", args);
+            let mutable args = List[Type].new();
+            args.push(transform_result_type);
+            return Type.GenericEnum("Result", self.option_result_template_def_id(operand_type, "Result"), args);
         };
 
         let has_some = not self.get_enum_case_field_types(operand_type, "Some").is_empty();
@@ -425,28 +442,28 @@ given TypeChecker {
             if self.is_option_result_wrapper(transform_result_type, "Option") then {
                 return transform_result_type;
             };
-            let mutable args = List[* Type].new();
-            args.push(box(transform_result_type));
-            return Type.GenericEnum("Option", args);
+            let mutable args = List[Type].new();
+            args.push(transform_result_type);
+            return Type.GenericEnum("Option", self.option_result_template_def_id(operand_type, "Option"), args);
         };
 
         when operand_type in {
-            .GenericEnum(template, _) then {
+            .GenericEnum(template, template_def_id, _) then {
                 if template == "Result" then {
                     if self.is_option_result_wrapper(transform_result_type, "Result") then {
                         return transform_result_type;
                     };
-                    let mutable args = List[* Type].new();
-                    args.push(box(transform_result_type));
-                    return Type.GenericEnum("Result", args);
+                    let mutable args = List[Type].new();
+                    args.push(transform_result_type);
+                    return Type.GenericEnum("Result", template_def_id, args);
                 };
                 if template == "Option" then {
                     if self.is_option_result_wrapper(transform_result_type, "Option") then {
                         return transform_result_type;
                     };
-                    let mutable args = List[* Type].new();
-                    args.push(box(transform_result_type));
-                    return Type.GenericEnum("Option", args);
+                    let mutable args = List[Type].new();
+                    args.push(transform_result_type);
+                    return Type.GenericEnum("Option", template_def_id, args);
                 };
             },
             _ then {},
@@ -460,7 +477,7 @@ given TypeChecker {
             .Some(expected_type) then {
                 let operand_is_result = not self.get_enum_case_field_types(operand_type, "Ok").is_empty() and not self.get_enum_case_field_types(operand_type, "Error").is_empty();
                 let operand_is_option = not self.get_enum_case_field_types(operand_type, "Some").is_empty() or when operand_type in {
-                        .GenericEnum(template, _) then template == "Option",
+                        .GenericEnum(template, _, _) then template == "Option",
                         _ then false,
                     };
 
@@ -476,17 +493,17 @@ given TypeChecker {
         };
     };
 
-    module_private resolve_member_type_ref(self, base_type_ref * Type, member String) Type = {
-        let inner_type = when *base_type_ref in {
-            .MutableReferenceType(inner) then *inner,
-            .MutablePointerType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
-            .PointerType(inner) then *inner,
-            _ then *base_type_ref,
+    module_private resolve_member_type_ref(self, base_type_ref Type, member String) Type = {
+        let inner_type = when base_type_ref in {
+            .MutableReferenceType(inner) then inner,
+            .MutablePointerType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            .PointerType(inner) then inner,
+            _ then base_type_ref,
         };
         return when inner_type in {
             .StructureType(def_id) then {
@@ -511,7 +528,8 @@ given TypeChecker {
                                             DiagnosticStage.Semantic(),
                                             self.storage.file_path,
                                             "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(inner_type))'"
-                                        )
+
+                                    )
                                     );
                                 };
                                 break;
@@ -522,9 +540,9 @@ given TypeChecker {
                     .None() then Type.Unknown(),
                 };
             },
-            .GenericStruct(template_name, args) then {
+            .GenericStruct(template_name, _, args) then {
                 // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
-                let raw_field_type = when self.storage.generic_templates.lookup_struct(template_name) in {
+                let mutable raw_field_type = when self.storage.generic_templates.lookup_struct(template_name) in {
                     .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
                             let mutable found = Type.Unknown();
@@ -542,7 +560,8 @@ given TypeChecker {
                                                 DiagnosticStage.Semantic(),
                                                 self.storage.file_path,
                                                 "Cannot access \(access_label) field '\(member)' of type '\(template_name)'"
-                                            )
+
+                                        )
                                         );
                                     };
                                     break;
@@ -565,7 +584,7 @@ given TypeChecker {
                         let n = if param_count < arg_count then param_count else arg_count;
                         while i < n then {
                             let tp = struct_template.type_parameters[i];
-                            bindings.insert(tp.name, (*args[i]));
+                            bindings.insert(tp.name, (args[i]));
                             i += 1;
                         };
                         yield self.apply_type_bindings(raw_field_type, bindings);
@@ -573,7 +592,7 @@ given TypeChecker {
                     .None() then raw_field_type,
                 };
             },
-            .GenericEnum(template, _) then
+            .GenericEnum(template, _, _) then
                 // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
                 Type.Unknown(),
             _ then Type.Unknown(),
@@ -581,7 +600,58 @@ given TypeChecker {
     };
 
     module_private resolve_member_type(self, base_type Type, member String) Type = {
-        return self.resolve_member_type_ref(box(base_type), member);
+        return self.resolve_member_type_ref(base_type, member);
+    };
+
+    module_private member_decl_is_mutable(self, base_type Type, member String) Bool = {
+        let inner_type = when base_type in {
+            .MutableReferenceType(inner) then inner,
+            .MutablePointerType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            .PointerType(inner) then inner,
+            _ then base_type,
+        };
+        return when inner_type in {
+            .StructureType(def_id) then {
+                if self.context().is_foreign_struct(def_id) then {
+                    return true;
+                };
+                yield when self.context().get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mutable found = false;
+                        for field in fields then {
+                            if field.name == member then {
+                                found = true;
+                                return field.is_mutable;
+                            };
+                        };
+                        yield not found;
+                    },
+                    .None() then true,
+                };
+            },
+            .GenericStruct(template_name, _, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mutable found = false;
+                        for field in fields then {
+                            if field.name == member then {
+                                found = true;
+                                return field.is_mutable;
+                            };
+                        };
+                        yield not found;
+                    },
+                    .None() then true,
+                },
+                .None() then true,
+            },
+            _ then true,
+        };
     };
 
     module_private normalize_type_for_bindings(self, t Type) Type = {
@@ -592,11 +662,11 @@ given TypeChecker {
                 yield when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
-                            let mutable args = List[* Type].new();
+                            let mutable args = List[Type].new();
                             for arg in type_args then {
-                                args.push(box(arg));
+                                args.push(arg);
                             };
-                            yield Type.GenericStruct(template_name, args);
+                            yield Type.GenericStruct(template_name, self.context().get_template_def_id(def_id), args);
                         },
                         .None() then t,
                     },
@@ -609,11 +679,11 @@ given TypeChecker {
                 yield when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
-                            let mutable args = List[* Type].new();
+                            let mutable args = List[Type].new();
                             for arg in type_args then {
-                                args.push(box(arg));
+                                args.push(arg);
                             };
-                            yield Type.GenericEnum(template_name, args);
+                            yield Type.GenericEnum(template_name, self.context().get_template_def_id(def_id), args);
                         },
                         .None() then t,
                     },
@@ -624,7 +694,7 @@ given TypeChecker {
         };
     };
 
-    module_private infer_type_bindings(self, pattern Type, concrete Type, bindings *mutable Dict[String, Type]) Void = {
+    module_private infer_type_bindings(self, pattern Type, concrete Type, bindings Dict[String, Type]) Void = {
         let normalized_pattern = self.normalize_type_for_bindings(pattern);
         let normalized_concrete = self.normalize_type_for_bindings(concrete);
         when normalized_pattern in {
@@ -641,59 +711,59 @@ given TypeChecker {
             },
             .ReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .ReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .BorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .ReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .BorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .MutableReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .MutableReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .BorrowedReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .ReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .BorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .ReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .BorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .MutableBorrowedReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .MutableReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .WeakReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .WeakReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutableWeakReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .WeakReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutableWeakReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .MutableWeakReferenceType(p_inner) then {
                 when normalized_concrete in {
-                    .MutableWeakReferenceType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .MutableWeakReferenceType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .PointerType(p_inner) then {
                 when normalized_concrete in {
-                    .PointerType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
-                    .MutablePointerType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .PointerType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
+                    .MutablePointerType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
             .MutablePointerType(p_inner) then {
                 when normalized_concrete in {
-                    .MutablePointerType(c_inner) then self.infer_type_bindings(*p_inner, *c_inner, bindings),
+                    .MutablePointerType(c_inner) then self.infer_type_bindings(p_inner, c_inner, bindings),
                     _ then {},
                 };
             },
@@ -703,22 +773,22 @@ given TypeChecker {
                         if p_params.count() == c_params.count() then {
                             let mutable i UInt = 0;
                             while i < p_params.count() then {
-                                self.infer_type_bindings((*p_params[i]).param_type, (*c_params[i]).param_type, bindings);
+                                self.infer_type_bindings((p_params[i]).param_type, (c_params[i]).param_type, bindings);
                                 i += 1;
                             };
-                            self.infer_type_bindings(*p_ret, *c_ret, bindings);
+                            self.infer_type_bindings(p_ret, c_ret, bindings);
                         };
                     },
                     _ then {},
                 };
             },
-            .GenericStruct(p_template, p_args) then {
+            .GenericStruct(p_template, _, p_args) then {
                 when normalized_concrete in {
-                    .GenericStruct(c_template, c_args) then {
+                    .GenericStruct(c_template, _, c_args) then {
                         if p_template == c_template and p_args.count() == c_args.count() then {
                             let mutable i UInt = 0;
                             while i < p_args.count() then {
-                                self.infer_type_bindings((*p_args[i]), (*c_args[i]), bindings);
+                                self.infer_type_bindings((p_args[i]), (c_args[i]), bindings);
                                 i += 1;
                             };
                         };
@@ -726,13 +796,13 @@ given TypeChecker {
                     _ then {},
                 };
             },
-            .GenericEnum(p_template, p_args) then {
+            .GenericEnum(p_template, _, p_args) then {
                 when normalized_concrete in {
-                    .GenericEnum(c_template, c_args) then {
+                    .GenericEnum(c_template, _, c_args) then {
                         if p_template == c_template and p_args.count() == c_args.count() then {
                             let mutable i UInt = 0;
                             while i < p_args.count() then {
-                                self.infer_type_bindings((*p_args[i]), (*c_args[i]), bindings);
+                                self.infer_type_bindings((p_args[i]), (c_args[i]), bindings);
                                 i += 1;
                             };
                         };
@@ -759,45 +829,45 @@ given TypeChecker {
                 };
             },
             .ReferenceType(p_inner) then when normalized_concrete in {
-                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .BorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .BorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .MutableReferenceType(p_inner) then when normalized_concrete in {
-                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .BorrowedReferenceType(p_inner) then when normalized_concrete in {
-                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .BorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .BorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .MutableBorrowedReferenceType(p_inner) then when normalized_concrete in {
-                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableBorrowedReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .WeakReferenceType(p_inner) then when normalized_concrete in {
-                .WeakReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .WeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .MutableWeakReferenceType(p_inner) then when normalized_concrete in {
-                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .PointerType(p_inner) then when normalized_concrete in {
-                .PointerType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
-                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .PointerType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
+                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .MutablePointerType(p_inner) then when normalized_concrete in {
-                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(*p_inner, *c_inner, bindings),
+                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
                 _ then bindings,
             },
             .FunctionType(p_params, p_ret) then when normalized_concrete in {
@@ -808,37 +878,37 @@ given TypeChecker {
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_params.count() then {
-                        current_bindings = self.infer_type_bindings_persistent((*p_params[i]).param_type, (*c_params[i]).param_type, current_bindings);
+                        current_bindings = self.infer_type_bindings_persistent((p_params[i]).param_type, (c_params[i]).param_type, current_bindings);
                         i += 1;
                     };
-                    yield self.infer_type_bindings_persistent(*p_ret, *c_ret, current_bindings);
+                    yield self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings);
                 },
                 _ then bindings,
             },
-            .GenericStruct(p_template, p_args) then when normalized_concrete in {
-                .GenericStruct(c_template, c_args) then {
+            .GenericStruct(p_template, _, p_args) then when normalized_concrete in {
+                .GenericStruct(c_template, _, c_args) then {
                     if not (p_template == c_template and p_args.count() == c_args.count()) then {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.infer_type_bindings_persistent((*p_args[i]), (*c_args[i]), current_bindings);
+                        current_bindings = self.infer_type_bindings_persistent((p_args[i]), (c_args[i]), current_bindings);
                         i += 1;
                     };
                     yield current_bindings;
                 },
                 _ then bindings,
             },
-            .GenericEnum(p_template, p_args) then when normalized_concrete in {
-                .GenericEnum(c_template, c_args) then {
+            .GenericEnum(p_template, _, p_args) then when normalized_concrete in {
+                .GenericEnum(c_template, _, c_args) then {
                     if not (p_template == c_template and p_args.count() == c_args.count()) then {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.infer_type_bindings_persistent((*p_args[i]), (*c_args[i]), current_bindings);
+                        current_bindings = self.infer_type_bindings_persistent((p_args[i]), (c_args[i]), current_bindings);
                         i += 1;
                     };
                     yield current_bindings;
@@ -850,40 +920,51 @@ given TypeChecker {
     };
 
     module_private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+        return self.apply_type_bindings_impl(t, bindings);
+    };
+
+    module_private apply_type_bindings_impl(self, t Type, bindings Dict[String, Type]) Type = {
         return when t in {
             .GenericParameter(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
                 .None() then t,
             },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(*inner, bindings))),
-            .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(*inner, bindings))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.apply_type_bindings(*inner, bindings))),
+            .ReferenceType(inner) then Type.ReferenceType(self.apply_type_bindings(inner, bindings)),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(self.apply_type_bindings(inner, bindings)),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(self.apply_type_bindings(inner, bindings)),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(self.apply_type_bindings(inner, bindings)),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(self.apply_type_bindings(inner, bindings)),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(self.apply_type_bindings(inner, bindings)),
+            .PointerType(inner) then Type.PointerType(self.apply_type_bindings(inner, bindings)),
+            .MutablePointerType(inner) then Type.MutablePointerType(self.apply_type_bindings(inner, bindings)),
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params);
-                let mutable replaced_params = List[* Type].new();
+                let mutable replaced_params = List[Type].new();
                 for param_ref in param_types then {
-                    replaced_params.push(box(self.apply_type_bindings(*param_ref, bindings)));
+                    replaced_params.push(self.apply_type_bindings(param_ref, bindings));
                 };
-                yield Type.FunctionType(types_to_param_entries(replaced_params), box(self.apply_type_bindings(*return_type, bindings)));
+                yield Type.FunctionType(types_to_param_entries(replaced_params), self.apply_type_bindings(return_type, bindings));
             },
-            .GenericStruct(template, args) then {
-                let mutable replaced = List[* Type].new();
+            .GenericStruct(template, template_def_id, args) then {
+                let mutable replaced = List[Type].new();
                 for arg_ref in args then {
-                    replaced.push(box(self.apply_type_bindings(*arg_ref, bindings)));
+                    replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                yield Type.GenericStruct(template, replaced);
+                yield Type.GenericStruct(template, template_def_id, replaced);
             },
-            .GenericEnum(template, args) then {
-                let mutable replaced = List[* Type].new();
+            .GenericEnum(template, template_def_id, args) then {
+                let mutable replaced = List[Type].new();
                 for arg_ref in args then {
-                    replaced.push(box(self.apply_type_bindings(*arg_ref, bindings)));
+                    replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                yield Type.GenericEnum(template, replaced);
+                yield Type.GenericEnum(template, template_def_id, replaced);
+            },
+            .TraitObject(trait_name, trait_def_id, args) then {
+                let mutable replaced = List[Type].new();
+                for arg_ref in args then {
+                    replaced.push(self.apply_type_bindings(arg_ref, bindings));
+                };
+                yield Type.TraitObject(trait_name, trait_def_id, replaced);
             },
             _ then t,
         };
@@ -891,31 +972,31 @@ given TypeChecker {
 
     module_private normalize_method_receiver_type(self, base_type Type) Type = {
         return when base_type in {
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
-            .PointerType(inner) then Type.PointerType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(*inner)))),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .ReferenceType(inner) then Type.ReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .MutablePointerType(inner) then Type.MutablePointerType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
+            .PointerType(inner) then Type.PointerType(self.canonicalize_alias_type(self.concretize_default_literal_type(inner))),
             _ then self.canonicalize_alias_type(self.concretize_default_literal_type(base_type)),
         };
     };
 
     module_private receiver_type_args(self, inner_type Type) List[Type] = {
         return when inner_type in {
-            .GenericStruct(_, args) then {
+            .GenericStruct(_, _, args) then {
                 let mutable out = List[Type].new();
                 for arg in args then {
-                    out.push(*arg);
+                    out.push(arg);
                 };
                 yield out;
             },
-            .GenericEnum(_, args) then {
+            .GenericEnum(_, _, args) then {
                 let mutable out = List[Type].new();
                 for arg in args then {
-                    out.push(*arg);
+                    out.push(arg);
                 };
                 yield out;
             },
@@ -927,11 +1008,11 @@ given TypeChecker {
 
     module_private generic_extension_lookup_key(self, inner_type Type) Option[String] = {
         return when inner_type in {
-            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+            .GenericStruct(template_name, _, _) then when self.storage.generic_templates.lookup_extension_methods(template_name) in {
                 .Some(_) then Option[String].Some(template_name),
                 .None() then Option[String].None(),
             },
-            .GenericEnum(template_name, _) then when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+            .GenericEnum(template_name, _, _) then when self.storage.generic_templates.lookup_extension_methods(template_name) in {
                 .Some(_) then Option[String].Some(template_name),
                 .None() then Option[String].None(),
             },
@@ -1051,6 +1132,153 @@ given TypeChecker {
         };
     };
 
+    module_private resolve_extension_method_template_signature(
+        self,
+        base_type Type,
+        inner_type Type,
+        template GenericExtensionMethodTemplate,
+        actual_type_args List[Type],
+    ) Option[Symbol] = {
+        // A template declares the target's type parameters; the receiver must
+        // carry exactly that many arguments. Swift checks this the same way in
+        // `selectExtensionTemplate` (`ext.typeParams.count != extensionTypeArgCount`).
+        if template.type_params.count() <> actual_type_args.count() then {
+            self.push_diagnostic("Type mismatch: expected \(template.type_params.count()) type arguments, got \(actual_type_args.count())");
+            return Option[Symbol].None();
+        };
+        let mutable bindings = Dict[String, Type].new();
+        let mutable i UInt = 0;
+        while i < template.type_params.count() and i < actual_type_args.count() then {
+            bindings.insert(template.type_params[i].name, actual_type_args[i]);
+            i += 1;
+        };
+        // Swift `resolveGenericExtensionMethod`
+        // (TypeCheckerMethods.swift:562-610) calls `enforceGenericConstraints`
+        // with `methodInfo.typeParams`, i.e. at the CALL SITE. Re-checking a
+        // tool body during materialization reaches this same code, but that is
+        // a declaration activity: `constraint_enforcement_deferred` keeps it
+        // from reporting (`Rune: Hash`, `Pair[K, V]: Hash`), while a real call
+        // site like `names.borrow_ptr()` must report `String` lacking `Pod`.
+        for tp in template.type_params then {
+            for constraint in tp.constraints then {
+                let trait_name = self.type_node_name(constraint);
+                if trait_name == "Any" then {
+                    continue;
+                };
+                let bound_type = bindings.get(tp.name) or else Type.GenericParameter(tp.name);
+                let trait_args = self.trait_type_args_with_bindings(constraint, bindings);
+                if trait_args.is_empty() then {
+                    if trait_name == "mutable" then {
+                        if not self.satisfies_mutable_constraint(bound_type) then {
+                            self.push_diagnostic(self.mutable_constraint_violation_message(bound_type, "checking constraint \(tp.name): mutable"));
+                            return Option[Symbol].None();
+                        };
+                    } else if not self.enforce_explicit_trait_requirement_with_context(bound_type, trait_name, tp.name) then {
+                        return Option[Symbol].None();
+                    };
+                } else if not self.enforce_explicit_generic_trait_conformance(bound_type, trait_name, trait_args) then {
+                    return Option[Symbol].None();
+                };
+            };
+        };
+        for method_type_param in template.method.type_params then {
+            if not bindings.contains_key(method_type_param.name) then {
+                bindings.insert(method_type_param.name, Type.GenericParameter(method_type_param.name));
+            };
+        };
+        // Generic extension lookup receives the de-referenced receiver as
+        // `inner_type`; this is the Swift `typeToLookup` value used for `Self`.
+        // Keeping `base_type` here reintroduces a reference wrapper into
+        // generic constraints such as `R Iterator[T]`.
+        bindings.insert("Self", inner_type);
+        // `checkedParameters` / `checkedReturnType` were resolved with the
+        // conformance's trait arguments ALREADY BAKED IN — Swift
+        // `resolveGenericExtensionMethod` (TypeCheckerMethods.swift:587-610)
+        // substitutes only the template's own `typeParams`. Binding the trait
+        // arguments again (a map like `T -> Pair[UInt, T]` whose value still
+        // mentions its key) inflates `Option[Pair[UInt, T]]` into
+        // `Option[Pair[UInt, Pair[UInt, T]]]`. So the checked types get the
+        // template's own parameters only; the trait arguments stay in `bindings`
+        // for the TypeNode path below and for constraint checking.
+        let mutable checked_bindings = Dict[String, Type].new();
+        // `checked_*` keep the TARGET's type parameters generic (`Func(T) Bool` on
+        // `Iterator[T]`). Bind them the way `bind_direct_method_signature` does —
+        // unify the method's own `self` parameter with this receiver — so the
+        // caller sees `Func(Int) Bool` for `ListIterator[Int]`.
+        when template.checked_parameters in {
+            .Some(checked_symbols) then {
+                if not checked_symbols.is_empty() then {
+                    self.infer_type_bindings(checked_symbols[0(UInt)].symbol_type, inner_type, checked_bindings);
+                };
+            },
+            .None() then {},
+        };
+        for entry in bindings then {
+            if not checked_bindings.contains_key(entry.first) then {
+                checked_bindings.insert(entry.first, entry.second);
+            };
+        };
+        self.bind_extension_template_conformance_trait_args(inner_type, template, bindings);
+        // The tool method is written against the TRAIT's type parameters
+        // (`fn Func(T) Bool` on `Iterator[T]`). Map them straight to this
+        // receiver's conformance arguments — `T` becomes `Int` for
+        // `ListIterator[Int]` — so the parameter type comes out as
+        // `Func(Int) Bool` rather than a bare `T`. This is the same map
+        // `resolve_trait_registry_method_signature` builds via
+        // `trait_method_bindings`.
+        when template.conformance_trait_name in {
+            .Some(trait_name) then {
+                for entry in self.trait_method_bindings(trait_name, inner_type) then {
+                    bindings.insert(entry.first, entry.second);
+                };
+            },
+            .None() then {},
+        };
+        let mutable typed_params = List[TypedParam].new();
+        when template.checked_parameters in {
+            .Some(checked_symbols) then {
+                let mutable checked_index UInt = 0;
+                while checked_index < checked_symbols.count() then {
+                    let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown"), true);
+                    typed_params.push(TypedParam(
+                        declared.name,
+                        declared.is_mutable,
+                        self.apply_type_bindings(checked_symbols[checked_index].symbol_type, checked_bindings),
+                        declared.named,
+                    ));
+                    checked_index += 1;
+                };
+            },
+            .None() then {
+                for param in template.method.params then {
+                    typed_params.push(
+                        TypedParam(
+                            param.name,
+                            param.is_mutable,
+                            self.resolve_template_type_node_with_bindings(param.param_type, bindings),
+                            param.named,
+                        ),
+                    );
+                };
+            },
+        };
+        let return_type = when template.checked_return_type in {
+            .Some(ret) then self.apply_type_bindings(ret, checked_bindings),
+            .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
+        };
+        return Option[Symbol].Some(
+            self.make_method_callable_symbol_with_visibility(
+                template.method.name,
+                typed_params,
+                return_type,
+                template.method.access,
+                template.module_path,
+                template.source_file,
+                template.package_id,
+            ),
+        );
+    };
+
     module_private resolve_extension_template_signature(self, base_type Type, inner_type Type, method_name String) Option[Symbol] = {
         let template_key = self.generic_extension_lookup_key(inner_type);
         return when template_key in {
@@ -1060,89 +1288,106 @@ given TypeChecker {
                 Option[UInt].None(),
                 Option[UInt].Some(self.receiver_type_args(inner_type).count()),
             ) in {
-                .Some(template) then {
-                    let actual_type_args = self.receiver_type_args(inner_type);
-                    let mutable bindings = Dict[String, Type].new();
-                    let mutable i UInt = 0;
-                    while i < template.type_params.count() and i < actual_type_args.count() then {
-                        bindings.insert(template.type_params[i].name, actual_type_args[i]);
-                        i += 1;
-                    };
-                    // Also bind method-level type params as GenericParameter
-                    // so resolve_template_type_node_with_bindings can find them
-                    for mtp in template.method.type_params then {
-                        if not bindings.contains_key(mtp.name) then {
-                            bindings.insert(mtp.name, Type.GenericParameter(mtp.name));
-                        };
-                    };
-                    bindings.insert("Self", base_type);
-                    self.bind_extension_template_conformance_trait_args(inner_type, *template, &mutable bindings);
-                    let mutable typed_params = List[TypedParam].new();
-                    for param in template.method.params then {
-                        typed_params.push(
-                            TypedParam(
-                                param.name,
-                                param.is_mutable,
-                                self.resolve_template_type_node_with_bindings(param.param_type, bindings),
-                                param.named,
-                            )
-                        );
-                    };
-                    let return_type = when template.checked_return_type in {
-                        .Some(ret) then self.apply_type_bindings(ret, bindings),
-                        .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
-                    };
-                    yield Option[Symbol].Some(
-                        self.make_method_callable_symbol_with_visibility(
-                            method_name,
-                            typed_params,
-                            return_type,
-                            template.method.access,
-                            template.module_path,
-                            template.source_file,
-                            template.package_id,
-                        )
-                    );
-                },
+                .Some(template) then self.resolve_extension_method_template_signature(
+                    base_type,
+                    inner_type,
+                    template,
+                    self.receiver_type_args(inner_type),
+                ),
                 .None() then Option[Symbol].None(),
             },
             .None() then Option[Symbol].None(),
         };
     };
 
+    module_private resolve_trait_tool_method_signature(
+        self,
+        base_type Type,
+        trait_name String,
+        method_name String,
+    ) Option[Symbol] = {
+        return when self.flattened_trait_tool_methods(trait_name) in {
+            .Ok(methods) then when methods.get(method_name) in {
+                .Some(entry) then {
+                    if not self.trait_tool_method_is_receiver_style(entry.method) then {
+                        return Option[Symbol].None();
+                    };
+                    // The tool method is written against the TRAIT's type
+                    // parameters (`fn Func(T) Bool` on `Iterator[T]`, `other T` on
+                    // `MyEq[T]`). They must be bound to this receiver's conformance
+                    // arguments — the same map `resolve_trait_registry_method_signature`
+                    // builds — otherwise the parameter types come back as bare `T`.
+                    let mutable bindings = self.trait_method_bindings(trait_name, base_type);
+                    bindings.insert("Self", base_type);
+                    for type_param in entry.method.type_params then {
+                        if not bindings.contains_key(type_param.name) then {
+                            bindings.insert(type_param.name, Type.GenericParameter(type_param.name));
+                        };
+                    };
+                    let mutable typed_params = List[TypedParam].new();
+                    for param in entry.method.params then {
+                        typed_params.push(TypedParam(
+                            param.name,
+                            param.is_mutable,
+                            self.resolve_template_type_node_with_bindings(param.type_name, bindings),
+                            param.named,
+                        ));
+                    };
+                    let return_type = self.resolve_template_type_node_with_bindings(entry.method.return_type, bindings);
+                    return Option[Symbol].Some(self.make_method_callable_symbol_with_visibility(
+                        entry.method.name,
+                        typed_params,
+                        return_type,
+                        entry.method.access,
+                        entry.module_path,
+                        entry.source_file,
+                        entry.package_id,
+                    ));
+                },
+                .None() then Option[Symbol].None(),
+            },
+            .Error(error) then {
+                self.push_diagnostic(error.message());
+                return Option[Symbol].None();
+            },
+        };
+    };
+
     module_private concrete_receiver_for_method(self, base_type Type, method Symbol) Type = {
-        let normalized_base_type = self.normalize_method_receiver_type(base_type);
+        let mutable normalized_base_type = self.normalize_method_receiver_type(base_type);
         if self.method_param_count(method) == 0 then {
             return normalized_base_type;
         };
         let inner_type = when normalized_base_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
-            .MutablePointerType(inner) then *inner,
-            .PointerType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            .MutablePointerType(inner) then inner,
+            .PointerType(inner) then inner,
             _ then normalized_base_type,
         };
-        let receiver_param_type = self.method_param_type(method, 0(UInt)) or else normalized_base_type;
+        let mutable receiver_param_type = self.method_param_type(method, 0(UInt)) or else normalized_base_type;
         return when receiver_param_type in {
             .MutableReferenceType(_) then when normalized_base_type in {
                 .MutableReferenceType(_) then normalized_base_type,
                 .MutableBorrowedReferenceType(_) then normalized_base_type,
                 .ReferenceType(_) then {
-                    let mutable _rdmsg = "Cannot call mutating method through read-only reference of type '";
+                    let mutable _rdmsg = StringBuilder.new();
+                    _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg);
+                    self.push_diagnostic(_rdmsg.to_string());
                     yield normalized_base_type;
                 },
                 .BorrowedReferenceType(_) then {
-                    let mutable _rdmsg = "Cannot call mutating method through read-only reference of type '";
+                    let mutable _rdmsg = StringBuilder.new();
+                    _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg);
+                    self.push_diagnostic(_rdmsg.to_string());
                     yield normalized_base_type;
                 },
                 _ then Type.MutableReferenceType(self.box_type(inner_type)),
@@ -1151,17 +1396,19 @@ given TypeChecker {
                 .MutableReferenceType(_) then normalized_base_type,
                 .MutableBorrowedReferenceType(_) then normalized_base_type,
                 .ReferenceType(_) then {
-                    let mutable _rdmsg = "Cannot call mutating method through read-only reference of type '";
+                    let mutable _rdmsg = StringBuilder.new();
+                    _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg);
+                    self.push_diagnostic(_rdmsg.to_string());
                     yield normalized_base_type;
                 },
                 .BorrowedReferenceType(_) then {
-                    let mutable _rdmsg = "Cannot call mutating method through read-only reference of type '";
+                    let mutable _rdmsg = StringBuilder.new();
+                    _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg);
+                    self.push_diagnostic(_rdmsg.to_string());
                     yield normalized_base_type;
                 },
                 _ then Type.MutableBorrowedReferenceType(self.box_type(inner_type)),
@@ -1201,7 +1448,7 @@ given TypeChecker {
         self,
         receiver_type Type,
         template GenericExtensionMethodTemplate,
-        bindings *mutable Dict[String, Type],
+        bindings Dict[String, Type],
     ) Void = {
         when template.conformance_trait_name in {
             .Some(trait_name) then {
@@ -1219,7 +1466,7 @@ given TypeChecker {
                     };
 
                     let mutable conformance_bindings = Dict[String, Type].new();
-                    if not self.conformance_type_key_matches(conformance.target_type, receiver_type, &mutable conformance_bindings) then {
+                    if not self.conformance_type_key_matches(conformance.target_type, receiver_type, conformance_bindings) then {
                         continue;
                     };
 
@@ -1252,19 +1499,19 @@ given TypeChecker {
     };
 
     module_private bind_direct_method_signature(self, base_type Type, method_name String, raw_method Symbol) Symbol = {
-        let receiver_type = self.concrete_receiver_for_method(base_type, raw_method);
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, raw_method);
         let mutable bindings = Dict[String, Type].new();
+        let self_param_type = self.method_param_type(raw_method, 0(UInt)) or else Type.Unknown();
         if self.method_param_count(raw_method) > 0(UInt) then {
-            let self_param_type = self.method_param_type(raw_method, 0(UInt)) or else Type.Unknown();
-            self.infer_type_bindings(self_param_type, receiver_type, &mutable bindings);
+            self.infer_type_bindings(self_param_type, receiver_type, bindings);
         };
         let concrete_self = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         bindings.insert("Self", concrete_self);
@@ -1276,43 +1523,44 @@ given TypeChecker {
         if not bound_param_types.is_empty() then {
             bound_param_types[0(UInt)] = receiver_type;
         };
-        let bound_return_type = self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings));
+        let mutable bound_return_type = self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings));
         return self.rebuild_method_symbol(method_name, raw_method, bound_param_types, bound_return_type);
     };
+
 
     module_private replace_type_occurrence(self, t Type, pattern Type, replacement Type) Type = {
         if self.same_expr_type(t, pattern) then {
             return replacement;
         };
         return when t in {
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .ReferenceType(inner) then Type.ReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .PointerType(inner) then Type.PointerType(box(self.replace_type_occurrence(*inner, pattern, replacement))),
-            .GenericStruct(template, args) then {
-                let mutable replaced = List[* Type].new();
+            .MutableReferenceType(inner) then Type.MutableReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .ReferenceType(inner) then Type.ReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .MutablePointerType(inner) then Type.MutablePointerType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .PointerType(inner) then Type.PointerType(self.replace_type_occurrence(inner, pattern, replacement)),
+            .GenericStruct(template, template_def_id, args) then {
+                let mutable replaced = List[Type].new();
                 for arg_ref in args then {
-                    replaced.push(box(self.replace_type_occurrence(*arg_ref, pattern, replacement)));
+                    replaced.push(self.replace_type_occurrence(arg_ref, pattern, replacement));
                 };
-                yield Type.GenericStruct(template, replaced);
+                yield Type.GenericStruct(template, template_def_id, replaced);
             },
-            .GenericEnum(template, args) then {
-                let mutable replaced = List[* Type].new();
+            .GenericEnum(template, template_def_id, args) then {
+                let mutable replaced = List[Type].new();
                 for arg_ref in args then {
-                    replaced.push(box(self.replace_type_occurrence(*arg_ref, pattern, replacement)));
+                    replaced.push(self.replace_type_occurrence(arg_ref, pattern, replacement));
                 };
-                yield Type.GenericEnum(template, replaced);
+                yield Type.GenericEnum(template, template_def_id, replaced);
             },
             .FunctionType(params, ret) then {
-                let mutable replaced_params = List[* Type].new();
+                let mutable replaced_params = List[Type].new();
                 for entry in params then {
-                    replaced_params.push(box(self.replace_type_occurrence(entry.param_type, pattern, replacement)));
+                    replaced_params.push(self.replace_type_occurrence(entry.param_type, pattern, replacement));
                 };
-                let replaced_ret = self.replace_type_occurrence(*ret, pattern, replacement);
+                let replaced_ret = self.replace_type_occurrence(ret, pattern, replacement);
                 yield make_function_type(replaced_params, replaced_ret);
             },
             _ then t,
@@ -1324,14 +1572,14 @@ given TypeChecker {
             return self.method_return_type(method);
         };
         let mutable bindings = Dict[String, Type].new();
-        let self_param_type = self.method_param_type(method, 0(UInt)) or else Type.Unknown();
+        let mutable self_param_type = self.method_param_type(method, 0(UInt)) or else Type.Unknown();
         let concrete_self_type = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         // Only infer type bindings from self if parameter 0 is actually a self parameter
@@ -1339,38 +1587,38 @@ given TypeChecker {
         // constructors (e.g., Random[DefaultRandomSource].new(rng)), parameter 0 is NOT self.
         let is_self_param = when self_param_type in {
             .GenericParameter(_) then true,
-            .ReferenceType(inner) then when *inner in {
+            .ReferenceType(inner) then when inner in {
                 .GenericParameter(_) then true,
-                _ then self.same_expr_type(*inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, *inner),
+                _ then self.same_expr_type(inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, inner),
             },
-            .MutableReferenceType(inner) then when *inner in {
+            .MutableReferenceType(inner) then when inner in {
                 .GenericParameter(_) then true,
-                _ then self.same_expr_type(*inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, *inner),
+                _ then self.same_expr_type(inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, inner),
             },
-            .BorrowedReferenceType(inner) then when *inner in {
+            .BorrowedReferenceType(inner) then when inner in {
                 .GenericParameter(_) then true,
-                _ then self.same_expr_type(*inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, *inner),
+                _ then self.same_expr_type(inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, inner),
             },
-            .MutableBorrowedReferenceType(inner) then when *inner in {
+            .MutableBorrowedReferenceType(inner) then when inner in {
                 .GenericParameter(_) then true,
-                _ then self.same_expr_type(*inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, *inner),
+                _ then self.same_expr_type(inner, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, inner),
             },
             _ then self.same_expr_type(self_param_type, concrete_self_type) or self.type_matches_expected_pattern(concrete_self_type, self_param_type),
         };
         if is_self_param then {
-            self.infer_type_bindings(self_param_type, receiver_type, &mutable bindings);
+            self.infer_type_bindings(self_param_type, receiver_type, bindings);
         };
         bindings.insert("Self", concrete_self_type);
-        let bound_return_type = self.apply_type_bindings(self.method_return_type(method), bindings);
+        let mutable bound_return_type = self.apply_type_bindings(self.method_return_type(method), bindings);
         return bound_return_type;
     };
 
     module_private resolve_method_template_key(self, inner_type Type) Option[String] = {
         return when inner_type in {
-            .GenericStruct(template, _) then {
+            .GenericStruct(template, _, _) then {
                 yield Option[String].Some(template);
             },
-            .GenericEnum(template, _) then {
+            .GenericEnum(template, _, _) then {
                 yield Option[String].Some(template);
             },
             .StructureType(def_id) then {
@@ -1384,7 +1632,7 @@ given TypeChecker {
     };
 
     // Check if `ancestor` is a transitive parent of `descendant` in the trait hierarchy.
-    module_private trait_is_ancestor_of(self, ancestor String, descendant String, visited *mutable Set[String]) Bool = {
+    module_private trait_is_ancestor_of(self, ancestor String, descendant String, visited Set[String]) Bool = {
         if visited.contains(descendant) then { return false;};
         visited.insert(descendant);
         when self.storage.trait_registry.get(descendant) in {
@@ -1403,19 +1651,19 @@ given TypeChecker {
     module_private traits_are_related(self, trait_a String, trait_b String) Bool = {
         if trait_a == trait_b then { return true;};
         let mutable visited = Set[String].new();
-        if self.trait_is_ancestor_of(trait_a, trait_b, &mutable visited) then { return true;};
+        if self.trait_is_ancestor_of(trait_a, trait_b, visited) then { return true;};
         visited = Set[String].new();
-        return self.trait_is_ancestor_of(trait_b, trait_a, &mutable visited);
+        return self.trait_is_ancestor_of(trait_b, trait_a, visited);
     };
 
     module_private resolve_conformance_method_signature(self, receiver_type Type, method_name String) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -1432,7 +1680,7 @@ given TypeChecker {
         let mutable ambiguous = false;
         for template in templates then {
             let mutable bindings = Dict[String, Type].new();
-            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, &mutable bindings) then {
+            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
                 continue;
             };
 
@@ -1445,7 +1693,7 @@ given TypeChecker {
                     let n = if param_count < arg_count then param_count else arg_count;
                     let mutable i UInt = 0;
                     while i < n then {
-                        let arg_type = self.apply_type_bindings(template.trait_arg_types[i], bindings);
+                        let mutable arg_type = self.apply_type_bindings(template.trait_arg_types[i], bindings);
                         method_bindings.insert(info.type_params[i], arg_type);
                         i += 1;
                     };
@@ -1458,26 +1706,27 @@ given TypeChecker {
                 .Some(raw_method) then {
                     let mutable bound_param_types = List[Type].new();
                     for parameter_type in self.method_param_types(raw_method) then {
-                        let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type);
+                        let mutable bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type);
                         bound_param_types.push(bound_type);
                     };
                     if not bound_param_types.is_empty() then {
                         bound_param_types[0(UInt)] = self.concrete_receiver_for_method(receiver_type, raw_method);
                     };
                     let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(self.method_return_type(raw_method), method_bindings), trait_name, receiver_type);
-                    let bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return);
+                    let mutable bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return);
                     let candidate = Symbol(raw_method.def_id, bound_symbol_type, raw_method.kind);
                     if first_match is .Some(_) then {
                         if trait_name <> first_trait and not self.traits_are_related(first_trait, trait_name) then {
                             ambiguous = true;
-                            let mutable msg = "ambiguous method '";
+                            let mutable msg = StringBuilder.new();
+                            msg.push_string("ambiguous method '");
                             msg.push_string(method_name);
                             msg.push_string("' on type - implemented by both '");
                             msg.push_string(first_trait);
                             msg.push_string("' and '");
                             msg.push_string(trait_name);
                             msg.push_string("'. Use explicit trait qualification (e.g., value.(TraitName).method())");
-                            self.push_diagnostic(msg);
+                            self.push_diagnostic(msg.to_string());
                         };
                     } else {
                         first_match = Option[Symbol].Some(candidate);
@@ -1501,14 +1750,15 @@ given TypeChecker {
                             if first_match is .Some(_) then {
                                 if trait_name <> first_trait and not self.traits_are_related(first_trait, trait_name) then {
                                     ambiguous = true;
-                                    let mutable msg = "ambiguous method '";
+                                    let mutable msg = StringBuilder.new();
+                                    msg.push_string("ambiguous method '");
                                     msg.push_string(method_name);
                                     msg.push_string("' on type - implemented by both '");
                                     msg.push_string(first_trait);
                                     msg.push_string("' and '");
                                     msg.push_string(trait_name);
                                     msg.push_string("'. Use explicit trait qualification (e.g., value.(TraitName).method())");
-                                    self.push_diagnostic(msg);
+                                    self.push_diagnostic(msg.to_string());
                                 };
                             } else {
                                 first_match = Option[Symbol].Some(candidate);
@@ -1533,12 +1783,12 @@ given TypeChecker {
 
     module_private resolve_conformance_extension_template_signature(self, base_type Type, receiver_type Type, method_name String) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         let key = self.conformance_template_key(normalized_receiver);
@@ -1550,7 +1800,7 @@ given TypeChecker {
         };
         for conformance in conformances then {
             let mutable conformance_bindings = Dict[String, Type].new();
-            if not self.conformance_type_key_matches(conformance.target_type, normalized_receiver, &mutable conformance_bindings) then {
+            if not self.conformance_type_key_matches(conformance.target_type, normalized_receiver, conformance_bindings) then {
                 continue;
             };
 
@@ -1572,6 +1822,13 @@ given TypeChecker {
             for entry in conformance_bindings then {
                 bindings.insert(entry.first, entry.second);
             };
+            // Snapshot before the trait-argument pass: `checked_*` already carry
+            // those arguments and must not see them again (see
+            // resolve_extension_method_template_signature).
+            let mutable checked_bindings = Dict[String, Type].new();
+            for entry in bindings then {
+                checked_bindings.insert(entry.first, entry.second);
+            };
             when self.storage.trait_registry.get(trait_name) in {
                 .Some(info) then {
                     let param_count = info.type_params.count();
@@ -1591,21 +1848,41 @@ given TypeChecker {
                     bindings.insert(mtp.name, Type.GenericParameter(mtp.name));
                 };
             };
-            bindings.insert("Self", base_type);
+            bindings.insert("Self", normalized_receiver);
 
+            // Swift `resolveGenericExtensionMethod` (TypeCheckerMethods.swift:587-610):
+            // `checkedParameters` / `checkedReturnType` are already resolved and must
+            // not be re-bound. See resolve_extension_method_template_signature.
             let mutable typed_params = List[TypedParam].new();
-            for param in template.method.params then {
-                typed_params.push(
-                    TypedParam(
-                        param.name,
-                        param.is_mutable,
-                        self.resolve_template_type_node_with_bindings(param.param_type, bindings),
-                        param.named,
-                    )
-                );
+            when template.checked_parameters in {
+                .Some(checked_symbols) then {
+                    let mutable checked_index UInt = 0;
+                    while checked_index < checked_symbols.count() then {
+                        let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown"), true);
+                        typed_params.push(TypedParam(
+                            declared.name,
+                            declared.is_mutable,
+                            self.apply_type_bindings(checked_symbols[checked_index].symbol_type, checked_bindings),
+                            declared.named,
+                        ));
+                        checked_index += 1;
+                    };
+                },
+                .None() then {
+                    for param in template.method.params then {
+                        typed_params.push(
+                            TypedParam(
+                                param.name,
+                                param.is_mutable,
+                                self.resolve_template_type_node_with_bindings(param.param_type, bindings),
+                                param.named,
+                            ),
+                        );
+                    };
+                },
             };
             let return_type = when template.checked_return_type in {
-                .Some(ret) then self.apply_type_bindings(ret, bindings),
+                .Some(ret) then self.apply_type_bindings(ret, checked_bindings),
                 .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
             };
             return Option[Symbol].Some(
@@ -1617,7 +1894,7 @@ given TypeChecker {
                     template.module_path,
                     template.source_file,
                     template.package_id,
-                )
+                ),
             );
         };
 
@@ -1626,12 +1903,12 @@ given TypeChecker {
 
     module_private resolve_conformance_trait_method_signature(self, receiver_type Type, trait_name String, method_name String) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -1648,7 +1925,7 @@ given TypeChecker {
             };
 
             let mutable bindings = Dict[String, Type].new();
-            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, &mutable bindings) then {
+            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
                 continue;
             };
 
@@ -1660,7 +1937,7 @@ given TypeChecker {
                     let n = if param_count < arg_count then param_count else arg_count;
                     let mutable i UInt = 0;
                     while i < n then {
-                        let arg_type = self.apply_type_bindings(template.trait_arg_types[i], bindings);
+                        let mutable arg_type = self.apply_type_bindings(template.trait_arg_types[i], bindings);
                         method_bindings.insert(info.type_params[i], arg_type);
                         i += 1;
                     };
@@ -1690,14 +1967,14 @@ given TypeChecker {
                 .Some(raw_method) then {
                     let mutable bound_param_types = List[Type].new();
                     for parameter_type in self.method_param_types(raw_method) then {
-                        let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type);
+                        let mutable bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type);
                         bound_param_types.push(bound_type);
                     };
                     if not bound_param_types.is_empty() then {
                         bound_param_types[0(UInt)] = self.concrete_receiver_for_method(receiver_type, raw_method);
                     };
                     let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(self.method_return_type(raw_method), method_bindings), trait_name, receiver_type);
-                    let bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return);
+                    let mutable bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return);
                     return Option[Symbol].Some(Symbol(raw_method.def_id, bound_symbol_type, raw_method.kind));
                 },
                 .None() then {},
@@ -1709,12 +1986,12 @@ given TypeChecker {
 
     module_private apply_trait_self_binding(self, t Type, receiver_type Type) Type = {
         let concrete_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         let mutable bindings = Dict[String, Type].new();
@@ -1727,12 +2004,12 @@ given TypeChecker {
     /// Numeric (which declares [Self]Add), this resolves R -> Self and Self -> receiver_type.
     module_private resolve_trait_member_type(self, t Type, receiver_type Type) Type = {
         let concrete_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         // Build bindings from Self + any ancestor trait type params currently in scope
@@ -1740,18 +2017,18 @@ given TypeChecker {
         bindings.insert("Self", concrete_receiver);
         // Check if there are any GenericParameter references in the type that are
         // bound in the global scope (from bind_ancestor_trait_type_params)
-        self.collect_ancestor_bindings(t, &mutable bindings);
+        self.collect_ancestor_bindings(t, bindings);
         return self.apply_type_bindings(t, bindings);
     };
 
     module_private trait_method_bindings(self, trait_name String, receiver_type Type) Dict[String, Type] = {
         let concrete_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         let mutable bindings = Dict[String, Type].new();
@@ -1760,10 +2037,10 @@ given TypeChecker {
         // If receiver is a GenericParameter, extract constraint type args for this trait
         // to populate bindings. e.g. [R Iterator[T]] → Element -> T
         let receiver_inner = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
             _ then receiver_type,
         };
         when receiver_inner in {
@@ -1791,14 +2068,14 @@ given TypeChecker {
                     .None() then {},
                 };
             },
-            .TraitObject(receiver_trait_name, receiver_trait_args) then {
+            .TraitObject(receiver_trait_name, _, receiver_trait_args) then {
                 when self.storage.trait_registry.get(receiver_trait_name) in {
                     .Some(info) then {
                         let mutable idx UInt = 0;
                         while idx < info.type_params.count() and idx < receiver_trait_args.count() then {
                             let param_name = info.type_params[idx];
                             if not bindings.contains_key(param_name) then {
-                                bindings.insert(param_name, (*receiver_trait_args[idx]));
+                                bindings.insert(param_name, (receiver_trait_args[idx]));
                             };
                             idx += 1;
                         };
@@ -1807,7 +2084,7 @@ given TypeChecker {
                 };
                 if receiver_trait_name <> trait_name then {
                     let mutable receiver_visited = Set[String].new();
-                    bindings = self.collect_trait_method_bindings_recursive(receiver_trait_name, bindings, &mutable receiver_visited);
+                    bindings = self.collect_trait_method_bindings_recursive(receiver_trait_name, bindings, receiver_visited);
                 };
             },
             _ then {},
@@ -1818,7 +2095,7 @@ given TypeChecker {
             .Some(info) then {
                 for type_param in info.type_params then {
                     if not bindings.contains_key(type_param) then {
-                        let bound_type = when self.storage.global_scope.lookup_type(type_param) in {
+                        let mutable bound_type = when self.storage.global_scope.lookup_type(type_param) in {
                             .Some(existing) then existing,
                             .None() then Type.GenericParameter(type_param),
                         };
@@ -1832,14 +2109,14 @@ given TypeChecker {
             },
         };
         let mutable visited = Set[String].new();
-        return self.collect_trait_method_bindings_recursive(trait_name, bindings, &mutable visited);
+        return self.collect_trait_method_bindings_recursive(trait_name, bindings, visited);
     };
 
     module_private collect_trait_method_bindings_recursive(
         self,
         trait_name String,
         bindings Dict[String, Type],
-        visited *mutable Set[String],
+        visited Set[String],
     ) Dict[String, Type] = {
         if visited.contains(trait_name) then {
             return bindings;
@@ -1896,7 +2173,7 @@ given TypeChecker {
             for parameter_type in self.method_param_types(raw_method) then {
                 bound_param_types.push(self.concretize_default_literal_type(self.apply_type_bindings(parameter_type, bindings)));
             };
-            let bound_return_type = self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings));
+            let mutable bound_return_type = self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings));
             return Option[Symbol].Some(self.rebuild_method_symbol(method_name, raw_method, bound_param_types, bound_return_type));
         };
         return when self.storage.trait_registry.flatten_methods(trait_name) in {
@@ -1904,10 +2181,10 @@ given TypeChecker {
                 .Some(member) then {
                     let mutable typed_params = List[TypedParam].new();
                     for p in member.params then {
-                        let resolved_param_type = self.concretize_default_literal_type(self.apply_type_bindings(p.param_type, bindings));
+                        let mutable resolved_param_type = self.concretize_default_literal_type(self.apply_type_bindings(p.param_type, bindings));
                         typed_params.push(TypedParam(p.name, p.is_mutable, resolved_param_type, p.named));
                     };
-                    let resolved_return_type = self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings));
+                    let mutable resolved_return_type = self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings));
                     yield Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type));
                 },
                 .None() then Option[Symbol].None(),
@@ -1919,7 +2196,7 @@ given TypeChecker {
         };
     };
 
-    module_private collect_ancestor_bindings(self, t Type, bindings *mutable Dict[String, Type]) Void = {
+    module_private collect_ancestor_bindings(self, t Type, bindings Dict[String, Type]) Void = {
         when t in {
             .GenericParameter(name) then {
                 if not bindings.contains_key(name) then {
@@ -1933,21 +2210,21 @@ given TypeChecker {
                     };
                 };
             },
-            .ReferenceType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .MutableReferenceType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .BorrowedReferenceType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .MutableBorrowedReferenceType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .PointerType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .MutablePointerType(inner) then self.collect_ancestor_bindings(*inner, bindings),
-            .GenericStruct(_, args) then {
-                for arg in args then { self.collect_ancestor_bindings(*arg, bindings);};
+            .ReferenceType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .MutableReferenceType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .BorrowedReferenceType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .MutableBorrowedReferenceType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .PointerType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .MutablePointerType(inner) then self.collect_ancestor_bindings(inner, bindings),
+            .GenericStruct(_, _, args) then {
+                for arg in args then { self.collect_ancestor_bindings(arg, bindings);};
             },
-            .GenericEnum(_, args) then {
-                for arg in args then { self.collect_ancestor_bindings(*arg, bindings);};
+            .GenericEnum(_, _, args) then {
+                for arg in args then { self.collect_ancestor_bindings(arg, bindings);};
             },
             .FunctionType(params, ret) then {
                 for entry in params then { self.collect_ancestor_bindings(entry.param_type, bindings);};
-                self.collect_ancestor_bindings(*ret, bindings);
+                self.collect_ancestor_bindings(ret, bindings);
             },
             _ then {},
         };
@@ -1955,53 +2232,53 @@ given TypeChecker {
 
     module_private bind_conformance_trait_self_type(self, t Type, trait_name String, receiver_type Type) Type = {
         let concrete_receiver = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         return when t in {
-            .TraitObject(name, _) then if name == trait_name then concrete_receiver else t,
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .ReferenceType(inner) then Type.ReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
-            .PointerType(inner) then Type.PointerType(box(self.bind_conformance_trait_self_type(*inner, trait_name, concrete_receiver))),
+            .TraitObject(name, _, _) then if name == trait_name then concrete_receiver else t,
+            .MutableReferenceType(inner) then Type.MutableReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .ReferenceType(inner) then Type.ReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .MutablePointerType(inner) then Type.MutablePointerType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
+            .PointerType(inner) then Type.PointerType(self.bind_conformance_trait_self_type(inner, trait_name, concrete_receiver)),
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params);
-                let mutable replaced_params = List[* Type].new();
+                let mutable replaced_params = List[Type].new();
                 for param_ref in param_types then {
-                    replaced_params.push(box(self.bind_conformance_trait_self_type(*param_ref, trait_name, concrete_receiver)));
+                    replaced_params.push(self.bind_conformance_trait_self_type(param_ref, trait_name, concrete_receiver));
                 };
-                yield Type.FunctionType(types_to_param_entries(replaced_params), box(self.bind_conformance_trait_self_type(*return_type, trait_name, concrete_receiver)));
+                yield Type.FunctionType(types_to_param_entries(replaced_params), self.bind_conformance_trait_self_type(return_type, trait_name, concrete_receiver));
             },
-            .GenericStruct(template, args) then {
+            .GenericStruct(template, template_def_id, args) then {
                 yield when template == trait_name in {
                     true then concrete_receiver,
                     false then {
-                        let mutable replaced_args = List[* Type].new();
+                        let mutable replaced_args = List[Type].new();
                         for arg_ref in args then {
-                            replaced_args.push(box(self.bind_conformance_trait_self_type(*arg_ref, trait_name, concrete_receiver)));
+                            replaced_args.push(self.bind_conformance_trait_self_type(arg_ref, trait_name, concrete_receiver));
                         };
-                        yield Type.GenericStruct(template, replaced_args);
+                        yield Type.GenericStruct(template, template_def_id, replaced_args);
                     },
                 };
             },
-            .GenericEnum(template, args) then {
+            .GenericEnum(template, template_def_id, args) then {
                 yield when template == trait_name in {
                     true then concrete_receiver,
                     false then {
-                        let mutable replaced_args = List[* Type].new();
+                        let mutable replaced_args = List[Type].new();
                         for arg_ref in args then {
-                            replaced_args.push(box(self.bind_conformance_trait_self_type(*arg_ref, trait_name, concrete_receiver)));
+                            replaced_args.push(self.bind_conformance_trait_self_type(arg_ref, trait_name, concrete_receiver));
                         };
-                        yield Type.GenericEnum(template, replaced_args);
+                        yield Type.GenericEnum(template, template_def_id, replaced_args);
                     },
                 };
             },
@@ -2032,7 +2309,7 @@ given TypeChecker {
         };
     };
 
-    module_private extension_template_is_receiver_style(self, template * GenericExtensionMethodTemplate) Bool = {
+    module_private extension_template_is_receiver_style(self, template GenericExtensionMethodTemplate) Bool = {
         let _ = self;
         return if template.method.params.is_empty() then false else template.method.params[0(UInt)].name == "self";
     };
@@ -2050,19 +2327,28 @@ given TypeChecker {
                 ) in {
                     .Some(template) then {
                         yield if self.extension_template_is_receiver_style(template) then Option[Symbol].None() else {
-                            let mutable bindings = Dict[String, Type].new();
-                            let mutable i UInt = 0;
-                            while i < template.type_params.count() and i < actual_type_args.count() then {
-                                bindings.insert(template.type_params[i].name, actual_type_args[i]);
-                                i += 1;
+                            // Swift `resolveGenericExtensionMethod`
+                            // (TypeCheckerMethods.swift:581-610) binds the template's own
+                            // `typeParams` and `Self`, then substitutes once. The
+                            // conformance's trait arguments are already baked into
+                            // `checked_*`, so they must not be bound a second time.
+                            let mutable checked_bindings = Dict[String, Type].new();
+                            let mutable bind_index UInt = 0;
+                            while bind_index < template.type_params.count() and bind_index < actual_type_args.count() then {
+                                checked_bindings.insert(template.type_params[bind_index].name, actual_type_args[bind_index]);
+                                bind_index += 1;
                             };
                             for mtp in template.method.type_params then {
-                                if not bindings.contains_key(mtp.name) then {
-                                    bindings.insert(mtp.name, Type.GenericParameter(mtp.name));
+                                if not checked_bindings.contains_key(mtp.name) then {
+                                    checked_bindings.insert(mtp.name, Type.GenericParameter(mtp.name));
                                 };
                             };
-                            bindings.insert("Self", receiver_type);
-                            self.bind_extension_template_conformance_trait_args(receiver_type, *template, &mutable bindings);
+                            checked_bindings.insert("Self", receiver_type);
+                            let mutable bindings = Dict[String, Type].new();
+                            for entry in checked_bindings then {
+                                bindings.insert(entry.first, entry.second);
+                            };
+                            self.bind_extension_template_conformance_trait_args(receiver_type, template, bindings);
                             let mutable typed_params = List[TypedParam].new();
                             for param in template.method.params then {
                                 typed_params.push(
@@ -2071,11 +2357,11 @@ given TypeChecker {
                                         param.is_mutable,
                                         self.resolve_template_type_node_with_bindings(param.param_type, bindings),
                                         param.named,
-                                    )
+                                    ),
                                 );
                             };
                             let return_type = when template.checked_return_type in {
-                                .Some(ret) then self.apply_type_bindings(ret, bindings),
+                                .Some(ret) then self.apply_type_bindings(ret, checked_bindings),
                                 .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
                             };
                             yield Option[Symbol].Some(
@@ -2087,7 +2373,7 @@ given TypeChecker {
                                     template.module_path,
                                     template.source_file,
                                     template.package_id,
-                                )
+                                ),
                             );
                         };
                     },
@@ -2098,14 +2384,35 @@ given TypeChecker {
         };
     };
 
+    // Swift `resolveGenericExtensionMethod` (TypeCheckerMethods.swift:562-610)
+    // substitutes the template's type parameters and `Self` exactly once and
+    // hands back a symbol in final form; callers read its types verbatim.
+    // All three lookup paths below therefore return a receiver-substituted
+    // symbol. Substituting again at the call site captures the replacement's own
+    // free names: `List`'s parameter is `T` while `List[Pair[UInt, T]]`'s
+    // argument carries an outer `T`, so a second pass turns
+    // `List[Pair[UInt, T]]` into `List[Pair[UInt, Pair[UInt, T]]]`.
     module_private resolve_static_method_signature_for_receiver(self, type_name String, receiver_type Type, method_name String) Option[Symbol] = {
         return when self.lookup_method_signature(type_name, method_name) in {
-            .Some(method) then Option[Symbol].Some(method),
+            .Some(method) then Option[Symbol].Some(self.bind_static_declaration_signature(type_name, self.receiver_type_args(receiver_type), method)),
             .None() then when self.resolve_static_extension_template_signature(receiver_type, method_name) in {
                 .Some(method) then Option[Symbol].Some(method),
                 .None() then self.resolve_conformance_method_signature(receiver_type, method_name),
             },
         };
+    };
+
+    // Substitute a declaration-form signature (`List[T]`'s `new` returns
+    // `List[T]`) against the receiver's actual type arguments and `Self`.
+    module_private bind_static_declaration_signature(self, type_name String, receiver_type_args List[Type], method Symbol) Symbol = {
+        if receiver_type_args.is_empty() then {
+            return method;
+        };
+        let mutable bindings = Dict[String, Type].new();
+        self.bind_static_receiver_type_args(type_name, receiver_type_args, bindings);
+        bindings.insert("Self", self.resolve_static_declared_receiver_type(type_name, receiver_type_args));
+        let bound_type = self.apply_type_bindings(method.symbol_type, bindings);
+        return Symbol(method.def_id, bound_type, method.kind);
     };
 
     // Unified: delegates to resolve_method_signature (8-layer cascade).
@@ -2121,18 +2428,18 @@ given TypeChecker {
             return List[Type].new();
         };
         let mutable bindings = Dict[String, Type].new();
-        self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, &mutable bindings);
+        self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings);
         let mutable out = List[Type].new();
         let mutable i = 1(UInt);
         while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown();
+            let mutable param_type = self.method_param_type(method, i) or else Type.Unknown();
             out.push(self.apply_type_bindings(param_type, bindings));
             i += 1(UInt);
         };
         return out;
     };
 
-    module_private collect_unbound_method_generic_param_names(self, t Type, receiver_bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_unbound_method_generic_param_names(self, t Type, receiver_bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         when t in {
             .GenericParameter(name) then {
                 if not receiver_bindings.contains_key(name) and not seen.contains(name) then {
@@ -2140,44 +2447,44 @@ given TypeChecker {
                     ordered.push(name);
                 };
             },
-            .MutableReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .ReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .MutableBorrowedReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .BorrowedReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .WeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .MutableWeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .MutablePointerType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
-            .PointerType(inner) then self.collect_unbound_method_generic_param_names(*inner, receiver_bindings, ordered, seen),
+            .MutableReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .ReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .MutableBorrowedReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .BorrowedReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .WeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .MutableWeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .MutablePointerType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
+            .PointerType(inner) then self.collect_unbound_method_generic_param_names(inner, receiver_bindings, ordered, seen),
             .FunctionType(params, ret) then {
                 for entry in params then {
                     self.collect_unbound_method_generic_param_names(entry.param_type, receiver_bindings, ordered, seen);
                 };
-                self.collect_unbound_method_generic_param_names(*ret, receiver_bindings, ordered, seen);
+                self.collect_unbound_method_generic_param_names(ret, receiver_bindings, ordered, seen);
             },
-            .GenericStruct(_, args) then {
+            .GenericStruct(_, _, args) then {
                 for arg in args then {
-                    self.collect_unbound_method_generic_param_names(*arg, receiver_bindings, ordered, seen);
+                    self.collect_unbound_method_generic_param_names(arg, receiver_bindings, ordered, seen);
                 };
             },
-            .GenericEnum(_, args) then {
+            .GenericEnum(_, _, args) then {
                 for arg in args then {
-                    self.collect_unbound_method_generic_param_names(*arg, receiver_bindings, ordered, seen);
+                    self.collect_unbound_method_generic_param_names(arg, receiver_bindings, ordered, seen);
                 };
             },
             _ then {},
         };
     };
 
-    module_private collect_method_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_method_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         let mutable i UInt = 1;
         while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown();
+            let mutable param_type = self.method_param_type(method, i) or else Type.Unknown();
             self.collect_unbound_method_generic_param_names(param_type, receiver_bindings, ordered, seen);
             i += 1;
         };
     };
 
-    module_private collect_method_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_method_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         self.collect_method_generic_param_names_from_params(method, receiver_bindings, ordered, seen);
         self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered, seen);
     };
@@ -2185,7 +2492,7 @@ given TypeChecker {
     module_private resolve_signature_method_type_bindings(self, receiver_type Type, method Symbol, method_type_args List[Type]) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         if self.method_param_count(method) > 0 then {
-            self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, &mutable bindings);
+            self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings);
         };
         if method_type_args.is_empty() then {
             return bindings;
@@ -2193,7 +2500,7 @@ given TypeChecker {
 
         let mutable ordered = List[String].new();
         let mutable seen = Set[String].new();
-        self.collect_method_generic_param_names(method, bindings, &mutable ordered, &mutable seen);
+        self.collect_method_generic_param_names(method, bindings, ordered, seen);
 
         let mutable arg_i UInt = 0;
         while arg_i < method_type_args.count() and arg_i < ordered.count() then {
@@ -2203,19 +2510,19 @@ given TypeChecker {
         return bindings;
     };
 
-    module_private resolve_signature_call_type_bindings(self, base_type Type, method Symbol, args List[* TypedExpr], method_type_args List[Type]) Dict[String, Type] = {
-        let receiver_type = self.concrete_receiver_for_method(base_type, method);
+    module_private resolve_signature_call_type_bindings(self, base_type Type, method Symbol, args List[TypedExpr], method_type_args List[Type]) Dict[String, Type] = {
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let mutable bindings = self.resolve_signature_method_type_bindings(receiver_type, method, method_type_args);
         let mutable arg_i UInt = 0;
         while arg_i < args.count() and arg_i + 1(UInt) < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, arg_i + 1(UInt)) or else Type.Unknown();
-            self.infer_type_bindings(param_type, args[arg_i].expr_type, &mutable bindings);
+            let mutable param_type = self.method_param_type(method, arg_i + 1(UInt)) or else Type.Unknown();
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings);
             arg_i += 1;
         };
         return bindings;
     };
 
-    module_private bind_static_receiver_type_args(self, type_name String, receiver_type_args List[Type], bindings *mutable Dict[String, Type]) Void = {
+    module_private bind_static_receiver_type_args(self, type_name String, receiver_type_args List[Type], bindings Dict[String, Type]) Void = {
         when self.storage.generic_templates.lookup_struct(type_name) in {
             .Some(struct_template) then {
                 let mutable i UInt = 0;
@@ -2250,32 +2557,32 @@ given TypeChecker {
     module_private resolve_static_declared_receiver_type(self, type_name String, receiver_type_args List[Type]) Type = {
         when self.storage.generic_templates.lookup_struct(type_name) in {
             .Some(struct_template) then {
-                let mutable args = List[* Type].new();
+                let mutable args = List[Type].new();
                 if receiver_type_args.is_empty() then {
                     for tp in struct_template.type_parameters then {
-                        args.push(box(Type.GenericParameter(tp.name)));
+                        args.push(Type.GenericParameter(tp.name));
                     };
                 } else {
                     for arg in receiver_type_args then {
-                        args.push(box(arg));
+                        args.push(arg);
                     };
                 };
-                return Type.GenericStruct(type_name, args);
+                return Type.GenericStruct(type_name, struct_template.def_id, args);
             },
             .None() then {
                 when self.storage.generic_templates.lookup_enum(type_name) in {
                     .Some(enum_template) then {
-                        let mutable args = List[* Type].new();
+                        let mutable args = List[Type].new();
                         if receiver_type_args.is_empty() then {
                             for tp in enum_template.type_parameters then {
-                                args.push(box(Type.GenericParameter(tp.name)));
+                                args.push(Type.GenericParameter(tp.name));
                             };
                         } else {
                             for arg in receiver_type_args then {
-                                args.push(box(arg));
+                                args.push(arg);
                             };
                         };
-                        return Type.GenericEnum(type_name, args);
+                        return Type.GenericEnum(type_name, enum_template.def_id, args);
                     },
                     .None() then {},
                 };
@@ -2288,31 +2595,35 @@ given TypeChecker {
         };
     };
 
-    module_private collect_unbound_static_generic_param_names(self, method Symbol, bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_unbound_static_generic_param_names(self, method Symbol, bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         for parameter_type in self.method_param_types(method) then {
             self.collect_unbound_method_generic_param_names(parameter_type, bindings, ordered, seen);
         };
         self.collect_unbound_method_generic_param_names(self.method_return_type(method), bindings, ordered, seen);
     };
 
-    module_private collect_static_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_static_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         for parameter_type in self.method_param_types(method) then {
             self.collect_unbound_method_generic_param_names(parameter_type, receiver_bindings, ordered, seen);
         };
     };
 
-    module_private collect_static_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered *mutable List[String], seen *mutable Set[String]) Void = {
+    module_private collect_static_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered List[String], seen Set[String]) Void = {
         self.collect_static_generic_param_names_from_params(method, receiver_bindings, ordered, seen);
         self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered, seen);
     };
 
-    module_private resolve_static_call_type_bindings(self, type_name String, receiver_type_args List[Type], method Symbol, args List[* TypedExpr], method_type_args List[Type], expected Option[Type]) Dict[String, Type] = {
+    module_private resolve_static_call_type_bindings(self, type_name String, receiver_type_args List[Type], method Symbol, args List[TypedExpr], method_type_args List[Type], expected Option[Type]) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
-        self.bind_static_receiver_type_args(type_name, receiver_type_args, &mutable bindings);
+        self.bind_static_receiver_type_args(type_name, receiver_type_args, bindings);
+        // Signatures are kept in declaration form (see
+        // resolve_static_extension_template_signature); `Self` is resolved here so
+        // the single substitution at the call site covers it too.
+        bindings.insert("Self", self.resolve_static_declared_receiver_type(type_name, receiver_type_args));
 
         let mutable ordered = List[String].new();
         let mutable seen = Set[String].new();
-        self.collect_static_generic_param_names(method, bindings, &mutable ordered, &mutable seen);
+        self.collect_static_generic_param_names(method, bindings, ordered, seen);
 
         let mutable type_arg_i UInt = 0;
         while type_arg_i < method_type_args.count() and type_arg_i < ordered.count() then {
@@ -2322,25 +2633,25 @@ given TypeChecker {
 
         let mutable arg_i UInt = 0;
         while arg_i < args.count() and arg_i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, arg_i) or else Type.Unknown();
-            self.infer_type_bindings(param_type, args[arg_i].expr_type, &mutable bindings);
+            let mutable param_type = self.method_param_type(method, arg_i) or else Type.Unknown();
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings);
             arg_i += 1;
         };
 
         when expected in {
-            .Some(expected_type) then self.infer_type_bindings(self.method_return_type(method), expected_type, &mutable bindings),
+            .Some(expected_type) then self.infer_type_bindings(self.method_return_type(method), expected_type, bindings),
             .None() then {},
         };
         return bindings;
     };
 
-    module_private resolve_static_method_type_args_for_call(self, type_name String, receiver_type_args List[Type], method Symbol, args List[* TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
+    module_private resolve_static_method_type_args_for_call(self, type_name String, receiver_type_args List[Type], method Symbol, args List[TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
         let bindings = self.resolve_static_call_type_bindings(type_name, receiver_type_args, method, args, method_type_args, expected);
         let mutable receiver_bindings = Dict[String, Type].new();
-        self.bind_static_receiver_type_args(type_name, receiver_type_args, &mutable receiver_bindings);
+        self.bind_static_receiver_type_args(type_name, receiver_type_args, receiver_bindings);
         let mutable ordered = List[String].new();
         let mutable seen = Set[String].new();
-        self.collect_static_generic_param_names(method, receiver_bindings, &mutable ordered, &mutable seen);
+        self.collect_static_generic_param_names(method, receiver_bindings, ordered, seen);
 
         let mutable resolved = List[Type].new();
         for name in ordered then {
@@ -2359,18 +2670,60 @@ given TypeChecker {
         return resolved;
     };
 
-    module_private resolve_static_method_return_type_for_call(self, type_name String, receiver_type_args List[Type], method Symbol, args List[* TypedExpr], method_type_args List[Type], expected Option[Type]) Type = {
-        let bindings = self.resolve_static_call_type_bindings(type_name, receiver_type_args, method, args, method_type_args, expected);
-        return self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(method), bindings));
+    // Infer ONLY the method's own type parameters from the call site. The
+    // receiver's type parameters and `Self` are already substituted into the
+    // signature by resolve_static_method_signature_for_receiver; binding them a
+    // second time captures the replacement's free names (see the note there).
+    module_private resolve_static_method_param_bindings(
+        self,
+        type_name String,
+        receiver_type_args List[Type],
+        method Symbol,
+        args List[TypedExpr],
+        method_type_args List[Type],
+        expected Option[Type],
+    ) Dict[String, Type] = {
+        let mutable bound_names = Dict[String, Type].new();
+        self.bind_static_receiver_type_args(type_name, receiver_type_args, bound_names);
+        bound_names.insert("Self", self.resolve_static_declared_receiver_type(type_name, receiver_type_args));
+        let mutable ordered = List[String].new();
+        let mutable seen = Set[String].new();
+        self.collect_static_generic_param_names(method, bound_names, ordered, seen);
+
+        let mutable bindings = Dict[String, Type].new();
+        let mutable type_arg_i = 0(UInt);
+        while type_arg_i < method_type_args.count() and type_arg_i < ordered.count() then {
+            bindings.insert(ordered[type_arg_i], method_type_args[type_arg_i]);
+            type_arg_i += 1;
+        };
+
+        let mutable arg_i = 0(UInt);
+        while arg_i < args.count() and arg_i < self.method_param_count(method) then {
+            let mutable param_type = self.method_param_type(method, arg_i) or else Type.Unknown();
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings);
+            arg_i += 1;
+        };
+
+        when expected in {
+            .Some(expected_type) then self.infer_type_bindings(self.method_return_type(method), expected_type, bindings),
+            .None() then {},
+        };
+        return bindings;
     };
 
-    module_private resolve_method_type_args_for_call(self, base_type Type, method Symbol, args List[* TypedExpr], method_type_args List[Type]) List[Type] = {
-        let receiver_type = self.concrete_receiver_for_method(base_type, method);
+    module_private resolve_static_method_return_type_for_call(self, type_name String, receiver_type_args List[Type], method Symbol, args List[TypedExpr], method_type_args List[Type], expected Option[Type]) Type = {
+        let bindings = self.resolve_static_method_param_bindings(type_name, receiver_type_args, method, args, method_type_args, expected);
+        let bound_static_return = self.apply_type_bindings(self.method_return_type(method), bindings);
+        return self.concretize_default_literal_type(bound_static_return);
+    };
+
+    module_private resolve_method_type_args_for_call(self, base_type Type, method Symbol, args List[TypedExpr], method_type_args List[Type]) List[Type] = {
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let receiver_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new());
         let bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args);
         let mutable ordered = List[String].new();
         let mutable seen = Set[String].new();
-        self.collect_method_generic_param_names(method, receiver_bindings, &mutable ordered, &mutable seen);
+        self.collect_method_generic_param_names(method, receiver_bindings, ordered, seen);
 
         let mutable resolved = List[Type].new();
         for name in ordered then {
@@ -2389,13 +2742,13 @@ given TypeChecker {
         return resolved;
     };
 
-    module_private resolve_method_type_args_for_call_with_expected(self, base_type Type, method Symbol, args List[* TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
-        let receiver_type = self.concrete_receiver_for_method(base_type, method);
+    module_private resolve_method_type_args_for_call_with_expected(self, base_type Type, method Symbol, args List[TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let receiver_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new());
         let mutable bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args);
         let mutable ordered_from_params = List[String].new();
         let mutable seen_from_params = Set[String].new();
-        self.collect_method_generic_param_names_from_params(method, receiver_bindings, &mutable ordered_from_params, &mutable seen_from_params);
+        self.collect_method_generic_param_names_from_params(method, receiver_bindings, ordered_from_params, seen_from_params);
         if args.is_empty() and method_type_args.is_empty() and self.method_param_count(method) == 1(UInt) and expected is .None() then {
             return List[Type].new();
         };
@@ -2407,12 +2760,12 @@ given TypeChecker {
         };
         let mutable ordered = ordered_from_params;
         let mutable seen = seen_from_params;
-        self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, &mutable ordered, &mutable seen);
+        self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered, seen);
         if ordered.is_empty() then {
             return List[Type].new();
         };
         when expected in {
-            .Some(expected_type) then self.infer_type_bindings(self.method_return_type(method), expected_type, &mutable bindings),
+            .Some(expected_type) then self.infer_type_bindings(self.method_return_type(method), expected_type, bindings),
             .None() then {},
         };
 
@@ -2433,30 +2786,30 @@ given TypeChecker {
         return resolved;
     };
 
-    module_private resolve_method_return_type_for_call(self, base_type Type, method Symbol, args List[* TypedExpr], method_type_args List[Type]) Type = {
+    module_private resolve_method_return_type_for_call(self, base_type Type, method Symbol, args List[TypedExpr], method_type_args List[Type]) Type = {
         if self.method_param_count(method) == 0 then {
             let bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args);
             return self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(method), bindings));
         };
 
-        let receiver_type = self.concrete_receiver_for_method(base_type, method);
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let mutable bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args);
-        let self_param_type = self.method_param_type(method, 0(UInt)) or else Type.Unknown();
+        let mutable self_param_type = self.method_param_type(method, 0(UInt)) or else Type.Unknown();
         if bindings.is_empty() and self.same_expr_type(self_param_type, receiver_type) then {
-            let concrete_return_type = self.concretize_default_literal_type(self.method_return_type(method));
+            let mutable concrete_return_type = self.concretize_default_literal_type(self.method_return_type(method));
             return concrete_return_type;
         };
         let concrete_self_type = when receiver_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         bindings.insert("Self", concrete_self_type);
-        let bound_return_type = self.apply_type_bindings(self.method_return_type(method), bindings);
+        let mutable bound_return_type = self.apply_type_bindings(self.method_return_type(method), bindings);
         return self.concretize_default_literal_type(bound_return_type);
     };
 
@@ -2465,11 +2818,11 @@ given TypeChecker {
         if self.method_param_count(method) <= 1(UInt) then {
             return out;
         };
-        let receiver_type = self.concrete_receiver_for_method(base_type, method);
+        let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let bindings = self.resolve_signature_method_type_bindings(receiver_type, method, method_type_args);
         let mutable i UInt = 1(UInt);
         while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown();
+            let mutable param_type = self.method_param_type(method, i) or else Type.Unknown();
             out.push(self.apply_type_bindings(param_type, bindings));
             i += 1(UInt);
         };
@@ -2477,14 +2830,14 @@ given TypeChecker {
     };
 
     module_private resolve_method_signature_unchecked(self, base_type Type, method_name String) Option[Symbol] = {
-        let normalized_base_type = self.normalize_method_receiver_type(base_type);
+        let mutable normalized_base_type = self.normalize_method_receiver_type(base_type);
         let inner_type = when normalized_base_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then normalized_base_type,
         };
 
@@ -2500,11 +2853,19 @@ given TypeChecker {
                             .Some(method) then { return Option[Symbol].Some(method);},
                             .None() then {},
                         };
+                        when self.resolve_trait_tool_method_signature(inner_type, cn, method_name) in {
+                            .Some(method) then { return Option[Symbol].Some(method);},
+                            .None() then {},
+                        };
                     };
                 };
             },
-            .TraitObject(trait_name, _) then {
+            .TraitObject(trait_name, _, _) then {
                 when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                    .Some(method) then { return Option[Symbol].Some(method);},
+                    .None() then {},
+                };
+                when self.resolve_trait_tool_method_signature(inner_type, trait_name, method_name) in {
                     .Some(method) then { return Option[Symbol].Some(method);},
                     .None() then {},
                 };
@@ -2538,7 +2899,7 @@ given TypeChecker {
             return Option[Symbol].Some(self.bind_direct_method_signature(base_type, method_name, raw_method));
         };
 
-        // Check weakref intrinsic given extension methods (e.g., upgrade on ?*T / ?*mutable T)
+        // Check weakref intrinsic given extension methods (e.g., upgrade on ?*T / ?T)
         when self.resolve_weakref_extension_template_signature(normalized_base_type, method_name) in {
             .Some(method_symbol) then { return Option[Symbol].Some(method_symbol);},
             .None() then {},
@@ -2571,11 +2932,11 @@ given TypeChecker {
             .Some(method) then {
                 let mutable out = List[Type].new();
                 if self.method_param_count(method) > 1(UInt) then {
-                    let receiver_type = self.concrete_receiver_for_method(base_type, method);
+                    let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
                     let bindings = self.resolve_signature_method_type_bindings(receiver_type, method, method_type_args);
                     let mutable i UInt = 1;
                     while i < self.method_param_count(method) then {
-                        let param_type = self.method_param_type(method, i) or else Type.Unknown();
+                        let mutable param_type = self.method_param_type(method, i) or else Type.Unknown();
                         out.push(self.apply_type_bindings(param_type, bindings));
                         i += 1;
                     };
@@ -2589,7 +2950,7 @@ given TypeChecker {
     module_private resolve_method_return_type_with_method_type_args(self, base_type Type, method_name String, method_type_args List[Type]) Type = {
         return when self.resolve_method_signature(base_type, method_name) in {
             .Some(method) then {
-                let receiver_type = self.concrete_receiver_for_method(base_type, method);
+                let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
                 let bindings = self.resolve_signature_method_type_bindings(receiver_type, method, method_type_args);
                 yield self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(method), bindings));
             },
@@ -2627,13 +2988,13 @@ given TypeChecker {
         };
         if self.lookup_method_signature(trait_name, method_name) is .Some(method) then {
             if self.method_param_count(method) > 0(UInt) then {
-                let concrete_receiver_type = self.concrete_receiver_for_method(receiver_type, method);
+                let mutable concrete_receiver_type = self.concrete_receiver_for_method(receiver_type, method);
                 let mutable bindings = Dict[String, Type].new();
-                self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), concrete_receiver_type, &mutable bindings);
+                self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), concrete_receiver_type, bindings);
                 let mutable out = List[Type].new();
                 let mutable i UInt = 1;
                 while i < self.method_param_count(method) then {
-                    let param_type = self.method_param_type(method, i) or else Type.Unknown();
+                    let mutable param_type = self.method_param_type(method, i) or else Type.Unknown();
                     out.push(self.apply_type_bindings(param_type, bindings));
                     i += 1;
                 };
@@ -2666,19 +3027,21 @@ given TypeChecker {
     module_private collect_ordered_trait_members(
         self,
         trait_name String,
-        ordered *mutable List[TypedTraitMember],
-        seen *mutable Set[String],
-        visited *mutable Set[String],
+        module_path List[String],
+        ordered List[TypedTraitMember],
+        seen Set[String],
+        visited Set[String],
     ) Void = {
-        if visited.contains(trait_name) then {
+        let visit_key = qualified_trait_key(module_path, trait_name);
+        if visited.contains(visit_key) then {
             return;
         };
-        visited.insert(trait_name);
-        let info = self.storage.trait_registry.get(trait_name) or else {
+        visited.insert(visit_key);
+        let info = self.storage.trait_registry.get_in_module(trait_name, module_path) or else {
             return;
         };
         for parent in info.parent_traits then {
-            self.collect_ordered_trait_members(parent.name, ordered, seen, visited);
+            self.collect_ordered_trait_members(parent.name, info.module_path, ordered, seen, visited);
         };
         for member in info.methods then {
             if not seen.contains(member.name) then {
@@ -2688,11 +3051,21 @@ given TypeChecker {
         };
     };
 
-    module_private trait_vtable_method_index(self, trait_name String, method_name String) Option[Int] = {
+    module_private trait_vtable_method_index_for_type(self, trait_type Type, method_name String) Option[Int] = {
+        let trait_name = self.trait_name_from_type(trait_type);
+        let mutable module_path = self.storage.module_path;
+        when trait_type in {
+            .TraitObject(_, trait_def_id, _) then {
+                if self.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) is .Some(info) then {
+                    module_path = info.module_path;
+                };
+            },
+            _ then {},
+        };
         let mutable ordered = List[TypedTraitMember].new();
         let mutable seen = Set[String].new();
         let mutable visited = Set[String].new();
-        self.collect_ordered_trait_members(trait_name, &mutable ordered, &mutable seen, &mutable visited);
+        self.collect_ordered_trait_members(trait_name, module_path, ordered, seen, visited);
         let mutable index UInt = 0;
         while index < ordered.count() then {
             if ordered[index].name == method_name then {
@@ -2703,8 +3076,13 @@ given TypeChecker {
         return Option[Int].None();
     };
 
-    module_private report_trait_method_flatten_failure(self, trait_name String, method_name String, context String, error * Error) Void = {
-        let mutable message = "failed to flatten trait ";
+    module_private trait_vtable_method_index(self, trait_name String, method_name String) Option[Int] = {
+        return self.trait_vtable_method_index_for_type(self.canonical_trait_object_type(trait_name), method_name);
+    };
+
+    module_private report_trait_method_flatten_failure(self, trait_name String, method_name String, context String, error Error) Void = {
+        let mutable message = StringBuilder.new();
+        message.push_string("failed to flatten trait ");
         message.push_string(trait_name);
         message.push_string(" while resolving method '");
         message.push_string(method_name);
@@ -2712,15 +3090,16 @@ given TypeChecker {
         message.push_string(context);
         message.push_string(": ");
         message.push_string(error.message());
-        self.push_diagnostic(message);
+        self.push_diagnostic(message.to_string());
     };
 
     module_private report_missing_trait_method_info(self, trait_name String, context String) Void = {
-        let mutable message = "missing trait info for ";
+        let mutable message = StringBuilder.new();
+        message.push_string("missing trait info for ");
         message.push_string(trait_name);
         message.push_string(" in ");
         message.push_string(context);
-        self.push_diagnostic(message);
+        self.push_diagnostic(message.to_string());
     };
 
     // 从 trait registry 解析 qualified method call 的返回类型。
@@ -2784,16 +3163,16 @@ given TypeChecker {
         };
     };
 
-    module_private apply_static_method_type_bindings(self, type_name String, type_args List[* Type], return_type Type) Type = {
+    module_private apply_static_method_type_bindings(self, type_name String, type_args List[Type], return_type Type) Type = {
         if type_args.is_empty() then {
             return return_type;
         };
 
         let mutable bindings = Dict[String, Type].new();
-        let receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+        let mutable receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
             .Some(t) then when t in {
-                .StructureType(_) then Type.GenericStruct(type_name, type_args),
-                .EnumType(_) then Type.GenericEnum(type_name, type_args),
+                .StructureType(template_def_id) then Type.GenericStruct(type_name, template_def_id, type_args),
+                .EnumType(template_def_id) then Type.GenericEnum(type_name, template_def_id, type_args),
                 _ then Type.Unknown(),
             },
             .None() then Type.Unknown(),
@@ -2811,7 +3190,7 @@ given TypeChecker {
                 let n = if param_count < arg_count then param_count else arg_count;
                 while i < n then {
                     let tp = struct_template.type_parameters[i];
-                    bindings.insert(tp.name, (*type_args[i]));
+                    bindings.insert(tp.name, (type_args[i]));
                     i += 1;
                 };
             },
@@ -2824,7 +3203,7 @@ given TypeChecker {
                         let n = if param_count < arg_count then param_count else arg_count;
                         while i < n then {
                             let tp = enum_template.type_parameters[i];
-                            bindings.insert(tp.name, (*type_args[i]));
+                            bindings.insert(tp.name, (type_args[i]));
                             i += 1;
                         };
                     },
@@ -2836,16 +3215,16 @@ given TypeChecker {
         return self.apply_type_bindings(return_type, bindings);
     };
 
-    module_private bind_static_method_param_types(self, type_name String, type_args List[* Type], param_types List[Type]) List[Type] = {
+    module_private bind_static_method_param_types(self, type_name String, type_args List[Type], param_types List[Type]) List[Type] = {
         if type_args.is_empty() then {
             return param_types;
         };
 
         let mutable bindings = Dict[String, Type].new();
-        let receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+        let mutable receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
             .Some(t) then when t in {
-                .StructureType(_) then Type.GenericStruct(type_name, type_args),
-                .EnumType(_) then Type.GenericEnum(type_name, type_args),
+                .StructureType(template_def_id) then Type.GenericStruct(type_name, template_def_id, type_args),
+                .EnumType(template_def_id) then Type.GenericEnum(type_name, template_def_id, type_args),
                 _ then Type.Unknown(),
             },
             .None() then Type.Unknown(),
@@ -2863,7 +3242,7 @@ given TypeChecker {
                 let n = if param_count < arg_count then param_count else arg_count;
                 while i < n then {
                     let tp = struct_template.type_parameters[i];
-                    bindings.insert(tp.name, (*type_args[i]));
+                    bindings.insert(tp.name, (type_args[i]));
                     i += 1;
                 };
             },
@@ -2876,7 +3255,7 @@ given TypeChecker {
                         let n = if param_count < arg_count then param_count else arg_count;
                         while i < n then {
                             let tp = enum_template.type_parameters[i];
-                            bindings.insert(tp.name, (*type_args[i]));
+                            bindings.insert(tp.name, (type_args[i]));
                             i += 1;
                         };
                     },
@@ -2892,50 +3271,50 @@ given TypeChecker {
         return bound;
     };
 
-    module_private resolve_call_return_type(self, callee * TypedExpr) Type = {
+    module_private resolve_call_return_type(self, callee TypedExpr) Type = {
         when callee.expr_kind in {
             .Variable(sym) then {
                 if self.context().get_function_return_type(sym.def_id) is .Some(return_type) then {
                     return return_type;
                 };
-                let sym_name = self.context().symbol_name(*sym);
+                let sym_name = self.context().symbol_name(sym);
                 return when sym.symbol_type in {
-                    .FunctionType(_, ret) then *ret,
+                    .FunctionType(_, ret) then ret,
                     .StructureType(_) then sym.symbol_type,
                     .EnumType(_) then sym.symbol_type,
-                    .GenericStruct(_, _) then sym.symbol_type,
-                    .GenericEnum(_, _) then sym.symbol_type,
+                    .GenericStruct(_, _, _) then sym.symbol_type,
+                    .GenericEnum(_, _, _) then sym.symbol_type,
                     _ then if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then t else Type.Unknown(),
                 };
             },
             .MemberPath(base, path) then if not path.is_empty() then {
-                return self.resolve_method_return_type(base.expr_type, path[path.count() - 1]);
+                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(path[path.count() - 1]));
             },
             .MethodReference(base, _, method, _, _, _) then {
                 when method.symbol_type in {
                     .FunctionType(_, ret) then {
-                        return *ret;
+                        return ret;
                     },
                     _ then {},
                 };
                 if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
                     return return_type;
                 };
-                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(*method));
+                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method));
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type);
-                let method_name = self.context().symbol_name(*method);
-                let qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type);
+                let method_name = self.context().symbol_name(method);
+                let mutable qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type);
                 return when qualified_return_type in {
-                    .Unknown() then self.resolve_method_return_type(base.expr_type, self.context().symbol_name(*method)),
+                    .Unknown() then self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method)),
                     _ then qualified_return_type,
                 };
             },
             .StaticMethodCall(receiver_type, _, method, _, _, _) then {
                 when method.symbol_type in {
                     .FunctionType(_, ret) then {
-                        return *ret;
+                        return ret;
                     },
                     .Unknown() then {},
                     _ then {
@@ -2945,14 +3324,14 @@ given TypeChecker {
                 if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
                     return return_type;
                 };
-                return self.resolve_method_return_type(receiver_type, self.context().symbol_name(*method));
+                return self.resolve_method_return_type(receiver_type, self.context().symbol_name(method));
             },
             .GenericInstantiation(_, _) then {
                 return callee.expr_type;
             },
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type);
-                let qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type);
+                let mutable qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type);
                 return when qualified_return_type in {
                     .Unknown() then self.resolve_method_return_type(base.expr_type, method_name),
                     _ then qualified_return_type,
@@ -2961,7 +3340,7 @@ given TypeChecker {
             _ then {},
         };
         when callee.expr_type in {
-            .FunctionType(_, ret) then { return *ret;},
+            .FunctionType(_, ret) then { return ret;},
             _ then {},
         };
         return Type.Unknown();
@@ -2969,7 +3348,7 @@ given TypeChecker {
 
     // 从 callee 的类型信息中提取参数类型列表，用于向调用参数传播期望类型。
     // 返回空列表表示无法确定参数类型。
-    module_private resolve_call_param_types(self, callee * TypedExpr) List[Type] = {
+    module_private resolve_call_param_types(self, callee TypedExpr) List[Type] = {
         when callee.expr_kind in {
             .Variable(sym) then {
                 if self.context().get_function_type(sym.def_id) is .Some(function_type) then {
@@ -3006,13 +3385,13 @@ given TypeChecker {
             },
             .MemberPath(base, path) then if not path.is_empty() then {
                 let mutable out = List[Type].new();
-                for param_type in self.resolve_method_param_types(base.expr_type, path[path.count() - 1]) then {
+                for param_type in self.resolve_method_param_types(base.expr_type, self.context().symbol_name(path[path.count() - 1])) then {
                     out.push(param_type);
                 };
                 return out;
             },
             .MethodReference(base, _, method, _, _, _) then {
-                let method_name = self.context().symbol_name(*method);
+                let method_name = self.context().symbol_name(method);
                 let mutable out = List[Type].new();
                 for param_type in self.resolve_method_param_types(base.expr_type, method_name) then {
                     out.push(param_type);
@@ -3021,7 +3400,7 @@ given TypeChecker {
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type);
-                let method_name = self.context().symbol_name(*method);
+                let method_name = self.context().symbol_name(method);
                 let trait_params = self.resolve_trait_method_param_types(trait_name, method_name, base.expr_type);
                 if trait_params.is_empty() then {
                     let mutable out = List[Type].new();
@@ -3069,12 +3448,12 @@ given TypeChecker {
 
     module_private struct_constructor_param_types(self, constructor_type Type) List[Type] = {
         let inner_type = when constructor_type in {
-            .MutableReferenceType(inner) then *inner,
-            .ReferenceType(inner) then *inner,
-            .MutableBorrowedReferenceType(inner) then *inner,
-            .BorrowedReferenceType(inner) then *inner,
-            .WeakReferenceType(inner) then *inner,
-            .MutableWeakReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
             _ then constructor_type,
         };
 
@@ -3089,7 +3468,7 @@ given TypeChecker {
                 },
                 .None() then List[Type].new(),
             },
-            .GenericStruct(template_name, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
+            .GenericStruct(template_name, _, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mutable bindings = Dict[String, Type].new();
@@ -3099,7 +3478,7 @@ given TypeChecker {
                         let n = if param_count < arg_count then param_count else arg_count;
                         while i < n then {
                             let tp = struct_template.type_parameters[i];
-                            bindings.insert(tp.name, (*args[i]));
+                            bindings.insert(tp.name, (args[i]));
                             i += 1;
                         };
                         let mutable types = List[Type].new();

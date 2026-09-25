@@ -8,12 +8,13 @@ file_private type ReusedGivenMemberSignature(
 
 given TypeChecker {
 
-    module_private report_concrete_body_recheck_failure(self, source ConcreteExprSource, context String, error * Error) Void = {
-        let mutable message = "failed to recheck ";
+    module_private report_concrete_body_recheck_failure(self, source ConcreteExprSource, context String, error Error) Void = {
+        let mutable message = StringBuilder.new();
+        message.push_string("failed to recheck ");
         message.push_string(context);
         message.push_string(": ");
         message.push_string(error.message());
-        self.push_expr_diagnostic(source.body, message);
+        self.push_expr_diagnostic(source.body, message.to_string());
     };
 
     module_private function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
@@ -54,9 +55,9 @@ given TypeChecker {
     };
 
     module_private make_method_callable_symbol(self, method_name String, params List[TypedParam], return_type Type) Symbol = {
-        let mutable param_types = List[* Type].new();
+        let mutable param_types = List[Type].new();
         for param in params then {
-            param_types.push(box(param.param_type));
+            param_types.push(param.param_type);
         };
         let method_symbol = Symbol(
             self.allocate_unindexed_def_id(method_name, DefKind.Function()),
@@ -84,6 +85,7 @@ given TypeChecker {
 
     module_private make_method_callable_symbol_with_param_types(
         self,
+        method_def_id DefId,
         method_name String,
         param_types List[Type],
         param_specs List[FunctionParamSpec],
@@ -94,7 +96,7 @@ given TypeChecker {
         package_id String,
     ) Symbol = {
         let method_symbol = Symbol(
-            self.allocate_unindexed_def_id(method_name, DefKind.Function()),
+            if method_def_id.is_valid() then method_def_id else self.allocate_unindexed_def_id(method_name, DefKind.Function()),
             make_function_type(self.to_type_ref_list(param_types), return_type),
             SymbolKind.Function(),
         );
@@ -104,17 +106,18 @@ given TypeChecker {
     };
 
     module_private given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
-        let mutable message = prefix;
+        let mutable message = StringBuilder.new();
+        message.push_string(prefix);
         message.push_string(" ");
         message.push_string(member_name);
         message.push_string(" on ");
         message.push_string(self.context().type_display_name(target_type));
-        return message;
+        return message.to_string();
     };
 
     module_private make_method_symbol(self, method_name String, return_type Type) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function());
-        return Symbol(def_id, Type.FunctionType(List[* FunctionParamEntry].new(), box(return_type)), SymbolKind.Function());
+        return Symbol(def_id, Type.FunctionType(List[FunctionParamEntry].new(), return_type), SymbolKind.Function());
     };
 
     module_private reused_given_member_signature(self, method_symbol Symbol) Option[ReusedGivenMemberSignature] = {
@@ -132,7 +135,7 @@ given TypeChecker {
                         params.push(TypedParam(spec.name, spec.is_mutable, entry.param_type, spec.named));
                         idx += 1(UInt);
                     };
-                    yield Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, *return_type_ref));
+                    yield Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, return_type_ref));
                 },
                 _ then Option[ReusedGivenMemberSignature].None(),
             },
@@ -141,10 +144,10 @@ given TypeChecker {
     };
 
     // Recover static receiver types from member chains like Time.DateTime.
-    module_private resolve_static_receiver_type(self, expr * TypedExpr) Option[Type] = {
+    module_private resolve_static_receiver_type(self, expr TypedExpr) Option[Type] = {
         return when expr.expr_kind in {
             .MemberPath(_, path) then if not path.is_empty() then {
-                let member_name = path[path.count() - 1];
+                let member_name = self.context().symbol_name(path[path.count() - 1]);
                 if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
                     return Option[Type].Some(t);
                 };
@@ -154,7 +157,7 @@ given TypeChecker {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
                     return Option[Type].Some(sym.symbol_type);
                 };
-                let sym_name = self.context().symbol_name(*sym);
+                let sym_name = self.context().symbol_name(sym);
                 if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then {
                     return Option[Type].Some(t);
                 };
@@ -166,7 +169,7 @@ given TypeChecker {
 
     module_private trait_name_from_type(self, trait_type Type) String = {
         return when trait_type in {
-            .TraitObject(name, _) then name,
+            .TraitObject(name, _, _) then name,
             _ then self.context().type_display_name(trait_type),
         };
     };
@@ -229,7 +232,7 @@ given TypeChecker {
             scope.define_generic_param(tp.name);
         };
         when self_type in {
-            .TraitObject(_, _) then {
+            .GenericParameter(_) then {
                 scope.define_generic_param("Self");
                 scope.define_type("Self", Type.GenericParameter("Self"));
             },
@@ -261,15 +264,18 @@ given TypeChecker {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
                 .None() then {
+                    if name == "Self" then {
+                        return self_type;
+                    };
                     // Check current_scope before falling back (Swift: currentScope.resolveType)
                     if self.storage.current_scope.lookup_type(name) is .Some(t) then {
-                        return self.canonicalize_alias_type(t);
+                        return self.surface_named_type(self.canonicalize_alias_type(t));
                     };
-                    yield self.resolve_named_type(name);
+                    yield self.surface_named_type(self.resolve_named_type(name));
                 },
             },
             .Reference(inner, is_mutable) then {
-                let trait_ref_override = when *inner in {
+                let trait_ref_override = when inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
@@ -278,9 +284,9 @@ given TypeChecker {
                         yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings));
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg, self_type, bindings));
                             };
-                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                            let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
                             yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
                         } else Option[Type].None();
                     },
@@ -290,20 +296,20 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
                     .None() then {},
                 };
-                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings);
+                let resolved_inner = self.resolve_type_with_self_and_bindings(inner, self_type, bindings);
                 yield if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner);
             },
             .BorrowedReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_with_self_and_bindings(inner, self_type, bindings);
+                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
             },
             .Pointer(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings);
-                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_with_self_and_bindings(inner, self_type, bindings);
+                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
             },
             .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
-                let trait_ref_override = when *inner in {
+                let trait_ref_override = when inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         yield Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner));
@@ -312,9 +318,9 @@ given TypeChecker {
                         yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings));
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg, self_type, bindings));
                             };
-                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                            let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
                             yield Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner));
                         } else Option[Type].None();
                     },
@@ -324,26 +330,29 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
                     .None() then {},
                 };
-                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings);
+                let resolved_inner = self.resolve_type_with_self_and_bindings(inner, self_type, bindings);
                 yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner);
             },
             .Generic(base, args) then {
-                let mutable resolved_args = List[* Type].new();
+                let mutable resolved_args = List[Type].new();
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_with_self_and_bindings(*a, self_type, bindings)));
+                    resolved_args.push(self.resolve_type_with_self_and_bindings(a, self_type, bindings));
+                };
+                if self.storage.trait_registry.get(base) is .Some(_) then {
+                    return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 if self.is_enum_base_name(base) then {
-                    return Type.GenericEnum(base, resolved_args);
+                    return Type.GenericEnum(base, self.storage.generic_templates.lookup_enum_def_id(base), resolved_args);
                 };
-                return Type.GenericStruct(base, resolved_args);
+                return Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args);
             },
             .InferredSelf() then self_type,
             .FunctionType(param_types, return_type) then {
-                let mutable resolved_params = List[* Type].new();
+                let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_with_self_and_bindings(*pt, self_type, bindings)));
+                    resolved_params.push(self.resolve_type_with_self_and_bindings(pt, self_type, bindings));
                 };
-                let resolved_ret = self.resolve_type_with_self_and_bindings(*return_type, self_type, bindings);
+                let resolved_ret = self.resolve_type_with_self_and_bindings(return_type, self_type, bindings);
                 return make_function_type(resolved_params, resolved_ret);
             },
         };
@@ -367,7 +376,7 @@ given TypeChecker {
 
     module_private resolve_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _) then {
+            .TraitObject(trait_name, _, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
@@ -386,12 +395,12 @@ given TypeChecker {
             },
             _ then {},
         };
-        return Type.ReferenceType(box(inner_type));
+        return Type.ReferenceType(inner_type);
     };
 
     module_private resolve_mutable_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _) then {
+            .TraitObject(trait_name, _, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
@@ -410,12 +419,12 @@ given TypeChecker {
             },
             _ then {},
         };
-        return Type.MutableReferenceType(box(inner_type));
+        return Type.MutableReferenceType(inner_type);
     };
 
     module_private resolve_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _) then {
+            .TraitObject(trait_name, _, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
@@ -434,12 +443,12 @@ given TypeChecker {
             },
             _ then {},
         };
-        return Type.WeakReferenceType(box(inner_type));
+        return Type.WeakReferenceType(inner_type);
     };
 
     module_private resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _) then {
+            .TraitObject(trait_name, _, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
@@ -458,7 +467,7 @@ given TypeChecker {
             },
             _ then {},
         };
-        return Type.MutableWeakReferenceType(box(inner_type));
+        return Type.MutableWeakReferenceType(inner_type);
     };
 
     module_private check_enum_cases(self, cases List[EnumCase]) List[TypedEnumCase] = {
@@ -514,19 +523,19 @@ given TypeChecker {
             for p in m.params then {
                 typed_params.push(TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named));
             };
-            out.push(TypedTraitMember(m.name, typed_params, self.resolve_type(m.return_type)));
+            out.push(TypedTraitMember(m.name, not m.type_params.is_empty(), typed_params, self.resolve_type(m.return_type)));
         };
         return out;
     };
 
-    module_private check_given_members(self, members List[GivenMember]) List[* TypedGivenMember] = {
-        let mutable out = List[* TypedGivenMember].with_capacity(members.count());
+    module_private check_given_members(self, members List[GivenMember]) List[TypedGivenMember] = {
+        let mutable out = List[TypedGivenMember].with_capacity(members.count());
         for m in members then {
             let typed_params = self.check_params(m.params);
             let ret = self.resolve_type(m.return_type);
             let typed_body = when m.body in {
-                .Some(b) then Option[* TypedExpr].Some(box(self.check_expr_global_ref(b, .Some(ret)))),
-                .None() then Option[* TypedExpr].None(),
+                .Some(b) then Option[TypedExpr].Some(self.check_expr_global_ref(b, .Some(ret))),
+                .None() then Option[TypedExpr].None(),
             };
             let mutable context = self.context();
             let method_def_id = context.allocate(m.name, DefKind.Function());
@@ -536,61 +545,80 @@ given TypeChecker {
                 param_types.push(p.param_type);
             };
             let stable_ret = ret;
-            let method_type = make_function_type(self.to_type_ref_list(param_types), stable_ret);
+            let mutable method_type = make_function_type(self.to_type_ref_list(param_types), stable_ret);
             context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false));
             context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params));
-            out.push(box(TypedGivenMember(
+            out.push(TypedGivenMember(
                 method_def_id,
                 m.name,
                 typed_params,
                 stable_ret,
                 typed_body,
-            )));
+            ));
         };
         return out;
     };
 
     module_private check_given_members_for_type(
-        *mutable self,
+        self,
         members List[GivenMember],
         target_type Type,
         type_params List[TypeParameter],
+        declared_type_params List[TypeParameter],
         conformance_trait_name Option[String],
         retain_checked_template_bodies Bool,
-    ) List[* TypedGivenMember] = {
+    ) List[TypedGivenMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params);
         self.register_generic_constraints(type_params);
         defer { self.restore_generic_constraints(owner_constraint_snapshot);};
-        let mutable out = List[* TypedGivenMember].with_capacity(members.count());
-        let is_generic_given_target = when target_type in {
-            .TraitObject(_, _) then true,
-            _ then self.contains_generic_parameter(target_type),
+        let mutable out = List[TypedGivenMember].with_capacity(members.count());
+        let is_trait_tool_target = when target_type in {
+            .TraitObject(_, _, _) then true,
+            .ReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .MutableReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
+            _ then false,
         };
-        let self_constraint_snapshot = when target_type in {
-            .TraitObject(trait_name, trait_args) then {
-                let previous = when self.storage.generic_param_constraints.get("Self") in {
-                    .Some(existing) then {
-                        let mutable copied = List[GenericConstraintBound].with_capacity(existing.count());
-                        for constraint in existing then { copied.push(constraint);};
-                        yield Option[List[GenericConstraintBound]].Some(copied);
-                    },
-                    .None() then Option[List[GenericConstraintBound]].None(),
-                };
-                let mutable args = List[Type].new();
-                for trait_arg in trait_args then { args.push(*trait_arg);};
-                let mutable constraints = List[GenericConstraintBound].new();
-                constraints.push(GenericConstraintBound(trait_name, args));
-                self.storage.generic_param_constraints.insert("Self", constraints);
-                yield previous;
+        let is_trait_tool_declaration = type_params.is_empty() and is_trait_tool_target and conformance_trait_name is .None();
+        let is_generic_given_target = is_trait_tool_target or self.contains_generic_parameter(target_type);
+        // Swift TypeCheckerPasses: `Self = .genericParameter("Self")` plus the
+        // `Self : Trait[args]` bound are installed ONLY for generic givens
+        // (`given[T ...] [T]Trait { ... }`, the `!typeParams.isEmpty` branch).
+        // For a non-generic given or a `given Trait { ... }` tool block, `Self` is
+        // the resolved target type. Applying the generic form to every trait
+        // target rewrote `Self` for std's trait-tool methods and broke their
+        // signature resolution.
+        let use_generic_self = self.as_trait_object_type(target_type) is .Some(_) and not type_params.is_empty();
+        let generic_self_trait = if use_generic_self then self.as_trait_object_type(target_type) else Option[Type].None();
+        let self_constraint_snapshot = when generic_self_trait in {
+            .Some(trait_object) then when trait_object in {
+                .TraitObject(trait_name, _, trait_args) then {
+                    let previous = when self.storage.generic_param_constraints.get("Self") in {
+                        .Some(existing) then {
+                            let mutable copied = List[GenericConstraintBound].with_capacity(existing.count());
+                            for constraint in existing then { copied.push(constraint);};
+                            yield Option[List[GenericConstraintBound]].Some(copied);
+                        },
+                        .None() then Option[List[GenericConstraintBound]].None(),
+                    };
+                    let mutable args = List[Type].new();
+                    for trait_arg in trait_args then { args.push(trait_arg);};
+                    let mutable constraints = List[GenericConstraintBound].new();
+                    constraints.push(GenericConstraintBound(trait_name, args));
+                    self.storage.generic_param_constraints.insert("Self", constraints);
+                    yield previous;
+                },
+                _ then Option[List[GenericConstraintBound]].None(),
             },
-            _ then Option[List[GenericConstraintBound]].None(),
+            .None() then Option[List[GenericConstraintBound]].None(),
         };
         defer {
             when self_constraint_snapshot in {
                 .Some(previous) then self.storage.generic_param_constraints.insert("Self", previous),
-                .None() then when target_type in {
-                    .TraitObject(_, _) then self.storage.generic_param_constraints.remove("Self"),
-                    _ then {},
+                .None() then when generic_self_trait in {
+                    .Some(_) then self.storage.generic_param_constraints.remove("Self"),
+                    .None() then {},
                 },
             };
         };
@@ -601,16 +629,13 @@ given TypeChecker {
             if self.sema_progress_debug_enabled() then {
                 println("[sema-given-member] file=\(self.storage.file_path) member=\(m.name)");
             };
-            let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty();
+            let should_retain_template_body = not is_trait_tool_declaration and (is_generic_given_target or not m.type_params.is_empty());
             let skip_template_typed_body_boxing = self.skip_template_typed_body_boxing_debug_enabled();
             let should_store_checked_body = (retain_checked_template_bodies or should_retain_template_body) and not (skip_template_typed_body_boxing and should_retain_template_body);
-            let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params);
+            let effective_member_self_type = if use_generic_self then Type.GenericParameter("Self") else target_type;
+            let member_type_scope = self.make_given_member_type_scope(effective_member_self_type, type_params, m.type_params);
             let prev_scope = self.storage.current_scope;
             self.storage.current_scope = member_type_scope;
-            let effective_member_self_type = when target_type in {
-                .TraitObject(_, _) then Type.GenericParameter("Self"),
-                _ then target_type,
-            };
             let can_reuse_registered_signature = conformance_trait_name is .None() and type_params.is_empty() and m.type_params.is_empty();
             let reused_signature = if can_reuse_registered_signature then {
                 let type_key = self.extension_template_key(target_type);
@@ -629,11 +654,11 @@ given TypeChecker {
             };
             let typed_body = when m.body in {
                 .Some(b) then {
-                    if self.skip_given_body_debug_enabled() then {
-                        yield Option[* TypedExpr].None();
+                    if self.skip_given_body_debug_enabled() or is_trait_tool_declaration then {
+                        yield Option[TypedExpr].None();
                     };
                     // Enter function context for body checking (Swift: withNewScope)
-                    let prev_function_return_context = self.storage.function_return_context;
+                    let prev_function_return_context = self.clone_function_return_context();
                     let prev_in_loop = self.storage.in_loop;
         let prev_loop_depth = self.storage.loop_depth;
         let prev_exitable_construct_stack = self.storage.exitable_construct_stack;
@@ -646,7 +671,7 @@ given TypeChecker {
         self.storage.loop_depth = 0;
         self.storage.exitable_construct_stack = List[ExitableConstruct].new();
                     self.storage.in_defer = false;
-                    self.storage.branch_break_targets = List[*mutable BranchBreakTarget].new();
+                    self.storage.branch_break_targets = List[BranchBreakTarget].new();
                     defer {
                         self.storage.function_return_context = prev_function_return_context;
                         self.storage.in_loop = prev_in_loop;
@@ -655,7 +680,7 @@ given TypeChecker {
                         self.storage.in_defer = prev_in_defer;
                         self.storage.branch_break_targets = prev_branch_break_targets;
                     };
-                    let mutable method_scope = self.make_method_scope(typed_params, target_type, type_params);
+                    let mutable method_scope = self.make_method_scope(typed_params, effective_member_self_type, type_params);
                     // 注入方法级别的泛型类型参数到 method scope
                     for tp in m.type_params then {
                         method_scope.define_generic_param(tp.name);
@@ -664,11 +689,11 @@ given TypeChecker {
                     self.storage.current_scope = method_scope;
                     defer { self.storage.current_scope = prev_scope;};
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope);
-                    yield if should_store_checked_body then Option[* TypedExpr].Some(box(result)) else Option[* TypedExpr].None();
+                    yield if should_store_checked_body then Option[TypedExpr].Some(result) else Option[TypedExpr].None();
                 },
                 .None() then {
                     self.storage.current_scope = prev_scope;
-                    yield Option[* TypedExpr].None();
+                    yield Option[TypedExpr].None();
                 },
             };
             let mutable template_body = if should_retain_template_body then {
@@ -681,24 +706,35 @@ given TypeChecker {
             if should_retain_template_body then {
                 self.update_extension_method_checked_template(
                     target_type,
-                    type_params.count(),
+                    declared_type_params.count(),
                     method_name,
                     m.type_params.count(),
                     conformance_trait_name,
-                    &mutable template_body,
+                    template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                     template_ret,
                 );
             };
-            if is_generic_given_target then {
-                let generic_method_def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function());
+            // Swift TypeCheckerPasses.collectGivenSignatures: a `given Trait { ... }`
+            // tool block is stored in traitToolBlocks and returns immediately — it is
+            // NOT registered into genericExtensionMethods at declaration time. Tool
+            // methods are materialized per-conformance later (TypeCheckerPasses:3297)
+            // and stamped with the conformance's trait DefId. Registering them here is
+            // what made the "Ref"/trait-name bucket split matter.
+            if should_retain_template_body then {
+                // Reuse the declaration identity assigned at collection time. A
+                // tool method is materialized once per conforming type; minting a
+                // fresh DefId each time makes one declaration look like many.
+                let generic_method_def_id = if m.def_id.is_valid() then m.def_id else self.allocate_unindexed_def_id(method_name, DefKind.Function());
                 let mutable generic_param_types = List[Type].new();
                 for p in typed_params then {
                     generic_param_types.push(p.param_type);
                 };
                 let mutable context = self.context();
                 context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), ret), SymbolKind.Function(), MethodKind.Normal(), false));
-                context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(typed_params));
+                let param_specs = self.function_param_specs_from_typed_params(typed_params);
+                context.set_param_specs(generic_method_def_id, param_specs);
+                context.register_method_param_specs(self.extension_template_key(target_type), method_name, param_specs);
                 when m.body in {
                     .Some(raw_body) then context.set_concrete_given_member_source(
                         generic_method_def_id,
@@ -706,42 +742,50 @@ given TypeChecker {
                     ),
                     .None() then {},
                 };
+                let member_trait_def_id = when conformance_trait_name in {
+                    .Some(name) then self.trait_def_id_of(name),
+                    .None() then Option[DefId].None(),
+                };
                 self.register_extension_method_template(
                     self.extension_template_key(target_type),
-                    type_params,
+                    declared_type_params,
                     when conformance_trait_name in {
                         .Some(_) then Option[Type].Some(target_type),
                         .None() then Option[Type].None(),
                     },
                     List[Type].new(),
                     method_name,
+                    generic_method_def_id,
                     m.access,
                     m.type_params,
                     m.params,
                     m.return_type,
                     conformance_trait_name,
+                    member_trait_def_id,
                     template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                     Option[Type].Some(ret),
                 );
-                out.push(box(TypedGivenMember(
+                out.push(TypedGivenMember(
                     generic_method_def_id,
                     method_name,
                     typed_params,
                     ret,
-                    Option[* TypedExpr].None(),
-                )));
+                    Option[TypedExpr].None(),
+                ));
                 continue;
             };
             let mutable context = self.context();
             let method_def_id = when reused_signature in {
                 .Some(signature) then signature.method_def_id,
-                .None() then if conformance_trait_name is .None() and m.type_params.is_empty() then {
-                let type_key = self.extension_template_key(target_type);
-                yield when self.lookup_method_signature(type_key, method_name) in {
-                    .Some(existing_symbol) then existing_symbol.def_id,
-                    .None() then context.allocate(method_name, DefKind.Function()),
-                };
+                .None() then if m.def_id.is_valid() then {
+                    yield m.def_id;
+                } else if conformance_trait_name is .None() and m.type_params.is_empty() then {
+                    let type_key = self.extension_template_key(target_type);
+                    yield when self.lookup_method_signature(type_key, method_name) in {
+                        .Some(existing_symbol) then existing_symbol.def_id,
+                        .None() then context.allocate(method_name, DefKind.Function()),
+                    };
                 } else context.allocate(method_name, DefKind.Function()),
             };
             // Register method signature so mono can look it up by DefId
@@ -753,13 +797,23 @@ given TypeChecker {
                         param_types.push(p.param_type);
                     };
                     let stable_stored_ret = ret;
-                    let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret);
+                    let mutable method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret);
                     context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false));
-                    context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params));
+                    let param_specs = self.function_param_specs_from_typed_params(typed_params);
+                    context.set_param_specs(method_def_id, param_specs);
+                    context.register_method_param_specs(self.extension_template_key(target_type), method_name, param_specs);
                 },
             };
             let skip_concrete_given_program_body_retention = self.skip_concrete_given_program_body_retention_debug_enabled();
-            let should_store_concrete_given_body = retain_checked_template_bodies and not should_retain_template_body and not skip_concrete_given_program_body_retention;
+            // Exactly one of the two paths must retain the body. A method that
+            // declares its own type parameters (`copy_all_to[W Writer]` on
+            // `ByteBuffer`) is a TEMPLATE even for a concrete target — its
+            // signature still mentions `W`, so storing it as a concrete given
+            // member leaves `should_lower_function` rejecting it (generic symbol
+            // type) and the call is emitted with no definition. Swift
+            // monomorphizes it (`ByteBuffer_copy_all_to_Std_Io_ByteBuffer`).
+            let template_path_owns_body = should_retain_template_body;
+            let should_store_concrete_given_body = retain_checked_template_bodies and not template_path_owns_body and not skip_concrete_given_program_body_retention;
             when typed_body in {
                 .Some(body_ref) then {
                     if should_store_concrete_given_body then {
@@ -775,15 +829,333 @@ given TypeChecker {
                 },
                 .None() then {},
             };
-            out.push(box(TypedGivenMember(
+            out.push(TypedGivenMember(
                 method_def_id,
                 method_name,
                 typed_params,
                 ret,
-                Option[* TypedExpr].None(),
-            )));
+                Option[TypedExpr].None(),
+            ));
         };
         return out;
+    };
+
+    module_private same_generic_constraint_bound(self, left GenericConstraintBound, right GenericConstraintBound) Bool = {
+        if left.trait_name <> right.trait_name then {
+            return false;
+        };
+        if left.type_args.count() <> right.type_args.count() then {
+            return false;
+        };
+        let mutable index UInt = 0;
+        while index < left.type_args.count() then {
+            if self.context().type_display_name(left.type_args[index]) <> self.context().type_display_name(right.type_args[index]) then {
+                return false;
+            };
+            index += 1;
+        };
+        return true;
+    };
+
+    // Swift `recordGenericTraitBounds` + the toolTypeParams merge inside
+    // `buildTraitToolMethodInfo` (TypeCheckerPasses.swift:3059-3084, repeated
+    // for the body path at 3354-3380).
+    //
+    // Materialization re-checks a tool body against the conformance's target.
+    // The bounds that body needs are declared in two places the target does not
+    // carry: the conformance's own type parameters (`T Any` on
+    // `given[T Any] ListIterator[T] as Iterator[T]`) and the tool block's type
+    // parameters (`T Hash` on `given[T Hash] Iterator[T] { ... }`). Swift
+    // installs the former and merges the latter onto whichever parameter the
+    // trait argument maps to. Missing either makes the re-check see `T` as
+    // unbounded and report "Type T does not explicitly implement trait Hash
+    // (checking constraint T: Hash)" for every tool body.
+    module_private install_conformance_and_tool_bounds(
+        self,
+        owner_type_params List[TypeParameter],
+        trait_name String,
+        tool_type_params List[TypeParameterDecl],
+        resolved_trait_args List[Type],
+    ) GenericConstraintSnapshot = {
+        // Snapshot every parameter name we may touch, BEFORE touching any.
+        let mutable touched = List[TypeParameter].new();
+        for owner_type_param in owner_type_params then {
+            touched.push(TypeParameter(owner_type_param.name, List[TypeNode].new()));
+        };
+        for arg in resolved_trait_args then {
+            when arg in {
+                .GenericParameter(name) then {
+                    let mutable already = false;
+                    for touched_param in touched then {
+                        if touched_param.name == name then {
+                            already = true;
+                        };
+                    };
+                    if not already then {
+                        touched.push(TypeParameter(name, List[TypeNode].new()));
+                    };
+                },
+                _ then {},
+            };
+        };
+        let snapshot = self.snapshot_generic_constraints(touched);
+        // Conformance bounds.
+        for owner_type_param in owner_type_params then {
+            self.storage.generic_param_constraints.insert(owner_type_param.name, self.constraint_bounds_for_type_param(owner_type_param));
+        };
+        // Tool block bounds, merged onto the mapped parameter.
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(trait_info) then {
+                for tool_param in tool_type_params then {
+                    let mutable search UInt = 0;
+                    while search < trait_info.type_params.count() then {
+                        if trait_info.type_params[search] == tool_param.name and search < resolved_trait_args.count() then {
+                            when resolved_trait_args[search] in {
+                                .GenericParameter(mapped_name) then {
+                                    let mutable bounds = self.storage.generic_param_constraints.get(mapped_name) or else List[GenericConstraintBound].new();
+                                    for constraint_node in tool_param.constraints then {
+                                        let constraint = self.resolve_constraint_bound(constraint_node);
+                                        let mutable already_known = false;
+                                        for bound in bounds then {
+                                            if self.same_generic_constraint_bound(bound, constraint) then {
+                                                already_known = true;
+                                            };
+                                        };
+                                        if not already_known then {
+                                            bounds.push(constraint);
+                                        };
+                                    };
+                                    self.storage.generic_param_constraints.insert(mapped_name, bounds);
+                                },
+                                _ then {},
+                            };
+                        };
+                        search += 1;
+                    };
+                };
+            },
+            .None() then {},
+        };
+        return snapshot;
+    };
+
+    module_private materialize_trait_tool_members_for_conformance(
+        self,
+        trait_name String,
+        target_type Type,
+        resolved_trait_args List[Type],
+        type_params List[TypeParameter],
+        existing_members List[TypedGivenMember],
+        retain_checked_template_bodies Bool,
+    ) List[TypedGivenMember] = {
+        // Swift TypeCheckerPasses:3297 "Materialize trait tool methods for this
+        // explicit conformance". The exact shape there is:
+        //
+        //   let traitToolMethods = flattenedTraitToolMethodEntries(traitName)   // flattens superTraits
+        //   for (toolName, toolEntry) in traitToolMethods.sorted(by: key) {
+        //       if ownRequirements[toolName] != nil { continue }   // requirement impls handled above
+        //       if methods.contains { $0.name == toolName } { continue }        // explicit override
+        //       if methodInfos.contains { $0.method.name == toolName } { continue }
+        //       ... buildTraitToolMethodInfo / registerReceiverStyleMethod(...,
+        //           conformanceTraitName: traitName, conformanceTraitDefId: traitDefId)
+        //   }
+        //
+        // Everything below mirrors that: parent tools included, deterministic
+        // name order, both skip rules, and the tool methods registered under the
+        // conformance's trait DefId.
+        let mutable materialized_tool_members = List[TypedGivenMember].new();
+ when self.flattened_trait_tool_methods(trait_name) in {
+ .Ok(tool_methods) then {
+                let mutable tool_names = List[String].new();
+                for entry in tool_methods then {
+                    tool_names.push(entry.first);
+                };
+                tool_names.sort();
+                for tool_name in tool_names then {
+                    // (a) own requirement — its implementation is the conformance's,
+                    //     never a materialized tool.
+                    if self.trait_declares_requirement(trait_name, tool_name) then {
+                        continue;
+                    };
+                    // (b) explicit implementation already occupies the name.
+                    let mutable already_present = false;
+                    for existing in existing_members then {
+                        if existing.name == tool_name then {
+                            already_present = true;
+                        };
+                    };
+                    // (c) already materialized for this target. Swift's
+                    // `concreteExtensionMethods` is `[typeName: [methodName: Symbol]]`
+                    // — one symbol per (type, method name), later writes overwrite.
+                    // This path materializes parent-trait tools too, so without this
+                    // a tool inherited via two traits lands twice and later lookup
+                    // reports it as ambiguous.
+                    if not already_present then {
+                        let type_key = self.extension_template_key(target_type);
+                        when self.storage.generic_templates.extension_methods.get(type_key) in {
+                            .Some(existing_templates) then {
+                                for template_ref in existing_templates then {
+                                    if template_ref.method.name == tool_name then {
+                                        already_present = true;
+                                    };
+                                };
+                            },
+                            .None() then {},
+                        };
+                    };
+                    if already_present then {
+                        continue;
+                    };
+                    when tool_methods.get(tool_name) in {
+                        .Some(entry) then {
+                            let source_method = entry.method;
+                            let extra_type_params = self.from_template_type_params(entry.type_params);
+                            let materialized_method_id = self.allocate_unindexed_def_id(source_method.name, DefKind.Function());
+                            self.context().record_original_def_id(materialized_method_id, source_method.def_id);
+                            let materialized_method = GivenMember(
+                                source_method.name,
+                                source_method.type_params,
+                                source_method.access,
+                                source_method.params,
+                                source_method.return_type,
+                                source_method.body,
+                                materialized_method_id
+                            );
+                            let trait_bindings = self.trait_tool_source_trait_bindings(trait_name, entry.source_trait_name, target_type, resolved_trait_args, type_params);
+                            if not self.trait_tool_type_params_satisfied(extra_type_params, trait_bindings) then {
+                                continue;
+                            };
+                            // Two distinct roles, and Swift keeps them apart:
+                            //
+                            //  * SCOPE. `TypeCheckerPasses` opens the member scope by
+                            //    defining every conformance type parameter as a generic
+                            //    parameter, then redefines each trait type-parameter name
+                            //    to its trait argument (`defineType(traitParam.name,
+                            //    traitArgTypes[index])`). For
+                            //    `given[T,U,R] MapIterator[T,U,R] as Iterator[U]` that
+                            //    turns `T` into `U`. Dropping the names the trait-arg
+                            //    mapping already covers is the same effect without the
+                            //    overwrite — keeping them makes `into_list` return
+                            //    `List[T]` where the iterator yields `U`.
+                            //  * TEMPLATE ARITY. Swift still registers the template with
+                            //    `typeParams: typeParams` — the FULL list — because that
+                            //    is what `selectExtensionTemplate` compares against the
+                            //    receiver's argument count. The full list is passed
+                            //    separately as `declared_type_params`.
+                            let mutable owner_type_params = List[TypeParameter].new();
+                            for owner_type_param in type_params then {
+                                if not trait_bindings.contains_key(owner_type_param.name) then {
+                                    owner_type_params.push(owner_type_param);
+                                };
+                            };
+                            let mutable single_method = List[GivenMember].new();
+                            single_method.push(materialized_method);
+
+                            let prev_scope = self.storage.current_scope;
+                            let mutable binding_scope = Scope.new_child(prev_scope);
+                            for binding_entry in trait_bindings then {
+                                binding_scope.define_type(binding_entry.first, binding_entry.second);
+                            };
+                            self.storage.current_scope = binding_scope;
+                            defer { self.storage.current_scope = prev_scope;};
+                            let bound_snapshot = self.install_conformance_and_tool_bounds(type_params, trait_name, entry.type_params, resolved_trait_args);
+                            defer { self.restore_generic_constraints(bound_snapshot);};
+                            // Materializing a tool for a conformance is a
+                            // DECLARATION activity. Swift only calls
+                            // `enforceGenericConstraints` at call sites, so
+                            // constraint checks run while re-checking the body
+                            // here must not report; the call site enforces.
+                            let prev_deferred = self.storage.constraint_enforcement_deferred;
+                            self.storage.constraint_enforcement_deferred = true;
+                            defer { self.storage.constraint_enforcement_deferred = prev_deferred;};
+                            let typed_batch = self.check_given_members_for_type(
+                                single_method,
+                                target_type,
+                                owner_type_params,
+                                type_params,
+                                Option[String].Some(trait_name),
+                                retain_checked_template_bodies,
+                            );
+                            for typed_member in typed_batch then {
+                                materialized_tool_members.push(typed_member);
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
+            },
+            .Error(error) then {
+                self.push_diagnostic(error.message());
+                return List[TypedGivenMember].new();
+            },
+        };
+        return materialized_tool_members;
+    };
+
+    // Skips materializing a trait-tool method whose own constraints the target
+    // does not meet. A bound that is still generic is *undecided*, not missing —
+    // dropping the tool there erases `sum`/`product`/`average`/`copy_all_to` for
+    // every conforming type, and the call site then degrades to a member access
+    // instead of resolving one. Concrete bounds are enforced here; call sites
+    // enforce too (Swift `resolveGenericExtensionMethod` →
+    // `enforceGenericConstraints`, TypeCheckerMethods.swift:572).
+    module_private trait_tool_type_params_satisfied(self, type_params List[TypeParameter], bindings Dict[String, Type]) Bool = {
+        for type_param in type_params then {
+            let bound_type = bindings.get(type_param.name) or else Type.GenericParameter(type_param.name);
+            if self.contains_generic_parameter(bound_type) or self.is_unresolved_expr_type(bound_type) then {
+                continue;
+            };
+            for constraint in type_param.constraints then {
+                let constraint_name = self.type_node_name(constraint);
+                if constraint_name == "Any" then {
+                    continue;
+                };
+                let constraint_args = self.trait_type_args_with_bindings(constraint, bindings);
+                if constraint_args.is_empty() then {
+                    if constraint_name == "mutable" then {
+                        if not self.satisfies_mutable_constraint(bound_type) then {
+                            return false;
+                        };
+                    } else if not self.satisfies_trait_requirement_with_args(bound_type, constraint_name, List[Type].new()) then {
+                        return false;
+                    };
+                } else if not self.satisfies_trait_requirement_with_args(bound_type, constraint_name, constraint_args) then {
+                    return false;
+                };
+            };
+        };
+        return true;
+    };
+
+    module_private trait_tool_source_trait_bindings(
+        self,
+        trait_name String,
+        source_trait_name String,
+        target_type Type,
+        resolved_trait_args List[Type],
+        owner_type_params List[TypeParameter],
+    ) Dict[String, Type] = {
+        let mutable bindings = Dict[String, Type].new();
+        bindings.insert("Self", target_type);
+        for owner_type_param in owner_type_params then {
+            bindings.insert(owner_type_param.name, Type.GenericParameter(owner_type_param.name));
+        };
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                let mutable index UInt = 0;
+                while index < info.type_params.count() and index < resolved_trait_args.count() then {
+                    bindings.insert(info.type_params[index], resolved_trait_args[index]);
+                    index += 1;
+                };
+            },
+            .None() then {},
+        };
+        let mutable visited = Set[String].new();
+        let collected = self.collect_trait_method_bindings_recursive(trait_name, bindings, visited);
+        if source_trait_name == trait_name then {
+            return collected;
+        };
+        return collected;
     };
 
     module_private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
@@ -796,7 +1168,7 @@ given TypeChecker {
 
 
     public recheck_concrete_given_member_body(
-        *mutable self,
+        self,
         target_type Type,
         params List[TypedParam],
         return_type Type,
@@ -809,13 +1181,12 @@ given TypeChecker {
     ) TypedExpr = {
         self.storage.file_path = source.source_file;
         self.storage.module_path = source.module_path;
-        self.storage.package_id = source.package_id;
         self.storage.import_graph = Option[ImportGraph].Some(import_graph);
-        self.storage.generic_templates = box(generic_templates);
+        self.storage.generic_templates = generic_templates;
         self.storage.method_table = method_table;
         self.storage.trait_registry = trait_registry;
         self.storage.conformance_index = conformance_index;
-        let prev_function_return_context = self.storage.function_return_context;
+        let prev_function_return_context = self.clone_function_return_context();
         let prev_in_loop = self.storage.in_loop;
         let prev_loop_depth = self.storage.loop_depth;
         let prev_exitable_construct_stack = self.storage.exitable_construct_stack;
@@ -829,13 +1200,13 @@ given TypeChecker {
         self.storage.loop_depth = 0;
         self.storage.exitable_construct_stack = List[ExitableConstruct].new();
         self.storage.in_defer = false;
-        self.storage.branch_break_targets = List[*mutable BranchBreakTarget].new();
+        self.storage.branch_break_targets = List[BranchBreakTarget].new();
         let mutable method_scope = self.make_method_scope(params, target_type, List[TypeParameter].new());
         self.storage.current_scope = method_scope;
         let result = self.check_expr_scoped_ref(source.body, .Some(return_type), method_scope);
         let finalized = when self.storage.constraint_solver.solve() in {
             .Ok(subst) then {
-                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result));
+                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, result);
                 self.storage.constraint_solver.clear_debug_state();
                 yield resolved;
             },
@@ -856,7 +1227,7 @@ given TypeChecker {
     };
 
     public recheck_concrete_function_body(
-        *mutable self,
+        self,
         params List[TypedParam],
         return_type Type,
         source ConcreteExprSource,
@@ -870,11 +1241,11 @@ given TypeChecker {
         self.storage.module_path = source.module_path;
         self.storage.package_id = source.package_id;
         self.storage.import_graph = Option[ImportGraph].Some(import_graph);
-        self.storage.generic_templates = box(generic_templates);
+        self.storage.generic_templates = generic_templates;
         self.storage.method_table = method_table;
         self.storage.trait_registry = trait_registry;
         self.storage.conformance_index = conformance_index;
-        let prev_function_return_context = self.storage.function_return_context;
+        let prev_function_return_context = self.clone_function_return_context();
         let prev_in_loop = self.storage.in_loop;
         let prev_loop_depth = self.storage.loop_depth;
         let prev_exitable_construct_stack = self.storage.exitable_construct_stack;
@@ -888,13 +1259,13 @@ given TypeChecker {
         self.storage.loop_depth = 0;
         self.storage.exitable_construct_stack = List[ExitableConstruct].new();
         self.storage.in_defer = false;
-        self.storage.branch_break_targets = List[*mutable BranchBreakTarget].new();
+        self.storage.branch_break_targets = List[BranchBreakTarget].new();
         let mutable fn_scope = self.make_fn_scope(params);
         self.storage.current_scope = fn_scope;
         let result = self.check_expr_scoped_ref(source.body, .Some(return_type), fn_scope);
         let finalized = when self.storage.constraint_solver.solve() in {
             .Ok(subst) then {
-                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result));
+                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, result);
                 self.storage.constraint_solver.clear_debug_state();
                 yield resolved;
             },
@@ -921,7 +1292,7 @@ given TypeChecker {
             scope.define_generic_param(tp.name);
         };
         when self_type in {
-            .TraitObject(_, _) then {
+            .GenericParameter(_) then {
                 scope.define_generic_param("Self");
                 scope.define_type("Self", Type.GenericParameter("Self"));
             },

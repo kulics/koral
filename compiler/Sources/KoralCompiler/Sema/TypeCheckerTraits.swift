@@ -754,8 +754,11 @@ extension TypeChecker {
     for parent in traitInfo.superTraits {
       let parentMethods = try flattenedTraitToolMethodEntriesHelper(parent.baseName, visited: &visited)
       for (name, method) in parentMethods {
-        if result[name] != nil {
-          throw SemanticError(.generic("Ambiguous tool method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
+        if let existing = result[name] {
+          if existing.method.defId != method.method.defId {
+            throw SemanticError(.generic("Ambiguous tool method '\(name)' inherited in trait '\(traitName)'"), span: currentSpan)
+          }
+          continue
         }
         result[name] = method
       }
@@ -764,8 +767,11 @@ extension TypeChecker {
     if let blocks = traitToolBlocks[traitName] {
       for block in blocks {
         for method in block.methods {
-          if result[method.name] != nil {
-            throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+          if let existing = result[method.name] {
+            if existing.method.defId != method.defId {
+              throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+            }
+            continue
           }
           result[method.name] = (method: method, typeParams: block.traitTypeParams)
         }

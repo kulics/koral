@@ -1,10 +1,49 @@
 given TypeChecker {
-    module_private to_type_ref_list_in_resolution(self, args List[Type]) List[* Type] = {
-        let mutable refs = List[* Type].new();
+    module_private surface_named_type(self, t Type) Type = {
+        return when t in {
+            .TraitObject(_, _, _) then Type.ReferenceType(t),
+            _ then t,
+        };
+    };
+
+    // Return the trait object underneath any reference-family layers.
+    // Trait-target decisions (Self's type and the `Self : Trait[args]` bound) must
+    // key off the trait itself; Swift uses `traits[baseName] != nil`, which is
+    // unaffected by the internal `ReferenceType(TraitObject)` layout wrap that
+    // surface_named_type adds. Matching on a bare `.TraitObject` shape instead
+    // silently skipped every wrapped case.
+    module_private as_trait_object_type(self, t Type) Option[Type] = {
+        return when t in {
+            .TraitObject(_, _, _) then Option[Type].Some(t),
+            .ReferenceType(inner) then self.as_trait_object_type(inner),
+            .MutableReferenceType(inner) then self.as_trait_object_type(inner),
+            .BorrowedReferenceType(inner) then self.as_trait_object_type(inner),
+            .MutableBorrowedReferenceType(inner) then self.as_trait_object_type(inner),
+            .WeakReferenceType(inner) then self.as_trait_object_type(inner),
+            .MutableWeakReferenceType(inner) then self.as_trait_object_type(inner),
+            _ then Option[Type].None(),
+        };
+    };
+
+    module_private to_type_ref_list_in_resolution(self, args List[Type]) List[Type] = {
+        let mutable refs = List[Type].new();
         for arg in args then {
-            refs.push(box(arg));
+            refs.push(arg);
         };
         return refs;
+    };
+
+    module_private trait_object_safety_name(self, t Type) Option[String] = {
+        return when t in {
+            .TraitObject(name, _, _) then Option[String].Some(name),
+            .ReferenceType(inner) then self.trait_object_safety_name(inner),
+            .MutableReferenceType(inner) then self.trait_object_safety_name(inner),
+            .BorrowedReferenceType(inner) then self.trait_object_safety_name(inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_object_safety_name(inner),
+            .WeakReferenceType(inner) then self.trait_object_safety_name(inner),
+            .MutableWeakReferenceType(inner) then self.trait_object_safety_name(inner),
+            _ then Option[String].None(),
+        };
     };
 
     module_private resolve_visible_generic_template_type(self, base String, resolved_args List[Type], base_type Type) Type = {
@@ -14,13 +53,13 @@ given TypeChecker {
                 if not self.ensure_generic_template_visible(base, def_id, unknown_span()) then {
                     yield Type.Unknown();
                 };
-                yield Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args));
+                yield Type.GenericStruct(base, def_id, self.to_type_ref_list_in_resolution(resolved_args));
             },
             .EnumType(def_id) then {
                 if not self.ensure_generic_template_visible(base, def_id, unknown_span()) then {
                     yield Type.Unknown();
                 };
-                yield Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args));
+                yield Type.GenericEnum(base, def_id, self.to_type_ref_list_in_resolution(resolved_args));
             },
             _ then {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(base)"));
@@ -29,11 +68,38 @@ given TypeChecker {
         };
     };
 
+    module_private check_trait_object_safety(self, trait_name String) Bool = {
+        return when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
+            .Ok(is_safe) then {
+                if not is_safe then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Trait '\(trait_name)' is not object-safe"
+                        )
+                    );
+                };
+                yield is_safe;
+            },
+            .Error(_) then true,
+        };
+    };
+
     module_private resolve_type(self, node TypeNode) Type = {
         return when node in {
-            .Identifier(name) then self.resolve_named_type(name),
+            .Identifier(name) then {
+                // Swift `resolveTypeNode` (TypeCheckerTypeResolution.swift:295)
+                // checks object safety when a bare trait name is used as a type.
+                let resolved = self.resolve_named_type(name);
+                when self.trait_object_safety_name(resolved) in {
+                    .Some(trait_name) then { let _ = self.check_trait_object_safety(trait_name); },
+                    .None() then {},
+                };
+                yield self.surface_named_type(resolved);
+            },
             .Reference(inner, is_mutable) then {
-                let trait_ref_override = when *inner in {
+                let trait_ref_override = when inner in {
                     .Identifier(name) then if self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
@@ -42,9 +108,9 @@ given TypeChecker {
                         yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
-                                resolved_args.push(self.resolve_type(*arg));
+                                resolved_args.push(self.resolve_type(arg));
                             };
-                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                            let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
                             yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
                         } else Option[Type].None();
                     },
@@ -54,28 +120,29 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
                     .None() then {},
                 };
-                let resolved_inner = self.resolve_type(*inner);
+                let resolved_inner = self.resolve_type(inner);
                 yield if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner);
             },
             .BorrowedReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type(*inner);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner));
+                let resolved_inner = self.resolve_type(inner);
+                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
             },
             .Pointer(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type(*inner);
-                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner));
+                let resolved_inner = self.resolve_type(inner);
+                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
             },
             .WeakReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type(*inner);
+                let resolved_inner = self.resolve_type(inner);
                 yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner);
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[Type].new();
                 for a in args then {
-                    resolved_args.push(self.resolve_type(*a));
+                    resolved_args.push(self.resolve_type(a));
                 };
                 if self.storage.trait_registry.get(base) is .Some(_) then {
-                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                    let _ = self.check_trait_object_safety(base);
+                    return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 when self.try_resolve_named_type_without_diag(base) in {
                     .Some(base_type) then {
@@ -94,11 +161,11 @@ given TypeChecker {
                 return Type.Unknown();
             },
             .FunctionType(param_types, return_type) then {
-                let mutable resolved_params = List[* Type].new();
+                let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type(*pt)));
+                    resolved_params.push(self.resolve_type(pt));
                 };
-                let resolved_ret = self.resolve_type(*return_type);
+                let resolved_ret = self.resolve_type(return_type);
                 return make_function_type(resolved_params, resolved_ret);
             },
         };
@@ -109,15 +176,19 @@ given TypeChecker {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
                 .None() then {
-                    // Check current_scope before falling back (Swift: currentScope.resolveType)
-                    if self.storage.current_scope.lookup_type(name) is .Some(t) then {
-                        return self.canonicalize_alias_type(t);
+                    if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
+                        if local_trait is .TraitObject(_, _, _) then {
+                            return self.surface_named_type(self.canonicalize_alias_type(local_trait));
+                        };
                     };
-                    yield self.resolve_named_type(name);
+                    if self.storage.current_scope.lookup_type(name) is .Some(t) then {
+                        return self.surface_named_type(self.canonicalize_alias_type(t));
+                    };
+                    yield self.surface_named_type(self.resolve_named_type(name));
                 },
             },
             .Reference(inner, is_mutable) then {
-                let trait_ref_override = when *inner in {
+                let trait_ref_override = when inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
@@ -126,9 +197,9 @@ given TypeChecker {
                         yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_with_bindings(*arg, bindings));
+                                resolved_args.push(self.resolve_type_with_bindings(arg, bindings));
                             };
-                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                            let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
                             yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
                         } else Option[Type].None();
                     },
@@ -138,28 +209,28 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
                     .None() then {},
                 };
-                let resolved_inner = self.resolve_type_with_bindings(*inner, bindings);
+                let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
                 yield if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner);
             },
             .BorrowedReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_with_bindings(*inner, bindings);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
+                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
             },
             .Pointer(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_with_bindings(*inner, bindings);
-                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
+                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
             },
             .WeakReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_with_bindings(*inner, bindings);
+                let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
                 yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner);
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[Type].new();
                 for a in args then {
-                    resolved_args.push(self.resolve_type_with_bindings(*a, bindings));
+                    resolved_args.push(self.resolve_type_with_bindings(a, bindings));
                 };
                 if self.storage.trait_registry.get(base) is .Some(_) then {
-                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                    return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 when self.storage.current_scope.lookup_type(base) in {
                     .Some(base_type) then {
@@ -179,11 +250,11 @@ given TypeChecker {
                 .None() then self.resolve_type(node),
             },
             .FunctionType(param_types, return_type) then {
-                let mutable resolved_params = List[* Type].new();
+                let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_with_bindings(*pt, bindings)));
+                    resolved_params.push(self.resolve_type_with_bindings(pt, bindings));
                 };
-                let resolved_ret = self.resolve_type_with_bindings(*return_type, bindings);
+                let resolved_ret = self.resolve_type_with_bindings(return_type, bindings);
                 return make_function_type(resolved_params, resolved_ret);
             },
         };
@@ -192,6 +263,11 @@ given TypeChecker {
     module_private try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) Option[Type] = {
         if name == "Self" then {
             return scope.lookup_type("Self");
+        };
+        if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
+            if local_trait is .TraitObject(_, _, _) then {
+                return Option[Type].Some(local_trait);
+            };
         };
         if scope.lookup_type(name) is .Some(t) then {
             return Option[Type].Some(t);
@@ -211,9 +287,16 @@ given TypeChecker {
 
     module_private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
-            .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
+            .Identifier(name) then {
+                let resolved = self.resolve_named_type_in_scope(name, scope);
+                when self.trait_object_safety_name(resolved) in {
+                    .Some(trait_name) then { let _ = self.check_trait_object_safety(trait_name); },
+                    .None() then {},
+                };
+                yield self.surface_named_type(resolved);
+            },
             .Reference(inner, is_mutable) then {
-                let trait_ref_override = when *inner in {
+                let trait_ref_override = when inner in {
                     .Identifier(name) then if self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
@@ -222,9 +305,9 @@ given TypeChecker {
                         yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_in_scope(*arg, scope));
+                                resolved_args.push(self.resolve_type_in_scope(arg, scope));
                             };
-                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                            let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
                             yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
                         } else Option[Type].None();
                     },
@@ -234,28 +317,28 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
                     .None() then {},
                 };
-                let resolved_inner = self.resolve_type_in_scope(*inner, scope);
+                let resolved_inner = self.resolve_type_in_scope(inner, scope);
                 yield if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner);
             },
             .Pointer(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_in_scope(*inner, scope);
-                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_in_scope(inner, scope);
+                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
             },
             .WeakReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_in_scope(*inner, scope);
+                let resolved_inner = self.resolve_type_in_scope(inner, scope);
                 yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner);
             },
             .BorrowedReference(inner, is_mutable) then {
-                let resolved_inner = self.resolve_type_in_scope(*inner, scope);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner));
+                let resolved_inner = self.resolve_type_in_scope(inner, scope);
+                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[Type].new();
                 for a in args then {
-                    resolved_args.push(self.resolve_type_in_scope(*a, scope));
+                    resolved_args.push(self.resolve_type_in_scope(a, scope));
                 };
                 if self.storage.trait_registry.get(base) is .Some(_) then {
-                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args));
+                    return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
                     .Some(base_type) then {
@@ -273,11 +356,11 @@ given TypeChecker {
                 return Type.Unknown();
             },
             .FunctionType(param_types, return_type) then {
-                let mutable resolved_params = List[* Type].new();
+                let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_in_scope(*pt, scope)));
+                    resolved_params.push(self.resolve_type_in_scope(pt, scope));
                 };
-                let resolved_ret = self.resolve_type_in_scope(*return_type, scope);
+                let resolved_ret = self.resolve_type_in_scope(return_type, scope);
                 return make_function_type(resolved_params, resolved_ret);
             },
         };
@@ -389,9 +472,9 @@ given TypeChecker {
         return when rune_type in {
             .StructureType(def_id) then {
                 let type_name = self.context().get_name(def_id) or else "Rune";
-                let identifier = box(Symbol(def_id, rune_type, SymbolKind.TypeSymbol()));
-                let mutable args = List[* TypedExpr].new();
-                args.push(box(make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.UInt32Type())));
+                let identifier = Symbol(def_id, rune_type, SymbolKind.TypeSymbol());
+                let mutable args = List[TypedExpr].new();
+                args.push(make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), Type.UInt32Type()));
                 let _ = type_name;
                 yield make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), args), rune_type);
             },
@@ -449,11 +532,11 @@ given TypeChecker {
             .StructureType(def_id) then self.context().get_module_path(def_id),
             .EnumType(def_id) then self.context().get_module_path(def_id),
             .OpaqueType(def_id) then self.context().get_module_path(def_id),
-            .GenericStruct(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+            .GenericStruct(template, _, _) then when self.try_resolve_named_type_without_diag(template) in {
                 .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
                 .None() then Option[List[String]].None(),
             },
-            .GenericEnum(template, _) then when self.try_resolve_named_type_without_diag(template) in {
+            .GenericEnum(template, _, _) then when self.try_resolve_named_type_without_diag(template) in {
                 .Some(resolved) then self.type_module_path(self.canonicalize_alias_type(resolved)),
                 .None() then Option[List[String]].None(),
             },
@@ -462,8 +545,14 @@ given TypeChecker {
     };
 
     module_private resolve_named_type(self, name String) Type = {
-        // Check current_scope first (analogous to Swift's currentScope.resolveType)
-        // The scope chain is walked automatically by lookup_type
+        // Declaration identity wins over the global textual type scope. This keeps
+        // same-named traits/types from different modules distinct while preserving
+        // local generic-parameter lookup through current_scope below.
+        if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
+            if local_trait is .TraitObject(_, _, _) then {
+                return self.canonicalize_alias_type(local_trait);
+            };
+        };
         if self.storage.current_scope.lookup_type(name) is .Some(t) then {
             return self.canonicalize_alias_type(t);
         };

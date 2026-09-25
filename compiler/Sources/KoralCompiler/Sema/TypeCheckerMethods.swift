@@ -552,7 +552,8 @@ extension TypeChecker {
       access: method.access,
       span: currentSpan,
       packageID: packageID,
-      isMutable: false
+      isMutable: false,
+      preferredDefId: method.defId
     )
   }
   
