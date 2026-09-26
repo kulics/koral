@@ -108,11 +108,6 @@ public class Parser {
       try match(.breakKeyword)
       try requireSemicolon()
       return .break(span: startSpan)
-    case .yieldKeyword:
-      try match(.yieldKeyword)
-      let value = try expression()
-      try requireSemicolon()
-      return .yield(value: value, span: startSpan)
     case .continueKeyword:
       try match(.continueKeyword)
       try requireSemicolon()

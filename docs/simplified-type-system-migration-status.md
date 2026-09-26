@@ -27,7 +27,7 @@
 
 - `self` 按拷贝传递；ARC / 隐藏间接层由类型布局分析决定，与 method call receiver 适配无关。
 - `type mutable` 恒为 managed（共享对象语义）。
-- plain `type` 只暴露值语义；底层是 inline value 还是 managed wrapper 由编译器按语义属性决定，已确认的触发条件：
+- plain `type` 只暴露浅层不可变、无 identity、且不承诺值语义；底层是 inline value 还是 managed wrapper 由编译器按语义属性决定，已确认的触发条件：
   - 值递归
   - 显式 `Drop` conformance
 - managed nominal 的 copy 必须对嵌套 managed 字段逐个 retain，与外层 control block 的 retain 配套；否则参数 drop 会造成 use-after-free。
@@ -36,8 +36,8 @@
 
 | 项 | 值 |
 |---|---|
-| Swift 全量 | **528/528**（2026-09-26 复验） |
-| Bootstrap 全量 | **528/528**（2026-09-26 复验） |
+| Swift 全量 | **533/533**（2026-09-26 合入 `a82bb748` / `cfc940d3` 后复验） |
+| Bootstrap 全量 | 待按 `a82bb748` 的语义变更适配后复验（合并前为 528/528） |
 | 临时调试代码 | **已全部清除**（`KORAL_DEBUG_SUBST_CONTEXT` 系列探针、`trace_*` 辅助函数、`[inflate]`/`[tool-*]`/`[mono-*]` 等打印均已删除） |
 | 自举（bootstrap 编译自身） | **非目标**，当前不通。见下「自举（非目标）」 |
 | Swift 构建 | `cd compiler && swift build` |

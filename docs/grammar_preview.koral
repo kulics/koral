@@ -383,33 +383,34 @@ let control_flow() Void = {
 };
 
 // ------------------------------------------------------------
-// yield value（仅用于 if / when 分支表达式的分支 body）
+// block tail expression（块尾表达式）
 // ------------------------------------------------------------
 
 let value = if ready() then {
-    yield 42;
+    42
 } else {
-    yield 0;
+    0
 };
 
-// early yield value：在分支 body 内提前产出当前分支表达式的值
 let classify(score Int) String =
     if score >= 90 then {
-        if score == 100 then { yield "perfect"; };
-        yield "A";
+        if score == 100 then {
+            "perfect"
+        } else {
+            "A"
+        }
     } else {
-        yield "other";
+        "other"
     };
 
-// 嵌套 when 表达式拥有自己的分支结果目标
 let nested(flag Bool) Int =
     if flag then {
-        yield when input() in {
-            .Some(v) then { yield v; },
-            .None() then { yield 0; },
-        };
+        when input() in {
+            .Some(v) then { v },
+            .None() then { 0 },
+        }
     } else {
-        yield -1;
+        -1
     };
 
 // ------------------------------------------------------------
@@ -419,8 +420,9 @@ let nested(flag Bool) Int =
 let option_chaining() Void = {
     let opt = Option[Int].Some(42);
     let none = Option[Int].None();
+    // 优先级：`and then` > `and` > `or else` / `or return` > `or`
 
-    // or else：解包，None 时使用默认值
+    // or else：值合并；左侧为 None / Error 时使用默认值
     let value  = opt  or else 0;// 42
     let value2 = none or else 0;// 0
 
@@ -430,16 +432,16 @@ let option_chaining() Void = {
         return v * 2;
     };
 
-    // and then：值变换（Some 时执行，None 时透传）
+    // and then：值变换（Some / Ok 时执行，None / Error 时透传）
     let doubled = opt and then it * 2;// Some(84)
     let chained = opt and then it + 1 and then it * 3;// Some(129)
 
-    // and then + 自动 flatten（monadic bind）
+    // and then + 同 kind 自动 flatten（monadic bind）
     let safe_div Func(Int, Int) Option[Int] = (x Int, y Int) Option[Int] ->
         if y == 0 then .None() else .Some(x / y);
     let result = opt and then safe_div(it, 10);// Option[Option[T]] -> Option[T]
 
-    // Result 的 or else 错误传播
+    // Result 同样支持 or else / and then；此处 `it` 是 Error 值
     let double_result Func(Result[Int]) Result[Int] = (res Result[Int]) Result[Int] -> {
         let value = res or else { return .Error(it); };
         return .Ok(value * 2);

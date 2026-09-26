@@ -196,7 +196,6 @@ public indirect enum TypedStatementNode {
   case `break`
   case `continue`
   case deferStatement(expression: TypedExpressionNode)
-  case yieldValue(target: YieldTargetId, value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision
@@ -235,7 +234,7 @@ public indirect enum TypedExpressionNode {
   case ptrExpression(expression: TypedExpressionNode, type: Type)
   case variable(identifier: Symbol)
   case blockExpression(
-    statements: [TypedStatementNode], type: Type)
+    statements: [TypedStatementNode], tailExpression: TypedExpressionNode?, type: Type)
   case ifExpression(
     condition: TypedExpressionNode, thenBranch: TypedExpressionNode,
     elseBranch: TypedExpressionNode?, type: Type)
@@ -463,7 +462,7 @@ extension TypedExpressionNode {
       .unsafeDerefExpression(_, let type),
       .referenceExpression(_, let type),
       .ptrExpression(_, let type),
-      .blockExpression(_, let type),
+      .blockExpression(_, _, let type),
       .ifExpression(_, _, _, let type),
       .ifPatternExpression(_, _, _, _, _, let type),
       .call(_, _, let type),
@@ -537,7 +536,6 @@ extension TypedExpressionNode {
   ) -> TypedExpressionNode {
     return .blockExpression(statements: [
       .variableDeclaration(identifier: identifier, value: value, mutable: identifier.isMutable()),
-      .expression(body),
-    ], type: type)
+    ], tailExpression: body, type: type)
   }
 }

@@ -274,12 +274,6 @@ public func printAST(_ node: ASTNode) {
     case .break:
       print("\(indent)Break")
 
-    case .yield(let value, _):
-      print("\(indent)Yield")
-      withIndent {
-        printExpression(value)
-      }
-
     case .continue:
       print("\(indent)Continue")
 
@@ -351,11 +345,17 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)EmptyLiteral")
     case .identifier(let name):
       print("\(indent)Identifier: \(name)")
-    case .blockExpression(let statements):
+    case .blockExpression(let statements, let tailExpression):
       print("\(indent)BlockExpression:")
       withIndent {
         for statement in statements {
           printStatement(statement)
+        }
+        if let tailExpression {
+          print("\(indent)TailExpression:")
+          withIndent {
+            printExpression(tailExpression)
+          }
         }
       }
     case .arithmeticExpression(let left, let op, let right):

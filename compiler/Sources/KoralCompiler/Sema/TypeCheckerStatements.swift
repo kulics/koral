@@ -139,7 +139,7 @@ extension TypeChecker {
     case .ifExpression, .whenExpression, .whileExpression, .forExpression:
       let stmt = try inferStatementExpression(expr)
       let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
-      return .blockExpression(statements: [stmt], type: blockType)
+      return .blockExpression(statements: [stmt], tailExpression: nil, type: blockType)
     default:
       let typedExpr = try inferTypedExpression(expr, usage: .statement)
       try requireEffectfulStatementExpression(expr, typedExpr: typedExpr)
@@ -149,7 +149,7 @@ extension TypeChecker {
 
   func statementCanFallThrough(_ stmt: TypedStatementNode) -> Bool {
     switch stmt {
-    case .return, .break, .continue, .yieldValue:
+    case .return, .break, .continue:
       return false
     case .expression(let expr):
       return expr.type != .never
@@ -176,8 +176,6 @@ extension TypeChecker {
       return "break"
     case .continue:
       return "continue"
-    case .yieldValue:
-      return "break"
     case .expression(let expr):
       return expr.type == .never ? "control flow terminator" : nil
     case .ifStatement, .ifPatternStatement, .whenStatement:
@@ -609,7 +607,7 @@ extension TypeChecker {
           )
           stmts.append(.expression(setCall))
 
-          return .expression(.blockExpression(statements: stmts, type: .void))
+          return .expression(.blockExpression(statements: stmts, tailExpression: nil, type: .void))
         }
 
         let typedTarget = try resolveLValue(target)
@@ -767,7 +765,7 @@ extension TypeChecker {
         )
         stmts.append(.expression(setCall))
 
-        return .expression(.blockExpression(statements: stmts, type: .void))
+        return .expression(.blockExpression(statements: stmts, tailExpression: nil, type: .void))
       }
 
       let typedTarget = try resolveLValue(target)
@@ -838,44 +836,6 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(expected: returnType.description, got: "Void")
       }
       return .return(value: nil)
-
-    case .yield(let value, let span):
-      self.currentSpan = span
-      if insideDefer {
-        throw SemanticError(.generic(
-          "control flow statement 'yield' is not allowed in defer expression"))
-      }
-      guard let currentTarget = yieldTargets.last else {
-        throw SemanticError(.generic("yield outside of branch expression body"), span: span)
-      }
-      if exitableConstructStack.count > currentTarget.constructStackDepthAtCreation,
-         let penetrated = exitableConstructStack.last {
-        switch penetrated {
-        case .loop:
-          throw SemanticError(.generic(
-            "yield cannot penetrate through loop boundary"), span: span)
-        case .branch:
-          throw SemanticError(.generic(
-            "yield cannot penetrate through branch boundary"), span: span)
-        }
-      }
-      let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
-      var typedValueOpt: TypedExpressionNode?
-      for expectedType in candidateExpectedTypes {
-        do {
-          typedValueOpt = try normalizeBranchExpression(
-            try inferTypedExpression(value, expectedType: expectedType),
-            expectedType: expectedType
-          )
-          break
-        } catch {
-          continue
-        }
-      }
-      let typedValue = try typedValueOpt ?? inferTypedExpression(value)
-      markExplicitYield(on: currentTarget.id)
-      try mergeYieldTargetResult(type: typedValue.type, span: span)
-      return .yieldValue(target: currentTarget.id, value: typedValue)
 
     case .break(let span):
       self.currentSpan = span

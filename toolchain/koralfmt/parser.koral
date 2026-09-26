@@ -63,7 +63,7 @@ public type CstExpr {
     ImplicitMember(dot Token, name Token, lparen Option[Token], args List[CstCallArg], rparen Option[Token]),
 
     // Control flow
-    Block(lbrace Token, items List[CstItem], rbrace Token),
+    Block(lbrace Token, items List[CstItem], tail_expr Option[CstExpr], rbrace Token),
     If(kw Token, cond CstExpr, then_kw Token, then_body CstExpr,
        else_kw Option[Token], else_body Option[CstExpr]),
     IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern,
@@ -185,7 +185,6 @@ public type CstStmt {
     Defer(kw Token, value CstExpr),
     Return(kw Token, value Option[CstExpr]),
     Break(kw Token),
-    Yield(kw Token, value CstExpr),
     Continue(kw Token),
 };
 
@@ -337,8 +336,8 @@ public type CstFile(items List[CstItem]);
 
 public type mutable CstParser(
     tokens List[Token],
-    pos UInt,
-    line_join_grouping UInt,
+    mutable pos UInt,
+    mutable line_join_grouping UInt,
 );
 
 given CstParser {
@@ -408,7 +407,7 @@ given CstParser {
             let runes = name.to_runes();
             if runes.count() == 0 then { return false;};
             let first = runes[0].to_uint32();
-            yield first >= 65 and first <= 90;
+            first >= 65 and first <= 90
         },
         _ then false,
     };
@@ -496,12 +495,12 @@ given CstParser {
 
     file_private last_item_is_code(self, items List[CstItem]) Bool = {
         if items.count() == 0 then { return false;};
-        let prev = *items[items.count() - 1];
+        let prev = items[items.count() - 1];
         return CstParser.is_code_item(prev);
     };
 
     file_private item_is_using_decl(item CstItem) Bool = when item in {
-        .Decl(decl) then when *decl in {
+        .Decl(decl) then when decl in {
             .Using(_) or .ForeignUsing(_, _) then true,
             _ then false,
         },
@@ -509,7 +508,7 @@ given CstParser {
     };
 
     file_private item_is_non_using_top_level_code(item CstItem) Bool = when item in {
-        .Decl(decl) then when *decl in {
+        .Decl(decl) then when decl in {
             .Using(_) or .ForeignUsing(_, _) then false,
             _ then true,
         },
@@ -848,11 +847,31 @@ given CstParser {
     };
 
     file_private parse_expr_node(self) Result[CstExpr] = {
-        return self.parse_or_return();
+        return self.parse_or();
     };
 
-    file_private parse_or_return(self) Result[CstExpr] = {
-        let mutable left = when self.parse_or_else() in {
+    file_private parse_or(self) Result[CstExpr] = {
+        let mutable left = when self.parse_option_flow() in {
+            .Ok(e) then e,
+            .Error(e) then { return .Error(e);},
+        };
+        while self.check(.KwOr()) then {
+            if self.should_break_expr_at_peek() then { break;};
+            let next = self.peek_at_skip_nl(1);
+            if next is .KwElse() then { break;};
+            if next is .KwReturn() then { break;};
+            let op = self.eat();
+            let right = when self.parse_option_flow() in {
+                .Ok(e) then e,
+                .Error(e) then { return .Error(e);},
+            };
+            left = .BinaryOp(left, op, right);
+        };
+        return .Ok(left);
+    };
+
+    file_private parse_option_flow(self) Result[CstExpr] = {
+        let mutable left = when self.parse_and() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
@@ -860,6 +879,15 @@ given CstParser {
             if self.should_break_expr_at_peek() then { break;};
             let next = self.peek_at_skip_nl(1);
             when next in {
+                .KwElse() then {
+                    let or_kw = self.eat();
+                    let else_kw = self.eat();
+                    let right = when self.parse_and() in {
+                        .Ok(e) then e,
+                        .Error(e) then { return .Error(e);},
+                    };
+                    left = .OrElse(left, or_kw, else_kw, right);
+                },
                 .KwReturn() then {
                     let or_kw = self.eat();
                     let ret_kw = self.eat();
@@ -871,52 +899,8 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_or_else(self) Result[CstExpr] = {
-        let mutable left = when self.parse_or() in {
-            .Ok(e) then e,
-            .Error(e) then { return .Error(e);},
-        };
-        while self.check(.KwOr()) then {
-            if self.should_break_expr_at_peek() then { break;};
-            let next = self.peek_at_skip_nl(1);
-            when next in {
-                .KwElse() then {
-                    let or_kw = self.eat();
-                    let else_kw = self.eat();
-                    let right = when self.parse_or() in {
-                        .Ok(e) then e,
-                        .Error(e) then { return .Error(e);},
-                    };
-                    left = .OrElse(left, or_kw, else_kw, right);
-                },
-                _ then { break;},
-            };
-        };
-        return .Ok(left);
-    };
-
-    file_private parse_or(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and_then() in {
-            .Ok(e) then e,
-            .Error(e) then { return .Error(e);},
-        };
-        while self.check(.KwOr()) then {
-            if self.should_break_expr_at_peek() then { break;};
-            let next = self.peek_at_skip_nl(1);
-            if next is .KwElse() then { break;};
-            if next is .KwReturn() then { break;};
-            let op = self.eat();
-            let right = when self.parse_and_then() in {
-                .Ok(e) then e,
-                .Error(e) then { return .Error(e);},
-            };
-            left = .BinaryOp(left, op, right);
-        };
-        return .Ok(left);
-    };
-
     file_private parse_and_then(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and() in {
+        let mutable left = when self.parse_not() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
@@ -927,7 +911,7 @@ given CstParser {
                 .KwThen() then {
                     let and_kw = self.eat();
                     let then_kw = self.eat();
-                    let right = when self.parse_and() in {
+                    let right = when self.parse_not() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e);},
                     };
@@ -940,7 +924,7 @@ given CstParser {
     };
 
     file_private parse_and(self) Result[CstExpr] = {
-        let mutable left = when self.parse_not() in {
+        let mutable left = when self.parse_and_then() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
@@ -949,7 +933,7 @@ given CstParser {
             let next = self.peek_at_skip_nl(1);
             if next is .KwThen() then { break;};
             let op = self.eat();
-            let right = when self.parse_not() in {
+            let right = when self.parse_and_then() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
             };
@@ -963,7 +947,7 @@ given CstParser {
     };
 
     file_private parse_is(self) Result[CstExpr] = {
-        let left = when self.parse_bitwise_or() in {
+        let left = when self.parse_range() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
@@ -1034,14 +1018,14 @@ given CstParser {
     };
 
     file_private parse_bitwise_and(self) Result[CstExpr] = {
-        let mutable left = when self.parse_range() in {
+        let mutable left = when self.parse_shift() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
         while self.check(.Amp()) then {
             if self.should_break_expr_at_peek() then { break;};
             let op = self.eat();
-            let right = when self.parse_range() in {
+            let right = when self.parse_shift() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
             };
@@ -1124,7 +1108,7 @@ given CstParser {
     };
 
     file_private parse_comparison(self) Result[CstExpr] = {
-        let mutable left = when self.parse_shift() in {
+        let mutable left = when self.parse_bitwise_or() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e);},
         };
@@ -1133,7 +1117,7 @@ given CstParser {
                 .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq() then {
                     if self.should_break_expr_at_peek() then { break;};
                     let op = self.eat();
-                    let right = when self.parse_shift() in {
+                    let right = when self.parse_bitwise_or() in {
                         .Ok(e) then e,
                         .Error(e) then { return .Error(e);},
                     };
@@ -1633,8 +1617,7 @@ given CstParser {
     };
 
     // ========================================================================
-    // Block expression: { statements }
-    // Note: block body is statement-only (no trailing final-expression slot).
+    // Block expression: { statements [tail-expression] }
     // ========================================================================
 
     file_private parse_block_expr(self) Result[CstExpr] = {
@@ -1643,6 +1626,7 @@ given CstParser {
             .Error(e) then { return .Error(e);},
         };
         let mutable items = List[CstItem].new();
+        let mutable tail_expr = Option[CstExpr].None();
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines();
             if nl_count >= 2 then {
@@ -1663,15 +1647,32 @@ given CstParser {
                 continue;
             };
             when self.parse_block_item() in {
-                .Ok(item) then { items.push(item);},
+                .Ok(item) then {
+                    when item in {
+                        .Stmt(stmt) then {
+                            when stmt in {
+                                .ExprStmt(expr, semi) then {
+                                    if semi is .None() and self.check(.RBrace()) then {
+                                        tail_expr = .Some(expr);
+                                    } else {
+                                        items.push(item);
+                                    };
+                                },
+                                _ then { items.push(item);},
+                            };
+                        },
+                        _ then { items.push(item);},
+                    };
+                },
                 .Error(e) then { return .Error(e);},
             };
+            if tail_expr is .Some(_) then { break;};
         };
         let rb = when self.expect(.RBrace(), "'}'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e);},
         };
-        return .Ok(.Block(lb, items, rb));
+        return .Ok(.Block(lb, items, tail_expr, rb));
     };
 
     file_private parse_block_item(self) Result[CstItem] = {
@@ -1878,15 +1879,15 @@ given CstParser {
             .Error(e) then { return .Error(e);},
         };
         let body = if self.check(.LBrace()) then {
-            yield when self.parse_block_expr() in {
+            when self.parse_block_expr() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
-            };
+            }
         } else {
-            yield when self.parse_expr_node() in {
+            when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
-            };
+            }
         };
         return .Ok(.While(kw, cond, then_kw, body));
     };
@@ -1970,15 +1971,15 @@ given CstParser {
             .Error(e) then { return .Error(e);},
         };
         let body = if self.check(.LBrace()) then {
-            yield when self.parse_block_expr() in {
+            when self.parse_block_expr() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
-            };
+            }
         } else {
-            yield when self.parse_expr_node() in {
+            when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e);},
-            };
+            }
         };
         let comma = self.eat_comma();
         let mutable trailing_comments = List[Token].new();
@@ -2237,18 +2238,6 @@ given CstParser {
                 self.eat();
                 return .Ok(.Break(kw));
             },
-            .KwYield() then {
-                let kw = self.eat();
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then { return .Error(e);},
-                };
-                if self.peek() is not .Semi() then {
-                    return .Error("Parse error: expected ';' after yield");
-                };
-                self.eat();
-                return .Ok(.Yield(kw, value));
-            },
             .KwContinue() then {
                 let kw = self.eat();
                 if self.peek() is not .Semi() then {
@@ -2280,10 +2269,7 @@ given CstParser {
             },
             _ then {},
         };
-        if self.peek() is not .Semi() then {
-            return .Error("Parse error: expected ';' after expression");
-        };
-        let semi Option[Token] = .Some(self.eat());
+        let semi Option[Token] = if self.peek() is .Semi() then .Some(self.eat()) else .None();
         return .Ok(.ExprStmt(expr, semi));
     };
 
@@ -2765,7 +2751,7 @@ given CstParser {
                     let c = self.eat();
                     let prev_is_field =
                         if items.count() > 0 then {
-                            yield when *items[items.count() - 1] in { .Field(_) then true, _ then false };
+                            when items[items.count() - 1] in { .Field(_) then true, _ then false }
                         } else false;
                     if nl_count == 0 and prev_is_field then {
                         items.push(CstStructBodyItem.TrailingComment(c));
