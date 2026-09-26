@@ -16,1319 +16,1319 @@
 /// 使用 ref 持有 DefIdMap，与 Swift 版本的 class 语义一致，
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type mutable CompilerContext(
- mutable def_id_map DefIdMap,
- mutable concrete_global_initializers Dict[UInt, TypedExpr],
- mutable concrete_function_bodies Dict[UInt, TypedExpr],
- mutable concrete_function_sources Dict[UInt, ConcreteExprSource],
- mutable concrete_given_member_bodies Dict[UInt, TypedExpr],
- mutable concrete_given_member_sources Dict[UInt, ConcreteExprSource],
- mutable parsed_default_values Dict[String, String],
- mutable method_param_specs Dict[String, Dict[String, List[FunctionParamSpec]]],
+    mutable def_id_map DefIdMap,
+    mutable concrete_global_initializers Dict[UInt, TypedExpr],
+    mutable concrete_function_bodies Dict[UInt, TypedExpr],
+    mutable concrete_function_sources Dict[UInt, ConcreteExprSource],
+    mutable concrete_given_member_bodies Dict[UInt, TypedExpr],
+    mutable concrete_given_member_sources Dict[UInt, ConcreteExprSource],
+    mutable parsed_default_values Dict[String, String],
+    mutable method_param_specs Dict[String, Dict[String, List[FunctionParamSpec]]],
 );
 
 public type ConcreteExprSource(
- body Expr,
- source_file String,
- package_id String,
- module_path List[String],
+    body Expr,
+    source_file String,
+    package_id String,
+    module_path List[String],
 );
 
 given CompilerContext {
- public new() CompilerContext = {
- return CompilerContext(
- DefIdMap.new(),
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, ConcreteExprSource].new(),
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, ConcreteExprSource].new(),
- Dict[String, String].new(),
- Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
- );
- };
-
- public from_def_id_map(map DefIdMap) CompilerContext = {
- return CompilerContext(
- map,
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, ConcreteExprSource].new(),
- Dict[UInt, TypedExpr].new(),
- Dict[UInt, ConcreteExprSource].new(),
- Dict[String, String].new(),
- Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
- );
- };
-
- public register_method_param_specs(self, owner_name String, method_name String, specs List[FunctionParamSpec]) Void = {
- let mutable methods = self.method_param_specs.get(owner_name) or else Dict[String, List[FunctionParamSpec]].new();
- methods.insert(method_name, specs);
- self.method_param_specs.insert(owner_name, methods);
- };
-
- public get_method_param_specs(self, owner_name String, method_name String) Option[List[FunctionParamSpec]] = {
- return when self.method_param_specs.get(owner_name) in {
- .Some(methods) then methods.get(method_name),
- .None() then Option[List[FunctionParamSpec]].None(),
- };
- };
-
- public find_method_param_specs_by_name(self, method_name String, expected_count UInt) Option[List[FunctionParamSpec]] = {
- for owner_entry in self.method_param_specs.iterator() then {
- when owner_entry.second.get(method_name) in {
- .Some(specs) then {
- if expected_count == 0(UInt) or specs.count() == expected_count then {
- return Option[List[FunctionParamSpec]].Some(specs);
- };
- },
- .None() then {},
- };
- };
- return Option[List[FunctionParamSpec]].None();
- };
-
- // ── DefIdMap 查询 ─────────────────────────────────────────────────────
-
- public get_name(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_name(def_id);
- };
-
- public get_module_path(self, def_id DefId) Option[List[String]] = {
- return self.def_id_map.get_module_path(def_id);
- };
-
- public get_source_file(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_source_file(def_id);
- };
-
- public get_package_id(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_package_id(def_id);
- };
-
- public get_kind(self, def_id DefId) Option[DefKind] = {
- return self.def_id_map.get_kind(def_id);
- };
-
- public get_access(self, def_id DefId) Option[AccessModifier] = {
- return self.def_id_map.get_access(def_id);
- };
-
- public get_span(self, def_id DefId) Option[SourceSpan] = {
- return self.def_id_map.get_span(def_id);
- };
-
- public get_qualified_name(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_qualified_name(def_id);
- };
-
- public get_c_identifier(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_c_identifier(def_id);
- };
-
- public get_symbol_type(self, def_id DefId) Option[Type] = {
- return self.def_id_map.get_symbol_type(def_id);
- };
-
- public get_symbol_kind(self, def_id DefId) Option[SymbolKind] = {
- return self.def_id_map.get_symbol_kind(def_id);
- };
-
- public get_symbol_method_kind(self, def_id DefId) Option[MethodKind] = {
- return self.def_id_map.get_symbol_method_kind(def_id);
- };
-
- public get_symbol_mutable(self, def_id DefId) Option[Bool] = {
- return self.def_id_map.get_symbol_mutable(def_id);
- };
-
- public get_symbol(self, def_id DefId) Option[Symbol] = {
- return when self.get_symbol_type(def_id) in {
- .Some(symbol_type) then when self.get_symbol_kind(def_id) in {
- .Some(kind) then Option[Symbol].Some(Symbol(def_id, symbol_type, kind)),
- .None() then Option[Symbol].None(),
- },
- .None() then Option[Symbol].None(),
- };
- };
-
- public symbol_name(self, symbol Symbol) String = {
- return self.get_name(symbol.def_id) or else "";
- };
-
- public symbol_name_or(self, symbol Symbol, fallback String) String = {
- return self.get_name(symbol.def_id) or else fallback;
- };
-
- public is_symbol_mutable(self, def_id DefId) Bool = {
- return when self.def_id_map.get_symbol_mutable(def_id) in {
- .Some(v) then v,
- .None() then false,
- };
- };
-
- // ── DefId 查找 ────────────────────────────────────────────────────────
-
- public lookup_def_id(self, module_path List[String], name String, source_file Option[String]) Option[DefId] = {
- return self.def_id_map.lookup(module_path, name, source_file);
- };
-
- // ── DefId 分配 ────────────────────────────────────────────────────────
-
- public allocate_def_id(
- self,
- module_path List[String],
- name String,
- kind DefKind,
- source_file String,
- access AccessModifier,
- span SourceSpan,
- ) DefId = {
- return self.def_id_map.allocate_full(name, kind, module_path, source_file, "", access, span);
- };
-
- public allocate(self, name String, kind DefKind) DefId = {
- return self.def_id_map.allocate(name, kind);
- };
-
- public allocate_unindexed(self, name String, kind DefKind) DefId = {
- return self.def_id_map.allocate_unindexed(name, kind);
- };
-
- public allocate_full(
- self,
- name String,
- kind DefKind,
- module_path List[String],
- source_file String,
- access AccessModifier,
- span SourceSpan,
- ) DefId = {
- return self.def_id_map.allocate_full(name, kind, module_path, source_file, "", access, span);
- };
-
- public allocate_full_in_package(
- self,
- name String,
- kind DefKind,
- module_path List[String],
- source_file String,
- package_id String,
- access AccessModifier,
- span SourceSpan,
- ) DefId = {
- return self.def_id_map.allocate_full(name, kind, module_path, source_file, package_id, access, span);
- };
-
- // ── 符号创建 ──────────────────────────────────────────────────────────
-
- public create_symbol(
- self,
- name String,
- module_path List[String],
- source_file String,
- symbol_type Type,
- kind SymbolKind,
- method_kind MethodKind,
- access AccessModifier,
- span SourceSpan,
- is_mutable Bool,
- ) Symbol = {
- let def_kind = when kind in {
- .Function() then DefKind.Function(),
- .Variable(_) then DefKind.Variable(),
- .TypeSymbol() then {
- yield when symbol_type in {
- .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
- _ then DefKind.TypeDef(TypeDefKind.Structure()),
- };
- },
- .Module() then DefKind.Module(),
- };
-
- let def_id = when access in {
- .FilePrivate() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
- .Some(existing) then existing,
- .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
- },
- _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
- .Some(existing) then existing,
- .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
- },
- };
-
- self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable));
-
- return Symbol(def_id, symbol_type, kind);
- };
-
- public create_symbol_with_package(
- self,
- name String,
- module_path List[String],
- source_file String,
- symbol_type Type,
- kind SymbolKind,
- method_kind MethodKind,
- access AccessModifier,
- span SourceSpan,
- is_mutable Bool,
- package_id String,
- ) Symbol = {
- let def_kind = when kind in {
- .Function() then DefKind.Function(),
- .Variable(_) then DefKind.Variable(),
- .TypeSymbol() then {
- yield when symbol_type in {
- .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
- _ then DefKind.TypeDef(TypeDefKind.Structure()),
- };
- },
- .Module() then DefKind.Module(),
- };
-
- let def_id = when access in {
- .FilePrivate() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
- .Some(existing) then existing,
- .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
- },
- _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
- .Some(existing) then existing,
- .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
- },
- };
-
- self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable));
-
- return Symbol(def_id, symbol_type, kind);
- };
-
- // ── 类型定义查询 ──────────────────────────────────────────────────────
-
- public get_struct_fields(self, def_id DefId) Option[List[StructField]] = {
- return self.def_id_map.get_struct_fields(def_id);
- };
-
- public get_struct_fields_by_raw_id(self, raw_id UInt) Option[List[StructField]] = {
- return self.def_id_map.get_struct_fields(DefId(raw_id));
- };
-
- public def_id_name_equals(self, def_id DefId, expected String) Bool = {
- for entry in self.def_id_map.names then {
- if entry.first == def_id.id then {
- return entry.second == expected;
- };
- };
- return false;
- };
-
- public get_enum_cases(self, def_id DefId) Option[List[EnumCaseInfo]] = {
- return self.def_id_map.get_enum_cases(def_id);
- };
-
- public get_enum_cases_by_raw_id(self, raw_id UInt) Option[List[EnumCaseInfo]] = {
- return self.def_id_map.get_enum_cases(DefId(raw_id));
- };
-
- public enum_case_tag_index_by_raw_id(self, raw_id UInt, case_name String) UInt = {
- let zero UInt = 0;
- for entry in self.def_id_map.enum_cases.iterator() then {
- if entry.first == raw_id then {
- let cases = entry.second;
- let mutable idx UInt = 0;
- for case_info in cases then {
- if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
- return idx;
- };
- idx += 1(UInt);
- };
- return zero;
- };
- };
- return zero;
- };
-
- public enum_case_param_specs_by_raw_id(self, raw_id UInt, case_name String) List[FunctionParamSpec] = {
- for entry in self.def_id_map.enum_cases.iterator() then {
- if entry.first == raw_id then {
- let cases = entry.second;
- let mutable specs = List[FunctionParamSpec].new();
- for case_info in cases then {
- if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
- for param in case_info.params then {
- let default_key = "\(case_name).\(param.name)";
- let has_def = self.parsed_default_values.contains_key(default_key) or self.parsed_default_values.contains_key(param.name);
- specs.push(FunctionParamSpec(param.name, false, param.named, has_def));
- };
- };
- };
- return specs;
- };
- };
- return List[FunctionParamSpec].new();
- };
-
- public enum_case_params_by_raw_id(self, raw_id UInt, case_name String) List[EnumCaseParam] = {
- for entry in self.def_id_map.enum_cases.iterator() then {
- if entry.first == raw_id then {
- let cases = entry.second;
- for case_info in cases then {
- if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
- return case_info.params;
- };
- };
- return List[EnumCaseParam].new();
- };
- };
- return List[EnumCaseParam].new();
- };
-
- public enum_case_params_by_template_name(self, template_name String, case_name String) List[EnumCaseParam] = {
- for entry in self.def_id_map.enum_template_names.iterator() then {
- if entry.second == template_name then {
- return self.enum_case_params_by_raw_id(entry.first, case_name);
- };
- };
- return List[EnumCaseParam].new();
- };
-
- public enum_has_case_by_raw_id(self, raw_id UInt, case_name String) Bool = {
- for entry in self.def_id_map.enum_cases.iterator() then {
- if entry.first == raw_id then {
- let cases = entry.second;
- for case_info in cases then {
- if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
- return true;
- };
- };
- return false;
- };
- };
- return false;
- };
-
- public is_foreign_struct(self, def_id DefId) Bool = {
- return self.def_id_map.is_foreign_struct(def_id);
- };
-
- public get_foreign_struct_fields(self, def_id DefId) Option[List[StructField]] = {
- return self.def_id_map.get_foreign_struct_fields(def_id);
- };
-
- public get_param_specs(self, def_id DefId) Option[List[FunctionParamSpec]] = {
- return self.def_id_map.get_param_specs(def_id);
- };
-
- public get_function_type(self, def_id DefId) Option[Type] = {
- return when self.get_symbol_type(def_id) in {
- .Some(symbol_type) then when symbol_type in {
- .FunctionType(_, _) then Option[Type].Some(symbol_type),
- _ then Option[Type].None(),
- },
- .None() then Option[Type].None(),
- };
- };
-
- public get_function_return_type(self, def_id DefId) Option[Type] = {
- return when self.get_function_type(def_id) in {
- .Some(function_type) then when function_type in {
- .FunctionType(_, return_type_ref) then Option[Type].Some(return_type_ref),
- _ then Option[Type].None(),
- },
- .None() then Option[Type].None(),
- };
- };
-
- public get_function_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
- return when self.get_function_type(def_id) in {
- .Some(function_type) then when function_type in {
- .FunctionType(params, _) then {
- yield if arg_index < params.count() then Option[Type].Some(params[arg_index].param_type) else Option[Type].None();
- },
- _ then Option[Type].None(),
- },
- .None() then Option[Type].None(),
- };
- };
-
- public signature_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
- return self.get_function_param_type(def_id, arg_index);
- };
-
- public signature_param_type_or_unknown(self, def_id DefId, arg_index UInt) Type = {
- return self.get_function_param_type(def_id, arg_index) or else Type.Unknown();
- };
-
- public get_original_def_id(self, def_id DefId) Option[DefId] = {
- return self.def_id_map.get_original_def_id(def_id);
- };
-
- public record_original_def_id(self, def_id DefId, original_def_id DefId) Void = {
- self.def_id_map.record_import(def_id, original_def_id, List[String].new());
- };
-
- public lookup_type(self, def_id DefId) Option[Type] = {
- return self.def_id_map.lookup_type(def_id);
- };
-
- public is_not_deref(self, def_id DefId) Bool = {
- return self.def_id_map.is_not_deref(def_id);
- };
-
- public type_display_name(self, t Type) String = {
- return self.def_id_map.type_display_name(t);
- };
-
- public has_explicit_drop(self, def_id DefId) Bool = {
- if self.def_id_map.has_explicit_drop(def_id) then {
- return true;
- };
- let template_def_id = self.get_template_def_id(def_id);
- return template_def_id.is_valid() and self.def_id_map.has_explicit_drop(template_def_id);
- };
-
- public set_explicit_drop(self, def_id DefId) Void = {
- self.def_id_map.set_explicit_drop(def_id);
- };
-
- public nominal_layout_kind(self, def_id DefId) NominalLayoutKind = {
- return if self.requires_managed_nominal_layout_def(def_id) then NominalLayoutKind.Managed() else NominalLayoutKind.Value();
- };
-
- public nominal_layout_kind_for_type(self, t Type) NominalLayoutKind = {
- let result = if self.requires_managed_nominal_layout_type(t) then NominalLayoutKind.Managed() else NominalLayoutKind.Value();
- return result;
- };
-
- file_private requires_managed_nominal_layout_type(self, t Type) Bool = {
- return when t in {
- .StructureType(def_id) then self.requires_managed_nominal_layout_def(def_id),
- .EnumType(def_id) then self.requires_managed_nominal_layout_def(def_id),
- .OpaqueType(def_id) then self.requires_managed_nominal_layout_def(def_id),
- .GenericStruct(template, template_def_id, _) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
- if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
- return true;
- };
- yield when self.lookup_generic_layout_def_id(t) in {
- .Some(def_id) then self.requires_managed_nominal_layout_def(def_id),
- .None() then false,
- };
- },
- .GenericEnum(template, template_def_id, _) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
- if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
- return true;
- };
- yield when self.lookup_generic_layout_def_id(t) in {
- .Some(def_id) then self.requires_managed_nominal_layout_def(def_id),
- .None() then false,
- };
- },
- _ then false,
- };
- };
-
- file_private requires_managed_nominal_layout_def(self, def_id DefId) Bool = {
- if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
- return true;
- };
- let mutable path = Set[UInt].new();
- path.insert(def_id.id);
- let cycle = self.contains_nominal_value_cycle(def_id, def_id, path);
- return cycle;
- };
-
- file_private contains_nominal_value_cycle(self, current DefId, target DefId, mutable path Set[UInt]) Bool = {
- let dependencies = self.direct_nominal_value_dependencies_of_def(current);
- for dependency in dependencies then {
- if dependency.id == target.id then {
- return true;
- };
- if path.contains(dependency.id) then {
- continue;
- };
- path.insert(dependency.id);
- if self.contains_nominal_value_cycle(dependency, target, path) then {
- return true;
- };
- path.remove(dependency.id);
- };
- return false;
- };
-
- file_private direct_nominal_value_dependencies_of_def(self, def_id DefId) List[DefId] = {
- if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
- return List[DefId].new();
- };
-
- let mutable result = List[DefId].new();
- if self.def_id_map.get_struct_fields(def_id) is .Some(fields) then {
- for field in fields then {
- let dependencies = self.direct_nominal_value_dependencies_in_type(field.field_type);
- for dependency in dependencies then { result.push(dependency); };
- };
- return result;
- };
-
- if self.def_id_map.get_enum_cases(def_id) is .Some(cases) then {
- for case_info in cases then {
- for param in case_info.params then {
- let dependencies = self.direct_nominal_value_dependencies_in_type(param.param_type);
- for dependency in dependencies then { result.push(dependency); };
- };
- };
- };
- return result;
- };
-
- file_private lookup_generic_layout_def_id(self, t Type) Option[DefId] = {
- let direct_layout_name = self.get_layout_key(t);
- if self.lookup_def_id(List[String].new(), direct_layout_name, Option[String].None()) is .Some(def_id) then {
- return Option[DefId].Some(def_id);
- };
-
- return when t in {
- .GenericStruct(template, template_def_id, args) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
- if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
- return Option[DefId].Some(resolved_template_def_id);
- };
- let resolved_type = Type.GenericStruct(template, resolved_template_def_id, args);
- let layout_name = self.get_layout_key(resolved_type);
- yield self.lookup_def_id(List[String].new(), layout_name, Option[String].None());
- },
- .GenericEnum(template, template_def_id, args) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
- if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
- return Option[DefId].Some(resolved_template_def_id);
- };
- let resolved_type = Type.GenericEnum(template, resolved_template_def_id, args);
- let layout_name = self.get_layout_key(resolved_type);
- yield self.lookup_def_id(List[String].new(), layout_name, Option[String].None());
- },
- _ then Option[DefId].None(),
- };
- };
-
- file_private direct_nominal_value_dependencies_in_type(self, t Type) List[DefId] = {
- let mutable result = List[DefId].new();
- when t in {
- .StructureType(def_id) then {
- if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
- result.push(def_id);
- };
- },
- .EnumType(def_id) then {
- if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
- result.push(def_id);
- };
- },
- .OpaqueType(def_id) then {
- if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
- result.push(def_id);
- };
- },
- .GenericStruct(template, template_def_id, type_args) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
- if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
- return result;
- };
- when self.lookup_generic_layout_def_id(t) in {
- .Some(def_id) then {
- if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
- result.push(def_id);
- };
- },
- .None() then {
- for arg in type_args then {
- let dependencies = self.direct_nominal_value_dependencies_in_type(arg);
- for dependency in dependencies then { result.push(dependency); };
- };
- },
- };
- },
- .GenericEnum(template, template_def_id, type_args) then {
- let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
- if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
- return result;
- };
- when self.lookup_generic_layout_def_id(t) in {
- .Some(def_id) then {
- if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
- result.push(def_id);
- };
- },
- .None() then {
- for arg in type_args then {
- let dependencies = self.direct_nominal_value_dependencies_in_type(arg);
- for dependency in dependencies then { result.push(dependency); };
- };
- },
- };
- },
- .GenericParameter(_) then {},
- _ then {},
- };
- return result;
- };
-
- public get_cname(self, def_id DefId) Option[String] = {
- return self.def_id_map.get_cname(def_id);
- };
-
- public set_cname(self, def_id DefId, cname String) Void = {
- self.def_id_map.set_cname(def_id, cname);
- };
-
- public next_def_id(self) UInt = {
- return self.def_id_map.next_id;
- };
-
- public get_names(self) Dict[UInt, String] = {
- return self.def_id_map.names;
- };
-
- public is_generic_instantiation(self, def_id DefId) Bool = {
- return when self.def_id_map.get_generic_instantiation(def_id) in {
- .Some(v) then v,
- .None() then false,
- };
- };
-
- public get_type_arguments(self, def_id DefId) Option[List[Type]] = {
- when self.def_id_map.get_type_arguments(def_id) in {
- .Some(args) then { return Option[List[Type]].Some(args);},
- .None() then {},
- };
- return when self.def_id_map.lookup_type(def_id) in {
- .Some(mapped) then when mapped in {
- .GenericStruct(_, _, args) then {
- let mutable unpacked = List[Type].new();
- for arg in args then {
- unpacked.push(arg);
- };
- yield Option[List[Type]].Some(unpacked);
- },
- .GenericEnum(_, _, args) then {
- let mutable unpacked = List[Type].new();
- for arg in args then {
- unpacked.push(arg);
- };
- yield Option[List[Type]].Some(unpacked);
- },
- _ then Option[List[Type]].None(),
- },
- .None() then Option[List[Type]].None(),
- };
- };
-
- public get_template_name(self, def_id DefId) Option[String] = {
- when self.def_id_map.get_template_name(def_id) in {
- .Some(name) then { return Option[String].Some(name);},
- .None() then {},
- };
- return when self.def_id_map.lookup_type(def_id) in {
- .Some(mapped) then when mapped in {
- .GenericStruct(template, _, _) then Option[String].Some(template),
- .GenericEnum(template, _, _) then Option[String].Some(template),
- _ then Option[String].None(),
- },
- .None() then Option[String].None(),
- };
- };
-
- public get_template_def_id(self, def_id DefId) DefId = {
- return self.def_id_map.get_template_def_id(def_id);
- };
-
- // ── 类型定义更新 ──────────────────────────────────────────────────────
-
- public update_struct_info(
- self,
- def_id DefId,
- members List[StructField],
- is_generic_instantiation Bool,
- type_arguments Option[List[Type]],
- template_name Option[String],
- template_def_id DefId,
- ) Void = {
- self.def_id_map.set_struct_info(def_id, StructTypeInfo(
- members,
- is_generic_instantiation,
- type_arguments,
- template_name,
- template_def_id,
- ));
- };
-
- public update_union_info(
- self,
- def_id DefId,
- cases List[EnumCaseInfo],
- is_generic_instantiation Bool,
- type_arguments Option[List[Type]],
- template_name Option[String],
- template_def_id DefId,
- ) Void = {
- self.def_id_map.set_enum_info(def_id, EnumTypeInfo(
- cases,
- is_generic_instantiation,
- type_arguments,
- template_name,
- template_def_id,
- ));
- };
-
- public set_struct_mutable(self, def_id DefId, is_mutable Bool) Void = {
- self.def_id_map.set_struct_mutable(def_id, is_mutable);
- };
-
- public is_struct_mutable(self, def_id DefId) Bool = {
- return self.def_id_map.is_struct_mutable(def_id);
- };
-
- public set_symbol_info(self, def_id DefId, info SymbolInfo) Void = {
- self.def_id_map.set_symbol_info(def_id, info);
- };
-
- public set_param_specs(self, def_id DefId, specs List[FunctionParamSpec]) Void = {
- self.def_id_map.set_param_specs(def_id, specs);
- };
-
- public set_module_path(self, def_id DefId, module_path List[String]) Void = {
- self.def_id_map.set_module_path(def_id, module_path);
- };
-
- public set_source_file(self, def_id DefId, source_file String) Void = {
- self.def_id_map.set_source_file(def_id, source_file);
- };
-
- public set_package_id(self, def_id DefId, package_id String) Void = {
- self.def_id_map.set_package_id(def_id, package_id);
- };
-
- public set_access(self, def_id DefId, access AccessModifier) Void = {
- self.def_id_map.set_access(def_id, access);
- };
-
- public set_span(self, def_id DefId, span SourceSpan) Void = {
- self.def_id_map.set_span(def_id, span);
- };
-
- public set_struct_info(self, def_id DefId, info StructTypeInfo) Void = {
- self.def_id_map.set_struct_info(def_id, info);
- };
-
- public set_enum_info(self, def_id DefId, info EnumTypeInfo) Void = {
- self.def_id_map.set_enum_info(def_id, info);
- };
-
- public set_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
- self.def_id_map.set_struct_fields(def_id, fields);
- };
-
- public set_foreign_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
- self.def_id_map.set_foreign_struct_fields(def_id, fields);
- };
-
- public set_enum_cases(self, def_id DefId, cases List[EnumCaseInfo]) Void = {
- self.def_id_map.set_enum_cases(def_id, cases);
- };
-
- public add_type(self, def_id DefId, t Type) Void = {
- self.def_id_map.add_type(def_id, t);
- };
-
- public set_not_deref(self, def_id DefId) Void = {
- self.def_id_map.set_not_deref(def_id);
- };
-
- public clear_variable_symbol_types_in_range(self, start_id UInt, end_exclusive UInt) Void = {
- self.def_id_map.clear_variable_symbol_types_in_range(start_id, end_exclusive);
- };
-
- // ── 类型查询 ──────────────────────────────────────────────────────────
-
- /// 获取类型的人类可读名称
- public get_type_name(self, t Type) String = {
- return when t in {
- .StructureType(def_id) then {
- yield when self.def_id_map.get_name(def_id) in {
- .Some(name) then name,
- .None() then "<unknown>",
- };
- },
- .EnumType(def_id) then {
- yield when self.def_id_map.get_name(def_id) in {
- .Some(name) then name,
- .None() then "<unknown>",
- };
- },
- .OpaqueType(def_id) then {
- yield when self.def_id_map.get_name(def_id) in {
- .Some(name) then name,
- .None() then "<unknown>",
- };
- },
- .ModuleType(info) then {
- yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".");
- },
- _ then type_to_string(t),
- };
- };
-
- /// 获取类型的调试名称（含泛型参数展开）
- public get_debug_name(self, t Type) String = {
- return when t in {
- .IntType() then "Int",
- .Int8Type() then "Int8",
- .Int16Type() then "Int16",
- .Int32Type() then "Int32",
- .Int64Type() then "Int64",
- .UIntType() then "UInt",
- .UInt8Type() then "UInt8",
- .UInt16Type() then "UInt16",
- .UInt32Type() then "UInt32",
- .UInt64Type() then "UInt64",
- .Float32Type() then "Float32",
- .Float64Type() then "Float64",
- .BoolType() then "Bool",
- .VoidType() then "Void",
- .NeverType() then "Never",
- .FunctionType(params, ret) then {
- let mutable parts = List[String].new();
- for entry in params then {
- parts.push(self.get_debug_name(entry.param_type));
- };
- let mutable out = StringBuilder.new();
- out.push_string("Func(");
- out.push_string(join_strings(parts, ", "));
- out.push_byte(')');
- out.push_byte(' ');
- out.push_string(self.get_debug_name(ret));
- yield out.to_string();
- },
- .ReferenceType(inner) then "*\(self.get_debug_name(inner))",
- .BorrowedReferenceType(inner) then "ref *\(self.get_debug_name(inner))",
- .MutableReferenceType(inner) then "*mutable \(self.get_debug_name(inner))",
- .MutableBorrowedReferenceType(inner) then "ref mutable *\(self.get_debug_name(inner))",
- .PointerType(inner) then "*unsafe \(self.get_debug_name(inner))",
- .MutablePointerType(inner) then "*unsafe mutable \(self.get_debug_name(inner))",
- .WeakReferenceType(inner) then "?*\(self.get_debug_name(inner))",
- .MutableWeakReferenceType(inner) then "?*mutable \(self.get_debug_name(inner))",
- .StructureType(def_id) then {
- let base_name = when self.def_id_map.get_name(def_id) in {
- .Some(n) then n,
- .None() then "<unknown>",
- };
- yield when self.def_id_map.get_type_arguments(def_id) in {
- .Some(args) then if not args.is_empty() then {
- let mutable arg_parts = List[String].new();
- for a in args then {
- arg_parts.push(self.get_debug_name(a));
- };
- let args_str = join_strings(arg_parts, ", ");
- let mutable out = StringBuilder.new();
- out.push_string(base_name);
- out.push_byte('[');
- out.push_string(args_str);
- out.push_byte(']');
- yield out.to_string();
- } else base_name,
- .None() then base_name,
- };
- },
- .EnumType(def_id) then {
- let base_name = when self.def_id_map.get_name(def_id) in {
- .Some(n) then n,
- .None() then "<unknown>",
- };
- yield when self.def_id_map.get_type_arguments(def_id) in {
- .Some(args) then if not args.is_empty() then {
- let mutable arg_parts = List[String].new();
- for a in args then {
- arg_parts.push(self.get_debug_name(a));
- };
- let args_str = join_strings(arg_parts, ", ");
- let mutable out = StringBuilder.new();
- out.push_string(base_name);
- out.push_byte('[');
- out.push_string(args_str);
- out.push_byte(']');
- yield out.to_string();
- } else base_name,
- .None() then base_name,
- };
- },
- .OpaqueType(def_id) then {
- yield when self.def_id_map.get_name(def_id) in {
- .Some(n) then n,
- .None() then "<unknown>",
- };
- },
- .ModuleType(info) then {
- yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".");
- },
- .GenericParameter(name) then name,
- .GenericStruct(template, _, args) then {
- let mutable arg_parts = List[String].new();
- for a in args then {
- arg_parts.push(self.get_debug_name(a));
- };
- let args_str = join_strings(arg_parts, ", ");
- let mutable out = StringBuilder.new();
- out.push_string(template);
- out.push_byte('[');
- out.push_string(args_str);
- out.push_byte(']');
- yield out.to_string();
- },
- .GenericEnum(template, _, args) then {
- let mutable arg_parts = List[String].new();
- for a in args then {
- arg_parts.push(self.get_debug_name(a));
- };
- let args_str = join_strings(arg_parts, ", ");
- let mutable out = StringBuilder.new();
- out.push_string(template);
- out.push_byte('[');
- out.push_string(args_str);
- out.push_byte(']');
- yield out.to_string();
- },
- .TraitObject(name, _, args) then {
- if args.is_empty() then {
- yield name;
- } else {
- let mutable arg_parts = List[String].new();
- for a in args then {
- arg_parts.push(self.get_debug_name(a));
- };
- let args_str = join_strings(arg_parts, ", ");
- let mutable out = StringBuilder.new();
- out.push_byte('[');
- out.push_string(args_str);
- out.push_byte(']');
- out.push_string(name);
- yield out.to_string();
- };
- },
- .TypeVar(tv) then "?\(tv.id)",
- .Unknown() then "?",
- };
- };
-
- // ── 类型变量查询 ──────────────────────────────────────────────────────
-
- /// 检查类型是否包含类型变量
- public contains_type_variable(self, t Type) Bool = {
- return when t in {
- .TypeVar(_) then true,
- .FunctionType(params, ret) then {
- if self.contains_type_variable(ret) then { return true;};
- for entry in params then {
- if self.contains_type_variable(entry.param_type) then { return true;};
- };
- yield false;
- },
- .ReferenceType(inner) then self.contains_type_variable(inner),
- .MutableReferenceType(inner) then self.contains_type_variable(inner),
- .PointerType(inner) then self.contains_type_variable(inner),
- .MutablePointerType(inner) then self.contains_type_variable(inner),
- .WeakReferenceType(inner) then self.contains_type_variable(inner),
- .MutableWeakReferenceType(inner) then self.contains_type_variable(inner),
- .GenericStruct(_, _, args) then {
- for a in args then {
- if self.contains_type_variable(a) then { return true;};
- };
- yield false;
- },
- .GenericEnum(_, _, args) then {
- for a in args then {
- if self.contains_type_variable(a) then { return true;};
- };
- yield false;
- },
- _ then false,
- };
- };
-
- /// 检查类型是否包含泛型参数
- public contains_generic_parameter(self, t Type) Bool = {
- return type_contains_generic_parameter(t, self);
- };
-
- /// 检查类型表面是否仍提及未解析的泛型占位。
- public mentions_unresolved_generic_placeholder(self, t Type) Bool = {
- return type_mentions_unresolved_generic_placeholder(t);
- };
-
- // ── Layout Key 生成 ───────────────────────────────────────────────────
-
- /// 生成类型的布局键（用于 C 标识符生成）
- public get_layout_key(self, t Type) String = {
- return when t in {
- .IntType() then "I",
- .Int8Type() then "I8",
- .Int16Type() then "I16",
- .Int32Type() then "I32",
- .Int64Type() then "I64",
- .UIntType() then "U",
- .UInt8Type() then "U8",
- .UInt16Type() then "U16",
- .UInt32Type() then "U32",
- .UInt64Type() then "U64",
- .Float32Type() then "F32",
- .Float64Type() then "F64",
- .BoolType() then "B",
- .VoidType() then "V",
- .NeverType() then "N",
- .FunctionType(_, _) then "Fn",
- .ReferenceType(inner) then "R_\(self.get_layout_key(inner))",
- .MutableReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
- .PointerType(inner) then "P_\(self.get_layout_key(inner))",
- .MutablePointerType(inner) then "MP_\(self.get_layout_key(inner))",
- .WeakReferenceType(inner) then "W_\(self.get_layout_key(inner))",
- .MutableWeakReferenceType(inner) then "MW_\(self.get_layout_key(inner))",
- .BorrowedReferenceType(inner) then "R_\(self.get_layout_key(inner))",
- .MutableBorrowedReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
- .StructureType(def_id) then self.layout_key_for_def_id(def_id),
- .EnumType(def_id) then self.layout_key_for_def_id(def_id),
- .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
- .GenericParameter(name) then "Param_\(name)",
-        .GenericStruct(template, template_def_id, args) then {
-            if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
-                yield self.layout_key_for_def_id(template_def_id);
+    public new() CompilerContext = {
+        return CompilerContext(
+            DefIdMap.new(),
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, ConcreteExprSource].new(),
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, ConcreteExprSource].new(),
+            Dict[String, String].new(),
+            Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
+        );
+    };
+
+    public from_def_id_map(map DefIdMap) CompilerContext = {
+        return CompilerContext(
+            map,
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, ConcreteExprSource].new(),
+            Dict[UInt, TypedExpr].new(),
+            Dict[UInt, ConcreteExprSource].new(),
+            Dict[String, String].new(),
+            Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
+        );
+    };
+
+    public register_method_param_specs(self, owner_name String, method_name String, specs List[FunctionParamSpec]) Void = {
+        let mutable methods = self.method_param_specs.get(owner_name) or else Dict[String, List[FunctionParamSpec]].new();
+        methods.insert(method_name, specs);
+        self.method_param_specs.insert(owner_name, methods);
+    };
+
+    public get_method_param_specs(self, owner_name String, method_name String) Option[List[FunctionParamSpec]] = {
+        return when self.method_param_specs.get(owner_name) in {
+            .Some(methods) then methods.get(method_name),
+            .None() then Option[List[FunctionParamSpec]].None(),
+        };
+    };
+
+    public find_method_param_specs_by_name(self, method_name String, expected_count UInt) Option[List[FunctionParamSpec]] = {
+        for owner_entry in self.method_param_specs.iterator() then {
+            when owner_entry.second.get(method_name) in {
+                .Some(specs) then {
+                    if expected_count == 0(UInt) or specs.count() == expected_count then {
+                        return Option[List[FunctionParamSpec]].Some(specs);
+                    };
+                },
+                .None() then {},
             };
-            let mutable arg_keys = List[String].new();
-            for a in args then {
-                arg_keys.push(self.get_layout_key(a));
+        };
+        return Option[List[FunctionParamSpec]].None();
+    };
+
+    // ── DefIdMap 查询 ─────────────────────────────────────────────────────
+
+    public get_name(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_name(def_id);
+    };
+
+    public get_module_path(self, def_id DefId) Option[List[String]] = {
+        return self.def_id_map.get_module_path(def_id);
+    };
+
+    public get_source_file(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_source_file(def_id);
+    };
+
+    public get_package_id(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_package_id(def_id);
+    };
+
+    public get_kind(self, def_id DefId) Option[DefKind] = {
+        return self.def_id_map.get_kind(def_id);
+    };
+
+    public get_access(self, def_id DefId) Option[AccessModifier] = {
+        return self.def_id_map.get_access(def_id);
+    };
+
+    public get_span(self, def_id DefId) Option[SourceSpan] = {
+        return self.def_id_map.get_span(def_id);
+    };
+
+    public get_qualified_name(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_qualified_name(def_id);
+    };
+
+    public get_c_identifier(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_c_identifier(def_id);
+    };
+
+    public get_symbol_type(self, def_id DefId) Option[Type] = {
+        return self.def_id_map.get_symbol_type(def_id);
+    };
+
+    public get_symbol_kind(self, def_id DefId) Option[SymbolKind] = {
+        return self.def_id_map.get_symbol_kind(def_id);
+    };
+
+    public get_symbol_method_kind(self, def_id DefId) Option[MethodKind] = {
+        return self.def_id_map.get_symbol_method_kind(def_id);
+    };
+
+    public get_symbol_mutable(self, def_id DefId) Option[Bool] = {
+        return self.def_id_map.get_symbol_mutable(def_id);
+    };
+
+    public get_symbol(self, def_id DefId) Option[Symbol] = {
+        return when self.get_symbol_type(def_id) in {
+            .Some(symbol_type) then when self.get_symbol_kind(def_id) in {
+                .Some(kind) then Option[Symbol].Some(Symbol(def_id, symbol_type, kind)),
+                .None() then Option[Symbol].None(),
+            },
+            .None() then Option[Symbol].None(),
+        };
+    };
+
+    public symbol_name(self, symbol Symbol) String = {
+        return self.get_name(symbol.def_id) or else "";
+    };
+
+    public symbol_name_or(self, symbol Symbol, fallback String) String = {
+        return self.get_name(symbol.def_id) or else fallback;
+    };
+
+    public is_symbol_mutable(self, def_id DefId) Bool = {
+        return when self.def_id_map.get_symbol_mutable(def_id) in {
+            .Some(v) then v,
+            .None() then false,
+        };
+    };
+
+    // ── DefId 查找 ────────────────────────────────────────────────────────
+
+    public lookup_def_id(self, module_path List[String], name String, source_file Option[String]) Option[DefId] = {
+        return self.def_id_map.lookup(module_path, name, source_file);
+    };
+
+    // ── DefId 分配 ────────────────────────────────────────────────────────
+
+    public allocate_def_id(
+        self,
+        module_path List[String],
+        name String,
+        kind DefKind,
+        source_file String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        return self.def_id_map.allocate_full(name, kind, module_path, source_file, "", access, span);
+    };
+
+    public allocate(self, name String, kind DefKind) DefId = {
+        return self.def_id_map.allocate(name, kind);
+    };
+
+    public allocate_unindexed(self, name String, kind DefKind) DefId = {
+        return self.def_id_map.allocate_unindexed(name, kind);
+    };
+
+    public allocate_full(
+        self,
+        name String,
+        kind DefKind,
+        module_path List[String],
+        source_file String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        return self.def_id_map.allocate_full(name, kind, module_path, source_file, "", access, span);
+    };
+
+    public allocate_full_in_package(
+        self,
+        name String,
+        kind DefKind,
+        module_path List[String],
+        source_file String,
+        package_id String,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        return self.def_id_map.allocate_full(name, kind, module_path, source_file, package_id, access, span);
+    };
+
+    // ── 符号创建 ──────────────────────────────────────────────────────────
+
+    public create_symbol(
+        self,
+        name String,
+        module_path List[String],
+        source_file String,
+        symbol_type Type,
+        kind SymbolKind,
+        method_kind MethodKind,
+        access AccessModifier,
+        span SourceSpan,
+        is_mutable Bool,
+    ) Symbol = {
+        let def_kind = when kind in {
+            .Function() then DefKind.Function(),
+            .Variable(_) then DefKind.Variable(),
+            .TypeSymbol() then {
+                when symbol_type in {
+                    .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
+                    _ then DefKind.TypeDef(TypeDefKind.Structure()),
+                }
+            },
+            .Module() then DefKind.Module(),
+        };
+
+        let def_id = when access in {
+            .FilePrivate() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
+            },
+            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
+            },
+        };
+
+        self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable));
+
+        return Symbol(def_id, symbol_type, kind);
+    };
+
+    public create_symbol_with_package(
+        self,
+        name String,
+        module_path List[String],
+        source_file String,
+        symbol_type Type,
+        kind SymbolKind,
+        method_kind MethodKind,
+        access AccessModifier,
+        span SourceSpan,
+        is_mutable Bool,
+        package_id String,
+    ) Symbol = {
+        let def_kind = when kind in {
+            .Function() then DefKind.Function(),
+            .Variable(_) then DefKind.Variable(),
+            .TypeSymbol() then {
+                when symbol_type in {
+                    .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
+                    _ then DefKind.TypeDef(TypeDefKind.Structure()),
+                }
+            },
+            .Module() then DefKind.Module(),
+        };
+
+        let def_id = when access in {
+            .FilePrivate() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
+            },
+            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
+            },
+        };
+
+        self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable));
+
+        return Symbol(def_id, symbol_type, kind);
+    };
+
+    // ── 类型定义查询 ──────────────────────────────────────────────────────
+
+    public get_struct_fields(self, def_id DefId) Option[List[StructField]] = {
+        return self.def_id_map.get_struct_fields(def_id);
+    };
+
+    public get_struct_fields_by_raw_id(self, raw_id UInt) Option[List[StructField]] = {
+        return self.def_id_map.get_struct_fields(DefId(raw_id));
+    };
+
+    public def_id_name_equals(self, def_id DefId, expected String) Bool = {
+        for entry in self.def_id_map.names then {
+            if entry.first == def_id.id then {
+                return entry.second == expected;
             };
-            let arg_key_suffix = join_strings(arg_keys, "_");
-            let mutable out = StringBuilder.new();
-            out.push_string(template);
-            out.push_byte('_');
-            out.push_string(arg_key_suffix);
-            if template_def_id.is_valid() then {
-                out.push_string("_d");
-                out.push_string(template_def_id.id.to_string());
+        };
+        return false;
+    };
+
+    public get_enum_cases(self, def_id DefId) Option[List[EnumCaseInfo]] = {
+        return self.def_id_map.get_enum_cases(def_id);
+    };
+
+    public get_enum_cases_by_raw_id(self, raw_id UInt) Option[List[EnumCaseInfo]] = {
+        return self.def_id_map.get_enum_cases(DefId(raw_id));
+    };
+
+    public enum_case_tag_index_by_raw_id(self, raw_id UInt, case_name String) UInt = {
+        let zero UInt = 0;
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second;
+                let mutable idx UInt = 0;
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return idx;
+                    };
+                    idx += 1(UInt);
+                };
+                return zero;
             };
-            yield out.to_string();
-        },
-        .GenericEnum(template, template_def_id, args) then {
-            if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
-                yield self.layout_key_for_def_id(template_def_id);
+        };
+        return zero;
+    };
+
+    public enum_case_param_specs_by_raw_id(self, raw_id UInt, case_name String) List[FunctionParamSpec] = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second;
+                let mutable specs = List[FunctionParamSpec].new();
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        for param in case_info.params then {
+                            let default_key = "\(case_name).\(param.name)";
+                            let has_def = self.parsed_default_values.contains_key(default_key) or self.parsed_default_values.contains_key(param.name);
+                            specs.push(FunctionParamSpec(param.name, false, param.named, has_def));
+                        };
+                    };
+                };
+                return specs;
             };
-            let mutable arg_keys = List[String].new();
-            for a in args then {
-                arg_keys.push(self.get_layout_key(a));
+        };
+        return List[FunctionParamSpec].new();
+    };
+
+    public enum_case_params_by_raw_id(self, raw_id UInt, case_name String) List[EnumCaseParam] = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second;
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return case_info.params;
+                    };
+                };
+                return List[EnumCaseParam].new();
             };
-            let arg_key_suffix = join_strings(arg_keys, "_");
-            let mutable out = StringBuilder.new();
-            out.push_string(template);
-            out.push_byte('_');
-            out.push_string(arg_key_suffix);
-            if template_def_id.is_valid() then {
-                out.push_string("_d");
-                out.push_string(template_def_id.id.to_string());
+        };
+        return List[EnumCaseParam].new();
+    };
+
+    public enum_case_params_by_template_name(self, template_name String, case_name String) List[EnumCaseParam] = {
+        for entry in self.def_id_map.enum_template_names.iterator() then {
+            if entry.second == template_name then {
+                return self.enum_case_params_by_raw_id(entry.first, case_name);
             };
-            yield out.to_string();
-        },
-        .TraitObject(name, trait_def_id, args) then {
-            let suffix = if trait_def_id.is_valid() then "_d\(trait_def_id.id)" else "";
-            if args.is_empty() then {
-                yield "TO_\(name)\(suffix)";
+        };
+        return List[EnumCaseParam].new();
+    };
+
+    public enum_has_case_by_raw_id(self, raw_id UInt, case_name String) Bool = {
+        for entry in self.def_id_map.enum_cases.iterator() then {
+            if entry.first == raw_id then {
+                let cases = entry.second;
+                for case_info in cases then {
+                    if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
+                        return true;
+                    };
+                };
+                return false;
             };
-            let mutable arg_keys = List[String].new();
- for arg in args then {
-                arg_keys.push(self.get_layout_key(arg));
+        };
+        return false;
+    };
+
+    public is_foreign_struct(self, def_id DefId) Bool = {
+        return self.def_id_map.is_foreign_struct(def_id);
+    };
+
+    public get_foreign_struct_fields(self, def_id DefId) Option[List[StructField]] = {
+        return self.def_id_map.get_foreign_struct_fields(def_id);
+    };
+
+    public get_param_specs(self, def_id DefId) Option[List[FunctionParamSpec]] = {
+        return self.def_id_map.get_param_specs(def_id);
+    };
+
+    public get_function_type(self, def_id DefId) Option[Type] = {
+        return when self.get_symbol_type(def_id) in {
+            .Some(symbol_type) then when symbol_type in {
+                .FunctionType(_, _) then Option[Type].Some(symbol_type),
+                _ then Option[Type].None(),
+            },
+            .None() then Option[Type].None(),
+        };
+    };
+
+    public get_function_return_type(self, def_id DefId) Option[Type] = {
+        return when self.get_function_type(def_id) in {
+            .Some(function_type) then when function_type in {
+                .FunctionType(_, return_type_ref) then Option[Type].Some(return_type_ref),
+                _ then Option[Type].None(),
+            },
+            .None() then Option[Type].None(),
+        };
+    };
+
+    public get_function_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
+        return when self.get_function_type(def_id) in {
+            .Some(function_type) then when function_type in {
+                .FunctionType(params, _) then {
+                    if arg_index < params.count() then Option[Type].Some(params[arg_index].param_type) else Option[Type].None()
+                },
+                _ then Option[Type].None(),
+            },
+            .None() then Option[Type].None(),
+        };
+    };
+
+    public signature_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
+        return self.get_function_param_type(def_id, arg_index);
+    };
+
+    public signature_param_type_or_unknown(self, def_id DefId, arg_index UInt) Type = {
+        return self.get_function_param_type(def_id, arg_index) or else Type.Unknown();
+    };
+
+    public get_original_def_id(self, def_id DefId) Option[DefId] = {
+        return self.def_id_map.get_original_def_id(def_id);
+    };
+
+    public record_original_def_id(self, def_id DefId, original_def_id DefId) Void = {
+        self.def_id_map.record_import(def_id, original_def_id, List[String].new());
+    };
+
+    public lookup_type(self, def_id DefId) Option[Type] = {
+        return self.def_id_map.lookup_type(def_id);
+    };
+
+    public is_not_deref(self, def_id DefId) Bool = {
+        return self.def_id_map.is_not_deref(def_id);
+    };
+
+    public type_display_name(self, t Type) String = {
+        return self.def_id_map.type_display_name(t);
+    };
+
+    public has_explicit_drop(self, def_id DefId) Bool = {
+        if self.def_id_map.has_explicit_drop(def_id) then {
+            return true;
+        };
+        let template_def_id = self.get_template_def_id(def_id);
+        return template_def_id.is_valid() and self.def_id_map.has_explicit_drop(template_def_id);
+    };
+
+    public set_explicit_drop(self, def_id DefId) Void = {
+        self.def_id_map.set_explicit_drop(def_id);
+    };
+
+    public nominal_layout_kind(self, def_id DefId) NominalLayoutKind = {
+        return if self.requires_managed_nominal_layout_def(def_id) then NominalLayoutKind.Managed() else NominalLayoutKind.Value();
+    };
+
+    public nominal_layout_kind_for_type(self, t Type) NominalLayoutKind = {
+        let result = if self.requires_managed_nominal_layout_type(t) then NominalLayoutKind.Managed() else NominalLayoutKind.Value();
+        return result;
+    };
+
+    file_private requires_managed_nominal_layout_type(self, t Type) Bool = {
+        return when t in {
+            .StructureType(def_id) then self.requires_managed_nominal_layout_def(def_id),
+            .EnumType(def_id) then self.requires_managed_nominal_layout_def(def_id),
+            .OpaqueType(def_id) then self.requires_managed_nominal_layout_def(def_id),
+            .GenericStruct(template, template_def_id, _) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+                if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
+                    return true;
+                };
+                when self.lookup_generic_layout_def_id(t) in {
+                    .Some(def_id) then self.requires_managed_nominal_layout_def(def_id),
+                    .None() then false,
+                }
+            },
+            .GenericEnum(template, template_def_id, _) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+                if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
+                    return true;
+                };
+                when self.lookup_generic_layout_def_id(t) in {
+                    .Some(def_id) then self.requires_managed_nominal_layout_def(def_id),
+                    .None() then false,
+                }
+            },
+            _ then false,
+        };
+    };
+
+    file_private requires_managed_nominal_layout_def(self, def_id DefId) Bool = {
+        if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
+            return true;
+        };
+        let mutable path = Set[UInt].new();
+        path.insert(def_id.id);
+        let cycle = self.contains_nominal_value_cycle(def_id, def_id, path);
+        return cycle;
+    };
+
+    file_private contains_nominal_value_cycle(self, current DefId, target DefId, mutable path Set[UInt]) Bool = {
+        let dependencies = self.direct_nominal_value_dependencies_of_def(current);
+        for dependency in dependencies then {
+            if dependency.id == target.id then {
+                return true;
             };
-            yield "TO_\(name)_\(join_strings(arg_keys, "_"))\(suffix)";
-        },
-        .ModuleType(info) then "M_\(join_strings(info.module_path, "_"))",
- .TypeVar(tv) then "TV_\(tv.id)",
- .Unknown() then "Unknown",
- };
- };
+            if path.contains(dependency.id) then {
+                continue;
+            };
+            path.insert(dependency.id);
+            if self.contains_nominal_value_cycle(dependency, target, path) then {
+                return true;
+            };
+            path.remove(dependency.id);
+        };
+        return false;
+    };
 
- file_private layout_key_for_def_id(self, def_id DefId) String = {
- let name_opt = self.def_id_map.get_name(def_id);
- let module_opt = self.def_id_map.get_module_path(def_id);
- let access_opt = self.def_id_map.get_access(def_id);
- let source_opt = self.def_id_map.get_source_file(def_id);
+    file_private direct_nominal_value_dependencies_of_def(self, def_id DefId) List[DefId] = {
+        if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
+            return List[DefId].new();
+        };
 
- let mutable parts = List[String].new();
+        let mutable result = List[DefId].new();
+        if self.def_id_map.get_struct_fields(def_id) is .Some(fields) then {
+            for field in fields then {
+                let dependencies = self.direct_nominal_value_dependencies_in_type(field.field_type);
+                for dependency in dependencies then { result.push(dependency); };
+            };
+            return result;
+        };
 
- if module_opt is .Some(mod_path) and not mod_path.is_empty() then {
- parts.push(join_strings(mod_path, "_"));
- };
+        if self.def_id_map.get_enum_cases(def_id) is .Some(cases) then {
+            for case_info in cases then {
+                for param in case_info.params then {
+                    let dependencies = self.direct_nominal_value_dependencies_in_type(param.param_type);
+                    for dependency in dependencies then { result.push(dependency); };
+                };
+            };
+        };
+        return result;
+    };
 
- // file_private 符号添加文件哈希
- let is_private = when access_opt in {
- .Some(a) then when a in {
- .FilePrivate() then true,
- _ then false,
- },
- .None() then false,
- };
- if is_private then {
- if source_opt is .Some(sf) then {
- let mutable hash UInt32 = 0;
- // 简单哈希
- let bytes = sf.bytes();
- for b in bytes then {
- hash = hash.wrapping_mul(31).wrapping_add(b(UInt32));
- };
- parts.push("f\((hash % 10000)(UInt))");
- };
- };
+    file_private lookup_generic_layout_def_id(self, t Type) Option[DefId] = {
+        let direct_layout_name = self.get_layout_key(t);
+        if self.lookup_def_id(List[String].new(), direct_layout_name, Option[String].None()) is .Some(def_id) then {
+            return Option[DefId].Some(def_id);
+        };
 
- when name_opt in {
- .Some(n) then parts.push(n),
- .None() then parts.push("T_\(def_id.id)"),
- };
+        return when t in {
+            .GenericStruct(template, template_def_id, args) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+                if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
+                    return Option[DefId].Some(resolved_template_def_id);
+                };
+                let resolved_type = Type.GenericStruct(template, resolved_template_def_id, args);
+                let layout_name = self.get_layout_key(resolved_type);
+                self.lookup_def_id(List[String].new(), layout_name, Option[String].None())
+            },
+            .GenericEnum(template, template_def_id, args) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+                if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
+                    return Option[DefId].Some(resolved_template_def_id);
+                };
+                let resolved_type = Type.GenericEnum(template, resolved_template_def_id, args);
+                let layout_name = self.get_layout_key(resolved_type);
+                self.lookup_def_id(List[String].new(), layout_name, Option[String].None())
+            },
+            _ then Option[DefId].None(),
+        };
+    };
 
- // 泛型实例化的类型参数
- if self.def_id_map.get_type_arguments(def_id) is .Some(args) then {
- let is_inst = when self.def_id_map.get_generic_instantiation(def_id) in {
- .Some(v) then v,
- .None() then false,
- };
- if not is_inst and not args.is_empty() then {
- let mutable arg_keys = List[String].new();
- for a in args then {
- arg_keys.push(self.get_layout_key(a));
- };
- parts.push(join_strings(arg_keys, "_"));
- };
- };
+    file_private direct_nominal_value_dependencies_in_type(self, t Type) List[DefId] = {
+        let mutable result = List[DefId].new();
+        when t in {
+            .StructureType(def_id) then {
+                if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
+                    result.push(def_id);
+                };
+            },
+            .EnumType(def_id) then {
+                if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
+                    result.push(def_id);
+                };
+            },
+            .OpaqueType(def_id) then {
+                if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
+                    result.push(def_id);
+                };
+            },
+            .GenericStruct(template, template_def_id, type_args) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+                if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
+                    return result;
+                };
+                when self.lookup_generic_layout_def_id(t) in {
+                    .Some(def_id) then {
+                        if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
+                            result.push(def_id);
+                        };
+                    },
+                    .None() then {
+                        for arg in type_args then {
+                            let dependencies = self.direct_nominal_value_dependencies_in_type(arg);
+                            for dependency in dependencies then { result.push(dependency); };
+                        };
+                    },
+                };
+            },
+            .GenericEnum(template, template_def_id, type_args) then {
+                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+                if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
+                    return result;
+                };
+                when self.lookup_generic_layout_def_id(t) in {
+                    .Some(def_id) then {
+                        if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(def_id) then {
+                            result.push(def_id);
+                        };
+                    },
+                    .None() then {
+                        for arg in type_args then {
+                            let dependencies = self.direct_nominal_value_dependencies_in_type(arg);
+                            for dependency in dependencies then { result.push(dependency); };
+                        };
+                    },
+                };
+            },
+            .GenericParameter(_) then {},
+            _ then {},
+        };
+        return result;
+    };
 
- return join_strings(parts, "_");
- };
+    public get_cname(self, def_id DefId) Option[String] = {
+        return self.def_id_map.get_cname(def_id);
+    };
 
- // ── Concrete function/given-member body cache ───────────────────────────
+    public set_cname(self, def_id DefId, cname String) Void = {
+        self.def_id_map.set_cname(def_id, cname);
+    };
 
- public get_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
- return self.concrete_global_initializers.get(def_id.id);
- };
+    public next_def_id(self) UInt = {
+        return self.def_id_map.next_id;
+    };
 
- public set_concrete_global_initializer(self, def_id DefId, initializer TypedExpr) Void = {
- self.concrete_global_initializers.insert(def_id.id, initializer);
- };
+    public get_names(self) Dict[UInt, String] = {
+        return self.def_id_map.names;
+    };
 
- public take_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
- let initializer = self.concrete_global_initializers.get(def_id.id);
- when initializer in {
- .Some(_) then self.concrete_global_initializers.remove(def_id.id),
- .None() then {},
- };
- return initializer;
- };
+    public is_generic_instantiation(self, def_id DefId) Bool = {
+        return when self.def_id_map.get_generic_instantiation(def_id) in {
+            .Some(v) then v,
+            .None() then false,
+        };
+    };
 
- public get_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
- return self.concrete_function_bodies.get(def_id.id);
- };
+    public get_type_arguments(self, def_id DefId) Option[List[Type]] = {
+        when self.def_id_map.get_type_arguments(def_id) in {
+            .Some(args) then { return Option[List[Type]].Some(args);},
+            .None() then {},
+        };
+        return when self.def_id_map.lookup_type(def_id) in {
+            .Some(mapped) then when mapped in {
+                .GenericStruct(_, _, args) then {
+                    let mutable unpacked = List[Type].new();
+                    for arg in args then {
+                        unpacked.push(arg);
+                    };
+                    Option[List[Type]].Some(unpacked)
+                },
+                .GenericEnum(_, _, args) then {
+                    let mutable unpacked = List[Type].new();
+                    for arg in args then {
+                        unpacked.push(arg);
+                    };
+                    Option[List[Type]].Some(unpacked)
+                },
+                _ then Option[List[Type]].None(),
+            },
+            .None() then Option[List[Type]].None(),
+        };
+    };
 
- public set_concrete_function_body(self, def_id DefId, body TypedExpr) Void = {
- self.concrete_function_bodies.insert(def_id.id, body);
- };
+    public get_template_name(self, def_id DefId) Option[String] = {
+        when self.def_id_map.get_template_name(def_id) in {
+            .Some(name) then { return Option[String].Some(name);},
+            .None() then {},
+        };
+        return when self.def_id_map.lookup_type(def_id) in {
+            .Some(mapped) then when mapped in {
+                .GenericStruct(template, _, _) then Option[String].Some(template),
+                .GenericEnum(template, _, _) then Option[String].Some(template),
+                _ then Option[String].None(),
+            },
+            .None() then Option[String].None(),
+        };
+    };
 
- public take_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
- let body = self.concrete_function_bodies.get(def_id.id);
- when body in {
- .Some(_) then self.concrete_function_bodies.remove(def_id.id),
- .None() then {},
- };
- return body;
- };
+    public get_template_def_id(self, def_id DefId) DefId = {
+        return self.def_id_map.get_template_def_id(def_id);
+    };
 
- public get_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
- return self.concrete_function_sources.get(def_id.id);
- };
+    // ── 类型定义更新 ──────────────────────────────────────────────────────
 
- public set_concrete_function_source(self, def_id DefId, source ConcreteExprSource) Void = {
- self.concrete_function_sources.insert(def_id.id, source);
- };
+    public update_struct_info(
+        self,
+        def_id DefId,
+        members List[StructField],
+        is_generic_instantiation Bool,
+        type_arguments Option[List[Type]],
+        template_name Option[String],
+        template_def_id DefId,
+    ) Void = {
+        self.def_id_map.set_struct_info(def_id, StructTypeInfo(
+            members,
+            is_generic_instantiation,
+            type_arguments,
+            template_name,
+            template_def_id,
+        ));
+    };
 
- public take_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
- let source = self.concrete_function_sources.get(def_id.id);
- when source in {
- .Some(_) then self.concrete_function_sources.remove(def_id.id),
- .None() then {},
- };
- return source;
- };
+    public update_union_info(
+        self,
+        def_id DefId,
+        cases List[EnumCaseInfo],
+        is_generic_instantiation Bool,
+        type_arguments Option[List[Type]],
+        template_name Option[String],
+        template_def_id DefId,
+    ) Void = {
+        self.def_id_map.set_enum_info(def_id, EnumTypeInfo(
+            cases,
+            is_generic_instantiation,
+            type_arguments,
+            template_name,
+            template_def_id,
+        ));
+    };
 
- public get_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
- return self.concrete_given_member_bodies.get(def_id.id);
- };
+    public set_struct_mutable(self, def_id DefId, is_mutable Bool) Void = {
+        self.def_id_map.set_struct_mutable(def_id, is_mutable);
+    };
 
- public set_concrete_given_member_body(self, def_id DefId, body TypedExpr) Void = {
- self.concrete_given_member_bodies.insert(def_id.id, body);
- };
+    public is_struct_mutable(self, def_id DefId) Bool = {
+        return self.def_id_map.is_struct_mutable(def_id);
+    };
 
- public take_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
- let body = self.concrete_given_member_bodies.get(def_id.id);
- when body in {
- .Some(_) then self.concrete_given_member_bodies.remove(def_id.id),
- .None() then {},
- };
- return body;
- };
+    public set_symbol_info(self, def_id DefId, info SymbolInfo) Void = {
+        self.def_id_map.set_symbol_info(def_id, info);
+    };
 
- public get_concrete_given_member_source(self, def_id DefId) Option[ConcreteExprSource] = {
- return self.concrete_given_member_sources.get(def_id.id);
- };
+    public set_param_specs(self, def_id DefId, specs List[FunctionParamSpec]) Void = {
+        self.def_id_map.set_param_specs(def_id, specs);
+    };
 
- public set_concrete_given_member_source(self, def_id DefId, source ConcreteExprSource) Void = {
- self.concrete_given_member_sources.insert(def_id.id, source);
- };
+    public set_module_path(self, def_id DefId, module_path List[String]) Void = {
+        self.def_id_map.set_module_path(def_id, module_path);
+    };
 
- public take_concrete_given_member_source(self, def_id DefId) Option[ConcreteExprSource] = {
- let source = self.concrete_given_member_sources.get(def_id.id);
- when source in {
- .Some(_) then self.concrete_given_member_sources.remove(def_id.id),
- .None() then {},
- };
- return source;
- };
+    public set_source_file(self, def_id DefId, source_file String) Void = {
+        self.def_id_map.set_source_file(def_id, source_file);
+    };
 
- /// Drop and replace concrete body caches with empty dicts to free memory.
- /// Call after monomorphization — MIR lowering and codegen don't need these.
- public drop_concrete_bodies(self) Void = {
- self.concrete_global_initializers = Dict[UInt, TypedExpr].new();
- self.concrete_function_bodies = Dict[UInt, TypedExpr].new();
- self.concrete_function_sources = Dict[UInt, ConcreteExprSource].new();
- self.concrete_given_member_bodies = Dict[UInt, TypedExpr].new();
- self.concrete_given_member_sources = Dict[UInt, ConcreteExprSource].new();
- };
+    public set_package_id(self, def_id DefId, package_id String) Void = {
+        self.def_id_map.set_package_id(def_id, package_id);
+    };
 
- /// Drop DefId metadata that is only needed before codegen.
- /// Keep names/types/layout-related maps intact for MIR/codegen queries.
- public drop_codegen_unused_metadata(self) Void = {
- self.parsed_default_values = Dict[String, String].new();
- self.def_id_map.name_to_def_id = Dict[String, DefId].new();
- self.def_id_map.package_ids = Dict[UInt, String].new();
- self.def_id_map.spans = Dict[UInt, SourceSpan].new();
- self.def_id_map.import_records = Dict[UInt, ImportRecord].new();
- self.def_id_map.symbol_method_kinds = Dict[UInt, UInt].new();
- self.def_id_map.symbol_mutables = Dict[UInt, Bool].new();
- self.def_id_map.struct_generic_instantiation = Dict[UInt, Bool].new();
- self.def_id_map.enum_generic_instantiation = Dict[UInt, Bool].new();
- self.def_id_map.foreign_struct_fields = Dict[UInt, List[StructField]].new();
- self.def_id_map.not_deref_types = Set[UInt].new();
- };
+    public set_access(self, def_id DefId, access AccessModifier) Void = {
+        self.def_id_map.set_access(def_id, access);
+    };
+
+    public set_span(self, def_id DefId, span SourceSpan) Void = {
+        self.def_id_map.set_span(def_id, span);
+    };
+
+    public set_struct_info(self, def_id DefId, info StructTypeInfo) Void = {
+        self.def_id_map.set_struct_info(def_id, info);
+    };
+
+    public set_enum_info(self, def_id DefId, info EnumTypeInfo) Void = {
+        self.def_id_map.set_enum_info(def_id, info);
+    };
+
+    public set_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
+        self.def_id_map.set_struct_fields(def_id, fields);
+    };
+
+    public set_foreign_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
+        self.def_id_map.set_foreign_struct_fields(def_id, fields);
+    };
+
+    public set_enum_cases(self, def_id DefId, cases List[EnumCaseInfo]) Void = {
+        self.def_id_map.set_enum_cases(def_id, cases);
+    };
+
+    public add_type(self, def_id DefId, t Type) Void = {
+        self.def_id_map.add_type(def_id, t);
+    };
+
+    public set_not_deref(self, def_id DefId) Void = {
+        self.def_id_map.set_not_deref(def_id);
+    };
+
+    public clear_variable_symbol_types_in_range(self, start_id UInt, end_exclusive UInt) Void = {
+        self.def_id_map.clear_variable_symbol_types_in_range(start_id, end_exclusive);
+    };
+
+    // ── 类型查询 ──────────────────────────────────────────────────────────
+
+    /// 获取类型的人类可读名称
+    public get_type_name(self, t Type) String = {
+        return when t in {
+            .StructureType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            .EnumType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            .OpaqueType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(name) then name,
+                    .None() then "<unknown>",
+                }
+            },
+            .ModuleType(info) then {
+                if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
+            },
+            _ then type_to_string(t),
+        };
+    };
+
+    /// 获取类型的调试名称（含泛型参数展开）
+    public get_debug_name(self, t Type) String = {
+        return when t in {
+            .IntType() then "Int",
+            .Int8Type() then "Int8",
+            .Int16Type() then "Int16",
+            .Int32Type() then "Int32",
+            .Int64Type() then "Int64",
+            .UIntType() then "UInt",
+            .UInt8Type() then "UInt8",
+            .UInt16Type() then "UInt16",
+            .UInt32Type() then "UInt32",
+            .UInt64Type() then "UInt64",
+            .Float32Type() then "Float32",
+            .Float64Type() then "Float64",
+            .BoolType() then "Bool",
+            .VoidType() then "Void",
+            .NeverType() then "Never",
+            .FunctionType(params, ret) then {
+                let mutable parts = List[String].new();
+                for entry in params then {
+                    parts.push(self.get_debug_name(entry.param_type));
+                };
+                let mutable out = StringBuilder.new();
+                out.push_string("Func(");
+                out.push_string(join_strings(parts, ", "));
+                out.push_byte(')');
+                out.push_byte(' ');
+                out.push_string(self.get_debug_name(ret));
+                out.to_string()
+            },
+            .ReferenceType(inner) then "*\(self.get_debug_name(inner))",
+            .BorrowedReferenceType(inner) then "ref *\(self.get_debug_name(inner))",
+            .MutableReferenceType(inner) then "*mutable \(self.get_debug_name(inner))",
+            .MutableBorrowedReferenceType(inner) then "ref mutable *\(self.get_debug_name(inner))",
+            .PointerType(inner) then "*unsafe \(self.get_debug_name(inner))",
+            .MutablePointerType(inner) then "*unsafe mutable \(self.get_debug_name(inner))",
+            .WeakReferenceType(inner) then "?*\(self.get_debug_name(inner))",
+            .MutableWeakReferenceType(inner) then "?*mutable \(self.get_debug_name(inner))",
+            .StructureType(def_id) then {
+                let base_name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                };
+                when self.def_id_map.get_type_arguments(def_id) in {
+                    .Some(args) then if not args.is_empty() then {
+                        let mutable arg_parts = List[String].new();
+                        for a in args then {
+                            arg_parts.push(self.get_debug_name(a));
+                        };
+                        let args_str = join_strings(arg_parts, ", ");
+                        let mutable out = StringBuilder.new();
+                        out.push_string(base_name);
+                        out.push_byte('[');
+                        out.push_string(args_str);
+                        out.push_byte(']');
+                        out.to_string()
+                    } else base_name,
+                    .None() then base_name,
+                }
+            },
+            .EnumType(def_id) then {
+                let base_name = when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                };
+                when self.def_id_map.get_type_arguments(def_id) in {
+                    .Some(args) then if not args.is_empty() then {
+                        let mutable arg_parts = List[String].new();
+                        for a in args then {
+                            arg_parts.push(self.get_debug_name(a));
+                        };
+                        let args_str = join_strings(arg_parts, ", ");
+                        let mutable out = StringBuilder.new();
+                        out.push_string(base_name);
+                        out.push_byte('[');
+                        out.push_string(args_str);
+                        out.push_byte(']');
+                        out.to_string()
+                    } else base_name,
+                    .None() then base_name,
+                }
+            },
+            .OpaqueType(def_id) then {
+                when self.def_id_map.get_name(def_id) in {
+                    .Some(n) then n,
+                    .None() then "<unknown>",
+                }
+            },
+            .ModuleType(info) then {
+                if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
+            },
+            .GenericParameter(name) then name,
+            .GenericStruct(template, _, args) then {
+                let mutable arg_parts = List[String].new();
+                for a in args then {
+                    arg_parts.push(self.get_debug_name(a));
+                };
+                let args_str = join_strings(arg_parts, ", ");
+                let mutable out = StringBuilder.new();
+                out.push_string(template);
+                out.push_byte('[');
+                out.push_string(args_str);
+                out.push_byte(']');
+                out.to_string()
+            },
+            .GenericEnum(template, _, args) then {
+                let mutable arg_parts = List[String].new();
+                for a in args then {
+                    arg_parts.push(self.get_debug_name(a));
+                };
+                let args_str = join_strings(arg_parts, ", ");
+                let mutable out = StringBuilder.new();
+                out.push_string(template);
+                out.push_byte('[');
+                out.push_string(args_str);
+                out.push_byte(']');
+                out.to_string()
+            },
+            .TraitObject(name, _, args) then {
+                if args.is_empty() then {
+                    name
+                } else {
+                    let mutable arg_parts = List[String].new();
+                    for a in args then {
+                        arg_parts.push(self.get_debug_name(a));
+                    };
+                    let args_str = join_strings(arg_parts, ", ");
+                    let mutable out = StringBuilder.new();
+                    out.push_byte('[');
+                    out.push_string(args_str);
+                    out.push_byte(']');
+                    out.push_string(name);
+                    out.to_string()
+                }
+            },
+            .TypeVar(tv) then "?\(tv.id)",
+            .Unknown() then "?",
+        };
+    };
+
+    // ── 类型变量查询 ──────────────────────────────────────────────────────
+
+    /// 检查类型是否包含类型变量
+    public contains_type_variable(self, t Type) Bool = {
+        return when t in {
+            .TypeVar(_) then true,
+            .FunctionType(params, ret) then {
+                if self.contains_type_variable(ret) then { return true;};
+                for entry in params then {
+                    if self.contains_type_variable(entry.param_type) then { return true;};
+                };
+                false
+            },
+            .ReferenceType(inner) then self.contains_type_variable(inner),
+            .MutableReferenceType(inner) then self.contains_type_variable(inner),
+            .PointerType(inner) then self.contains_type_variable(inner),
+            .MutablePointerType(inner) then self.contains_type_variable(inner),
+            .WeakReferenceType(inner) then self.contains_type_variable(inner),
+            .MutableWeakReferenceType(inner) then self.contains_type_variable(inner),
+            .GenericStruct(_, _, args) then {
+                for a in args then {
+                    if self.contains_type_variable(a) then { return true;};
+                };
+                false
+            },
+            .GenericEnum(_, _, args) then {
+                for a in args then {
+                    if self.contains_type_variable(a) then { return true;};
+                };
+                false
+            },
+            _ then false,
+        };
+    };
+
+    /// 检查类型是否包含泛型参数
+    public contains_generic_parameter(self, t Type) Bool = {
+        return type_contains_generic_parameter(t, self);
+    };
+
+    /// 检查类型表面是否仍提及未解析的泛型占位。
+    public mentions_unresolved_generic_placeholder(self, t Type) Bool = {
+        return type_mentions_unresolved_generic_placeholder(t);
+    };
+
+    // ── Layout Key 生成 ───────────────────────────────────────────────────
+
+    /// 生成类型的布局键（用于 C 标识符生成）
+    public get_layout_key(self, t Type) String = {
+        return when t in {
+            .IntType() then "I",
+            .Int8Type() then "I8",
+            .Int16Type() then "I16",
+            .Int32Type() then "I32",
+            .Int64Type() then "I64",
+            .UIntType() then "U",
+            .UInt8Type() then "U8",
+            .UInt16Type() then "U16",
+            .UInt32Type() then "U32",
+            .UInt64Type() then "U64",
+            .Float32Type() then "F32",
+            .Float64Type() then "F64",
+            .BoolType() then "B",
+            .VoidType() then "V",
+            .NeverType() then "N",
+            .FunctionType(_, _) then "Fn",
+            .ReferenceType(inner) then "R_\(self.get_layout_key(inner))",
+            .MutableReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
+            .PointerType(inner) then "P_\(self.get_layout_key(inner))",
+            .MutablePointerType(inner) then "MP_\(self.get_layout_key(inner))",
+            .WeakReferenceType(inner) then "W_\(self.get_layout_key(inner))",
+            .MutableWeakReferenceType(inner) then "MW_\(self.get_layout_key(inner))",
+            .BorrowedReferenceType(inner) then "R_\(self.get_layout_key(inner))",
+            .MutableBorrowedReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
+            .StructureType(def_id) then self.layout_key_for_def_id(def_id),
+            .EnumType(def_id) then self.layout_key_for_def_id(def_id),
+            .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
+            .GenericParameter(name) then "Param_\(name)",
+            .GenericStruct(template, template_def_id, args) then {
+                if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
+                    return self.layout_key_for_def_id(template_def_id);
+                };
+                let mutable arg_keys = List[String].new();
+                for a in args then {
+                    arg_keys.push(self.get_layout_key(a));
+                };
+                let arg_key_suffix = join_strings(arg_keys, "_");
+                let mutable out = StringBuilder.new();
+                out.push_string(template);
+                out.push_byte('_');
+                out.push_string(arg_key_suffix);
+                if template_def_id.is_valid() then {
+                    out.push_string("_d");
+                    out.push_string(template_def_id.id.to_string());
+                };
+                out.to_string()
+            },
+            .GenericEnum(template, template_def_id, args) then {
+                if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
+                    return self.layout_key_for_def_id(template_def_id);
+                };
+                let mutable arg_keys = List[String].new();
+                for a in args then {
+                    arg_keys.push(self.get_layout_key(a));
+                };
+                let arg_key_suffix = join_strings(arg_keys, "_");
+                let mutable out = StringBuilder.new();
+                out.push_string(template);
+                out.push_byte('_');
+                out.push_string(arg_key_suffix);
+                if template_def_id.is_valid() then {
+                    out.push_string("_d");
+                    out.push_string(template_def_id.id.to_string());
+                };
+                out.to_string()
+            },
+            .TraitObject(name, trait_def_id, args) then {
+                let suffix = if trait_def_id.is_valid() then "_d\(trait_def_id.id)" else "";
+                if args.is_empty() then {
+                    return "TO_\(name)\(suffix)";
+                };
+                let mutable arg_keys = List[String].new();
+                for arg in args then {
+                    arg_keys.push(self.get_layout_key(arg));
+                };
+                "TO_\(name)_\(join_strings(arg_keys, "_"))\(suffix)"
+            },
+            .ModuleType(info) then "M_\(join_strings(info.module_path, "_"))",
+            .TypeVar(tv) then "TV_\(tv.id)",
+            .Unknown() then "Unknown",
+        };
+    };
+
+    file_private layout_key_for_def_id(self, def_id DefId) String = {
+        let name_opt = self.def_id_map.get_name(def_id);
+        let module_opt = self.def_id_map.get_module_path(def_id);
+        let access_opt = self.def_id_map.get_access(def_id);
+        let source_opt = self.def_id_map.get_source_file(def_id);
+
+        let mutable parts = List[String].new();
+
+        if module_opt is .Some(mod_path) and not mod_path.is_empty() then {
+            parts.push(join_strings(mod_path, "_"));
+        };
+
+        // file_private 符号添加文件哈希
+        let is_private = when access_opt in {
+            .Some(a) then when a in {
+                .FilePrivate() then true,
+                _ then false,
+            },
+            .None() then false,
+        };
+        if is_private then {
+            if source_opt is .Some(sf) then {
+                let mutable hash UInt32 = 0;
+                // 简单哈希
+                let bytes = sf.bytes();
+                for b in bytes then {
+                    hash = hash.wrapping_mul(31).wrapping_add(b(UInt32));
+                };
+                parts.push("f\((hash % 10000)(UInt))");
+            };
+        };
+
+        when name_opt in {
+            .Some(n) then parts.push(n),
+            .None() then parts.push("T_\(def_id.id)"),
+        };
+
+        // 泛型实例化的类型参数
+        if self.def_id_map.get_type_arguments(def_id) is .Some(args) then {
+            let is_inst = when self.def_id_map.get_generic_instantiation(def_id) in {
+                .Some(v) then v,
+                .None() then false,
+            };
+            if not is_inst and not args.is_empty() then {
+                let mutable arg_keys = List[String].new();
+                for a in args then {
+                    arg_keys.push(self.get_layout_key(a));
+                };
+                parts.push(join_strings(arg_keys, "_"));
+            };
+        };
+
+        return join_strings(parts, "_");
+    };
+
+    // ── Concrete function/given-member body cache ───────────────────────────
+
+    public get_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
+        return self.concrete_global_initializers.get(def_id.id);
+    };
+
+    public set_concrete_global_initializer(self, def_id DefId, initializer TypedExpr) Void = {
+        self.concrete_global_initializers.insert(def_id.id, initializer);
+    };
+
+    public take_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
+        let initializer = self.concrete_global_initializers.get(def_id.id);
+        when initializer in {
+            .Some(_) then self.concrete_global_initializers.remove(def_id.id),
+            .None() then {},
+        };
+        return initializer;
+    };
+
+    public get_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
+        return self.concrete_function_bodies.get(def_id.id);
+    };
+
+    public set_concrete_function_body(self, def_id DefId, body TypedExpr) Void = {
+        self.concrete_function_bodies.insert(def_id.id, body);
+    };
+
+    public take_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
+        let body = self.concrete_function_bodies.get(def_id.id);
+        when body in {
+            .Some(_) then self.concrete_function_bodies.remove(def_id.id),
+            .None() then {},
+        };
+        return body;
+    };
+
+    public get_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
+        return self.concrete_function_sources.get(def_id.id);
+    };
+
+    public set_concrete_function_source(self, def_id DefId, source ConcreteExprSource) Void = {
+        self.concrete_function_sources.insert(def_id.id, source);
+    };
+
+    public take_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
+        let source = self.concrete_function_sources.get(def_id.id);
+        when source in {
+            .Some(_) then self.concrete_function_sources.remove(def_id.id),
+            .None() then {},
+        };
+        return source;
+    };
+
+    public get_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
+        return self.concrete_given_member_bodies.get(def_id.id);
+    };
+
+    public set_concrete_given_member_body(self, def_id DefId, body TypedExpr) Void = {
+        self.concrete_given_member_bodies.insert(def_id.id, body);
+    };
+
+    public take_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
+        let body = self.concrete_given_member_bodies.get(def_id.id);
+        when body in {
+            .Some(_) then self.concrete_given_member_bodies.remove(def_id.id),
+            .None() then {},
+        };
+        return body;
+    };
+
+    public get_concrete_given_member_source(self, def_id DefId) Option[ConcreteExprSource] = {
+        return self.concrete_given_member_sources.get(def_id.id);
+    };
+
+    public set_concrete_given_member_source(self, def_id DefId, source ConcreteExprSource) Void = {
+        self.concrete_given_member_sources.insert(def_id.id, source);
+    };
+
+    public take_concrete_given_member_source(self, def_id DefId) Option[ConcreteExprSource] = {
+        let source = self.concrete_given_member_sources.get(def_id.id);
+        when source in {
+            .Some(_) then self.concrete_given_member_sources.remove(def_id.id),
+            .None() then {},
+        };
+        return source;
+    };
+
+    /// Drop and replace concrete body caches with empty dicts to free memory.
+    /// Call after monomorphization — MIR lowering and codegen don't need these.
+    public drop_concrete_bodies(self) Void = {
+        self.concrete_global_initializers = Dict[UInt, TypedExpr].new();
+        self.concrete_function_bodies = Dict[UInt, TypedExpr].new();
+        self.concrete_function_sources = Dict[UInt, ConcreteExprSource].new();
+        self.concrete_given_member_bodies = Dict[UInt, TypedExpr].new();
+        self.concrete_given_member_sources = Dict[UInt, ConcreteExprSource].new();
+    };
+
+    /// Drop DefId metadata that is only needed before codegen.
+    /// Keep names/types/layout-related maps intact for MIR/codegen queries.
+    public drop_codegen_unused_metadata(self) Void = {
+        self.parsed_default_values = Dict[String, String].new();
+        self.def_id_map.name_to_def_id = Dict[String, DefId].new();
+        self.def_id_map.package_ids = Dict[UInt, String].new();
+        self.def_id_map.spans = Dict[UInt, SourceSpan].new();
+        self.def_id_map.import_records = Dict[UInt, ImportRecord].new();
+        self.def_id_map.symbol_method_kinds = Dict[UInt, UInt].new();
+        self.def_id_map.symbol_mutables = Dict[UInt, Bool].new();
+        self.def_id_map.struct_generic_instantiation = Dict[UInt, Bool].new();
+        self.def_id_map.enum_generic_instantiation = Dict[UInt, Bool].new();
+        self.def_id_map.foreign_struct_fields = Dict[UInt, List[StructField]].new();
+        self.def_id_map.not_deref_types = Set[UInt].new();
+    };
 };
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 file_private let join_strings(parts List[String], sep String) String = {
- let mutable result = StringBuilder.new();
- let mutable first = true;
- for p in parts then {
- if not first then { result.push_string(sep);};
- result.push_string(p);
- first = false;
- };
- return result.to_string();
+    let mutable result = StringBuilder.new();
+    let mutable first = true;
+    for p in parts then {
+        if not first then { result.push_string(sep);};
+        result.push_string(p);
+        first = false;
+    };
+    return result.to_string();
 };

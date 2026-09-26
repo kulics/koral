@@ -189,11 +189,11 @@ given Parser {
     };
 
     module_private parse_bitwise_and(self) Result[Expr] = {
-        let mutable expr = self.parse_range() or return;
+        let mutable expr = self.parse_shift() or return;
 
         while self.current().kind is .Ampersand() then {
             self.advance();
-            let rhs = self.parse_range() or return;
+            let rhs = self.parse_shift() or return;
             expr = Expr.BitwiseExpr(expr, BitwiseOperator.BitAnd(), rhs, self.span_from_expr_start(expr));
         };
 
@@ -226,7 +226,7 @@ given Parser {
 
     module_private parse_comparison(self) Result[Expr] = {
         let start = self.current();
-        let expr = self.parse_shift() or return;
+        let expr = self.parse_bitwise_or() or return;
 
 
         let first_kind = self.current().kind;
@@ -238,7 +238,7 @@ given Parser {
             };
             let op = self.comparison_operator_from_kind(first_kind);
             self.advance();
-            let rhs = self.parse_shift() or return;
+            let rhs = self.parse_bitwise_or() or return;
             if self.expr_is_ordering_comparison(rhs) then {
                 return self.invalid_comparison_chain_error();
             };
@@ -257,7 +257,7 @@ given Parser {
         let direction_is_ascending = self.comparison_kind_is_ascending(first_kind);
         let first_op = self.comparison_operator_from_kind(first_kind);
         self.advance();
-        let first_right = self.parse_shift() or return;
+        let first_right = self.parse_bitwise_or() or return;
 
         // Check if next token is equality (invalid in chain) or not ordering (simple comparison)
         if not self.comparison_kind_is_ordering(self.current().kind) then {
@@ -283,7 +283,7 @@ given Parser {
             };
             let next_op = self.comparison_operator_from_kind(next_kind);
             self.advance();
-            let rhs = self.parse_shift() or return;
+            let rhs = self.parse_bitwise_or() or return;
             operands.push(rhs);
             operators.push(next_op);
         };
@@ -294,7 +294,7 @@ given Parser {
 
 
     module_private parse_is(self) Result[Expr] = {
-        let mutable expr = self.parse_bitwise_or() or return;
+        let mutable expr = self.parse_range() or return;
 
 
         if self.current().kind is .KwIs() then {
@@ -323,8 +323,9 @@ given Parser {
         return self.parse_is();
     };
 
+    // `and then` binds tighter than logical `and`.
     module_private parse_and_then(self) Result[Expr] = {
-        let mutable expr = self.parse_and() or return;
+        let mutable expr = self.parse_logical_not() or return;
 
         while self.current().kind is .KwAnd() then {
             let is_and_then = self.next_is_then();
@@ -333,7 +334,7 @@ given Parser {
             };
             self.advance();
             self.advance();
-            let rhs = self.parse_and() or return;
+            let rhs = self.parse_logical_not() or return;
             expr = Expr.AndThenExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
@@ -341,7 +342,7 @@ given Parser {
     };
 
     module_private parse_and(self) Result[Expr] = {
-        let mutable expr = self.parse_logical_not() or return;
+        let mutable expr = self.parse_and_then() or return;
 
         while self.current().kind is .KwAnd() then {
             let next_is_then = self.next_is_then();
@@ -349,51 +350,43 @@ given Parser {
                 break;
             };
             self.advance();
-            let rhs = self.parse_logical_not() or return;
+            let rhs = self.parse_and_then() or return;
             expr = Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or_else(self) Result[Expr] = {
-        let mutable expr = self.parse_or() or return;
+    // `or else` / `or return` bind tighter than logical `or` but looser than `and`.
+    module_private parse_option_flow(self) Result[Expr] = {
+        let mutable expr = self.parse_and() or return;
 
         while self.current().kind is .KwOr() then {
-            let mutable next_text = StringBuilder.new();
-            next_text.push_string("<none>");
-            if self.index + 1 < self.tokens.count() then {
-                next_text = StringBuilder.new();
-                next_text.push_string(token_text(self.tokens[self.index + 1]));
+            if self.next_is_else() then {
+                self.advance();
+                self.advance();
+                let rhs = self.parse_and() or return;
+                expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
+                continue;
             };
-            let is_or_else = self.next_is_else();
-            self.parse_debug("parse_or_else saw or token=\(token_text(self.current())) next=\(next_text.to_string()) is_or_else=\(is_or_else)");
-            if not is_or_else then {
-                break;
+            if self.next_is_return() then {
+                self.advance();
+                self.advance();
+                expr = Expr.OrReturnExpr(expr, self.span_from_expr_start(expr));
+                continue;
             };
-            self.advance();
-            self.advance();
-            self.parse_debug("parse_or_else consumed or/else current=\(token_text(self.current()))");
-            let rhs = self.parse_or() or return;
-            expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
+            break;
         };
 
         return .Ok(expr);
     };
 
     module_private parse_or(self) Result[Expr] = {
-        let mutable expr = self.parse_and_then() or return;
+        let mutable expr = self.parse_option_flow() or return;
 
         while self.current().kind is .KwOr() then {
-            let mutable next_text = StringBuilder.new();
-            next_text.push_string("<none>");
-            if self.index + 1 < self.tokens.count() then {
-                next_text = StringBuilder.new();
-                next_text.push_string(token_text(self.tokens[self.index + 1]));
-            };
             let next_is_else = self.next_is_else();
             let next_is_return = self.next_is_return();
-            self.parse_debug("parse_or saw or token=\(token_text(self.current())) next=\(next_text.to_string()) next_is_else=\(next_is_else) next_is_return=\(next_is_return)");
             if next_is_else then {
                 break;
             };
@@ -401,31 +394,15 @@ given Parser {
                 break;
             };
             self.advance();
-            let rhs = self.parse_and_then() or return;
+            let rhs = self.parse_option_flow() or return;
             expr = Expr.OrExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or_return(self) Result[Expr] = {
-        let mutable expr = self.parse_or_else() or return;
-
-        while self.current().kind is .KwOr() then {
-            let is_or_return = self.next_is_return();
-            if not is_or_return then {
-                break;
-            };
-            self.advance();
-            self.advance();
-            expr = Expr.OrReturnExpr(expr, self.span_from_expr_start(expr));
-        };
-
-        return .Ok(expr);
-    };
-
     module_private parse_expression(self) Result[Expr] = {
-        return self.parse_or_return();
+        return self.parse_or();
     };
 
     module_private parse_access_modifier(self, default AccessModifier) AccessModifier = {
@@ -649,7 +626,7 @@ given Parser {
                                 };
                                 return .Error(self.parser_error_without_span("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"));
                             };
-                            yield Option[String].Some(alias_name);
+                            Option[String].Some(alias_name)
                         },
                         _ then Option[String].None(),
                     };

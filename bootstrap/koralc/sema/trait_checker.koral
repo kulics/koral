@@ -8,469 +8,469 @@
 /// For example, `[Self]Add` is ParentTraitConstraint("Add", [TypeNode for Self]).
 /// A simple parent like `Ord` is ParentTraitConstraint("Ord", []).
 public type ParentTraitConstraint(
- name String,
- type_arg_nodes List[TypeNode],
+    name String,
+    type_arg_nodes List[TypeNode],
 );
 
 // ── TraitInfo ─────────────────────────────────────────────────────────────────
 
 public type TraitInfo(
- // Declaration identity of this trait. Name matching cannot distinguish two
- // same-named traits (or one aliased across modules), so anything that decides
- // "is this the trait X" must compare this DefId.
- def_id DefId,
- name String,
- type_params List[String],
- parent_traits List[ParentTraitConstraint],
- methods List[TypedTraitMember],
- module_path List[String],
+    // Declaration identity of this trait. Name matching cannot distinguish two
+    // same-named traits (or one aliased across modules), so anything that decides
+    // "is this the trait X" must compare this DefId.
+    def_id DefId,
+    name String,
+    type_params List[String],
+    parent_traits List[ParentTraitConstraint],
+    methods List[TypedTraitMember],
+    module_path List[String],
 );
 
 // ── TraitRegistry ─────────────────────────────────────────────────────────────
 
 public type mutable TraitRegistry(
- mutable traits Dict[String, TraitInfo],
- mutable flattened_cache Dict[String, Dict[String, TypedTraitMember]],
- mutable object_safety_cache Dict[String, Bool],
+    mutable traits Dict[String, TraitInfo],
+    mutable flattened_cache Dict[String, Dict[String, TypedTraitMember]],
+    mutable object_safety_cache Dict[String, Bool],
 );
 
 given TraitRegistry {
 
- public new() TraitRegistry = {
- return TraitRegistry(
- Dict[String, TraitInfo].new(),
- Dict[String, Dict[String, TypedTraitMember]].new(),
- Dict[String, Bool].new()
- );
- };
+    public new() TraitRegistry = {
+        return TraitRegistry(
+            Dict[String, TraitInfo].new(),
+            Dict[String, Dict[String, TypedTraitMember]].new(),
+            Dict[String, Bool].new()
+        );
+    };
 
- public register(self, info TraitInfo) Void = {
- self.traits.insert(info.name, info);
- self.traits.insert(qualified_trait_key(info.module_path, info.name), info);
- self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
- self.object_safety_cache = Dict[String, Bool].new();
- };
+    public register(self, info TraitInfo) Void = {
+        self.traits.insert(info.name, info);
+        self.traits.insert(qualified_trait_key(info.module_path, info.name), info);
+        self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
+        self.object_safety_cache = Dict[String, Bool].new();
+    };
 
- public get(self, name String) Option[TraitInfo] = {
- return self.traits.get(name);
- };
+    public get(self, name String) Option[TraitInfo] = {
+        return self.traits.get(name);
+    };
 
- public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
- let qualified = qualified_trait_key(module_path, name);
- return when self.traits.get(qualified) in {
- .Some(info) then Option[TraitInfo].Some(info),
- .None() then self.traits.get(name),
- };
- };
+    public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
+        let qualified = qualified_trait_key(module_path, name);
+        return when self.traits.get(qualified) in {
+            .Some(info) then Option[TraitInfo].Some(info),
+            .None() then self.traits.get(name),
+        };
+    };
 
- public validate_inheritance_graph(self, trait_name String) Result[Void] = {
- let mutable visited = List[String].new();
- let mutable stack = List[String].new();
- return self.validate_inheritance_graph_internal(trait_name, visited, stack);
- };
+    public validate_inheritance_graph(self, trait_name String) Result[Void] = {
+        let mutable visited = List[String].new();
+        let mutable stack = List[String].new();
+        return self.validate_inheritance_graph_internal(trait_name, visited, stack);
+    };
 
- file_private validate_inheritance_graph_internal(self, trait_name String, visited List[String], stack List[String]) Result[Void] = {
- if stack.contains(trait_name) then {
- let mutable cycle = StringBuilder.new();
- cycle.push_string(stack.join_to_string(" -> "));
- if not cycle.is_empty() then {
- cycle.push_string(" -> ");
- };
- cycle.push_string(trait_name);
- return Result[Void].Error("Cyclic trait inheritance: " + cycle.to_string());
- };
- if visited.contains(trait_name) then {
- return Result[Void].Ok({});
- };
- let info = self.traits.get(trait_name) or else {
- return Result[Void].Ok({});
- };
- stack.push(trait_name);
- for parent in info.parent_traits then {
- let _ = self.validate_inheritance_graph_internal(parent.name, visited, stack) or return;
- };
- let _ = stack.pop();
- visited.push(trait_name);
- return Result[Void].Ok({});
- };
+    file_private validate_inheritance_graph_internal(self, trait_name String, visited List[String], stack List[String]) Result[Void] = {
+        if stack.contains(trait_name) then {
+            let mutable cycle = StringBuilder.new();
+            cycle.push_string(stack.join_to_string(" -> "));
+            if not cycle.is_empty() then {
+                cycle.push_string(" -> ");
+            };
+            cycle.push_string(trait_name);
+            return Result[Void].Error("Cyclic trait inheritance: " + cycle.to_string());
+        };
+        if visited.contains(trait_name) then {
+            return Result[Void].Ok({});
+        };
+        let info = self.traits.get(trait_name) or else {
+            return Result[Void].Ok({});
+        };
+        stack.push(trait_name);
+        for parent in info.parent_traits then {
+            let _ = self.validate_inheritance_graph_internal(parent.name, visited, stack) or return;
+        };
+        let _ = stack.pop();
+        visited.push(trait_name);
+        return Result[Void].Ok({});
+    };
 
- // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
- // 同名方法以最近定义的 Trait 为准
- public flatten_methods(self, trait_name String) Result[Dict[String, TypedTraitMember]] = {
- return self.flatten_methods_in_module(trait_name, List[String].new());
- };
+    // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
+    // 同名方法以最近定义的 Trait 为准
+    public flatten_methods(self, trait_name String) Result[Dict[String, TypedTraitMember]] = {
+        return self.flatten_methods_in_module(trait_name, List[String].new());
+    };
 
- public flatten_methods_in_module(self, trait_name String, module_path List[String]) Result[Dict[String, TypedTraitMember]] = {
- let cache_key = qualified_trait_key(module_path, trait_name);
- // 检查缓存
- if self.flattened_cache.get(cache_key) is .Some(cached) then {
- return Result[Dict[String, TypedTraitMember]].Ok(cached);
- };
+    public flatten_methods_in_module(self, trait_name String, module_path List[String]) Result[Dict[String, TypedTraitMember]] = {
+        let cache_key = qualified_trait_key(module_path, trait_name);
+        // 检查缓存
+        if self.flattened_cache.get(cache_key) is .Some(cached) then {
+            return Result[Dict[String, TypedTraitMember]].Ok(cached);
+        };
 
- // Swift flattenedTraitMethodsHelper: builtin constraints (`Any`, `mutable`)
- // carry no methods — accept them, do not report them as undefined traits.
- if is_builtin_trait(trait_name) then {
- return Result[Dict[String, TypedTraitMember]].Ok(Dict[String, TypedTraitMember].new());
- };
+        // Swift flattenedTraitMethodsHelper: builtin constraints (`Any`, `mutable`)
+        // carry no methods — accept them, do not report them as undefined traits.
+        if is_builtin_trait(trait_name) then {
+            return Result[Dict[String, TypedTraitMember]].Ok(Dict[String, TypedTraitMember].new());
+        };
 
- when self.get_in_module(trait_name, module_path) in {
- .None() then {
- let mutable message = StringBuilder.new();
- message.push_string("Trait '");
- message.push_string(trait_name);
- message.push_string("' not found");
- return Result[Dict[String, TypedTraitMember]].Error(message.to_string());
- },
- .Some(info) then {
- let mutable result = Dict[String, TypedTraitMember].new();
+        when self.get_in_module(trait_name, module_path) in {
+            .None() then {
+                let mutable message = StringBuilder.new();
+                message.push_string("Trait '");
+                message.push_string(trait_name);
+                message.push_string("' not found");
+                return Result[Dict[String, TypedTraitMember]].Error(message.to_string());
+            },
+            .Some(info) then {
+                let mutable result = Dict[String, TypedTraitMember].new();
 
- // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
- for parent_name in info.parent_traits then {
- when self.flatten_methods_in_module(parent_name.name, info.module_path) in {
- .Ok(parent_methods) then {
- for entry in parent_methods then {
- result.insert(entry.first, entry.second);
- };
- },
- .Error(e) then {
- return Result[Dict[String, TypedTraitMember]].Error(e);
- },
- };
- };
+                // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
+                for parent_name in info.parent_traits then {
+                    when self.flatten_methods_in_module(parent_name.name, info.module_path) in {
+                        .Ok(parent_methods) then {
+                            for entry in parent_methods then {
+                                result.insert(entry.first, entry.second);
+                            };
+                        },
+                        .Error(e) then {
+                            return Result[Dict[String, TypedTraitMember]].Error(e);
+                        },
+                    };
+                };
 
- // 再收集当前 Trait 的方法（覆盖父 Trait 同名方法）
- for m in info.methods then {
- result.insert(m.name, m);
- };
+                // 再收集当前 Trait 的方法（覆盖父 Trait 同名方法）
+                for m in info.methods then {
+                    result.insert(m.name, m);
+                };
 
- self.flattened_cache.insert(cache_key, result);
- return Result[Dict[String, TypedTraitMember]].Ok(result);
- },
- };
- };
+                self.flattened_cache.insert(cache_key, result);
+                return Result[Dict[String, TypedTraitMember]].Ok(result);
+            },
+        };
+    };
 
- // 检查 Trait 是否对象安全
- // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
- public check_object_safety(self, trait_name String) Result[Bool] = {
- return self.check_object_safety_in_module(trait_name, List[String].new());
- };
+    // 检查 Trait 是否对象安全
+    // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
+    public check_object_safety(self, trait_name String) Result[Bool] = {
+        return self.check_object_safety_in_module(trait_name, List[String].new());
+    };
 
- public check_object_safety_in_module(self, trait_name String, module_path List[String]) Result[Bool] = {
- let cache_key = qualified_trait_key(module_path, trait_name);
- if self.object_safety_cache.get(cache_key) is .Some(cached) then {
- return Result[Bool].Ok(cached);
- };
+    public check_object_safety_in_module(self, trait_name String, module_path List[String]) Result[Bool] = {
+        let cache_key = qualified_trait_key(module_path, trait_name);
+        if self.object_safety_cache.get(cache_key) is .Some(cached) then {
+            return Result[Bool].Ok(cached);
+        };
 
- let methods = self.flatten_methods_in_module(trait_name, module_path) or return;
- let mutable is_safe = true;
- for entry in methods then {
- let m = entry.second;
- if m.has_generic_type_params then {
- is_safe = false;
- };
- if not m.params.is_empty() then {
- let receiver = m.params[0(UInt)];
- if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
- is_safe = false;
- };
- };
- // 检查返回值是否使用 Self（receiver 之外不允许）
- if self.type_uses_self(m.return_type) then {
- is_safe = false;
- };
- // 检查参数（跳过第一个 self 参数）
- let mutable param_index UInt = 0;
- for p in m.params then {
- if param_index == 0(UInt) and p.name == "self" then {
- param_index += 1(UInt);
- continue;
- };
- if self.type_uses_self(p.param_type) then {
- is_safe = false;
- };
- param_index += 1(UInt);
- };
- };
- self.object_safety_cache.insert(cache_key, is_safe);
- return Result[Bool].Ok(is_safe);
- };
+        let methods = self.flatten_methods_in_module(trait_name, module_path) or return;
+        let mutable is_safe = true;
+        for entry in methods then {
+            let m = entry.second;
+            if m.has_generic_type_params then {
+                is_safe = false;
+            };
+            if not m.params.is_empty() then {
+                let receiver = m.params[0(UInt)];
+                if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
+                    is_safe = false;
+                };
+            };
+            // 检查返回值是否使用 Self（receiver 之外不允许）
+            if self.type_uses_self(m.return_type) then {
+                is_safe = false;
+            };
+            // 检查参数（跳过第一个 self 参数）
+            let mutable param_index UInt = 0;
+            for p in m.params then {
+                if param_index == 0(UInt) and p.name == "self" then {
+                    param_index += 1(UInt);
+                    continue;
+                };
+                if self.type_uses_self(p.param_type) then {
+                    is_safe = false;
+                };
+                param_index += 1(UInt);
+            };
+        };
+        self.object_safety_cache.insert(cache_key, is_safe);
+        return Result[Bool].Ok(is_safe);
+    };
 
- file_private is_object_safe_receiver_type(self, t Type) Bool = {
- let _ = self;
- return when t in {
- .GenericParameter(name) then name == "Self",
- _ then false,
- };
- };
+    file_private is_object_safe_receiver_type(self, t Type) Bool = {
+        let _ = self;
+        return when t in {
+            .GenericParameter(name) then name == "Self",
+            _ then false,
+        };
+    };
 
- file_private type_uses_self(self, t Type) Bool = {
- return when t in {
- .GenericParameter(name) then name == "Self",
- .ReferenceType(inner) then self.type_uses_self(inner),
- .MutableReferenceType(inner) then self.type_uses_self(inner),
- .BorrowedReferenceType(inner) then self.type_uses_self(inner),
- .MutableBorrowedReferenceType(inner) then self.type_uses_self(inner),
- .PointerType(inner) then self.type_uses_self(inner),
- .WeakReferenceType(inner) then self.type_uses_self(inner),
- .MutableWeakReferenceType(inner) then self.type_uses_self(inner),
- .GenericStruct(_, _, args) then {
- for arg in args then {
- if self.type_uses_self(arg) then {
- return true;
- };
- };
- yield false;
- },
- .GenericEnum(_, _, args) then {
- for arg in args then {
- if self.type_uses_self(arg) then {
- return true;
- };
- };
- yield false;
- },
- .TraitObject(_, _, args) then {
- for arg in args then {
- if self.type_uses_self(arg) then {
- return true;
- };
- };
- yield false;
- },
- .FunctionType(fn_params, return_type) then {
- let param_types = param_entry_types(fn_params);
- for param_type in param_types then {
- if self.type_uses_self(param_type) then {
- return true;
- };
- };
- yield self.type_uses_self(return_type);
- },
- _ then false,
- };
- };
+    file_private type_uses_self(self, t Type) Bool = {
+        return when t in {
+            .GenericParameter(name) then name == "Self",
+            .ReferenceType(inner) then self.type_uses_self(inner),
+            .MutableReferenceType(inner) then self.type_uses_self(inner),
+            .BorrowedReferenceType(inner) then self.type_uses_self(inner),
+            .MutableBorrowedReferenceType(inner) then self.type_uses_self(inner),
+            .PointerType(inner) then self.type_uses_self(inner),
+            .WeakReferenceType(inner) then self.type_uses_self(inner),
+            .MutableWeakReferenceType(inner) then self.type_uses_self(inner),
+            .GenericStruct(_, _, args) then {
+                for arg in args then {
+                    if self.type_uses_self(arg) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .GenericEnum(_, _, args) then {
+                for arg in args then {
+                    if self.type_uses_self(arg) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .TraitObject(_, _, args) then {
+                for arg in args then {
+                    if self.type_uses_self(arg) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .FunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                for param_type in param_types then {
+                    if self.type_uses_self(param_type) then {
+                        return true;
+                    };
+                };
+                self.type_uses_self(return_type)
+            },
+            _ then false,
+        };
+    };
 
- // 检查 Trait 继承传递性：trait_name 是否继承自 target
- public has_inheritance(self, trait_name String, target String) Bool = {
- let mutable visited = Set[String].new();
- return self.has_inheritance_internal(trait_name, target, visited);
- };
+    // 检查 Trait 继承传递性：trait_name 是否继承自 target
+    public has_inheritance(self, trait_name String, target String) Bool = {
+        let mutable visited = Set[String].new();
+        return self.has_inheritance_internal(trait_name, target, visited);
+    };
 
- file_private has_inheritance_internal(self, trait_name String, target String, visited Set[String]) Bool = {
- if visited.contains(trait_name) then {
- return false;
- };
- visited.insert(trait_name);
- if trait_name == target then { return true;};
- when self.traits.get(trait_name) in {
- .None() then { return false;},
- .Some(info) then {
- for parent in info.parent_traits then {
- if self.has_inheritance_internal(parent.name, target, visited) then { return true;};
- };
- return false;
- },
- };
- };
+    file_private has_inheritance_internal(self, trait_name String, target String, visited Set[String]) Bool = {
+        if visited.contains(trait_name) then {
+            return false;
+        };
+        visited.insert(trait_name);
+        if trait_name == target then { return true;};
+        when self.traits.get(trait_name) in {
+            .None() then { return false;},
+            .Some(info) then {
+                for parent in info.parent_traits then {
+                    if self.has_inheritance_internal(parent.name, target, visited) then { return true;};
+                };
+                return false;
+            },
+        };
+    };
 };
 
 // ── TraitChecker ──────────────────────────────────────────────────────────────
 
 public type TraitChecker(
- registry TraitRegistry,
- method_table MethodTable,
+    registry TraitRegistry,
+    method_table MethodTable,
 );
 
 given TraitChecker {
 
- public new(registry TraitRegistry, method_table MethodTable) TraitChecker = {
- return TraitChecker(registry, method_table);
- };
+    public new(registry TraitRegistry, method_table MethodTable) TraitChecker = {
+        return TraitChecker(registry, method_table);
+    };
 
- // 检查 given Type as Trait { ... } 声明的一致性
- // 返回 Ok 或 Error(message)
- public check_conformance(
- self,
- target_type Type,
- trait_name String,
- members List[TypedGivenMember],
- span SourceSpan,
- ) Result[Void] = {
- return self.check_conformance_in_module(target_type, trait_name, members, span, List[String].new());
- };
+    // 检查 given Type as Trait { ... } 声明的一致性
+    // 返回 Ok 或 Error(message)
+    public check_conformance(
+        self,
+        target_type Type,
+        trait_name String,
+        members List[TypedGivenMember],
+        span SourceSpan,
+    ) Result[Void] = {
+        return self.check_conformance_in_module(target_type, trait_name, members, span, List[String].new());
+    };
 
- public check_conformance_in_module(
- self,
- target_type Type,
- trait_name String,
- members List[TypedGivenMember],
- span SourceSpan,
- module_path List[String],
- ) Result[Void] = {
- // 仅检查当前 trait 自身的方法 requirement。
- // 父 trait 的显式实现在 TypeChecker 中单独检查。
- let required_methods = when self.registry.get_in_module(trait_name, module_path) in {
- .None() then {
- return Result[Void].Error("Undefined trait: " + trait_name);
- },
- .Some(info) then {
- let mutable own = Dict[String, TypedTraitMember].new();
- for m in info.methods then {
- own.insert(m.name, m);
- };
- yield own;
- },
- };
+    public check_conformance_in_module(
+        self,
+        target_type Type,
+        trait_name String,
+        members List[TypedGivenMember],
+        span SourceSpan,
+        module_path List[String],
+    ) Result[Void] = {
+        // 仅检查当前 trait 自身的方法 requirement。
+        // 父 trait 的显式实现在 TypeChecker 中单独检查。
+        let required_methods = when self.registry.get_in_module(trait_name, module_path) in {
+            .None() then {
+                return Result[Void].Error("Undefined trait: " + trait_name);
+            },
+            .Some(info) then {
+                let mutable own = Dict[String, TypedTraitMember].new();
+                for m in info.methods then {
+                    own.insert(m.name, m);
+                };
+                own
+            },
+        };
 
- // 构建已实现方法的名称集合
- let mutable implemented = Dict[String, TypedGivenMember].new();
- for m_ref in members then {
- let m = m_ref;
- implemented.insert(m.name, m);
- };
+        // 构建已实现方法的名称集合
+        let mutable implemented = Dict[String, TypedGivenMember].new();
+        for m_ref in members then {
+            let m = m_ref;
+            implemented.insert(m.name, m);
+        };
 
- // 检查是否包含非 requirement 的额外方法
- for entry in implemented then {
- if required_methods.get(entry.first) is .None() then {
- let mutable message = StringBuilder.new();
- message.push_string("Given implementation for type '");
- message.push_string(type_to_string(target_type));
- message.push_string("' is invalid: extra method '");
- message.push_string(entry.first);
- message.push_string("' is not a requirement of trait '");
- message.push_string(trait_name);
- message.push_byte('\'');
- return Result[Void].Error(message.to_string());
- };
- };
+        // 检查是否包含非 requirement 的额外方法
+        for entry in implemented then {
+            if required_methods.get(entry.first) is .None() then {
+                let mutable message = StringBuilder.new();
+                message.push_string("Given implementation for type '");
+                message.push_string(type_to_string(target_type));
+                message.push_string("' is invalid: extra method '");
+                message.push_string(entry.first);
+                message.push_string("' is not a requirement of trait '");
+                message.push_string(trait_name);
+                message.push_byte('\'');
+                return Result[Void].Error(message.to_string());
+            };
+        };
 
- // 检查每个 requirement 方法
- for entry in required_methods then {
- let method_name = entry.first;
- let required = entry.second;
+        // 检查每个 requirement 方法
+        for entry in required_methods then {
+            let method_name = entry.first;
+            let required = entry.second;
 
- when implemented.get(method_name) in {
- .None() then {
- let mutable message = StringBuilder.new();
- message.push_string("Given implementation for type '");
- message.push_string(type_to_string(target_type));
- message.push_string("' is invalid: missing method '");
- message.push_string(method_name);
- message.push_string("' required by trait '");
- message.push_string(trait_name);
- message.push_byte('\'');
- return Result[Void].Error(message.to_string());
- },
- .Some(actual) then {
- // 检查参数数量（跳过 self 参数）
- let required_count = required.params.count();
- let actual_count = actual.params.count();
- let required_param_count = if required_count > 0 then required_count - 1 else 0;
- let actual_param_count = if actual_count > 0 then actual_count - 1 else 0;
+            when implemented.get(method_name) in {
+                .None() then {
+                    let mutable message = StringBuilder.new();
+                    message.push_string("Given implementation for type '");
+                    message.push_string(type_to_string(target_type));
+                    message.push_string("' is invalid: missing method '");
+                    message.push_string(method_name);
+                    message.push_string("' required by trait '");
+                    message.push_string(trait_name);
+                    message.push_byte('\'');
+                    return Result[Void].Error(message.to_string());
+                },
+                .Some(actual) then {
+                    // 检查参数数量（跳过 self 参数）
+                    let required_count = required.params.count();
+                    let actual_count = actual.params.count();
+                    let required_param_count = if required_count > 0 then required_count - 1 else 0;
+                    let actual_param_count = if actual_count > 0 then actual_count - 1 else 0;
 
- if required_param_count <> actual_param_count then {
- let mutable message = StringBuilder.new();
- message.push_string("Method '");
- message.push_string(method_name);
- message.push_string("' for trait '");
- message.push_string(trait_name);
- message.push_string("': expected ");
- message.push_string(required_param_count.to_string());
- message.push_string(" params, got ");
- message.push_string(actual_param_count.to_string());
- return Result[Void].Error(message.to_string());
- };
+                    if required_param_count <> actual_param_count then {
+                        let mutable message = StringBuilder.new();
+                        message.push_string("Method '");
+                        message.push_string(method_name);
+                        message.push_string("' for trait '");
+                        message.push_string(trait_name);
+                        message.push_string("': expected ");
+                        message.push_string(required_param_count.to_string());
+                        message.push_string(" params, got ");
+                        message.push_string(actual_param_count.to_string());
+                        return Result[Void].Error(message.to_string());
+                    };
 
- let mutable idx UInt = 1;
- let named_check_end = if required_count < actual_count then required_count else actual_count;
- while idx < named_check_end then {
- let trait_param = required.params[idx];
- let impl_param = actual.params[idx];
- if trait_param.named <> impl_param.named then {
- if trait_param.named then {
- let mutable message = StringBuilder.new();
- message.push_string("Trait method '");
- message.push_string(method_name);
- message.push_string("' requires named parameter '");
- message.push_string(trait_param.name);
- message.push_string("' at position ");
- message.push_string(idx.to_string());
- message.push_string(", but implementation uses positional parameter");
- return Result[Void].Error(message.to_string());
- };
- let mutable message = StringBuilder.new();
- message.push_string("Trait method '");
- message.push_string(method_name);
- message.push_string("' requires positional parameter at position ");
- message.push_string(idx.to_string());
- message.push_string(", but implementation uses named parameter");
- return Result[Void].Error(message.to_string());
- };
- if trait_param.named and impl_param.named and trait_param.name <> impl_param.name then {
- let mutable message = StringBuilder.new();
- message.push_string("Trait method '");
- message.push_string(method_name);
- message.push_string("' requires named parameter '");
- message.push_string(trait_param.name);
- message.push_string("' at position ");
- message.push_string(idx.to_string());
- message.push_string(", but implementation uses '");
- message.push_string(impl_param.name);
- message.push_byte('\'');
- return Result[Void].Error(message.to_string());
- };
- idx += 1;
- };
- },
- };
- };
+                    let mutable idx UInt = 1;
+                    let named_check_end = if required_count < actual_count then required_count else actual_count;
+                    while idx < named_check_end then {
+                        let trait_param = required.params[idx];
+                        let impl_param = actual.params[idx];
+                        if trait_param.named <> impl_param.named then {
+                            if trait_param.named then {
+                                let mutable message = StringBuilder.new();
+                                message.push_string("Trait method '");
+                                message.push_string(method_name);
+                                message.push_string("' requires named parameter '");
+                                message.push_string(trait_param.name);
+                                message.push_string("' at position ");
+                                message.push_string(idx.to_string());
+                                message.push_string(", but implementation uses positional parameter");
+                                return Result[Void].Error(message.to_string());
+                            };
+                            let mutable message = StringBuilder.new();
+                            message.push_string("Trait method '");
+                            message.push_string(method_name);
+                            message.push_string("' requires positional parameter at position ");
+                            message.push_string(idx.to_string());
+                            message.push_string(", but implementation uses named parameter");
+                            return Result[Void].Error(message.to_string());
+                        };
+                        if trait_param.named and impl_param.named and trait_param.name <> impl_param.name then {
+                            let mutable message = StringBuilder.new();
+                            message.push_string("Trait method '");
+                            message.push_string(method_name);
+                            message.push_string("' requires named parameter '");
+                            message.push_string(trait_param.name);
+                            message.push_string("' at position ");
+                            message.push_string(idx.to_string());
+                            message.push_string(", but implementation uses '");
+                            message.push_string(impl_param.name);
+                            message.push_byte('\'');
+                            return Result[Void].Error(message.to_string());
+                        };
+                        idx += 1;
+                    };
+                },
+            };
+        };
 
- return Result[Void].Ok({});
- };
+        return Result[Void].Ok({});
+    };
 
- // 检查父 Trait 是否已被实现
- public check_parent_traits_satisfied(
- self,
- target_type Type,
- trait_name String,
- all_given_traits List[String],
- span SourceSpan,
- ) Result[Void] = {
- return self.check_parent_traits_satisfied_in_module(target_type, trait_name, all_given_traits, span, List[String].new());
- };
+    // 检查父 Trait 是否已被实现
+    public check_parent_traits_satisfied(
+        self,
+        target_type Type,
+        trait_name String,
+        all_given_traits List[String],
+        span SourceSpan,
+    ) Result[Void] = {
+        return self.check_parent_traits_satisfied_in_module(target_type, trait_name, all_given_traits, span, List[String].new());
+    };
 
- public check_parent_traits_satisfied_in_module(
- self,
- target_type Type,
- trait_name String,
- all_given_traits List[String],
- span SourceSpan,
- module_path List[String],
- ) Result[Void] = {
- when self.registry.get_in_module(trait_name, module_path) in {
- .None() then { return Result[Void].Error("Undefined trait: " + trait_name);},
- .Some(info) then {
- for parent in info.parent_traits then {
- let mutable found = false;
- for given_trait in all_given_traits then {
- if given_trait == parent.name then {
- found = true;
- };
- };
- if not found then {
- let mutable message = StringBuilder.new();
- message.push_string("Type '");
- message.push_string(type_to_string(target_type));
- message.push_string("' implements '");
- message.push_string(trait_name);
- message.push_string("' but not parent trait '");
- message.push_string(parent.name);
- message.push_byte('\'');
- return Result[Void].Error(message.to_string());
- };
- };
- return Result[Void].Ok({});
- },
- };
- };
+    public check_parent_traits_satisfied_in_module(
+        self,
+        target_type Type,
+        trait_name String,
+        all_given_traits List[String],
+        span SourceSpan,
+        module_path List[String],
+    ) Result[Void] = {
+        when self.registry.get_in_module(trait_name, module_path) in {
+            .None() then { return Result[Void].Error("Undefined trait: " + trait_name);},
+            .Some(info) then {
+                for parent in info.parent_traits then {
+                    let mutable found = false;
+                    for given_trait in all_given_traits then {
+                        if given_trait == parent.name then {
+                            found = true;
+                        };
+                    };
+                    if not found then {
+                        let mutable message = StringBuilder.new();
+                        message.push_string("Type '");
+                        message.push_string(type_to_string(target_type));
+                        message.push_string("' implements '");
+                        message.push_string(trait_name);
+                        message.push_string("' but not parent trait '");
+                        message.push_string(parent.name);
+                        message.push_byte('\'');
+                        return Result[Void].Error(message.to_string());
+                    };
+                };
+                return Result[Void].Ok({});
+            },
+        };
+    };
 };

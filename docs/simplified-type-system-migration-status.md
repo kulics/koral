@@ -37,7 +37,7 @@
 | 项 | 值 |
 |---|---|
 | Swift 全量 | **533/533**（2026-09-26 合入 `a82bb748` / `cfc940d3` 后复验） |
-| Bootstrap 全量 | 待按 `a82bb748` 的语义变更适配后复验（合并前为 528/528） |
+| Bootstrap 全量 | **533/533**（2026-09-26 按 `a82bb748` 语义变更适配后复验） |
 | 临时调试代码 | **已全部清除**（`KORAL_DEBUG_SUBST_CONTEXT` 系列探针、`trace_*` 辅助函数、`[inflate]`/`[tool-*]`/`[mono-*]` 等打印均已删除） |
 | 自举（bootstrap 编译自身） | **非目标**，当前不通。见下「自举（非目标）」 |
 | Swift 构建 | `cd compiler && swift build` |
@@ -49,6 +49,38 @@
 迁移起点基线：510/528。**2026-09-25 傍晚从 193 提到 503。**
 
 **2026-09-26：193 → 528/528，Swift / Bootstrap 全量均绿（自举为非目标，未打通）。**
+
+**2026-09-26（晚）：528 → 533/533，按 `a82bb748` 的块尾表达式 / 优先级语义适配 bootstrap，Swift / Bootstrap 全量均绿（自举仍为非目标）。**
+
+### 2026-09-26（晚）按 `a82bb748` 适配 bootstrap 的根因修复
+
+1. **块尾表达式在 mono / sema 重建时被丢弃**（最主要的崩溃族根因）。
+   `a82bb748` 把 `yield` 换成块尾表达式后，三处「用语句列表重建 `TypedExprKind.Block`」的代码仍写死 `Option[TypedExpr].None()`：
+   `type_checker_substitution.koral`、`mono/mono_expr_substitution.koral`、`mono/mono_type_resolution.koral`。
+   于是 `return { s.substring(..<5) };` 这类块的尾部**整段消失**，MIR 里只剩一个未初始化的 `block_result`，运行期 SIGSEGV。
+   同族的扫描漏掉尾部的还有：`mono_register_pattern_binding_types_in_expr`、`typed_expr_contains_branch_break`、`collect_captures_expr`、`validate_lambda_captures_in_expr`、`expr_contains_or_return`、`typed_expr_span`。
+   已逐一对齐 Swift（`MonomorphizerExpressionSubstitution.swift` / `MonomorphizerTypeResolution.swift` / `TypeCheckerLambda.swift` 均携带尾部）。
+
+2. **`yield` 时代的「值塞进最后一条 `ExprStmt`」写法**（字符串插值、集合/字典字面量、`__member_base` / `__recv` / `__cmp_chain` 等临时块）。
+   块类型是值类型，但尾部是 `None`，值被当成语句丢掉——`println("r=\(x)")` 直接崩溃。
+   已改成把值表达式作为块尾（Swift `TypeCheckerExpressions.swift:2533/2585/7612` 的写法）。
+
+3. **`yield` 时代误转成 `return` 的表达式位置**。
+   `or else` 的 Option 分支、`expr_contains_or_return` 的入口、`for` 迭代器初始化，三处 `else { return X; }` 本是块的尾值，被批量改成提前返回，导致 `or else` **永远取默认分支**、函数返回前不还原 `in_loop`/`loop_depth` 等状态。
+
+4. **运算符优先级重排未跟上**。
+   位运算改绑比比较紧、`and then` 比 `and` 紧、`or else`/`or return` 比 `or` 紧且同层。
+   `parse_and`/`parse_and_then`、`parse_or`/`parse_or_else`/`parse_or_return` 的调用链已按 Swift `ParserExpressions.swift` 的层级重排，并合并出 `parse_option_flow`。
+
+5. **`or else` 的模式绑定与函数体引用的是两个不同符号**。
+   `Some`/`Ok`/`Error` 分支手工造了一个 `__val`/`it` 符号给函数体，而 `lower_typed_pattern` 又按名字新建了一个绑进作用域，运行期读到的是未绑定符号。
+   已改成先 `scope.define(sym)` 再降模式（对齐 Swift `lowerOrElseExpressionCore` 复用同一 `DefId` 的注释）。
+
+6. **`given Trait { ... }` 工具块里 `Self` 带了引用包装**。
+   `Self` 被绑成 `*MyEq`（`ReferenceType(TraitObject)`），而 trait 需求在调用点把 `Self` 实例化成裸的 `MyEq`，于是 `self.equals(other)` 报 `expected MyEq, got *MyEq`。
+   已在 `check_given_members_for_type` 解掉引用包装，使两侧 `Self` 同义；同时给「按值接收者 + 类引用实参」补了自动解引用。
+
+7. **杂项**：`while` 可作表达式（`check_statement_body_expr`）、`and`/`or` 两侧必须是 `Bool`、块结束符的报错改用 `token_kind_description` 以匹配 Swift 的 `Unexpected token: Identifier(...)`。
 
 ### 2026-09-26 根因修复（均已对照 Swift 的结构与逻辑）
 
@@ -80,7 +112,7 @@
 
 ### 自举（非目标）
 
-**测试口径已达标：Swift 与 Bootstrap 均 528/528。自举不作为验收条件。**
+**测试口径已达标：Swift 与 Bootstrap 均 533/533。自举不作为验收条件。**
 
 当前 `bin/bootstrap/koralc` 编译不了 `bootstrap/koralc/`，卡在 **C 编译期**（sema/mono 已能生成 133MB 的 `koralc.c`）：
 
@@ -559,5 +591,5 @@ managed nominal 的 C 结构体只是 `{void* ptr; void* control;}`，不提及 
 
 - Bootstrap build 成功。
 - Bootstrap self-host `check --package-config bootstrap/koral.json --target-module koralc` 成功。
-- `./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/bootstrap -j=8` 达到 528/528；网络类波动用重复运行区分环境失败与编译器回归。
+- `./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/bootstrap -j=8` 达到 533/533；网络类波动用重复运行区分环境失败与编译器回归。
 - 删除临时 debug 输出，完成内存测试分离与最终 bootstrap 审阅报告。

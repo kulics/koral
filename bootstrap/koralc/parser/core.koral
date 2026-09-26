@@ -244,7 +244,7 @@ given Parser {
                 if self.next_is_colon() then {
                     return Option[String].Some(label);
                 };
-                yield Option[String].None();
+                Option[String].None()
             },
             _ then Option[String].None(),
         };
@@ -591,10 +591,10 @@ given Parser {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
                 .LetDecl(_, name, is_mutable, type_name, _, span) then
-                    when type_name in {
-                        .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span)),
-                        .None() then Result[Decl].Error(self.parser_error_without_span("foreign let declaration requires explicit type")),
-                    },
+                when type_name in {
+                    .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span)),
+                    .None() then Result[Decl].Error(self.parser_error_without_span("foreign let declaration requires explicit type")),
+                },
                 .TypeStructDecl(_, name, _, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
                 .GivenDecl(_, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
@@ -803,7 +803,7 @@ given Parser {
             let param_name = when self.current().kind in {
                 .Identifier(name) then {
                     self.advance();
-                    yield name;
+                    name
                 },
                 _ then {
                     return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", "type parameter", self.current()), self.current()));
@@ -1502,35 +1502,6 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_statement_list_until_rbrace(self, context String) Result[List[Statement]] = {
-        let mutable statements = List[Statement].new();
-        self.parse_debug("stmt-list begin");
-        while true then {
-            when self.current().kind in {
-                .RBrace() then {
-                    self.advance();
-                    break;
-                },
-                .Eof() then {
-                    let mutable message = StringBuilder.new();
-                    message.push_string("Unexpected EOF in ");
-                    message.push_string(context);
-                    return .Error(self.parser_error(message.to_string()));
-                },
-                _ then {
-                    let before = self.index;
-                    let parsed = self.parse_statement() or return;
-                    if self.index == before then {
-                        let t = self.current();
-                        return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", context, t), t));
-                    };
-                    statements.push(parsed);
-                },
-            };
-        };
-        return .Ok(statements);
-    };
-
     module_private parse_statement(self) Result[Statement] = {
         let start = self.current();
         self.parse_debug("statement dispatch");
@@ -1547,12 +1518,6 @@ given Parser {
                 let value = self.parse_expression_checked("return statement value") or return;
                 let _ = self.require_semicolon() or return;
                 return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)));
-            },
-            .KwYield() then {
-                self.advance();
-                let value = self.parse_expression_checked("yield statement value") or return;
-                let _ = self.require_semicolon() or return;
-                return .Ok(Statement.YieldStmt(value, self.span_from_start(start)));
             },
             .KwBreak() then {
                 self.advance();

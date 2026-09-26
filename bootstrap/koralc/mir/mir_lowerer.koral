@@ -1,4 +1,4 @@
-﻿using std::os { env };
+using std::os { env };
 
 public type mutable MIRLowerer(
     program MonomorphizedProgram,
@@ -129,9 +129,9 @@ public let lower_monomorphized_program_releasing_source(mutable program Monomorp
         prepared.metadata_program.context,
         prepared.metadata_program.static_method_lookup,
         prepared.metadata_program.traits,
-            prepared.metadata_program.receiver_method_dispatch,
-            prepared.metadata_program.concrete_callables_by_def_id,
-            prepared.metadata_program.conformance_witnesses,
+        prepared.metadata_program.receiver_method_dispatch,
+        prepared.metadata_program.concrete_callables_by_def_id,
+        prepared.metadata_program.conformance_witnesses,
     );
     trace_mir_progress("[mir-work] skipping ref promotion");
     return LoweredMIRProgram(lowered, lowerer.diagnostics);
@@ -139,7 +139,7 @@ public let lower_monomorphized_program_releasing_source(mutable program Monomorp
 
 given MIRLowerer {
     public new(program MonomorphizedProgram, context CompilerContext) MIRLowerer =
-        MIRLowerer(program, context, List[MIRFunctionWorkItem].new(), false, DiagnosticCollector.new());
+    MIRLowerer(program, context, List[MIRFunctionWorkItem].new(), false, DiagnosticCollector.new());
 
     module_private unique_vtable_requests(self) List[VtableRequest] = {
         let _ = self;
@@ -337,12 +337,12 @@ given MIRLowerer {
                             .Some(source) then {
                                 let mutable checker = TypeChecker.new(self.program.global_scope, self.context, source.source_file);
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
-                                yield if checker.has_errors() then {
+                                if checker.has_errors() then {
                                     self.diagnostics.merge(checker.storage.diagnostics);
-                                    yield body;
+                                    body
                                 } else {
-                                    yield Monomorphizer.resolve_program_body_expression(self.program, self.context, rechecked);
-                                };
+                                    Monomorphizer.resolve_program_body_expression(self.program, self.context, rechecked)
+                                }
                             },
                             .None() then body,
                         },
@@ -781,19 +781,19 @@ given MIRLowerer {
             },
             .Reference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner);
+                if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner)
             },
             .BorrowedReference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
+                if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
             },
             .Pointer(inner, is_mutable) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
+                if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
             },
             .WeakReference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner);
+                if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner)
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[Type].new();
@@ -802,11 +802,11 @@ given MIRLowerer {
                 };
                 let struct_def_id = self.program.generic_templates.lookup_struct_def_id(base);
                 let enum_def_id = self.program.generic_templates.lookup_enum_def_id(base);
-                yield if struct_def_id.is_valid() then {
-                    yield Type.GenericStruct(base, struct_def_id, resolved_args);
+                if struct_def_id.is_valid() then {
+                    Type.GenericStruct(base, struct_def_id, resolved_args)
                 } else {
-                    yield Type.GenericEnum(base, enum_def_id, resolved_args);
-                };
+                    Type.GenericEnum(base, enum_def_id, resolved_args)
+                }
             },
             .InferredSelf() then bindings.get("Self") or else Type.Unknown(),
             .FunctionType(param_types, return_type) then {
@@ -814,7 +814,7 @@ given MIRLowerer {
                 for param_type in param_types then {
                     resolved_params.push(self.resolve_trait_type_node_with_bindings(param_type, bindings));
                 };
-                yield make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(return_type, bindings));
+                make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(return_type, bindings))
             },
         };
     };
@@ -861,22 +861,22 @@ given MIRLowerer {
                 for param in params then {
                     bound_params.push(self.apply_type_bindings(param.param_type, bindings));
                 };
-                yield make_function_type(bound_params, self.apply_type_bindings(return_type, bindings));
+                make_function_type(bound_params, self.apply_type_bindings(return_type, bindings))
             },
             .GenericStruct(template, template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                yield Type.GenericStruct(template, template_def_id, bound_args);
+                Type.GenericStruct(template, template_def_id, bound_args)
             },
             .GenericEnum(template, template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                yield Type.GenericEnum(template, template_def_id, bound_args);
+                Type.GenericEnum(template, template_def_id, bound_args)
             },
             .TraitObject(trait_name, trait_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                yield Type.TraitObject(trait_name, trait_def_id, bound_args);
+                Type.TraitObject(trait_name, trait_def_id, bound_args)
             },
             _ then t,
         };

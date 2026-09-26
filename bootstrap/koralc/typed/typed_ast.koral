@@ -1,4 +1,4 @@
-﻿// Typed AST nodes produced by the type checker.
+// Typed AST nodes produced by the type checker.
 // Each node carries a resolved Type alongside the original source information.
 
 // type_names maps DefId.id -> type name for display (struct/enum names)
@@ -187,7 +187,6 @@ public type TypedStatement {
     BreakStmt(span SourceSpan),
     ContinueStmt(span SourceSpan),
     DeferStmt(expr TypedExpr, span SourceSpan),
-    BranchBreakStmt(expr TypedExpr, span SourceSpan),
 };
 
 public type TypedWhenArm(
@@ -217,11 +216,11 @@ public let typed_intrinsic_type(node TypedIntrinsic) Type = {
         .InitMemory(_, _) then Type.VoidType(),
         .DeinitMemory(_) then Type.VoidType(),
         .TakeMemory(pointer_expr, _) then {
-            yield when typed_expr_type(pointer_expr) in {
+            when typed_expr_type(pointer_expr) in {
                 .PointerType(inner) then inner,
                 .MutablePointerType(inner) then inner,
                 _ then Type.Unknown(),
-            };
+            }
         },
         .NullPtr(result_type) then result_type,
     };
@@ -233,22 +232,22 @@ public let typed_expr_type(expr TypedExpr) Type = {
         .CastExpr(target_type, _) then target_type,
         .RefExpr(inner) then {
             let inner_type = typed_expr_type(inner);
-            yield when expr.expr_type in {
+            when expr.expr_type in {
                 .MutableReferenceType(_) then Type.MutableReferenceType(inner_type),
                 .BorrowedReferenceType(_) then Type.BorrowedReferenceType(inner_type),
                 .MutableBorrowedReferenceType(_) then Type.MutableBorrowedReferenceType(inner_type),
                 _ then Type.ReferenceType(inner_type),
-            };
+            }
         },
         .PtrExpr(inner) then {
             let inner_type = typed_expr_type(inner);
-            yield when expr.expr_type in {
+            when expr.expr_type in {
                 .MutablePointerType(_) then Type.MutablePointerType(inner_type),
                 _ then Type.PointerType(inner_type),
-            };
+            }
         },
         .DerefExpr(inner) then {
-            yield when typed_expr_type(inner) in {
+            when typed_expr_type(inner) in {
                 .ReferenceType(inner_type) then inner_type,
                 .MutableReferenceType(inner_type) then inner_type,
                 .BorrowedReferenceType(inner_type) then inner_type,
@@ -258,17 +257,17 @@ public let typed_expr_type(expr TypedExpr) Type = {
                 .PointerType(inner_type) then inner_type,
                 .MutablePointerType(inner_type) then inner_type,
                 _ then expr.expr_type,
-            };
+            }
         },
         .UnsafeDerefExpr(inner) then {
-            yield when typed_expr_type(inner) in {
+            when typed_expr_type(inner) in {
                 .PointerType(inner_type) then inner_type,
                 .MutablePointerType(inner_type) then inner_type,
                 _ then expr.expr_type,
-            };
+            }
         },
         .MemberPath(_, path) then {
-            yield if path.is_empty() then Type.VoidType() else path[path.count() - 1].symbol_type;
+            if path.is_empty() then Type.VoidType() else path[path.count() - 1].symbol_type
         },
         .IntrinsicCall(node) then typed_intrinsic_type(node),
         .MethodReference(_, _, method, _, _, _) then method.symbol_type,
@@ -302,7 +301,7 @@ public type TypedExprKind {
     IntrinsicCall(node TypedIntrinsic),
     MemberPath(base TypedExpr, path List[Symbol]),
     MethodReference(base TypedExpr, receiver_type Type, method Symbol, type_args List[Type], method_type_args List[Type], dispatch_callsite Option[DefId]),
-    Block(statements List[TypedStatement]),
+    Block(statements List[TypedStatement], tail_expression Option[TypedExpr]),
     IfExpr(condition TypedExpr, then_branch TypedExpr, else_branch Option[TypedExpr]),
     WhenExpr(subject TypedExpr, arms List[TypedWhenArm]),
     LambdaExpr(params List[TypedParam], return_type Type, body TypedExpr),
@@ -378,7 +377,7 @@ public let typed_expr_value_category(expr TypedExpr) ValueCategory = {
         .DerefExpr(_) then ValueCategory.LValue(),
         .UnsafeDerefExpr(_) then ValueCategory.LValue(),
         .CastExpr(target_type, inner) then {
-            yield if typed_value_category_preserves_identity_cast(inner.expr_type, target_type) then typed_expr_value_category(inner) else ValueCategory.RValue();
+            if typed_value_category_preserves_identity_cast(inner.expr_type, target_type) then typed_expr_value_category(inner) else ValueCategory.RValue()
         },
         _ then ValueCategory.RValue(),
     };

@@ -1,4 +1,4 @@
-﻿using std::os { env };
+using std::os { env };
 
 file_private type BuiltinSubscriptKind {
     String(),
@@ -30,7 +30,7 @@ given TypeChecker {
     module_private method_param_type(self, method Symbol, index UInt) Option[Type] = {
         return when method.symbol_type in {
             .FunctionType(params, _) then
-                if index < params.count() then Option[Type].Some((params[index]).param_type) else Option[Type].None(),
+            if index < params.count() then Option[Type].Some((params[index]).param_type) else Option[Type].None(),
             _ then Option[Type].None(),
         };
     };
@@ -115,7 +115,7 @@ given TypeChecker {
                 for entry in params then {
                     out.push(entry.param_type);
                 };
-                yield out;
+                out
             },
             _ then List[Type].new(),
         };
@@ -148,7 +148,7 @@ given TypeChecker {
                 };
                 let template_name_opt = self.context().get_template_name(def_id);
                 let type_args_opt = self.context().get_type_arguments(def_id);
-                yield when template_name_opt in {
+                when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
                             if type_args.count() == 1(UInt) and template_name == "List" then {
@@ -160,12 +160,12 @@ given TypeChecker {
                             if type_args.count() == 2(UInt) and template_name == "Dict" then {
                                 return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(type_args[0(UInt)], type_args[1(UInt)]));
                             };
-                            yield Option[BuiltinSubscriptKind].None();
+                            Option[BuiltinSubscriptKind].None()
                         },
                         .None() then Option[BuiltinSubscriptKind].None(),
                     },
                     .None() then Option[BuiltinSubscriptKind].None(),
-                };
+                }
             },
             .GenericStruct(template_name, _, type_args) then {
                 if template_name == "List" and type_args.count() == 1(UInt) then {
@@ -177,7 +177,7 @@ given TypeChecker {
                 if template_name == "Dict" and type_args.count() == 2(UInt) then {
                     return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict((type_args[0(UInt)]), (type_args[1(UInt)])));
                 };
-                yield Option[BuiltinSubscriptKind].None();
+                Option[BuiltinSubscriptKind].None()
             },
             .PointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, false)),
             .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, true)),
@@ -236,7 +236,7 @@ given TypeChecker {
                 .String() then {
                     if is_mutable then {
                         self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(base));
-                        yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown());
+                        return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown());
                     };
                     let pointer_expr = self.lower_receiver_method_call_expr(base, "borrow_ptr", List[TypedExpr].new());
                     let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (args[0(UInt)]);
@@ -246,11 +246,11 @@ given TypeChecker {
                         pointer_base_type,
                     );
                     let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), Type.UInt8Type());
-                    yield self.adapt_expr_to_expected_type(deref_expr, Option[Type].Some(Type.ReferenceType(Type.UInt8Type())));
+                    self.adapt_expr_to_expected_type(deref_expr, Option[Type].Some(Type.ReferenceType(Type.UInt8Type())))
                 },
                 .Dict(_, _) or .List(_) or .Deque(_) then {
                     let helper_name = if is_mutable then "__index_mut_ref" else "__index_ref";
-                    yield self.build_builtin_subscript_helper_call(base, args, helper_name);
+                    self.build_builtin_subscript_helper_call(base, args, helper_name)
                 },
                 .Pointer(element_type, _) then {
                     let index_expr = if args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (args[0(UInt)]);
@@ -268,7 +268,7 @@ given TypeChecker {
                     );
                     let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), element_type);
                     let expected_ref_type = if is_mutable then Option[Type].Some(Type.MutableReferenceType(element_type)) else Option[Type].Some(Type.ReferenceType(element_type));
-                    yield self.adapt_expr_to_expected_type(deref_expr, expected_ref_type);
+                    self.adapt_expr_to_expected_type(deref_expr, expected_ref_type)
                 },
             },
             .None() then {
@@ -276,7 +276,7 @@ given TypeChecker {
                     "subscript is only supported for String, List, Deque, Dict, and pointer types",
                     self.typed_expr_span(base)
                 );
-                yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown());
+                make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown())
             },
         };
     };
@@ -392,7 +392,7 @@ given TypeChecker {
         };
         return when t in {
             .GenericEnum(template, _, args) then
-                if template == "Result" and args.count() > 1 then (args[1]) else self.extract_option_result_inner(t),
+            if template == "Result" and args.count() > 1 then (args[1]) else self.extract_option_result_inner(t),
             _ then self.extract_option_result_inner(t),
         };
     };
@@ -419,7 +419,7 @@ given TypeChecker {
             .GenericEnum(template, template_def_id, _) then if template == template_name then template_def_id else def_id_invalid(),
             .EnumType(def_id) then {
                 let template_def_id = self.context().get_template_def_id(def_id);
-                yield if self.context().get_template_name(def_id) is .Some(name) and name == template_name then template_def_id else def_id_invalid();
+                if self.context().get_template_name(def_id) is .Some(name) and name == template_name then template_def_id else def_id_invalid()
             },
             _ then def_id_invalid(),
         };
@@ -477,9 +477,9 @@ given TypeChecker {
             .Some(expected_type) then {
                 let operand_is_result = not self.get_enum_case_field_types(operand_type, "Ok").is_empty() and not self.get_enum_case_field_types(operand_type, "Error").is_empty();
                 let operand_is_option = not self.get_enum_case_field_types(operand_type, "Some").is_empty() or when operand_type in {
-                        .GenericEnum(template, _, _) then template == "Option",
-                        _ then false,
-                    };
+                    .GenericEnum(template, _, _) then template == "Option",
+                    _ then false,
+                };
 
                 if operand_is_result and self.is_option_result_wrapper(expected_type, "Result") then {
                     return expected_type;
@@ -511,7 +511,7 @@ given TypeChecker {
                     true then self.context().get_foreign_struct_fields(def_id),
                     false then self.context().get_struct_fields(def_id),
                 };
-                yield when fields_opt in {
+                when fields_opt in {
                     .Some(fields) then {
                         let mutable found = Type.Unknown();
                         for f in fields then {
@@ -529,16 +529,16 @@ given TypeChecker {
                                             self.storage.file_path,
                                             "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(inner_type))'"
 
-                                    )
+                                        )
                                     );
                                 };
                                 break;
                             };
                         };
-                        yield found;
+                        found
                     },
                     .None() then Type.Unknown(),
-                };
+                }
             },
             .GenericStruct(template_name, _, args) then {
                 // 直接从泛型模板的 def_id 读取字段，避免再次依赖全局类型表。
@@ -561,13 +561,13 @@ given TypeChecker {
                                                 self.storage.file_path,
                                                 "Cannot access \(access_label) field '\(member)' of type '\(template_name)'"
 
-                                        )
+                                            )
                                         );
                                     };
                                     break;
                                 };
                             };
-                            yield found;
+                            found
                         },
                         .None() then Type.Unknown(),
                     },
@@ -575,7 +575,7 @@ given TypeChecker {
                 };
 
                 // 将模板字段类型中的泛型参数替换为当前实例的实参类型。
-                yield when self.storage.generic_templates.lookup_struct(template_name) in {
+                when self.storage.generic_templates.lookup_struct(template_name) in {
                     .Some(struct_template) then {
                         let mutable bindings = Dict[String, Type].new();
                         let mutable i UInt = 0;
@@ -587,14 +587,14 @@ given TypeChecker {
                             bindings.insert(tp.name, (args[i]));
                             i += 1;
                         };
-                        yield self.apply_type_bindings(raw_field_type, bindings);
+                        self.apply_type_bindings(raw_field_type, bindings)
                     },
                     .None() then raw_field_type,
-                };
+                }
             },
             .GenericEnum(template, _, _) then
-                // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
-                Type.Unknown(),
+            // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
+            Type.Unknown(),
             _ then Type.Unknown(),
         };
     };
@@ -620,7 +620,7 @@ given TypeChecker {
                 if self.context().is_foreign_struct(def_id) then {
                     return true;
                 };
-                yield when self.context().get_struct_fields(def_id) in {
+                when self.context().get_struct_fields(def_id) in {
                     .Some(fields) then {
                         let mutable found = false;
                         for field in fields then {
@@ -629,10 +629,10 @@ given TypeChecker {
                                 return field.is_mutable;
                             };
                         };
-                        yield not found;
+                        not found
                     },
                     .None() then true,
-                };
+                }
             },
             .GenericStruct(template_name, _, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
@@ -644,7 +644,7 @@ given TypeChecker {
                                 return field.is_mutable;
                             };
                         };
-                        yield not found;
+                        not found
                     },
                     .None() then true,
                 },
@@ -659,36 +659,36 @@ given TypeChecker {
             .StructureType(def_id) then {
                 let template_name_opt = self.context().get_template_name(def_id);
                 let type_args_opt = self.context().get_type_arguments(def_id);
-                yield when template_name_opt in {
+                when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
                             let mutable args = List[Type].new();
                             for arg in type_args then {
                                 args.push(arg);
                             };
-                            yield Type.GenericStruct(template_name, self.context().get_template_def_id(def_id), args);
+                            Type.GenericStruct(template_name, self.context().get_template_def_id(def_id), args)
                         },
                         .None() then t,
                     },
                     .None() then t,
-                };
+                }
             },
             .EnumType(def_id) then {
                 let template_name_opt = self.context().get_template_name(def_id);
                 let type_args_opt = self.context().get_type_arguments(def_id);
-                yield when template_name_opt in {
+                when template_name_opt in {
                     .Some(template_name) then when type_args_opt in {
                         .Some(type_args) then {
                             let mutable args = List[Type].new();
                             for arg in type_args then {
                                 args.push(arg);
                             };
-                            yield Type.GenericEnum(template_name, self.context().get_template_def_id(def_id), args);
+                            Type.GenericEnum(template_name, self.context().get_template_def_id(def_id), args)
                         },
                         .None() then t,
                     },
                     .None() then t,
-                };
+                }
             },
             _ then t,
         };
@@ -819,14 +819,14 @@ given TypeChecker {
         let normalized_concrete = self.normalize_type_for_bindings(concrete);
         return when normalized_pattern in {
             .GenericParameter(name) then {
-                yield when bindings.get(name) in {
+                when bindings.get(name) in {
                     .Some(existing) then if self.same_expr_type(existing, normalized_concrete) then bindings else bindings,
                     .None() then {
                         let mutable next_bindings = bindings;
                         next_bindings.insert(name, normalized_concrete);
-                        yield next_bindings;
+                        next_bindings
                     },
-                };
+                }
             },
             .ReferenceType(p_inner) then when normalized_concrete in {
                 .ReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner, c_inner, bindings),
@@ -881,7 +881,7 @@ given TypeChecker {
                         current_bindings = self.infer_type_bindings_persistent((p_params[i]).param_type, (c_params[i]).param_type, current_bindings);
                         i += 1;
                     };
-                    yield self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings);
+                    self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings)
                 },
                 _ then bindings,
             },
@@ -896,7 +896,7 @@ given TypeChecker {
                         current_bindings = self.infer_type_bindings_persistent((p_args[i]), (c_args[i]), current_bindings);
                         i += 1;
                     };
-                    yield current_bindings;
+                    current_bindings
                 },
                 _ then bindings,
             },
@@ -911,7 +911,7 @@ given TypeChecker {
                         current_bindings = self.infer_type_bindings_persistent((p_args[i]), (c_args[i]), current_bindings);
                         i += 1;
                     };
-                    yield current_bindings;
+                    current_bindings
                 },
                 _ then bindings,
             },
@@ -943,28 +943,28 @@ given TypeChecker {
                 for param_ref in param_types then {
                     replaced_params.push(self.apply_type_bindings(param_ref, bindings));
                 };
-                yield Type.FunctionType(types_to_param_entries(replaced_params), self.apply_type_bindings(return_type, bindings));
+                Type.FunctionType(types_to_param_entries(replaced_params), self.apply_type_bindings(return_type, bindings))
             },
             .GenericStruct(template, template_def_id, args) then {
                 let mutable replaced = List[Type].new();
                 for arg_ref in args then {
                     replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                yield Type.GenericStruct(template, template_def_id, replaced);
+                Type.GenericStruct(template, template_def_id, replaced)
             },
             .GenericEnum(template, template_def_id, args) then {
                 let mutable replaced = List[Type].new();
                 for arg_ref in args then {
                     replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                yield Type.GenericEnum(template, template_def_id, replaced);
+                Type.GenericEnum(template, template_def_id, replaced)
             },
             .TraitObject(trait_name, trait_def_id, args) then {
                 let mutable replaced = List[Type].new();
                 for arg_ref in args then {
                     replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                yield Type.TraitObject(trait_name, trait_def_id, replaced);
+                Type.TraitObject(trait_name, trait_def_id, replaced)
             },
             _ then t,
         };
@@ -991,14 +991,14 @@ given TypeChecker {
                 for arg in args then {
                     out.push(arg);
                 };
-                yield out;
+                out
             },
             .GenericEnum(_, _, args) then {
                 let mutable out = List[Type].new();
                 for arg in args then {
                     out.push(arg);
                 };
-                yield out;
+                out
             },
             .StructureType(def_id) then self.context().get_type_arguments(def_id) or else List[Type].new(),
             .EnumType(def_id) then self.context().get_type_arguments(def_id) or else List[Type].new(),
@@ -1025,10 +1025,10 @@ given TypeChecker {
                     .None() then {},
                 };
                 let type_name = self.context().get_name(def_id) or else "";
-                yield when self.storage.generic_templates.lookup_extension_methods(type_name) in {
+                when self.storage.generic_templates.lookup_extension_methods(type_name) in {
                     .Some(_) then Option[String].Some(type_name),
                     .None() then Option[String].None(),
-                };
+                }
             },
             .EnumType(def_id) then {
                 when self.context().get_template_name(def_id) in {
@@ -1039,10 +1039,10 @@ given TypeChecker {
                     .None() then {},
                 };
                 let type_name = self.context().get_name(def_id) or else "";
-                yield when self.storage.generic_templates.lookup_extension_methods(type_name) in {
+                when self.storage.generic_templates.lookup_extension_methods(type_name) in {
                     .Some(_) then Option[String].Some(type_name),
                     .None() then Option[String].None(),
-                };
+                }
             },
             .ReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("Ref") in {
                 .Some(_) then Option[String].Some("Ref"),
@@ -1380,7 +1380,7 @@ given TypeChecker {
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
                     self.push_diagnostic(_rdmsg.to_string());
-                    yield normalized_base_type;
+                    normalized_base_type
                 },
                 .BorrowedReferenceType(_) then {
                     let mutable _rdmsg = StringBuilder.new();
@@ -1388,7 +1388,7 @@ given TypeChecker {
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
                     self.push_diagnostic(_rdmsg.to_string());
-                    yield normalized_base_type;
+                    normalized_base_type
                 },
                 _ then Type.MutableReferenceType(self.box_type(inner_type)),
             },
@@ -1401,7 +1401,7 @@ given TypeChecker {
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
                     self.push_diagnostic(_rdmsg.to_string());
-                    yield normalized_base_type;
+                    normalized_base_type
                 },
                 .BorrowedReferenceType(_) then {
                     let mutable _rdmsg = StringBuilder.new();
@@ -1409,7 +1409,7 @@ given TypeChecker {
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
                     self.push_diagnostic(_rdmsg.to_string());
-                    yield normalized_base_type;
+                    normalized_base_type
                 },
                 _ then Type.MutableBorrowedReferenceType(self.box_type(inner_type)),
             },
@@ -1546,14 +1546,14 @@ given TypeChecker {
                 for arg_ref in args then {
                     replaced.push(self.replace_type_occurrence(arg_ref, pattern, replacement));
                 };
-                yield Type.GenericStruct(template, template_def_id, replaced);
+                Type.GenericStruct(template, template_def_id, replaced)
             },
             .GenericEnum(template, template_def_id, args) then {
                 let mutable replaced = List[Type].new();
                 for arg_ref in args then {
                     replaced.push(self.replace_type_occurrence(arg_ref, pattern, replacement));
                 };
-                yield Type.GenericEnum(template, template_def_id, replaced);
+                Type.GenericEnum(template, template_def_id, replaced)
             },
             .FunctionType(params, ret) then {
                 let mutable replaced_params = List[Type].new();
@@ -1561,7 +1561,7 @@ given TypeChecker {
                     replaced_params.push(self.replace_type_occurrence(entry.param_type, pattern, replacement));
                 };
                 let replaced_ret = self.replace_type_occurrence(ret, pattern, replacement);
-                yield make_function_type(replaced_params, replaced_ret);
+                make_function_type(replaced_params, replaced_ret)
             },
             _ then t,
         };
@@ -1616,16 +1616,16 @@ given TypeChecker {
     module_private resolve_method_template_key(self, inner_type Type) Option[String] = {
         return when inner_type in {
             .GenericStruct(template, _, _) then {
-                yield Option[String].Some(template);
+                Option[String].Some(template)
             },
             .GenericEnum(template, _, _) then {
-                yield Option[String].Some(template);
+                Option[String].Some(template)
             },
             .StructureType(def_id) then {
-                yield self.context().get_template_name(def_id);
+                self.context().get_template_name(def_id)
             },
             .EnumType(def_id) then {
-                yield self.context().get_template_name(def_id);
+                self.context().get_template_name(def_id)
             },
             _ then Option[String].None(),
         };
@@ -2185,13 +2185,13 @@ given TypeChecker {
                         typed_params.push(TypedParam(p.name, p.is_mutable, resolved_param_type, p.named));
                     };
                     let mutable resolved_return_type = self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings));
-                    yield Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type));
+                    Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type))
                 },
                 .None() then Option[Symbol].None(),
             },
             .Error(e) then {
                 self.report_trait_method_flatten_failure(trait_name, method_name, "resolve_trait_registry_method_signature", e);
-                yield Option[Symbol].None();
+                Option[Symbol].None()
             },
         };
     };
@@ -2203,8 +2203,8 @@ given TypeChecker {
                     when self.storage.global_scope.lookup_type(name) in {
                         .Some(resolved) then {
                             if not (resolved is .GenericParameter(_) and when resolved in { .GenericParameter(n) then n == name, _ then false }) then {
-                                bindings.insert(name, resolved)
-                            ;};
+                                bindings.insert(name, resolved);
+                            };
                         },
                         .None() then {},
                     };
@@ -2256,31 +2256,31 @@ given TypeChecker {
                 for param_ref in param_types then {
                     replaced_params.push(self.bind_conformance_trait_self_type(param_ref, trait_name, concrete_receiver));
                 };
-                yield Type.FunctionType(types_to_param_entries(replaced_params), self.bind_conformance_trait_self_type(return_type, trait_name, concrete_receiver));
+                Type.FunctionType(types_to_param_entries(replaced_params), self.bind_conformance_trait_self_type(return_type, trait_name, concrete_receiver))
             },
             .GenericStruct(template, template_def_id, args) then {
-                yield when template == trait_name in {
+                when template == trait_name in {
                     true then concrete_receiver,
                     false then {
                         let mutable replaced_args = List[Type].new();
                         for arg_ref in args then {
                             replaced_args.push(self.bind_conformance_trait_self_type(arg_ref, trait_name, concrete_receiver));
                         };
-                        yield Type.GenericStruct(template, template_def_id, replaced_args);
+                        Type.GenericStruct(template, template_def_id, replaced_args)
                     },
-                };
+                }
             },
             .GenericEnum(template, template_def_id, args) then {
-                yield when template == trait_name in {
+                when template == trait_name in {
                     true then concrete_receiver,
                     false then {
                         let mutable replaced_args = List[Type].new();
                         for arg_ref in args then {
                             replaced_args.push(self.bind_conformance_trait_self_type(arg_ref, trait_name, concrete_receiver));
                         };
-                        yield Type.GenericEnum(template, template_def_id, replaced_args);
+                        Type.GenericEnum(template, template_def_id, replaced_args)
                     },
-                };
+                }
             },
             _ then t,
         };
@@ -2319,14 +2319,14 @@ given TypeChecker {
         return when template_key in {
             .Some(key) then {
                 let actual_type_args = self.receiver_type_args(receiver_type);
-                yield when self.storage.generic_templates.lookup_extension_method(
+                when self.storage.generic_templates.lookup_extension_method(
                     key,
                     method_name,
                     Option[UInt].None(),
                     Option[UInt].Some(actual_type_args.count()),
                 ) in {
                     .Some(template) then {
-                        yield if self.extension_template_is_receiver_style(template) then Option[Symbol].None() else {
+                        if self.extension_template_is_receiver_style(template) then Option[Symbol].None() else {
                             // Swift `resolveGenericExtensionMethod`
                             // (TypeCheckerMethods.swift:581-610) binds the template's own
                             // `typeParams` and `Self`, then substitutes once. The
@@ -2364,7 +2364,7 @@ given TypeChecker {
                                 .Some(ret) then self.apply_type_bindings(ret, checked_bindings),
                                 .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
                             };
-                            yield Option[Symbol].Some(
+                            Option[Symbol].Some(
                                 self.make_method_callable_symbol_with_visibility(
                                     method_name,
                                     typed_params,
@@ -2374,11 +2374,11 @@ given TypeChecker {
                                     template.source_file,
                                     template.package_id,
                                 ),
-                            );
-                        };
+                            )
+                        }
                     },
                     .None() then Option[Symbol].None(),
-                };
+                }
             },
             .None() then Option[Symbol].None(),
         };
@@ -2941,7 +2941,7 @@ given TypeChecker {
                         i += 1;
                     };
                 };
-                yield out;
+                out
             },
             .None() then self.resolve_method_param_types(base_type, method_name),
         };
@@ -2952,7 +2952,7 @@ given TypeChecker {
             .Some(method) then {
                 let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
                 let bindings = self.resolve_signature_method_type_bindings(receiver_type, method, method_type_args);
-                yield self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(method), bindings));
+                self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(method), bindings))
             },
             .None() then self.resolve_method_return_type(base_type, method_name),
         };
@@ -3139,14 +3139,14 @@ given TypeChecker {
                 for parameter_type in self.method_param_types(method) then {
                     out.push(parameter_type);
                 };
-                yield out;
+                out
             },
             .None() then
-                // 尝试从 enum case 字段获取参数类型
-                when self.storage.global_scope.lookup_type(type_name) in {
-                    .Some(t) then self.get_enum_case_field_types(t, method_name),
-                    .None() then List[Type].new(),
-                },
+            // 尝试从 enum case 字段获取参数类型
+            when self.storage.global_scope.lookup_type(type_name) in {
+                .Some(t) then self.get_enum_case_field_types(t, method_name),
+                .None() then List[Type].new(),
+            },
         };
     };
 
@@ -3157,7 +3157,7 @@ given TypeChecker {
                 for parameter_type in self.method_param_types(method) then {
                     out.push(parameter_type);
                 };
-                yield out;
+                out
             },
             .None() then self.resolve_static_method_param_types(type_name, method_name),
         };
@@ -3464,7 +3464,7 @@ given TypeChecker {
                     for field in fields then {
                         types.push(field.field_type);
                     };
-                    yield types;
+                    types
                 },
                 .None() then List[Type].new(),
             },
@@ -3485,7 +3485,7 @@ given TypeChecker {
                         for field in fields then {
                             types.push(self.apply_type_bindings(field.field_type, bindings));
                         };
-                        yield types;
+                        types
                     },
                     .None() then List[Type].new(),
                 },

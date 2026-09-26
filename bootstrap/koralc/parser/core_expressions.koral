@@ -294,7 +294,7 @@ given Parser {
         return when expr in {
             .Identifier(base_name, _) then if self.is_upper_first(base_name) then Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, List[TypeNode].new())) else Option[StaticDispatchReceiver].None(),
             .GenericInstantiation(base_name, type_args, _) then {
-                yield Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, type_args));
+                Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, type_args))
             },
             .MemberPath(base_expr, path, _) then {
                 if not path.is_empty() then {
@@ -317,12 +317,12 @@ given Parser {
 
                     let last = path[path.count() - 1];
                     if self.is_upper_first(last) then {
-                        yield Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(last, List[TypeNode].new()));
+                        Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(last, List[TypeNode].new()))
                     } else {
-                        yield Option[StaticDispatchReceiver].None();
+                        Option[StaticDispatchReceiver].None()
                     };
                 };
-                yield Option[StaticDispatchReceiver].None();
+                Option[StaticDispatchReceiver].None()
             },
             _ then Option[StaticDispatchReceiver].None(),
         };
@@ -336,7 +336,7 @@ given Parser {
                 receiver_path.push(path[idx]);
                 idx += 1;
             };
-            yield Expr.MemberPath(base, receiver_path, self.span_from_expr_start(base));
+            Expr.MemberPath(base, receiver_path, self.span_from_expr_start(base))
         };
     };
 
@@ -406,10 +406,68 @@ given Parser {
         };
 
         self.parse_debug("block begin");
-        let statements = self.parse_statement_list_until_rbrace("block") or return;
+        // Mirrors Swift ParserExpressions.blockExpression(): statements are
+        // ';'-terminated; a final expression with no ';' is the block's value.
+        let mutable statements = List[Statement].new();
+        let mutable tail_expression = Option[Expr].None();
+        let mutable finished = false;
+        while not finished then {
+            when self.current().kind in {
+                .RBrace() then {
+                    finished = true;
+                },
+                .Eof() then {
+                    return .Error(self.parser_error("Unexpected EOF in block"));
+                },
+                _ then {
+                    let stmt_start = self.current();
+                    let is_declaration_statement =
+                        self.current().kind is .KwLet()
+                        or self.current().kind is .KwReturn()
+                        or self.current().kind is .KwBreak()
+                        or self.current().kind is .KwContinue()
+                        or self.current().kind is .KwDefer();
+                    if is_declaration_statement then {
+                        let before = self.index;
+                        let parsed = self.parse_statement() or return;
+                        if self.index == before then {
+                            let t = self.current();
+                            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", "block", t), t));
+                        };
+                        statements.push(parsed);
+                    } else {
+                        let expr = self.parse_expression_checked("block expression") or return;
+                        if self.is_assignment_operator() then {
+                            let op = self.parse_assignment_operator() or else {
+                                return .Error(self.parser_error_without_span("Unknown assignment operator"));
+                            };
+                            self.advance();
+                            let rhs = self.parse_expression_checked("assignment right-hand side") or return;
+                            let _ = self.require_semicolon() or return;
+                            statements.push(Statement.AssignmentStmt(expr, op, rhs, self.span_from_start(stmt_start)));
+                        } else {
+                            when self.current().kind in {
+                                .Semicolon() then {
+                                    self.advance();
+                                    statements.push(Statement.ExprStmt(expr, self.span_from_start(stmt_start)));
+                                },
+                                _ then {
+                                    tail_expression = Option[Expr].Some(expr);
+                                    finished = true;
+                                },
+                            };
+                        };
+                    };
+                },
+            };
+        };
+        when self.current().kind in {
+            .RBrace() then { self.advance();},
+            _ then { return .Error(self.parser_error_at("Unexpected token: \(token_kind_description(self.current()))", self.current()));},
+        };
 
         let span = self.span_from_start(start);
-        return .Ok(Expr.Block(statements, span));
+        return .Ok(Expr.Block(statements, tail_expression, span));
     };
 
     module_private parse_call_argument(self, context String) Result[Expr] = {
@@ -685,11 +743,11 @@ given Parser {
             .Minus() then {
                 self.advance();
                 let value = if self.current().kind is .IntegerLiteral(v) then {
-                        self.advance();
-                        yield v;
-                    } else {
-                        return .Error(self.parser_error("Expected integer literal after '-' in negative pattern"));
-                    };
+                    self.advance();
+                    v
+                } else {
+                    return .Error(self.parser_error("Expected integer literal after '-' in negative pattern"));
+                };
                 node = PatternNode.NegativeIntegerLiteral(value, self.span_from_start(start));
             },
             .IntegerLiteral(value) then {
@@ -712,11 +770,11 @@ given Parser {
                     is_negative = true;
                 };
                 let value = if self.current().kind is .IntegerLiteral(v) then {
-                        self.advance();
-                        yield if is_negative then "-\(v)" else v;
-                    } else {
-                        return .Error(self.parser_error("Expected integer literal after '>' in comparison pattern"));
-                    };
+                    self.advance();
+                    if is_negative then "-\(v)" else v
+                } else {
+                    return .Error(self.parser_error("Expected integer literal after '>' in comparison pattern"));
+                };
                 node = PatternNode.ComparisonPattern(ComparisonPatternOperator.Greater(), value, self.span_from_start(start));
             },
             .Less() then {
@@ -727,11 +785,11 @@ given Parser {
                     is_negative = true;
                 };
                 let value = if self.current().kind is .IntegerLiteral(v) then {
-                        self.advance();
-                        yield if is_negative then "-\(v)" else v;
-                    } else {
-                        return .Error(self.parser_error("Expected integer literal after '<' in comparison pattern"));
-                    };
+                    self.advance();
+                    if is_negative then "-\(v)" else v
+                } else {
+                    return .Error(self.parser_error("Expected integer literal after '<' in comparison pattern"));
+                };
                 node = PatternNode.ComparisonPattern(ComparisonPatternOperator.Less(), value, self.span_from_start(start));
             },
             .GreaterEqual() then {
@@ -742,11 +800,11 @@ given Parser {
                     is_negative = true;
                 };
                 let value = if self.current().kind is .IntegerLiteral(v) then {
-                        self.advance();
-                        yield if is_negative then "-\(v)" else v;
-                    } else {
-                        return .Error(self.parser_error("Expected integer literal after '>=' in comparison pattern"));
-                    };
+                    self.advance();
+                    if is_negative then "-\(v)" else v
+                } else {
+                    return .Error(self.parser_error("Expected integer literal after '>=' in comparison pattern"));
+                };
                 node = PatternNode.ComparisonPattern(ComparisonPatternOperator.GreaterEqual(), value, self.span_from_start(start));
             },
             .LessEqual() then {
@@ -757,11 +815,11 @@ given Parser {
                     is_negative = true;
                 };
                 let value = if self.current().kind is .IntegerLiteral(v) then {
-                        self.advance();
-                        yield if is_negative then "-\(v)" else v;
-                    } else {
-                        return .Error(self.parser_error("Expected integer literal after '<=' in comparison pattern"));
-                    };
+                    self.advance();
+                    if is_negative then "-\(v)" else v
+                } else {
+                    return .Error(self.parser_error("Expected integer literal after '<=' in comparison pattern"));
+                };
                 node = PatternNode.ComparisonPattern(ComparisonPatternOperator.LessEqual(), value, self.span_from_start(start));
             },
             .Identifier(name) then {
@@ -1139,7 +1197,7 @@ given Parser {
                 let type_args = self.parse_type_arg_list() or else {
                     return .Error(self.parser_error("parse generic application type arguments error"));
                 };
-                yield .Ok(Expr.GenericInstantiation(name, type_args, self.span_from_expr_start(base)));
+                .Ok(Expr.GenericInstantiation(name, type_args, self.span_from_expr_start(base)))
             },
             _ then .Error(self.parser_error_without_span("generic application requires a type-like base expression")),
         };
@@ -1152,7 +1210,7 @@ given Parser {
             .Ok(expr) then Option[Expr].Some(expr),
             .Error(_) then {
                 self.restore_state(saved);
-                yield Option[Expr].None();
+                Option[Expr].None()
             },
         };
     };
@@ -1260,7 +1318,7 @@ given Parser {
                             };
                         };
                         let expr = if self.is_upper_first(type_name) and not self.is_upper_first(member) then Expr.StaticMethodCall(type_name, List[TypeNode].new(), member, args, self.span_from_expr_start(base)) else Expr.Call(base, args, self.span_from_expr_start(base));
-                        yield Result[Expr].Ok(expr);
+                        Result[Expr].Ok(expr)
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
                         if not allows_constructor_args then {
@@ -1269,7 +1327,7 @@ given Parser {
                                 .Error(e) then { return .Error(e);},
                             };
                         };
-                        yield Result[Expr].Ok(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base)));
+                        Result[Expr].Ok(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base)))
                     },
                     .MemberPath(_, _, _) then {
                         if not allows_constructor_args then {
@@ -1282,14 +1340,14 @@ given Parser {
                             .Some(receiver) then Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base)),
                             .None() then Expr.Call(base, args, self.span_from_expr_start(base)),
                         };
-                        yield Result[Expr].Ok(expr);
+                        Result[Expr].Ok(expr)
                     },
                     _ then {
                         when self.reject_non_constructor_call_args(args) in {
                             .Ok(_) then {},
                             .Error(e) then { return .Error(e);},
                         };
-                        yield Result[Expr].Ok(Expr.Call(base, args, self.span_from_expr_start(base)));
+                        Result[Expr].Ok(Expr.Call(base, args, self.span_from_expr_start(base)))
                     },
                 };
             },
@@ -1336,12 +1394,12 @@ given Parser {
                     extended.push(segment);
                 };
                 extended.push(member);
-                yield Expr.MemberPath(path_base, extended, span);
+                Expr.MemberPath(path_base, extended, span)
             },
             _ then {
                 let mutable path = List[String].new();
                 path.push(member);
-                yield Expr.MemberPath(base, path, span);
+                Expr.MemberPath(base, path, span)
             },
         };
     };
@@ -1455,12 +1513,12 @@ given Parser {
                     // then an ordinary call. Trying the cast first makes
                     // `Num(Tag)` a cast of `Num` to `Tag`.
                     let qualified_expr = if self.qualified_path_base_is_type_name(expr) then {
-                        yield when self.try_parse_qualified_trait_ref() in {
+                        when self.try_parse_qualified_trait_ref() in {
                             .Some(trait_type) then Option[Expr].Some(Expr.TraitQualificationExpr(expr, trait_type, self.span_from_expr_start(expr))),
                             .None() then Option[Expr].None(),
-                        };
+                        }
                     } else {
-                        yield Option[Expr].None();
+                        Option[Expr].None()
                     };
                     expr = when qualified_expr in {
                         .Some(qualified) then qualified,

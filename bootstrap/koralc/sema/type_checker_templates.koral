@@ -65,7 +65,7 @@ given TypeChecker {
                 for item in items then {
                     copied.push(item);
                 };
-                yield Option[List[Symbol]].Some(copied);
+                Option[List[Symbol]].Some(copied)
             },
             .None() then Option[List[Symbol]].None(),
         };
@@ -210,7 +210,7 @@ given TypeChecker {
                     if self.storage.current_scope.lookup_type(name) is .Some(t) then {
                         return self.canonicalize_alias_type(t);
                     };
-                    yield self.resolve_type(node);
+                    self.resolve_type(node)
                 },
             },
             .InferredSelf() then when bindings.get("Self") in {
@@ -221,71 +221,73 @@ given TypeChecker {
                 let trait_ref_override = when inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
-                        yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
+                        Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
                             };
                             let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
-                            yield Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner));
-                        } else Option[Type].None();
+                            Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner))
+                        } else Option[Type].None()
                     },
                     _ then Option[Type].None(),
                 };
                 when trait_ref_override in {
-                    .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
-                    .None() then {},
-                };
-                let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner);
+                    .Some(resolved_trait_ref) then resolved_trait_ref,
+                    .None() then {
+                        let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
+                        if is_mutable then self.resolve_mutable_reference_type(resolved_inner) else self.resolve_reference_type(resolved_inner)
+                    },
+                }
             },
             .BorrowedReference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner);
+                if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
             },
             .Pointer(inner, is_mutable) then {
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner);
+                if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
             },
             .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
-                        yield Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner));
+                        Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
                             };
                             let trait_ref_inner = self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args));
-                            yield Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner));
-                        } else Option[Type].None();
+                            Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner))
+                        } else Option[Type].None()
                     },
                     _ then Option[Type].None(),
                 };
                 when trait_ref_override in {
-                    .Some(resolved_trait_ref) then { yield resolved_trait_ref;},
-                    .None() then {},
-                };
-                let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
-                yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner);
+                    .Some(resolved_trait_ref) then resolved_trait_ref,
+                    .None() then {
+                        let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
+                        if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
+                    },
+                }
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
                     resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
                 };
-                yield if self.is_enum_base_name(base) then {
-                    yield Type.GenericEnum(base, self.storage.generic_templates.lookup_enum_def_id(base), resolved_args);
+                if self.is_enum_base_name(base) then {
+                    Type.GenericEnum(base, self.storage.generic_templates.lookup_enum_def_id(base), resolved_args)
                 } else {
-                    yield Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args);
-                };
+                    Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args)
+                }
             },
             .FunctionType(param_types, return_type) then {
                 let mutable resolved_params = List[Type].new();
@@ -293,7 +295,7 @@ given TypeChecker {
                     resolved_params.push(self.resolve_template_type_node_with_bindings(param_type, bindings));
                 };
                 let resolved_return = self.resolve_template_type_node_with_bindings(return_type, bindings);
-                yield make_function_type(resolved_params, resolved_return);
+                make_function_type(resolved_params, resolved_return)
             },
         };
     };
@@ -468,7 +470,7 @@ given TypeChecker {
                             current_ref.method,
 
                             current_ref.conformance_trait_name,
-            current_ref.conformance_trait_def_id,
+                            current_ref.conformance_trait_def_id,
 
                             current_ref.conformance_target_type,
 
@@ -487,7 +489,7 @@ given TypeChecker {
                             checked_parameters,
 
                             Option[Type].Some(checked_return_type)
-        );
+                        );
                         self.storage.generic_templates.extension_methods.insert(type_key, updated);
                         return;
                     };
@@ -909,7 +911,7 @@ given TypeChecker {
                     template.method,
 
                     template.conformance_trait_name,
-            template.conformance_trait_def_id,
+                    template.conformance_trait_def_id,
 
                     template.conformance_target_type,
 
@@ -928,7 +930,7 @@ given TypeChecker {
                     template.checked_parameters,
 
                     template.checked_return_type
-        );
+                );
                 self.record_instantiation_request(InstantiationRequest(
                     InstantiationKind.ExtensionMethod(
                         template_name,
@@ -936,7 +938,7 @@ given TypeChecker {
                         request_template,
                         extension_type_args,
                         method_type_args_ref,
-                        ),
+                    ),
                     0,
                     self.storage.file_path,
                 ));
@@ -976,7 +978,7 @@ given TypeChecker {
                         matched_template.method,
 
                         matched_template.conformance_trait_name,
-            matched_template.conformance_trait_def_id,
+                        matched_template.conformance_trait_def_id,
 
                         matched_template.conformance_target_type,
 
@@ -995,7 +997,7 @@ given TypeChecker {
                         matched_template.checked_parameters,
 
                         matched_template.checked_return_type
-        );
+                    );
                     self.record_instantiation_request(InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
                             trait_name,
