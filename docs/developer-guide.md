@@ -16,20 +16,53 @@ At repository root:
 
 ### Build the Compiler
 
+Both compilers have a **debug** and a **release** build mode. **Use release for running
+tests and for any repeated compilation work**; drop to debug only when you need to step
+through the compiler itself.
+
+The Swift host compiler is built with SwiftPM's two configurations:
+
 ```bash
 cd compiler
-swift build -c debug
+
+# debug   — unoptimized, for debugging the compiler itself
+swift build -c debug       # -> compiler/.build/debug/koralc
+
+# release — optimized, for running tests and compiling anything large
+swift build -c release     # -> compiler/.build/release/koralc
+```
+
+The debug binary is roughly **6x slower** at generating C for a large package and **3.7x
+slower** end-to-end than the release one, so the choice is not cosmetic. Measured on
+`bootstrap/koral.json` (see `docs/compile-performance-status.md`):
+
+| host build | `emit-c` | `build` (codegen + clang) |
+|---|---|---|
+| `swift build -c debug` | 264.6 s | 303.1 s |
+| `swift build -c release` | 42.9 s | 81.9 s |
+
+Binaries produced from generated C have their own mode, selected by `koralc` flags that
+control the clang optimization level (`--debug` / `--release` / `--optimize <level>`,
+default `-O1`):
+
+```bash
+koralc build app.koral -o out --debug     # clang -O0 -g  (unoptimized, debuggable)
+koralc build app.koral -o out             # clang -O1     (default, unchanged behaviour)
+koralc build app.koral -o out --release   # clang -O2     (optimized)
+koralc build app.koral -o out --optimize 3
 ```
 
 ### Run Tests
 
 ```bash
-cd compiler
-swift build -c debug
-cd ..
-compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+cd compiler && swift build -c release && cd ..
+compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
 ```
+
+To debug a failing case, rebuild the host compiler with `swift build -c debug` and point
+`--swift-koralc` at `compiler/.build/debug/koralc` instead. Add `--filter <name>` to run a
+single case, and `--verbose` to see the exact compiler command line.
 
 ### Run Shared Test Runner
 
@@ -42,16 +75,16 @@ Important trust boundary:
 - Do not rebuild the bootstrap compiler with itself and then use that next-stage binary as the default test harness; that path is reserved for explicit self-hosting validation and is not assumed stable.
 
 ```bash
-# 1) Build host compiler
+# 1) Build host compiler (release — see "Build the Compiler" above)
 cd compiler
-swift build -c debug
+swift build -c release
 cd ..
 
 # 2) Build bootstrap compiler executable
-compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
 
 # 3) Build shared test runner executable
-compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 
 # 4) Run shared cases against the host-built bootstrap compiler
 ./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
@@ -79,7 +112,7 @@ Examples:
 ./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter hello
 
 # Run shared cases against the Swift compiler
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
 
 # Point to a custom compiler path
 ./bin/compiler-test-runner/compiler_runner.exe --compiler custom --compiler-bin path/to/koralc.exe -j=8
@@ -255,7 +288,7 @@ Recommended flow:
 
 ```bash
 # 1) Build the host bootstrap compiler with the Swift compiler
-compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
 
 # 2) Generate stage2 C
 ./bin/bootstrap/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage2
@@ -786,10 +819,10 @@ How integration tests run (current behavior):
 
 ```bash
 cd compiler
-swift build -c debug
+swift build -c release
 cd ..
-compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
 ```
 
 - Output assertions are comment-based and order-sensitive:
@@ -940,20 +973,20 @@ Use this order when changing compiler, std, runtime, or test-runner behavior:
 ```bash
 # 1) Build Swift host compiler
 cd compiler
-swift build -c debug
+swift build -c release
 cd ..
 
 # 2) Build bootstrap compiler using the host-built compiler
-compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
 
 # 3) Build shared test runner
-compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 
 # 4) Run tests against bootstrap
 ./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
 
 # 5) Run tests against Swift host compiler
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
 ```
 
 Do not use a bootstrap-built next-stage binary as the default test harness unless the task is explicitly self-hosting validation.
@@ -972,7 +1005,7 @@ After compiler/runtime changes, build representative samples to catch compilatio
 
 ```bash
 # Example: build a sample using the host-built compiler
-compiler/.build/debug/koralc build samples/expr-eval/expr_eval.koral -o bin/samples
+compiler/.build/release/koralc build samples/expr-eval/expr_eval.koral -o bin/samples
 ```
 
 Use the repository's sample build/package targets if the sample uses a manifest.
@@ -983,13 +1016,13 @@ Run these validations when the change affects formatting, std API surface, or ge
 
 ```bash
 # Build formatter regression runner
-compiler/.build/debug/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
+compiler/.build/release/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
 
 # Run formatter regression suite
 toolchain/koralfmt/build/test_fmt.exe
 
 # Build std API doc generator
-compiler/.build/debug/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
+compiler/.build/release/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
 
 # Run doc generator from repo root so it can locate std sources
 bin/toolchain-doc-gen/toolchain_doc_gen.exe

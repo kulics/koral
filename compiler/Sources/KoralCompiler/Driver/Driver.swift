@@ -19,8 +19,17 @@ public class Driver {
     var stdConfigPath: String?
     var outputDir: String?
     var noStd = false
+    var optimizeArgs: [String] = Driver.defaultOptimizeArgs
   }
-  
+
+  /// Optimization/debug flags handed to clang for the generated C.
+  /// `-O1` matches historical behaviour; `--debug` / `--release` select the
+  /// conventional debug and release pair.
+  private static let defaultOptimizeArgs = ["-O1"]
+
+  /// Active clang flags for this invocation; set by `process` from the options.
+  private var optimizeArgs: [String] = Driver.defaultOptimizeArgs
+
   public init() {}
 
   private func writeStdout(_ text: String, newline: Bool = true) {
@@ -137,6 +146,25 @@ public class Driver {
       } else if arg == "--no-std" {
         options.noStd = true
         i += 1
+      } else if arg == "--debug" {
+        options.optimizeArgs = ["-O0", "-g"]
+        i += 1
+      } else if arg == "--release" {
+        options.optimizeArgs = ["-O2"]
+        i += 1
+      } else if arg == "--optimize" {
+        if i + 1 < remainingArgs.count, !remainingArgs[i + 1].hasPrefix("-") {
+          let level = remainingArgs[i + 1]
+          guard ["0", "1", "2", "3", "s", "fast"].contains(level) else {
+            writeStderr("Error: Invalid value for --optimize (expected 0, 1, 2, 3, s or fast): \(level)")
+            exit(1)
+          }
+          options.optimizeArgs = ["-O\(level)"]
+          i += 2
+        } else {
+          writeStderr("Error: Missing value for --optimize option")
+          exit(1)
+        }
       } else if arg.hasPrefix("-") {
         writeStderr("Error: Unknown argument: \(arg)")
         printUsage()
@@ -455,6 +483,7 @@ public class Driver {
   }
 
   private func process(mode: DriverCommand, options: InvocationOptions) throws {
+    optimizeArgs = options.optimizeArgs
     if let packageConfigPath = options.packageConfigPath {
       try processPackage(
         packageConfigPath: packageConfigPath,
@@ -902,7 +931,7 @@ public class Driver {
     clangArgs.append("-o")
     clangArgs.append(exeURL.path)
     clangArgs.append("-Wno-everything")
-    clangArgs.append("-O1")
+    clangArgs.append(contentsOf: optimizeArgs)
 
     let linkedLibraries = Array(NSOrderedSet(array: extraLinkedLibraries)) as? [String] ?? extraLinkedLibraries
     for lib in linkedLibraries {
@@ -1138,6 +1167,12 @@ public class Driver {
         --requires-root <path>        Root directory for resolved requires
         --std-config <path>       Standard library manifest path
         --no-std                  Compile without standard library
+
+      Build mode (selects the clang flags used for the generated C):
+        --debug                   -O0 -g   (unoptimized, debuggable)
+        --release                 -O2      (optimized)
+        --optimize <level>        Explicit clang level: 0, 1, 2, 3, s or fast
+                                  Default: -O1
       """
     )
   }
