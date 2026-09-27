@@ -22,6 +22,7 @@ public let parse_expectations(case_path Path) Result[ExpectationSet] = {
     let mutable expected_exact_output = List[String].new();
     let mutable expected_error = List[String].new();
     let mutable expected_exit = Option[Int].None();
+    let mutable expect_items = List[ExpectationItem].new();
 
     for line in content.lines() then {
         let trimmed = line.trim_ascii();
@@ -34,9 +35,14 @@ public let parse_expectations(case_path Path) Result[ExpectationSet] = {
         } else if trimmed.starts_with("// EXPECT EXACT: ") then {
             let want = trimmed.trim_prefix("// EXPECT EXACT: ").trim_ascii();
             expected_exact_output.push(want);
+        } else if trimmed.starts_with("// EXPECT-UNORDERED: ") then {
+            let want = trimmed.trim_prefix("// EXPECT-UNORDERED: ").trim_ascii();
+            expected_output.push(want);
+            expect_items.push(ExpectationItem.Unordered(want));
         } else if trimmed.starts_with("// EXPECT: ") then {
             let want = trimmed.trim_prefix("// EXPECT: ").trim_ascii();
             expected_output.push(want);
+            expect_items.push(ExpectationItem.Ordered(want));
         } else if trimmed.starts_with("// EXPECT-ERROR: ") then {
             let want = trimmed.trim_prefix("// EXPECT-ERROR: ").trim_ascii();
             expected_error.push(want);
@@ -55,7 +61,7 @@ public let parse_expectations(case_path Path) Result[ExpectationSet] = {
         };
     };
 
-    return Result[ExpectationSet].Ok(ExpectationSet(expected_output, expected_exact_output, expected_error, expected_exit));
+    return Result[ExpectationSet].Ok(ExpectationSet(expected_output, expected_exact_output, expected_error, expected_exit, expect_items));
 };
 
 public let match_expectations_in_order(lines List[String], expected List[String]) Pair[Bool, String] = {
@@ -78,6 +84,75 @@ public let match_expectations_in_order(lines List[String], expected List[String]
 
         if not found then {
             return Pair[Bool, String](false, want);
+        };
+    };
+
+    return Pair[Bool, String](true, "");
+};
+
+/// 按序列匹配期望：Ordered 走子序列；连续的 Unordered 构成一组，组内次序自由，
+/// 但整组必须落在「上一条已匹配行之后、下一条 Ordered 之前」的窗口里。
+public let match_expectation_items(lines List[String], items List[ExpectationItem]) Pair[Bool, String] = {
+    let mutable current UInt = 0;
+    let mutable i UInt = 0;
+
+    while i < items.count() then {
+        let item = items[i];
+        when item in {
+            .Ordered(want) then {
+                let trimmed = want.trim_ascii();
+                if not trimmed.is_empty() then {
+                    let mutable found = false;
+                    for j in current..<lines.count() then {
+                        if lines[j].contains(trimmed) then {
+                            found = true;
+                            current = j + 1;
+                            break;
+                        };
+                    };
+                    if not found then {
+                        return Pair[Bool, String](false, want);
+                    };
+                };
+                i += 1;
+            },
+            .Unordered(_) then {
+                // 收集这一组
+                let mutable group = List[String].new();
+                while i < items.count() then {
+                    when items[i] in {
+                        .Unordered(want) then {
+                            group.push(want);
+                            i += 1;
+                        },
+                        _ then { break; },
+                    };
+                };
+                // 组内逐条匹配到互不相同的行，窗口右端取最大命中位置
+                let mutable consumed = Set[UInt].new();
+                let mutable farthest = current;
+                for want in group then {
+                    let trimmed = want.trim_ascii();
+                    if trimmed.is_empty() then {
+                        continue;
+                    };
+                    let mutable found = false;
+                    for j in current..<lines.count() then {
+                        if not consumed.contains(j) and lines[j].contains(trimmed) then {
+                            consumed.insert(j);
+                            if j + 1 > farthest then {
+                                farthest = j + 1;
+                            };
+                            found = true;
+                            break;
+                        };
+                    };
+                    if not found then {
+                        return Pair[Bool, String](false, want);
+                    };
+                };
+                current = farthest;
+            },
         };
     };
 
