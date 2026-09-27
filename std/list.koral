@@ -26,10 +26,11 @@ public type mutable ListIterator[T Any](module_private source List[T], module_pr
 // ============================================================================
 given[T Any] List[T] {
 
+    /// 空列表不分配缓冲区，首次 push 时再分配。
+    /// 编译器里有大量建完就丢（或一直为空）的临时列表，例如每个 `Scope` 的
+    /// `entry_list` / `local_entry_list`，为它们每次都付一次 alloc 不值得。
     public new() Self = {
-        let cap UInt = 10;
-        let source = alloc_memory[T](cap);
-        return List[T](source, 0, cap);
+        return List[T](null_ptr[T](), 0, 0);
     };
 
     public with_capacity(capacity UInt) Self = {
@@ -46,15 +47,18 @@ given[T Any] List[T] {
 
     file_private ensure_capacity(self, min_capacity UInt) Void = {
         if min_capacity > self.cap then {
-            let mutable new_cap = self.cap * 2;
+            // 从 0 起步时先要一块够用的容量，避免 1,2,3… 逐个翻倍。
+            let mutable new_cap = if self.cap == 0(UInt) then 8(UInt) else self.cap * 2(UInt);
             if new_cap < min_capacity then {
                 new_cap = min_capacity;
             };
             let new_source = alloc_memory[T](new_cap);
             let old_len = self.len;
-            let old_source = self.source;
-            move_memory(new_source, old_source, old_len);
-            dealloc_memory(old_source);
+            // 空列表的 source 是 null，不要交给 memmove。
+            if old_len > 0(UInt) then {
+                move_memory(new_source, self.source, old_len);
+            };
+            dealloc_memory(self.source);
             self.source = new_source;
             self.cap = new_cap;
         };

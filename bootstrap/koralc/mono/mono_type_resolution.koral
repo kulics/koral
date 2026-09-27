@@ -880,6 +880,14 @@ file_private let resolve_parameterized_type_single(mono Monomorphizer, t Type) T
 };
 
 public let resolve_parameterized_type(mono Monomorphizer, t Type) Type = {
+    // 快路径：命中缓存直接返回。缓存由 resolve_parameterized_type_single 全量填充
+    // （连已具体的原语类型也缓存 t→t），而这个入口被逐节点调用，命中率很高。
+    // 不短路的话，即使答案已在缓存里，每次调用也要分配 worklist 的 List + Dict，
+    // 以及 collect_resolve_children 的一次 List。
+    when mono.storage.resolved_parameterized_types.get(t) in {
+        .Some(cached) then { return cached;},
+        .None() then {},
+    };
     // ── Iterative worklist pre-resolution ──────────────────────────────────
     // Pre-resolve all descendant types iteratively to avoid stack overflow.
     // This ensures that when the resolution logic below calls resolve_parameterized_type

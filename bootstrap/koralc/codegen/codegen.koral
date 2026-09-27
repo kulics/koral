@@ -81,6 +81,16 @@ public type mutable CodeGen(
 
     // 跨 emitter 复用的 owner-sensitive callable 名缓存
     mutable current_owner_callable_c_name_cache Dict[String, String],
+
+    // ── DefId 反查索引 ────────────────────────────────────────────────────
+    // codegen 里多处需要「给定 DefId 找回 globals 里的声明」。原先每次调用都全量
+    // 扫 program.globals，是 O(N)×调用次数。改成预热一次建索引、之后 O(1) 查表。
+    // 注意 DefId 不保证稠密（模块导出后会稀疏），所以一律用 Dict/Set 而非数组下标。
+    mutable foreign_function_def_ids Set[UInt],
+    mutable foreign_global_var_def_ids Set[UInt],
+    mutable foreign_type_def_ids Set[UInt],
+    mutable struct_fields_by_def_id Dict[UInt, List[TypedField]],
+    mutable enum_cases_by_def_id Dict[UInt, List[TypedEnumCase]],
 );
 
 given CodeGen {
@@ -118,8 +128,18 @@ given CodeGen {
             Dict[UInt, Type].new(),
             // current_owner_callable_c_name_cache
             Dict[String, String].new(),
+            // foreign_function_def_ids
+            Set[UInt].new(),
+            // foreign_global_var_def_ids
+            Set[UInt].new(),
+            // foreign_type_def_ids
+            Set[UInt].new(),
+            // struct_fields_by_def_id
+            Dict[UInt, List[TypedField]].new(),
+            // enum_cases_by_def_id
+            Dict[UInt, List[TypedEnumCase]].new(),
         );
-        cg.method_owner_type_cache = cg.build_method_owner_type_cache();
+        cg.build_def_id_indices();
         return cg;
     };
 
@@ -887,42 +907,15 @@ given CodeGen {
     };
 
     is_foreign_function_def_id(self, def_id DefId) Bool = {
-        for global in self.program.globals then {
-            when global in {
-                .ForeignFunction(identifier, _, _) then {
-                    if identifier.def_id == def_id then { return true;};
-                },
-                _ then {},
-            };
-        };
-        return false;
+        return self.foreign_function_def_ids.contains(def_id.id);
     };
 
     is_foreign_global_var_def_id(self, def_id DefId) Bool = {
-        for global in self.program.globals then {
-            when global in {
-                .ForeignGlobalVariable(identifier, _, _) then {
-                    if identifier.def_id == def_id then { return true;};
-                },
-                _ then {},
-            };
-        };
-        return false;
+        return self.foreign_global_var_def_ids.contains(def_id.id);
     };
 
     is_foreign_type_def_id(self, def_id DefId) Bool = {
-        for global in self.program.globals then {
-            when global in {
-                .ForeignType(identifier) then {
-                    if self.foreign_type_symbol_matches_def_id(identifier, def_id) then { return true;};
-                },
-                .ForeignStruct(identifier, _) then {
-                    if self.foreign_type_symbol_matches_def_id(identifier, def_id) then { return true;};
-                },
-                _ then {},
-            };
-        };
-        return false;
+        return self.foreign_type_def_ids.contains(def_id.id);
     };
 
     normalize_codegen_lookup_name(self, name String) String = {
@@ -1334,6 +1327,62 @@ given CodeGen {
         return cache;
     };
 
+    /// 一次预热，把 codegen 里「按 DefId 反查 globals 声明」的多次全量扫描收敛成查表。
+    /// 结果只取决于 program.globals，故在构造时一次性建好。
+    /// 取值语义与原来的线性扫描一致：同 id 重复出现时取先出现者。
+    public build_def_id_indices(self) Void = {
+        let mutable foreign_types = Set[UInt].new();
+        let mutable struct_fields = Dict[UInt, List[TypedField]].new();
+        let mutable enum_cases = Dict[UInt, List[TypedEnumCase]].new();
+        let mutable foreign_fns = Set[UInt].new();
+        let mutable foreign_vars = Set[UInt].new();
+
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(identifier, _, _) then {
+                    foreign_fns.insert(identifier.def_id.id);
+                },
+                .ForeignGlobalVariable(identifier, _, _) then {
+                    foreign_vars.insert(identifier.def_id.id);
+                },
+                .ForeignType(identifier) then {
+                    self.index_foreign_type_symbol(identifier, foreign_types);
+                },
+                .ForeignStruct(identifier, fields) then {
+                    self.index_foreign_type_symbol(identifier, foreign_types);
+                    // try_insert 在键已存在时不覆盖，保持原来线性扫描「取先出现者」的语义
+                    let _ = struct_fields.try_insert(identifier.def_id.id, fields);
+                },
+                .StructDeclaration(identifier, fields) then {
+                    let _ = struct_fields.try_insert(identifier.def_id.id, fields);
+                },
+                .EnumDeclaration(identifier, cases) then {
+                    let _ = enum_cases.try_insert(identifier.def_id.id, cases);
+                },
+                _ then {},
+            };
+        };
+
+        self.foreign_function_def_ids = foreign_fns;
+        self.foreign_global_var_def_ids = foreign_vars;
+        self.foreign_type_def_ids = foreign_types;
+        self.struct_fields_by_def_id = struct_fields;
+        self.enum_cases_by_def_id = enum_cases;
+        self.method_owner_type_cache = self.build_method_owner_type_cache();
+    };
+
+    /// 与 `foreign_type_symbol_matches_def_id` 同口径：符号自身 id，
+    /// 以及它 symbol_type 里携带的 nominal id，两者都可能被该判定命中。
+    module_private index_foreign_type_symbol(self, identifier Symbol, out Set[UInt]) Void = {
+        out.insert(identifier.def_id.id);
+        when identifier.symbol_type in {
+            .StructureType(type_def_id) then out.insert(type_def_id.id),
+            .OpaqueType(type_def_id) then out.insert(type_def_id.id),
+            .EnumType(type_def_id) then out.insert(type_def_id.id),
+            _ then {},
+        };
+    };
+
 
     callable_c_name(self, symbol Symbol) String = {
         when self.current_function_owner_type in {
@@ -1712,30 +1761,11 @@ given CodeGen {
     };
 
     module_private concrete_struct_fields_from_program(self, def_id DefId) Option[List[TypedField]] = {
-        for global in self.program.globals then {
-            when global in {
-                .StructDeclaration(identifier, fields) then {
-                    if identifier.def_id.id == def_id.id then { return Option[List[TypedField]].Some(fields);};
-                },
-                .ForeignStruct(identifier, fields) then {
-                    if identifier.def_id.id == def_id.id then { return Option[List[TypedField]].Some(fields);};
-                },
-                _ then {},
-            };
-        };
-        return Option[List[TypedField]].None();
+        return self.struct_fields_by_def_id.get(def_id.id);
     };
 
     module_private concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
-        for global in self.program.globals then {
-            when global in {
-                .EnumDeclaration(identifier, cases) then {
-                    if identifier.def_id.id == def_id.id then { return Option[List[TypedEnumCase]].Some(cases);};
-                },
-                _ then {},
-            };
-        };
-        return Option[List[TypedEnumCase]].None();
+        return self.enum_cases_by_def_id.get(def_id.id);
     };
 
     module_private lookup_enum_case_index_and_params(self, def_id DefId, case_name String) Option[Pair[UInt, List[EnumCaseParam]]] = {

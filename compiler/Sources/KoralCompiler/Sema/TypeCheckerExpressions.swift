@@ -7783,8 +7783,16 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     // 1. Type check the iterable expression
     let typedIterable = try inferTypedExpression(iterable)
+
+    // ── 区间循环专用降低 ────────────────────────────────────────────────────
+    // `for x in a..<b` 走这里，不经过迭代器协议。
+    if let rangeLoop = try maybeDesugarRangeForLoop(
+      pattern: pattern, typedIterable: typedIterable, body: body) {
+      return rangeLoop
+    }
+
     var iterableType = typedIterable.type
-    
+
     // Auto-deref: if the iterable is a reference type, unwrap it
     if let (inner, _) = referenceTypeComponents(iterableType) {
       iterableType = inner
@@ -7849,6 +7857,140 @@ extension TypeChecker {
       body: body,
       needsIteratorCall: true  // Need to call iterator()
     )
+  }
+
+  /// `for x in a..<b` 的专用降低：把迭代状态摊平成本地计数器，完全不走迭代器协议。
+  ///
+  /// 通用的 for-in 降低要 `iterable.iterator()` 拿到一个 `RangeIterator[T]`——它是
+  /// `type mutable`，因而是装箱的托管值，每个循环付一次堆分配；每一步还要经
+  /// `next()` 返回 `Option[T]`。对区间循环这些都是纯开销：起点、终点、步进在
+  /// 降低时就是已知的，没有任何需要动态决策的东西。
+  ///
+  /// 生成：
+  /// ```
+  /// let mutable i = a;
+  /// let end = b;
+  /// while i < end then {
+  ///   let x = i;
+  ///   i = i.succ().unwrap();   // 先自增
+  ///   <body>                   // 再跑 body
+  /// }
+  /// ```
+  /// 先自增再跑 body，这样 `continue` 直接回到条件判断，不需要额外的收尾逻辑；
+  /// `break` 也自然生效。`succ()` 在 `i < end` 时不可能返回 `None`（`end` 本身是
+  /// 一个 `T`，故 `end <= max_value`，于是 `i <= max_value - 1`），所以 `unwrap()` 不会触发。
+  ///
+  /// 只处理**有界闭开区间 `a..<b`**（`for i in 0..<n` 是压倒性的常见写法）和**简单绑定**
+  /// （含丢弃 `_`）。其余区间形态（`a..=b` 的末元自增会碰到 `max_value`、半开区间、无界区间）
+  /// 与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
+  private func maybeDesugarRangeForLoop(
+    pattern: BindingPatternNode,
+    typedIterable: TypedExpressionNode,
+    body: ExpressionNode
+  ) throws -> TypedExpressionNode? {
+    // 只做 `a..<b`：类型检查阶段产出的是 Range 的 ClosedOpen 枚举构造。
+    guard case .enumConstruction(_, let caseName, let boundArgs) = typedIterable,
+          caseName == "ClosedOpen", boundArgs.count == 2 else {
+      return nil
+    }
+    // 只做简单绑定；`(a, b)` 解构仍走通用路径。
+    guard case .binding(let binding) = pattern else {
+      return nil
+    }
+    let typedLeft = boundArgs[0]
+    let typedRight = boundArgs[1]
+    let elementType = typedLeft.type
+    if typedRight.type != elementType {
+      return nil
+    }
+    // 计数器需要 succ() 才能前进。
+    guard try lookupConcreteMethodSymbol(on: elementType, name: "succ") != nil else {
+      return nil
+    }
+
+    let suffix = synthesizedTempIndex
+    synthesizedTempIndex += 1
+    let iterName = "__koral_range_i_\(suffix)"
+    let endName = "__koral_range_end_\(suffix)"
+
+    // 计数器本身始终可变（循环要自增），与绑定模式的 mutability 无关；
+    // 模式绑定的是每轮的取值副本。
+    let iterMutSymbol = makeLocalSymbol(
+      name: iterName, type: elementType, kind: .variable(.MutableValue))
+    let endSymbol = makeLocalSymbol(name: endName, type: elementType, kind: .variable(.Value))
+
+    let iterVarExpr = TypedExpressionNode.variable(identifier: iterMutSymbol)
+    let endVarExpr = TypedExpressionNode.variable(identifier: endSymbol)
+
+    let condition = TypedExpressionNode.comparisonExpression(
+      left: iterVarExpr, op: .less, right: endVarExpr, type: .bool)
+
+    // i.succ().unwrap()
+    let succCall = try buildNullaryMethodCall(
+      on: iterVarExpr,
+      methodName: "succ",
+      returnType: genericEnumType(template: "Option", args: [elementType]))
+    let advanceValue = try buildNullaryMethodCall(
+      on: succCall, methodName: "unwrap", returnType: elementType)
+    let advance = TypedStatementNode.assignment(
+      target: iterVarExpr, operator: nil, value: advanceValue)
+
+    let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
+
+    return try withNewScope {
+      currentScope.define(iterName, defId: iterMutSymbol.defId)
+      currentScope.define(endName, defId: endSymbol.defId)
+
+      var bodyStatements: [TypedStatementNode] = []
+      if case .variable(let bindSymbol) = typedPattern {
+        bodyStatements.append(.variableDeclaration(
+          identifier: bindSymbol, value: iterVarExpr, mutable: binding.mutable))
+      }
+      // 自增先于 body，`continue` 才会正确前进。
+      bodyStatements.append(advance)
+
+      let typedBody = try withNewScope {
+        for symbol in extractPatternSymbols(from: typedPattern) {
+          if let name = context.getName(symbol.defId) {
+            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+          }
+        }
+        loopDepth += 1
+        exitableConstructStack.append(.loop)
+        let result = try inferCheckedStatementBodyExpression(body)
+        loopDepth -= 1
+        if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
+        return result
+      }
+      bodyStatements.append(.expression(typedBody))
+
+      return .blockExpression(
+        statements: [
+          .variableDeclaration(identifier: iterMutSymbol, value: typedLeft, mutable: true),
+          .variableDeclaration(identifier: endSymbol, value: typedRight, mutable: false),
+          .whileStatement(
+            condition: condition,
+            body: .blockExpression(
+              statements: bodyStatements, tailExpression: nil, type: .void)),
+        ],
+        tailExpression: nil,
+        type: .void
+      )
+    }
+  }
+
+  /// 构造 `base.<methodName>()` 这样的无参方法调用。
+  private func buildNullaryMethodCall(
+    on base: TypedExpressionNode,
+    methodName: String,
+    returnType: Type
+  ) throws -> TypedExpressionNode {
+    guard let method = try lookupConcreteMethodSymbol(on: base.type, name: methodName) else {
+      throw SemanticError(.generic("\(methodName)() method not found"), span: currentSpan)
+    }
+    let methodRef = TypedExpressionNode.methodReference(
+      base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type)
+    return .call(callee: methodRef, arguments: [], type: returnType)
   }
 
   /// Extracts the element type T from an iterator type.

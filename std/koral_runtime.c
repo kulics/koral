@@ -40,28 +40,18 @@ uint8_t** __koral_argv(void) {
     return __koral_argv_storage;
 }
 
-void __koral_retain(void* raw_control) {
-    if (!raw_control) return;
-    struct __koral_Control* control = (struct __koral_Control*)raw_control;
-    atomic_fetch_add(&control->strong_count, 1);
-}
-
-void __koral_release(void* raw_control) {
-    if (!raw_control) return;
-    struct __koral_Control* control = (struct __koral_Control*)raw_control;
-    int prev = atomic_fetch_sub(&control->strong_count, 1);
-    if (prev == 1) {
-        if (control->dtor) {
-            control->dtor(control->ptr);
-        }
-        // Merged layout: control block and payload are in the same allocation.
-        // Don't free(control->ptr) — the payload is freed together with the
-        // control block when the last weak reference is released.
-        // If no explicit weak references exist (weak_count == 0), free now.
-        // Otherwise, __koral_weak_release will free when the last weak ref dies.
-        if (atomic_load(&control->weak_count) == 0) {
-            free(control);
-        }
+// 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。
+void __koral_release_slow(struct __koral_Control* control) {
+    if (control->dtor) {
+        control->dtor(control->ptr);
+    }
+    // Merged layout: control block and payload are in the same allocation.
+    // Don't free(control->ptr) — the payload is freed together with the
+    // control block when the last weak reference is released.
+    // If no explicit weak references exist (weak_count == 0), free now.
+    // Otherwise, __koral_weak_release will free when the last weak ref dies.
+    if (atomic_load(&control->weak_count) == 0) {
+        free(control);
     }
 }
 

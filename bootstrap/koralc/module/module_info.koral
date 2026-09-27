@@ -35,6 +35,10 @@ public type SymbolImportEdge(
 public type mutable ImportGraph(
     mutable edges List[ImportEdge],
     mutable symbol_imports List[SymbolImportEdge],
+    // symbol_imports 的按名字索引：name -> 所有 `symbol` 或 `original_symbol` 命中该名的边，
+    // 顺序与 symbol_imports 中一致。命名类型解析原先每次都要线性扫完整个 symbol_imports，
+    // 且每一项都要比较源文件路径（还分配两个规范化字符串），占了类型检查的三分之一以上。
+    mutable symbol_imports_by_name Dict[String, List[SymbolImportEdge]],
 );
 
 given ImportGraph {
@@ -42,6 +46,7 @@ given ImportGraph {
         return ImportGraph(
             [],
             [],
+            Dict[String, List[SymbolImportEdge]].new(),
         );
     };
 
@@ -58,7 +63,34 @@ given ImportGraph {
         source_file Option[String],
         original_symbol Option[String],
     ) Void = {
-        self.symbol_imports.push(SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file));
+        let edge = SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file);
+        self.symbol_imports.push(edge);
+        self.index_symbol_import(edge);
+    };
+
+    file_private index_symbol_import(self, edge SymbolImportEdge) Void = {
+        self.index_symbol_import_name(edge, edge.symbol);
+        if edge.original_symbol <> edge.symbol then {
+            self.index_symbol_import_name(edge, edge.original_symbol);
+        };
+    };
+
+    file_private index_symbol_import_name(self, edge SymbolImportEdge, name String) Void = {
+        when self.symbol_imports_by_name.get(name) in {
+            .Some(bucket) then { bucket.push(edge); },
+            .None() then {
+                let mutable bucket = List[SymbolImportEdge].new();
+                bucket.push(edge);
+                self.symbol_imports_by_name.insert(name, bucket);
+            },
+        };
+    };
+
+    /// 名字命中 `name` 的候选符号导入边（`symbol` 或 `original_symbol` 与之相等）。
+    /// 只做哈希查找；调用方仍按模块 / 源文件 / 具体字段过滤，语义不变。
+    /// 找不到时返回 `.None()`，不分配空列表。
+    public symbol_import_candidates(self, name String) Option[List[SymbolImportEdge]] = {
+        return self.symbol_imports_by_name.get(name);
     };
 
     // 合并另一个 ImportGraph 的所有边
@@ -69,6 +101,7 @@ given ImportGraph {
         };
         for si in other.symbol_imports then {
             self.symbol_imports.push(si);
+            self.index_symbol_import(si);
         };
     };
 
@@ -81,10 +114,15 @@ given ImportGraph {
         // Symbol import
         when symbol_name in {
             .Some(name) then {
-                for si in self.symbol_imports then {
-                    if string_list_eq(si.module, in_module) and string_list_eq(si.target, symbol_module_path) and (si.symbol == name or si.original_symbol == name) and source_file_matches(si.source_file, in_source_file) then {
-                        return si.kind;
-                    };
+                when self.symbol_import_candidates(name) in {
+                    .Some(candidates) then {
+                        for si in candidates then {
+                            if string_list_eq(si.module, in_module) and string_list_eq(si.target, symbol_module_path) and (si.symbol == name or si.original_symbol == name) and source_file_matches(si.source_file, in_source_file) then {
+                                return si.kind;
+                            };
+                        };
+                    },
+                    .None() then {},
                 };
             },
             .None() then {},
@@ -326,21 +364,39 @@ public let source_file_matches(stored Option[String], current Option[String]) Bo
     when stored in {
         .None() then true,
         .Some(s) then when current in {
-            .Some(c) then normalize_source_file_for_match(s) == normalize_source_file_for_match(c),
+            .Some(c) then source_file_paths_equal(s, c),
             .None() then false,
         },
     };
 
-file_private let normalize_source_file_for_match(path String) String = {
-    let mutable out = StringBuilder.new();
-    for ch in path.to_runes() then {
-        if ch == '\\' then {
-            out.push_byte('/');
-        } else {
-            out.push_rune(ch);
-        };
+/// 与「两侧各自做 `\`→`/` 规范化后比较」等价，但不分配。
+///
+/// 规范化只替换一个码点（`\` → `/`），而这两个都是单字节、且不会出现在 UTF-8
+/// 多字节序列的续字节里，规范化也不改变字节长度——所以逐字节比较、把 `\` 当作 `/`
+/// 就是同一回事。原先的实现对每一次比较都把两个路径各自 `to_runes()` + `StringBuilder`
+/// 重建一遍，光这项就占了类型检查的三成。
+file_private let source_file_paths_equal(a String, b String) Bool = {
+    if a == b then {
+        return true;
     };
-    return out.to_string();
+    let len = a.count();
+    if len <> b.count() then {
+        return false;
+    };
+    let ap = a.borrow_ptr();
+    let bp = b.borrow_ptr();
+    let mutable i UInt = 0;
+    while i < len then {
+        let mutable x = ap[i];
+        let mutable y = bp[i];
+        if x == 92(UInt8) then { x = 47(UInt8); };
+        if y == 92(UInt8) then { y = 47(UInt8); };
+        if x <> y then {
+            return false;
+        };
+        i += 1;
+    };
+    return true;
 };
 
 // Join path segments with separator

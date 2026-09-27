@@ -64,8 +64,29 @@ uint64_t __koral_thread_current_id(void);
 void __koral_thread_yield(void);
 uint32_t __koral_hardware_concurrency(void);
 
-void __koral_retain(void* raw_control);
-void __koral_release(void* raw_control);
+// ARC 快路径内联。
+// Swift/LLVM 的 ARC 优化（`ARCOptimizer`、ARC contraction）能消掉冗余的
+// retain/release 对，前提是优化器看得见这两个函数。原先它们是外部函数，
+// 生成的 C 只能把每次引用计数都当成不透明调用——一对都消不掉，还多一层调用开销。
+// 与 Swift 运行时的做法一致：快路径内联、慢路径（析构 + 释放）外联，
+// 避免把每个调用点的体积撑大。
+void __koral_release_slow(struct __koral_Control* control);
+
+static inline void __koral_retain(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    atomic_fetch_add(&control->strong_count, 1);
+}
+
+static inline void __koral_release(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int prev = atomic_fetch_sub(&control->strong_count, 1);
+    if (prev == 1) {
+        __koral_release_slow(control);
+    }
+}
+
 void __koral_weak_retain(void* raw_control);
 void __koral_weak_release(void* raw_control);
 void __koral_ref_drop(void* raw_ref);

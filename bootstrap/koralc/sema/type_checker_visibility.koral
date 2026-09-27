@@ -414,28 +414,11 @@ given TypeChecker {
         };
     };
 
+    // 声明身份查找：用 `allocate_full` 注册时建的 (module, name, source_file) 键表，
+    // O(1)。不做「按名字扫全部 DefId」——那既是热路径上的性能黑洞，也违反
+    // 「身份判定走 DefId、名字只作索引键」的约定。
     module_private lookup_current_file_def_id(self, name String) Option[DefId] = {
-        let mutable id UInt = 1;
-        let next_def_id = self.context().next_def_id();
-        while id < next_def_id then {
-            let def_id = DefId(id);
-            when self.context().get_name(def_id) in {
-                .Some(def_name) then if def_name == name then {
-                    let def_module_path = self.context().get_module_path(def_id) or else List[String].new();
-                    let def_source_file = self.context().get_source_file(def_id);
-                    if string_list_eq(def_module_path, self.storage.module_path) and source_file_matches(def_source_file, Option[String].Some(self.storage.file_path)) then {
-                        return Option[DefId].Some(def_id);
-                    };
-                },
-                .None() then {},
-            };
-            id += 1;
-        };
-        when self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
-            .Some(def_id) then { return Option[DefId].Some(def_id);},
-            .None() then {},
-        };
-        return Option[DefId].None();
+        return self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path));
     };
 
     module_private lookup_current_file_symbol(self, name String) Option[Symbol] = {
@@ -522,13 +505,20 @@ given TypeChecker {
             .Some(graph) then {
                 let current_module = self.storage.module_path;
                 let current_file = Option[String].Some(self.storage.file_path);
-                let mutable index Int = graph.symbol_imports.count()(Int);
-                while index > 0 then {
-                    index -= 1;
-                    let entry = graph.symbol_imports[index(UInt)];
-                    if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
-                        return Option[String].Some(entry.original_symbol);
-                    };
+                when graph.symbol_import_candidates(alias) in {
+                    .Some(candidates) then {
+                        // 候选按 symbol_imports 的顺序排列，这里倒序遍历以保持
+                        // 「同名多条时取靠后者」的既有语义。
+                        let mutable index Int = candidates.count()(Int);
+                        while index > 0 then {
+                            index -= 1;
+                            let entry = candidates[index(UInt)];
+                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
+                                return Option[String].Some(entry.original_symbol);
+                            };
+                        };
+                    },
+                    .None() then {},
                 };
                 Option[String].None()
             },
@@ -541,16 +531,21 @@ given TypeChecker {
             .Some(graph) then {
                 let current_module = self.storage.module_path;
                 let current_file = Option[String].Some(self.storage.file_path);
-                let mutable index Int = graph.symbol_imports.count()(Int);
-                while index > 0 then {
-                    index -= 1;
-                    let entry = graph.symbol_imports[index(UInt)];
-                    if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
-                        return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
-                            .Some(def_id) then self.context().get_symbol(def_id),
-                            .None() then Option[Symbol].None(),
+                when graph.symbol_import_candidates(alias) in {
+                    .Some(candidates) then {
+                        let mutable index Int = candidates.count()(Int);
+                        while index > 0 then {
+                            index -= 1;
+                            let entry = candidates[index(UInt)];
+                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
+                                return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
+                                    .Some(def_id) then self.context().get_symbol(def_id),
+                                    .None() then Option[Symbol].None(),
+                                };
+                            };
                         };
-                    };
+                    },
+                    .None() then {},
                 };
                 Option[Symbol].None()
             },
@@ -563,16 +558,21 @@ given TypeChecker {
             .Some(graph) then {
                 let current_module = self.storage.module_path;
                 let current_file = Option[String].Some(self.storage.file_path);
-                let mutable index Int = graph.symbol_imports.count()(Int);
-                while index > 0 then {
-                    index -= 1;
-                    let entry = graph.symbol_imports[index(UInt)];
-                    if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
-                        return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
-                            .Some(def_id) then self.context().get_symbol_type(def_id),
-                            .None() then Option[Type].None(),
+                when graph.symbol_import_candidates(alias) in {
+                    .Some(candidates) then {
+                        let mutable index Int = candidates.count()(Int);
+                        while index > 0 then {
+                            index -= 1;
+                            let entry = candidates[index(UInt)];
+                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
+                                return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
+                                    .Some(def_id) then self.context().get_symbol_type(def_id),
+                                    .None() then Option[Type].None(),
+                                };
+                            };
                         };
-                    };
+                    },
+                    .None() then {},
                 };
                 Option[Type].None()
             },

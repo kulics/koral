@@ -48,18 +48,21 @@ public type mutable DictIterator[K Hash, V Any](module_private source Dict[K, V]
 // ============================================================================
 given[K Hash, V Any] Dict[K, V] {
 
+    /// 空表不分配桶数组，首次 insert（走 rehash）时再分配。
+    /// 编译器里每个 `Scope` 都带一张 `Dict[String, Type]`，大量是空的或只有一两项，
+    /// 为它们每次付 16 桶 alloc + 16 次清零不值得。
     public new() Self = {
-        let capacity UInt = 16;
-        let buckets = alloc_memory[DictBucket[K, V]](capacity);
-        for i in 0..<capacity then {
-            bucket_set_tag(buckets + i, 0(UInt));
-        };
-        return Dict[K, V](buckets, 0, capacity);
+        return Dict[K, V](null_ptr[DictBucket[K, V]](), 0, 0);
     };
 
     public with_capacity(capacity UInt) Self = {
-        // Hash tables need extra space for efficiency (load factor ~0.5)
-        let cap = if capacity < 4 then 4 else capacity * 2;
+        // Hash tables need extra space for efficiency (load factor ~0.5).
+        // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
+        let requested UInt = if capacity < 4(UInt) then 4(UInt) else capacity * 2(UInt);
+        let mutable cap UInt = 4(UInt);
+        while cap < requested then {
+            cap = cap * 2(UInt);
+        };
         let buckets = alloc_memory[DictBucket[K, V]](cap);
         for i in 0..<cap then {
             bucket_set_tag(buckets + i, 0(UInt));
@@ -70,9 +73,15 @@ given[K Hash, V Any] Dict[K, V] {
     public count(self) UInt = self.size;
 
     // Using when for bucket handling
+    // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
     file_private find_slot(self, key K) Option[UInt] = {
+        // 尚未分配桶数组（空表）：没有可命中的槽位。
+        if self.capacity == 0(UInt) then {
+            return Option[UInt].None();
+        };
+        let mask = self.capacity - 1;
         let h = key.hash();
-        let mutable idx = h % self.capacity;
+        let mutable idx = h & mask;
         let mutable first_deleted = Option[UInt].None();
         let mutable probes UInt = 0;
         while probes < self.capacity then {
@@ -99,7 +108,7 @@ given[K Hash, V Any] Dict[K, V] {
                     return Option[UInt].Some(idx);
                 };
             };
-            idx = (idx + 1) % self.capacity;
+            idx = (idx + 1) & mask;
             probes += 1;
         };
         return first_deleted;
@@ -108,7 +117,8 @@ given[K Hash, V Any] Dict[K, V] {
     file_private rehash(self) Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
-        let new_cap = old_cap * 2(UInt);
+        // 空表首次分配；已有桶数组时翻倍。
+        let new_cap = if old_cap == 0(UInt) then 16(UInt) else old_cap * 2(UInt);
         let new_buckets = alloc_memory[DictBucket[K, V]](new_cap);
         for i in 0..<new_cap then {
             bucket_set_tag(new_buckets + i, 0(UInt));

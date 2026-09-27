@@ -800,8 +800,129 @@ given TypeChecker {
         };
     };
 
+    /// `for x in a..<b` 的专用降低：把迭代状态摊平成本地计数器，完全不走迭代器协议。
+    ///
+    /// 通用的 for-in 降低要 `iterable.iterator()` 拿到一个 `RangeIterator[T]`——它是
+    /// `type mutable`，因而是装箱的托管值，每个循环付一次堆分配；每一步还要经
+    /// `next()` 返回 `Option[T]`。对区间循环这些都是纯开销：起点、终点、步进在
+    /// 降低时就是已知的，没有任何需要动态决策的东西。
+    ///
+    /// 生成：
+    /// ```
+    /// let mutable i = a;
+    /// let end = b;
+    /// while i < end then {
+    ///   let x = i;
+    ///   i = i.succ().unwrap();   // 先自增
+    ///   <body>                   // 再跑 body
+    /// }
+    /// ```
+    /// 先自增再跑 body，这样 `continue` 直接回到条件判断，不需要额外的收尾逻辑；
+    /// `break` 也自然生效。`succ()` 在 `i < end` 时不可能返回 `None`（`end` 本身是
+    /// 一个 `T`，故 `end <= max_value`，于是 `i <= max_value - 1`），所以 `unwrap()` 不会触发。
+    ///
+    /// 只处理**有界闭开区间 `a..<b`**（`for i in 0..<n` 是压倒性的常见写法）和**简单绑定**
+    /// （含丢弃 `_`）。其余区间形态（`a..=b` 的末元自增会碰到 `max_value`、半开区间、无界区间）
+    /// 与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
+    module_private maybe_desugar_range_for_loop(self, pattern ForBindingPattern, typed_iter TypedExpr, body Expr, scope Scope) Option[TypedExpr] = {
+        // 只做 `a..<b`：类型检查阶段产出的是 Range 的 ClosedOpen 枚举构造。
+        let mutable start_expr Option[TypedExpr] = Option[TypedExpr].None();
+        let mutable end_expr Option[TypedExpr] = Option[TypedExpr].None();
+        when typed_iter.expr_kind in {
+            .EnumConstruction(_, case_name, args) then {
+                if case_name == "ClosedOpen" and args.count() == 2(UInt) then {
+                    start_expr = Option[TypedExpr].Some(args[0(UInt)]);
+                    end_expr = Option[TypedExpr].Some(args[1(UInt)]);
+                };
+            },
+            _ then {},
+        };
+        if start_expr is .None() or end_expr is .None() then {
+            return Option[TypedExpr].None();
+        };
+        // 只做简单绑定；`(a, b)` 解构仍走通用路径。
+        let mutable binding_opt Option[PairBindingElement] = Option[PairBindingElement].None();
+        when pattern in {
+            .Single(binding) then { binding_opt = Option[PairBindingElement].Some(binding); },
+            .Pair(_, _, _) then {},
+        };
+        if binding_opt is .None() then {
+            return Option[TypedExpr].None();
+        };
+        let binding = binding_opt.unwrap();
+
+        let start = start_expr.unwrap();
+        let end = end_expr.unwrap();
+        let element_type = start.expr_type;
+        if end.expr_type <> element_type then {
+            return Option[TypedExpr].None();
+        };
+        // 计数器需要 succ() 才能前进。
+        let succ_return = self.resolve_method_return_type(element_type, "succ");
+        if self.extract_option_result_inner(succ_return) is .Unknown() then {
+            return Option[TypedExpr].None();
+        };
+
+        let iter_symbol = self.make_expr_temp_symbol("__for_range_i", element_type, VariableKind.MutableValue());
+        let end_symbol = self.make_expr_temp_symbol("__for_range_end", element_type, VariableKind.Value());
+        let iter_var = make_typed_expr(TypedExprKind.Variable(iter_symbol), element_type);
+        let end_var = make_typed_expr(TypedExprKind.Variable(end_symbol), element_type);
+
+        let span = unknown_span();
+        // i < end
+        let condition = make_typed_expr(
+            TypedExprKind.ComparisonExpr(iter_var, ComparisonOperator.Less(), end_var),
+            Type.BoolType(),
+        );
+        // i.succ().unwrap()
+        let succ_call = self.lower_receiver_method_call_expr(iter_var, "succ", List[TypedExpr].new());
+        let advance_value = self.lower_receiver_method_call_expr(succ_call, "unwrap", List[TypedExpr].new());
+
+        let for_scope = Scope.new_child(scope);
+        let bind_symbol_opt = self.bind_pair_let_symbol(binding, element_type, for_scope);
+        let mutable inner_statements = List[TypedStatement].new();
+        when bind_symbol_opt in {
+            .Some(bind_symbol) then {
+                inner_statements.push(TypedStatement.LetStmt(bind_symbol, iter_var, span));
+            },
+            .None() then {},
+        };
+        // 自增先于 body，`continue` 才会正确前进。
+        inner_statements.push(TypedStatement.AssignmentStmt(iter_var, advance_value, span));
+
+        let prev_in_loop = self.storage.in_loop;
+        self.storage.in_loop = true;
+        self.storage.loop_depth = self.storage.loop_depth + 1;
+        self.storage.exitable_construct_stack.push(ExitableConstruct(ExitableConstructKind.Loop()));
+        let typed_body = self.check_statement_body_expr(body, for_scope);
+        self.storage.in_loop = prev_in_loop;
+        self.storage.loop_depth = self.storage.loop_depth - 1;
+        if not self.storage.exitable_construct_stack.is_empty() then {
+            let _ = self.storage.exitable_construct_stack.pop();
+        };
+        inner_statements.push(TypedStatement.ExprStmt(typed_body, span));
+
+        let inner_block = make_typed_expr(TypedExprKind.Block(inner_statements, Option[TypedExpr].None()), Type.VoidType());
+        let while_stmt = TypedStatement.WhileStmt(condition, inner_block, span);
+
+        let mutable outer_statements = List[TypedStatement].new();
+        outer_statements.push(TypedStatement.LetStmt(iter_symbol, start, span));
+        outer_statements.push(TypedStatement.LetStmt(end_symbol, end, span));
+        outer_statements.push(while_stmt);
+        return Option[TypedExpr].Some(
+            make_typed_expr(TypedExprKind.Block(outer_statements, Option[TypedExpr].None()), Type.VoidType())
+        );
+    };
+
     module_private lower_for_expr(self, pattern ForBindingPattern, iterable Expr, body Expr, scope Scope) TypedExpr = {
         let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope);
+
+        // ── 区间循环专用降低 ────────────────────────────────────────────────
+        // `for x in a..<b` 走这里，不经过迭代器协议。
+        when self.maybe_desugar_range_for_loop(pattern, typed_iter, body, scope) in {
+            .Some(lowered) then { return lowered; },
+            .None() then {},
+        };
         let mutable for_scope = Scope.new_child(scope);
         let iterable_type = when typed_iter.expr_type in {
             .MutableReferenceType(inner) then inner,
