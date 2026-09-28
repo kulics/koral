@@ -8,6 +8,46 @@ using "executor";
 using "reporter";
 using "scheduler";
 
+/// 清掉上一轮的用例产物，只保留 `_reports`。
+///
+/// 每个用例都会在 `output_root` 下建目录（编译产物、生成的 C、可执行文件），一轮几百个
+/// 用例能涨到 GB 级。从不清理就会一直累积 —— 实测清出过 110 GB。
+///
+/// 放在**开跑前**清，而不是跑完清：这样盘上永远只有最近一轮的产物，失败时还能翻；
+/// 磁盘占用被限制在一轮的量。先收集路径再删，避免边遍历边删。
+file_private let clean_output_root(config RunnerConfig) Void = {
+    let root = config.output_root;
+    if not path_exist(root) then {
+        create_dir_all(config.report_file.dir_name()) or else {};
+        return;
+    };
+
+    let mutable iter = read_dir(root) or else {
+        // 读不了就不要挡着跑测试；下一轮再试。
+        return;
+    };
+    let mutable stale_dirs = List[Path].new();
+    let mutable stale_files = List[Path].new();
+    while iter.next() is .Some(entry) then {
+        if entry.name() == "_reports" then {
+            continue;
+        };
+        if entry.is_dir() then {
+            stale_dirs.push(entry.path());
+        } else {
+            stale_files.push(entry.path());
+        };
+    };
+    for p in stale_dirs then {
+        remove_dir_all(p) or else {};
+    };
+    for p in stale_files then {
+        remove_file(p) or else {};
+    };
+
+    create_dir_all(config.report_file.dir_name()) or else {};
+};
+
 public let run_compiler_tests() Int = {
     let config = parse_runner_config() or else {
         if it.message() == "__HELP__" then {
@@ -18,6 +58,8 @@ public let run_compiler_tests() Int = {
         print_usage();
         return 2;
     };
+
+    clean_output_root(config);
 
     init_report_file(config) or else {
         eprintln("failed to initialize report file: " + config.report_file.to_string() + ": " + it.message());
