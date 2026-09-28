@@ -3543,7 +3543,7 @@ private final class MIRFunctionBuilder {
 
   private func referenceKind(for type: Type) -> MIRReferenceKind {
     switch type {
-    case .mutableReference:
+    case .mutableReference, .mutableBorrowedReference:
       return .mutable
     case .weakReference:
       return .weak

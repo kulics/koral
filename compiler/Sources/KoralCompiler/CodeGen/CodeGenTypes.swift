@@ -6,7 +6,7 @@ extension CodeGen {
     appendToBuffer("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n")
     withIndent {
       appendToBuffer("    struct \(name) result = *self;\n")
-      appendToBuffer("    if (result.control) { __koral_retain(result.control); }\n")
+      appendToBuffer("    __koral_retain_value(result.ptr);\n")
       appendToBuffer("    return result;\n")
     }
     appendToBuffer("}\n\n")
@@ -15,15 +15,18 @@ extension CodeGen {
   private func appendManagedNominalDropFunction(name: String) {
     appendToBuffer("void __koral_\(name)_drop(struct \(name)* self) {\n")
     withIndent {
-      appendToBuffer("    if (self->control) { __koral_release(self->control); }\n")
+      // 头里不存析构函数：drop glue 在释放调用点单态化后传进来。
+      // 这里 `self->ptr` 指向的是本类型自己的 payload 块。
+      appendToBuffer("    __koral_release_value(self->ptr, (__koral_Dtor)__koral_\(name)_payload_drop);\n")
     }
     appendToBuffer("}\n\n")
   }
 
   private func appendManagedNominalUserDropPrelude(name: String, userDrop: String) {
+    // 借用形态：把 payload 交给用户的 `drop(self)`，不接管所有权。
+    // `__koral_self` 是栈局部且从不被 drop，所以不需要 control 哨兵。
     appendToBuffer("    struct \(name) __koral_self;\n")
     appendToBuffer("    __koral_self.ptr = raw_payload;\n")
-    appendToBuffer("    __koral_self.control = NULL;\n")
     appendToBuffer("    {\n")
     appendToBuffer("        void \(userDrop)(struct \(name)*);\n")
     appendToBuffer("        \(userDrop)(&__koral_self);\n")
@@ -52,7 +55,12 @@ extension CodeGen {
       if let userDrop = getUserDefinedDrop(for: name) {
         appendManagedNominalUserDropPrelude(name: name, userDrop: userDrop)
       }
-      appendToBuffer("    switch (self->tag) {\n")
+      if let niche = enumNicheLayout(cases: cases) {
+        let valueExpr = "self->data.\(sanitizeCIdentifier(niche.payloadCaseName)).\(sanitizeCIdentifier(niche.payloadFieldName))"
+        appendToBuffer("    switch (\(nicheTagExpression(layout: niche, valueExpr: valueExpr))) {\n")
+      } else {
+        appendToBuffer("    switch (self->tag) {\n")
+      }
       for (index, c) in cases.enumerated() {
         let caseName = sanitizeCIdentifier(c.name)
         appendToBuffer("    case \(index): // \(c.name)\n")
@@ -90,10 +98,13 @@ extension CodeGen {
 
   private func generateManagedEnumDeclaration(name: String, type: Type, cases: [EnumCase]) {
     let payloadName = managedPayloadTypeName(for: type)
+    let niche = enumNicheLayout(cases: cases)
     appendToBuffer("struct \(payloadName) {\n")
     withIndent {
-      addIndent()
-      appendToBuffer("intptr_t tag;\n")
+      if niche == nil {
+        addIndent()
+        appendToBuffer("intptr_t tag;\n")
+      }
       addIndent()
       appendToBuffer("union {\n")
       withIndent {
@@ -299,10 +310,13 @@ extension CodeGen {
       return
     }
 
+    let niche = enumNicheLayout(cases: cases)
     appendToBuffer("struct \(name) {\n")
     withIndent {
-      addIndent()
-      appendToBuffer("intptr_t tag;\n")
+      if niche == nil {
+        addIndent()
+        appendToBuffer("intptr_t tag;\n")
+      }
       addIndent()
       appendToBuffer("union {\n")
       withIndent {
@@ -339,8 +353,12 @@ extension CodeGen {
     appendToBuffer("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n")
     withIndent {
         appendToBuffer("    struct \(name) result;\n")
-        appendToBuffer("    result.tag = self->tag;\n")
-        appendToBuffer("    switch (self->tag) {\n")
+        if let niche {
+          appendToBuffer("    switch (\(nicheTagExpression(layout: niche, valueExpr: "self->data.\(sanitizeCIdentifier(niche.payloadCaseName)).\(sanitizeCIdentifier(niche.payloadFieldName))"))) {\n")
+        } else {
+          appendToBuffer("    result.tag = self->tag;\n")
+          appendToBuffer("    switch (self->tag) {\n")
+        }
         for (index, c) in cases.enumerated() {
              let caseName = sanitizeCIdentifier(c.name)
              appendToBuffer("    case \(index): // \(c.name)\n")
@@ -360,6 +378,11 @@ extension CodeGen {
                        dest: resultPath
                      )
                  }
+             } else if let niche {
+                 // niche 布局下空 case 没有自己的存储，必须把空位模式写回 result，
+                 // 否则 result 带着脏值，后续 niche 测试会误判成 payload case。
+                 let payloadField = "data.\(sanitizeCIdentifier(niche.payloadCaseName)).\(sanitizeCIdentifier(niche.payloadFieldName))"
+                 appendToBuffer("        \(nicheNullAssignment(niche.payloadFieldType, fieldPath: "result.\(payloadField)"))")
              }
              appendToBuffer("        break;\n")
         }
@@ -379,7 +402,11 @@ extension CodeGen {
             appendToBuffer("    }\n")
         }
 
-        appendToBuffer("    switch (self->tag) {\n")
+        if let niche {
+          appendToBuffer("    switch (\(nicheTagExpression(layout: niche, valueExpr: "self->data.\(sanitizeCIdentifier(niche.payloadCaseName)).\(sanitizeCIdentifier(niche.payloadFieldName))"))) {\n")
+        } else {
+          appendToBuffer("    switch (self->tag) {\n")
+        }
         for (index, c) in cases.enumerated() {
              let caseName = sanitizeCIdentifier(c.name)
              appendToBuffer("    case \(index): // \(c.name)\n")

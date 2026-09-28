@@ -12,8 +12,7 @@ extern "C" {
 #endif
 
 struct __koral_Ref {
-    void* ptr;
-    void* control;
+    void* ptr;   // 指向目标值；所属 control 块在 ptr - 1
 };
 
 typedef void (*__koral_Dtor)(void*);
@@ -23,9 +22,8 @@ struct __koral_WeakRef {
 };
 
 struct __koral_TraitRef {
-    void* ptr;
-    void* control;
-    const void* vtable;
+    void* ptr;          // 指向目标值；所属 control 块在 ptr - 1
+    const void* vtable; // 静态 vtable 实例，第一个成员是 struct __koral_VTableHeader base
 };
 
 struct __koral_TraitWeakRef {
@@ -39,19 +37,37 @@ struct __koral_Closure {
     void (*drop)(void*);
 };
 
+// vtable 的公共前缀。每个 trait 的 vtable 结构体第一个成员必须是
+// `struct __koral_VTableHeader base;`，于是 trait object 的类型擦除销毁可以
+// 统一读 base.destroy，而不用知道具体 trait。对应 Swift 的 value witness table
+// 被塞进 metadata 头的做法（但 Koral 的 trait object 一律装箱，不走扁平布局）。
+struct __koral_VTableHeader {
+    __koral_Dtor destroy;
+};
+
 // Merged layout convention: the control block and payload are allocated as one
 // contiguous block via a single malloc(sizeof(Control) + sizeof(T)).
 // Memory: [ __koral_Control | payload data ... ]
 //          ^                 ^
-//          control           control->ptr  (points to payload right after)
-// Sub-refs created via make_ref/make_mut_ref share the same control block
-// but have their own ptr pointing into the owner's payload.
+//          control           payload (= control + 1)
+// The payload address is derivable from the control block and vice versa, so the
+// control block does not store a back-pointer. Every handle stores the payload
+// address; the owning control block is always at payload - 1.
+//
+// 头只有两个引用计数（8 字节）。析构函数**不**存在头里 —— drop glue 在释放
+// 调用点单态化，由调用方作为 `__koral_Dtor` 传进来；类型擦除的场景（trait
+// object）改走 vtable 的 base.destroy。这与 Rust `RcBox { strong, weak, value }`
+// 同构：头里没有 dtor，drop glue 在 `Rc::drop::<T>` 处单态化。
 struct __koral_Control {
     _Atomic int strong_count;
     _Atomic int weak_count;
-    __koral_Dtor dtor;
-    void* ptr;  // points to the payload (may be inside a merged allocation)
 };
+
+// Payload <-> control conversion for the merged [Control | payload] layout.
+#define __koral_payload_of(control) \
+    ((void*)((char*)(control) + sizeof(struct __koral_Control)))
+#define __koral_control_of(payload) \
+    ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
 
 void __koral_set_args(int32_t argc, uint8_t** argv);
 void __koral_panic_float_cast_overflow(void);
@@ -70,27 +86,58 @@ uint32_t __koral_hardware_concurrency(void);
 // 生成的 C 只能把每次引用计数都当成不透明调用——一对都消不掉，还多一层调用开销。
 // 与 Swift 运行时的做法一致：快路径内联、慢路径（析构 + 释放）外联，
 // 避免把每个调用点的体积撑大。
-void __koral_release_slow(struct __koral_Control* control);
+//
+// Immortal（静态字面量）：control 块的 strong_count 为 -1，永不释放。
+// 与 Swift 的 immortal object 同一做法，用来取代「control == NULL」哨兵。
+#define KORAL_IMMORTAL_REFCOUNT (-1)
 
+// 慢路径：强引用归零后调 dtor 销毁 payload，再视 weak 计数决定何时 free 整块。
+void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor);
+
+// ---- control 层原语 ----
+// 入参是 control 块指针。仅供 `_value` 包装和弱引用内部使用；
+// 生成代码一律走下面的 `_value` 形式（瘦指针句柄保存的是 payload 地址）。
+// 弱引用为什么走 control 而不是 payload：weak 存的是 control 地址，
+// 因为 payload 可能已经销毁，weak 仍要能查 strong_count 判断能否 upgrade。
 static inline void __koral_retain(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
     atomic_fetch_add(&control->strong_count, 1);
 }
 
-static inline void __koral_release(void* raw_control) {
+static inline void __koral_release(void* raw_control, __koral_Dtor dtor) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
     int prev = atomic_fetch_sub(&control->strong_count, 1);
     if (prev == 1) {
-        __koral_release_slow(control);
+        __koral_release_slow(control, dtor);
     }
+}
+
+// ---- 值层 API（生成代码用这一对）----
+// 入参是 payload 指针，引用计数块固定在 ptr - 1。
+// release 的 dtor 是「原地销毁该 payload」的 drop glue，在释放调用点单态化；
+// 没有 drop glue 的类型传 NULL。trait object 传 vtable 的 base.destroy。
+static inline void __koral_retain_value(void* payload) {
+    if (!payload) return;
+    __koral_retain(__koral_control_of(payload));
+}
+static inline void __koral_release_value(void* payload, __koral_Dtor dtor) {
+    if (!payload) return;
+    __koral_release(__koral_control_of(payload), dtor);
 }
 
 void __koral_weak_retain(void* raw_control);
 void __koral_weak_release(void* raw_control);
-void __koral_ref_drop(void* raw_ref);
+// 「原地销毁一个 C 值」的可复用 drop glue。三者都与具体类型无关，
+// 所以能直接当 __koral_Dtor 传给 __koral_release_value。
+// 普通引用（struct __koral_Ref）的 drop 依赖内层类型，不是类型无关的，
+// 因此不提供通用函数 —— 由 codegen 按内层类型单态化出 thunk。
 void __koral_weakref_drop(void* raw_weak_ref);
+void __koral_traitref_drop(void* raw_trait_ref);
+void __koral_closure_drop(void* raw_closure);
 
 struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r);
 struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success);

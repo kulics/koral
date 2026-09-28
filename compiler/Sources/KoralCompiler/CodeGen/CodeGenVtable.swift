@@ -200,6 +200,7 @@ extension CodeGen {
       
       // Step 3: Generate vtable instance
       if let instanceCode = generateVtableInstance(
+        concreteType: request.concreteType,
         concreteTypeCName: concreteTypeCName,
         traitName: traitName,
         traitTypeArgs: request.traitTypeArguments,
@@ -236,25 +237,28 @@ extension CodeGen {
   func generateVtableStructDefinition(methods: [MIRTraitVTableMethod], vtableStructName: String) -> String? {
     // Build the vtable struct
     var code = "struct \(vtableStructName) {\n"
-    
+    // 公共前缀必须是第一个成员：trait object 的类型擦除销毁统一读 base.destroy，
+    // 不用知道具体 trait。布局上 base.destroy 落在 offset 0。
+    code += "    struct __koral_VTableHeader base;\n"
+
     for method in methods {
       let returnCType = method.returnType.map { cTypeName($0) } ?? "void"
-      
+
       // Build parameter list: first param is always struct Ref (the receiver)
       var paramTypes = ["struct __koral_Ref"]
-      
+
       // Add non-self parameters
       for param in method.parameters where !param.isSelf {
         if let type = param.type {
           paramTypes.append(cTypeName(type))
         }
       }
-      
+
       let paramsStr = paramTypes.joined(separator: ", ")
       let sanitizedMethodName = sanitizeCIdentifier(method.name)
       code += "    \(returnCType) (*\(sanitizedMethodName))(\(paramsStr));\n"
     }
-    
+
     code += "};\n"
     return code
   }
@@ -361,12 +365,14 @@ extension CodeGen {
     let callArgsStr = callArgs.joined(separator: ", ")
     
     let isVoidReturn = (returnCType == "void")
+    // 头里不存析构函数：销毁 boxed 具体值的 glue 在这里单态化。
+    let releaseSelfRef = "    __koral_release_value(self_ref.ptr, \(dropFunctionPointer(for: concreteType)));\n"
     if isVoidReturn {
       code += "    \(actualMethodCName)(\(callArgsStr));\n"
-      code += "    __koral_release(self_ref.control);\n"
+      code += releaseSelfRef
     } else {
       code += "    \(returnCType) __koral_ret = \(actualMethodCName)(\(callArgsStr));\n"
-      code += "    __koral_release(self_ref.control);\n"
+      code += releaseSelfRef
       code += "    return __koral_ret;\n"
     }
     
@@ -443,6 +449,7 @@ extension CodeGen {
   ///
   /// Returns `nil` if the trait is not found or if this combination has already been generated.
   func generateVtableInstance(
+    concreteType: Type,
     concreteTypeCName: String,
     traitName: String,
     traitTypeArgs: [Type] = [],
@@ -454,17 +461,19 @@ extension CodeGen {
       traitName: traitName,
       traitTypeArgs: traitTypeArgs
     )
-    
+
     // Deduplicate: skip if already generated
     if generatedVtableInstances.contains(instanceName) {
       return nil
     }
     generatedVtableInstances.insert(instanceName)
-    
+
     let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
-    
+
     var code = "static const struct \(vtableStructName) \(instanceName) = {\n"
-    
+    // 公共前缀：trait object 释放时从这里取具体类型的 drop glue。
+    code += "    .base = { \(dropFunctionPointer(for: concreteType)) },\n"
+
     for method in methods {
       let methodName = method.name
       let sanitizedMethodName = sanitizeCIdentifier(methodName)
@@ -525,12 +534,10 @@ extension CodeGen {
     addIndent()
     appendToBuffer("\(result).ptr = \(innerResult).ptr;\n")
     addIndent()
-    appendToBuffer("\(result).control = \(innerResult).control;\n")
-    addIndent()
     appendToBuffer("\(result).vtable = &\(vtableName);\n")
     if sourceOwnership == .copy {
       addIndent()
-      appendToBuffer("__koral_retain(\(result).control);\n")
+      appendToBuffer("__koral_retain_value(\(result).ptr);\n")
     }
 
     return result
@@ -558,10 +565,10 @@ extension CodeGen {
     // - lvalue receiver: retain copied self
     // - rvalue receiver: move ownership directly
     let sanitizedMethodName = sanitizeCIdentifier(methodName)
-    let selfArg = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "(struct __koral_Ref){\(receiverResult).ptr, \(receiverResult).control}")
+    let selfArg = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "(struct __koral_Ref){\(receiverResult).ptr}")
     if receiverOwnership == .copy {
       addIndent()
-      appendToBuffer("__koral_retain(\(selfArg).control);\n")
+      appendToBuffer("__koral_retain_value(\(selfArg).ptr);\n")
     }
     var allArgs = [selfArg]
     for argument in arguments {

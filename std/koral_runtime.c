@@ -41,15 +41,16 @@ uint8_t** __koral_argv(void) {
 }
 
 // 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。
-void __koral_release_slow(struct __koral_Control* control) {
-    if (control->dtor) {
-        control->dtor(control->ptr);
+// dtor 由释放调用点单态化后传进来，头里不再存析构函数。
+void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
+    if (dtor) {
+        dtor(__koral_payload_of(control));
     }
     // Merged layout: control block and payload are in the same allocation.
-    // Don't free(control->ptr) — the payload is freed together with the
-    // control block when the last weak reference is released.
-    // If no explicit weak references exist (weak_count == 0), free now.
-    // Otherwise, __koral_weak_release will free when the last weak ref dies.
+    // The payload is freed together with the control block when the last weak
+    // reference is released. If no explicit weak references exist
+    // (weak_count == 0), free now. Otherwise, __koral_weak_release will free
+    // when the last weak ref dies.
     if (atomic_load(&control->weak_count) == 0) {
         free(control);
     }
@@ -73,21 +74,28 @@ void __koral_weak_release(void* raw_control) {
     }
 }
 
-void __koral_ref_drop(void* raw_ref) {
-    if (!raw_ref) return;
-    struct __koral_Ref* ref = (struct __koral_Ref*)raw_ref;
-    __koral_release(ref->control);
-}
-
 void __koral_weakref_drop(void* raw_weak_ref) {
     if (!raw_weak_ref) return;
     struct __koral_WeakRef* weak_ref = (struct __koral_WeakRef*)raw_weak_ref;
     __koral_weak_release(weak_ref->control);
 }
 
+// 类型无关的 trait object 销毁：具体类型的 drop glue 从 vtable 的 base.destroy 取。
+// 这是头里去掉 dtor 之后，类型擦除场景唯一的析构入口。
+void __koral_traitref_drop(void* raw_trait_ref) {
+    if (!raw_trait_ref) return;
+    struct __koral_TraitRef* ref = (struct __koral_TraitRef*)raw_trait_ref;
+    if (!ref->ptr) return;
+    __koral_Dtor destroy = NULL;
+    if (ref->vtable) {
+        destroy = ((const struct __koral_VTableHeader*)ref->vtable)->destroy;
+    }
+    __koral_release_value(ref->ptr, destroy);
+}
+
 struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r) {
     struct __koral_WeakRef w;
-    w.control = r.control;
+    w.control = r.ptr ? __koral_control_of(r.ptr) : NULL;
     if (w.control) {
         __koral_weak_retain(w.control);
     }
@@ -97,7 +105,6 @@ struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r) {
 struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success) {
     struct __koral_Ref r;
     r.ptr = NULL;
-    r.control = NULL;
     *success = 0;
 
     if (!w.control) return r;
@@ -106,8 +113,7 @@ struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success) {
     int old_count = atomic_load(&control->strong_count);
     while (old_count > 0) {
         if (atomic_compare_exchange_weak(&control->strong_count, &old_count, old_count + 1)) {
-            r.ptr = control->ptr;
-            r.control = w.control;
+            r.ptr = __koral_payload_of(control);
             *success = 1;
             return r;
         }

@@ -259,7 +259,7 @@ given CodeGen {
         self.add_indent();
         self.buffer.push_string("struct \(name) result = *self;\n");
         self.add_indent();
-        self.buffer.push_string("if (result.control) { __koral_retain(result.control); }\n");
+        self.buffer.push_string("__koral_retain_value(result.ptr);\n");
         self.add_indent();
         self.buffer.push_string("return result;\n");
         self.pop_indent_level();
@@ -270,7 +270,9 @@ given CodeGen {
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
         self.push_indent_level();
         self.add_indent();
-        self.buffer.push_string("if (self->control) { __koral_release(self->control); }\n");
+        // 头里不存析构函数：drop glue 在释放调用点单态化后传进来。
+        // 这里 self->ptr 指向的是本类型自己的 payload 块。
+        self.buffer.push_string("__koral_release_value(self->ptr, (__koral_Dtor)__koral_\(name)_payload_drop);\n");
         self.pop_indent_level();
         self.buffer.push_string("}\n\n");
     };
@@ -281,8 +283,7 @@ given CodeGen {
         self.add_indent();
         self.buffer.push_string("__koral_self.ptr = raw_payload;\n");
         self.add_indent();
-        self.buffer.push_string("__koral_self.control = NULL;\n");
-        self.add_indent();
+                self.add_indent();
         self.buffer.push_string("{\n");
         self.push_indent_level();
         self.add_indent();
@@ -325,8 +326,17 @@ given CodeGen {
             .Some(user_drop) then self.append_managed_nominal_user_drop_prelude(name, user_drop),
             .None() then {},
         };
+        let niche = self.enum_niche_layout(cases);
         self.add_indent();
-        self.buffer.push_string("switch (self->tag) {\n");
+        when niche in {
+            .Some(layout) then {
+                let value_expr = "self->data.\(self.sanitize_codegen_identifier(layout.payload_case_name)).\(self.sanitize_codegen_identifier(layout.payload_field_name))";
+                self.buffer.push_string("switch (\(self.niche_tag_expression(layout, value_expr))) {\n");
+            },
+            .None() then {
+                self.buffer.push_string("switch (self->tag) {\n");
+            },
+        };
         let mutable case_index UInt = 0;
         for case_info in cases then {
             let case_c_name = self.sanitize_codegen_identifier(case_info.name);
@@ -369,10 +379,13 @@ given CodeGen {
 
     module_private generate_managed_enum_declaration(self, name String, cases List[TypedEnumCase]) Void = {
         let payload_name = "__koral_payload_\(name)";
+        let niche = self.enum_niche_layout(cases);
         self.buffer.push_string("struct \(payload_name) {\n");
         self.push_indent_level();
-        self.add_indent();
-        self.buffer.push_string("intptr_t tag;\n");
+        if niche is .None() then {
+            self.add_indent();
+            self.buffer.push_string("intptr_t tag;\n");
+        };
         self.add_indent();
         self.buffer.push_string("union {\n");
         self.push_indent_level();
@@ -482,10 +495,13 @@ given CodeGen {
             return;
         };
         // 生成枚举结构体定义
+        let niche = self.enum_niche_layout(cases);
         self.buffer.push_string("struct \(name) {\n");
         self.push_indent_level();
-        self.add_indent();
-        self.buffer.push_string("intptr_t tag;\n");
+        if niche is .None() then {
+            self.add_indent();
+            self.buffer.push_string("intptr_t tag;\n");
+        };
         self.add_indent();
         self.buffer.push_string("union {\n");
         self.push_indent_level();
@@ -520,10 +536,19 @@ given CodeGen {
         self.push_indent_level();
         self.add_indent();
         self.buffer.push_string("struct \(name) result;\n");
-        self.add_indent();
-        self.buffer.push_string("result.tag = self->tag;\n");
-        self.add_indent();
-        self.buffer.push_string("switch (self->tag) {\n");
+        when niche in {
+            .Some(layout) then {
+                let value_expr = "self->data.\(self.sanitize_codegen_identifier(layout.payload_case_name)).\(self.sanitize_codegen_identifier(layout.payload_field_name))";
+                self.add_indent();
+                self.buffer.push_string("switch (\(self.niche_tag_expression(layout, value_expr))) {\n");
+            },
+            .None() then {
+                self.add_indent();
+                self.buffer.push_string("result.tag = self->tag;\n");
+                self.add_indent();
+                self.buffer.push_string("switch (self->tag) {\n");
+            },
+        };
         let mutable case_index UInt = 0;
         for case_info in cases then {
             let case_c_name = self.sanitize_codegen_identifier(case_info.name);
@@ -541,6 +566,19 @@ given CodeGen {
                 let src = "self->data.\(case_c_name).\(f_c_name)";
                 let dst = "result.data.\(case_c_name).\(f_c_name)";
                 self.append_copy_assignment(f.field_type, src, dst);
+            };
+            when niche in {
+                .Some(layout) then {
+                    if non_void_fields.is_empty() then {
+                        // niche 布局下空 case 没有自己的存储，必须把空位模式写回 result，
+                        // 否则 result 带着脏值，后续 niche 测试会误判成 payload case。
+                        let payload_field = "result.data.\(self.sanitize_codegen_identifier(layout.payload_case_name)).\(self.sanitize_codegen_identifier(layout.payload_field_name))";
+                        self.add_indent();
+                        self.buffer.push_string("    ");
+                        self.buffer.push_string(self.niche_null_assignment(layout.payload_field_type, payload_field));
+                    };
+                },
+                .None() then {},
             };
             self.add_indent();
             self.buffer.push_string("    break;\n");
@@ -571,8 +609,17 @@ given CodeGen {
             },
             .None() then {},
         };
-        self.add_indent();
-        self.buffer.push_string("switch (self->tag) {\n");
+        when niche in {
+            .Some(layout) then {
+                let value_expr = "self->data.\(self.sanitize_codegen_identifier(layout.payload_case_name)).\(self.sanitize_codegen_identifier(layout.payload_field_name))";
+                self.add_indent();
+                self.buffer.push_string("switch (\(self.niche_tag_expression(layout, value_expr))) {\n");
+            },
+            .None() then {
+                self.add_indent();
+                self.buffer.push_string("switch (self->tag) {\n");
+            },
+        };
         case_index = 0;
         for case_info in cases then {
             let case_c_name = self.sanitize_codegen_identifier(case_info.name);

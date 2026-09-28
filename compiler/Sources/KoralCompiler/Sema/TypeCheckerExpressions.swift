@@ -8102,9 +8102,11 @@ extension TypeChecker {
       
       // Build: __koral_iter_N.next()
       let iterVarExpr = TypedExpressionNode.variable(identifier: iterSymbol)
+      // for 循环持有迭代器的**非拥有借用**：只需要「可变读写下一次 next()」，
+      // 不接管所有权，也不参与引用计数。用瘦借用类型，而不是 owning 的 `*mutable T`。
       let iterRefExpr = TypedExpressionNode.referenceExpression(
         expression: iterVarExpr,
-        type: .mutableReference(inner: iteratorType)
+        type: .mutableBorrowedReference(inner: iteratorType)
       )
       let nextCall = try buildNextCall(iterRef: iterRefExpr, elementType: elementType)
       

@@ -1,5 +1,16 @@
 // codegen_memory.koral - MIR-oriented copy/drop helpers
 
+module_private let drop_thunk_marker() String = { return "/* __koral_drop_thunks__ */\n"; };
+
+/// niche 布局的描述：用「空位模式」而不是 tag 来区分 case。
+module_private type EnumNicheLayout(
+    empty_case_index UInt,
+    payload_case_index UInt,
+    payload_case_name String,
+    payload_field_name String,
+    payload_field_type Type,
+);
+
 given CodeGen {
     public needs_drop(self, var_type Type) Bool = {
         let mapped_needs_drop = when var_type in {
@@ -51,10 +62,285 @@ given CodeGen {
     };
 
     module_private append_release_control_line(self, runtime_name String, value String) Void = {
-        self.buffer.push_string(runtime_name);
+        // 弱引用持有 control 字；owning ref / 托管值是单字 payload 指针。
+        let is_weak = runtime_name == "__koral_weak_retain" or runtime_name == "__koral_weak_release";
+        if runtime_name == "__koral_release" then {
+            // 头里不存析构函数之后，释放必须带上 dtor，只能走 append_release_handle_statement。
+            // 走到这里说明有调用点漏改了 —— 直接炸，不要静默发成 retain。
+            panic("append_release_control_line: release must go through append_release_handle_statement");
+        };
+        let resolved_name = if is_weak then runtime_name else "__koral_retain_value";
+        self.buffer.push_string(resolved_name);
         self.buffer.push_string("((");
         self.buffer.push_string(value);
-        self.buffer.push_string(").control);\n");
+        self.buffer.push_string(if is_weak then ").control);\n" else ").ptr);\n");
+    };
+
+    /// `__koral_release_value((value).ptr, dtor)`：头里不存析构函数，
+    /// drop glue 在释放调用点单态化后作为第二个参数传入。
+    module_private append_release_value_line(self, value String, dtor String) Void = {
+        self.buffer.push_string("__koral_release_value((");
+        self.buffer.push_string(value);
+        self.buffer.push_string(").ptr, ");
+        self.buffer.push_string(dtor);
+        self.buffer.push_string(");\n");
+    };
+
+    /// 释放一个**句柄**。`handle_type` 是引用或 trait object。
+    ///
+    /// - owning reference：`value.ptr` 指向一个 C 值，dtor 是该值的原地 drop glue。
+    /// - trait object：dtor 是**动态**的（具体类型的 glue 在 `value.vtable` 里）。
+    /// - weak reference：只减 weak 计数，不碰 payload（可能已死）。
+    /// - 借用：不拥有，什么都不做。
+    public append_release_handle_statement(self, handle_type Type, value String) Void = {
+        when handle_type in {
+            .BorrowedReferenceType(_) then {},
+            .MutableBorrowedReferenceType(_) then {},
+            .WeakReferenceType(_) then {
+                self.buffer.push_string("__koral_weak_release((");
+                self.buffer.push_string(value);
+                self.buffer.push_string(").control);\n");
+            },
+            .MutableWeakReferenceType(_) then {
+                self.buffer.push_string("__koral_weak_release((");
+                self.buffer.push_string(value);
+                self.buffer.push_string(").control);\n");
+            },
+            .TraitObject(_, _, _) then {
+                self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+            },
+            .ReferenceType(inner) then {
+                if self.is_trait_object_type(inner) then {
+                    self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+                } else {
+                    self.append_release_value_line(value, self.drop_function_pointer(inner));
+                };
+            },
+            .MutableReferenceType(inner) then {
+                if self.is_trait_object_type(inner) then {
+                    self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+                } else {
+                    self.append_release_value_line(value, self.drop_function_pointer(inner));
+                };
+            },
+            .OpaqueType(def_id) then {
+                when self.context.lookup_type(def_id) in {
+                    .Some(mapped) then self.append_release_handle_statement(mapped, value),
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+    };
+
+    /// 判断类型是否是 trait object（含 OpaqueType 映射到 trait object 的情况）。
+    public is_trait_object_type(self, var_type Type) Bool = {
+        return when var_type in {
+            .TraitObject(_, _, _) then true,
+            .OpaqueType(def_id) then {
+                when self.context.lookup_type(def_id) in {
+                    .Some(mapped) then self.is_trait_object_type(mapped),
+                    .None() then false,
+                }
+            },
+            _ then false,
+        };
+    };
+
+    // ── Enum niche layout ──────────────────────────────────────────────────
+    //
+    // 两 case、其中恰好一个无参数、另一个恰好一个参数且该参数的 C 表示整段就是
+    // 一个可空指针字时，枚举可以不带 tag —— 用那个指针的 NULL 位模式表示空 case。
+    // 这正是 `Option[T] { None(), Some(value T) }` 的形状。
+
+    /// C 表示是否整段就是一个可空指针字 —— NULL 是未使用的位模式。
+    ///
+    /// 不变量：**活的 owning handle 永不为 NULL**。`__koral_upgrade_ref` 失败时返回的
+    /// null ref 是瞬时值，生成代码立刻转成 Option 的 None，从不作为活值流出。
+    /// 将来若有「可空句柄」类型，必须先排除出 niche 名单。
+    module_private has_null_niche(self, var_type Type) Bool = {
+        return when var_type in {
+            // managed 名义 wrapper 是 `struct X { void* ptr; }`，单字。
+            .StructureType(_) then self.uses_managed_nominal_representation(var_type),
+            .EnumType(_) then self.uses_managed_nominal_representation(var_type),
+            .GenericStruct(_, _, _) then self.uses_managed_nominal_representation(var_type),
+            .GenericEnum(_, _, _) then self.uses_managed_nominal_representation(var_type),
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .BorrowedReferenceType(_) then true,
+            .MutableBorrowedReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            // Int/Float 全位模式有效；Closure 是三字；TraitRef 是两字；裸指针的 NULL 合法；
+            // 值布局枚举（包括已用 niche 布局的）不带空位 —— 嵌套 Option[Option[T]]
+            // 必须回落 tag 布局，否则 `.None()` 与 `.Some(Option.None())` 无法区分。
+            _ then false,
+        };
+    };
+
+    /// 承载 niche 的那个字段的「置空」语句。`field_path` 是该字段的完整 C 路径。
+    module_private niche_null_assignment(self, var_type Type, field_path String) String = {
+        return when var_type in {
+            .WeakReferenceType(_) then "\(field_path).control = NULL;\n",
+            .MutableWeakReferenceType(_) then "\(field_path).control = NULL;\n",
+            _ then "\(field_path).ptr = NULL;\n",
+        };
+    };
+
+    /// 「值为空」的 C 条件表达式。
+    module_private niche_null_test(self, var_type Type, value_expr String) String = {
+        return when var_type in {
+            .WeakReferenceType(_) then "(\(value_expr).control == NULL)",
+            .MutableWeakReferenceType(_) then "(\(value_expr).control == NULL)",
+            _ then "(\(value_expr).ptr == NULL)",
+        };
+    };
+
+    /// 由值表达式算出 case 序号（`intptr_t`），供 `switch` 分派使用。
+    module_private niche_tag_expression(self, layout EnumNicheLayout, value_expr String) String = {
+        return "(\(self.niche_null_test(layout.payload_field_type, value_expr)) ? \(layout.empty_case_index.to_string()) : \(layout.payload_case_index.to_string()))";
+    };
+
+    /// 按 case 列表判定 niche 布局；形状不对（或参数类型没有 niche）返回 None。
+    module_private enum_niche_layout(self, cases List[TypedEnumCase]) Option[EnumNicheLayout] = {
+        if cases.count() <> 2 then { return Option[EnumNicheLayout].None(); };
+        let mutable empty_case_index UInt = 0;
+        let mutable empty_count UInt = 0;
+        let mutable payload_case_index UInt = 0;
+        let mutable payload_count UInt = 0;
+        let mutable payload_case_name = "";
+        let mutable payload_fields = List[TypedEnumCaseField].new();
+        let mutable case_index UInt = 0;
+        for case_info in cases then {
+            if case_info.fields.is_empty() then {
+                empty_count += 1;
+                empty_case_index = case_index;
+            } else {
+                payload_count += 1;
+                payload_case_index = case_index;
+                payload_case_name = case_info.name;
+                payload_fields = case_info.fields;
+            };
+            case_index += 1;
+        };
+        if empty_count <> 1 or payload_count <> 1 then { return Option[EnumNicheLayout].None(); };
+        // Void 参数不占存储，先滤掉再数。
+        let mutable field_count UInt = 0;
+        let mutable payload_field_name = "";
+        let mutable payload_field_type = Type.VoidType();
+        for field in payload_fields then {
+            if not self.type_is_void(field.field_type) then {
+                field_count += 1;
+                payload_field_name = field.name;
+                payload_field_type = field.field_type;
+            };
+        };
+        if field_count <> 1 then { return Option[EnumNicheLayout].None(); };
+        if not self.has_null_niche(payload_field_type) then { return Option[EnumNicheLayout].None(); };
+        return Option[EnumNicheLayout].Some(EnumNicheLayout(
+            empty_case_index,
+            payload_case_index,
+            payload_case_name,
+            payload_field_name,
+            payload_field_type,
+        ));
+    };
+
+    /// 从类型出发判定 niche 布局（泛型实例化会先解析到具体布局的 case 列表）。
+    module_private enum_niche_layout_for_type(self, t Type) Option[EnumNicheLayout] = {
+        let def_id = when t in {
+            .EnumType(id) then id,
+            .GenericEnum(template, _, _) then self.find_type_def_id_by_layout_or_template(t, template) or else DefId(0(UInt)),
+            _ then DefId(0(UInt)),
+        };
+        return when self.concrete_enum_cases_from_def(def_id) in {
+            .Some(cases) then self.enum_niche_layout(cases),
+            .None() then Option[EnumNicheLayout].None(),
+        };
+    };
+
+    // ── Drop glue as a function pointer ─────────────────────────────────────
+    //
+    // 头里不存析构函数之后，`__koral_release_value` 的第二个参数必须在**释放调用点**
+    // 就绪。绝大多数类型已有同构的 `__koral_*_drop(void*)`，直接取函数名即可；
+    // 剩下的（典型是 `Ref[Y]`，其 drop 依赖内层类型）按需物化一个 thunk。
+
+    /// 「原地销毁一个 var_type 类型 C 值」的 `__koral_Dtor` 表达式。
+    /// 没有 drop glue 的类型返回 `NULL`。
+    ///
+    /// 注意：trait object 的销毁是**动态**的（具体类型的 glue 在 vtable 里），
+    /// 不要对 trait object 句柄用本函数 —— 用 append_release_handle_statement。
+    public drop_function_pointer(self, var_type Type) String = {
+        if not self.needs_drop(var_type) then { return "NULL"; };
+        return when var_type in {
+            .StructureType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
+            .EnumType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
+            .GenericStruct(template, _, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
+                };
+                "(__koral_Dtor)__koral_\(type_name)_drop"
+            },
+            .GenericEnum(template, _, _) then {
+                let type_name = when self.find_type_def_id_by_layout_or_template(var_type, template) in {
+                    .Some(def_id) then self.c_name_for_def_id(def_id),
+                    .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
+                };
+                "(__koral_Dtor)__koral_\(type_name)_drop"
+            },
+            .FunctionType(_, _) then "(__koral_Dtor)__koral_closure_drop",
+            .WeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
+            .MutableWeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
+            .TraitObject(_, _, _) then "(__koral_Dtor)__koral_traitref_drop",
+            .ReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
+            .MutableReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
+            .OpaqueType(def_id) then {
+                when self.context.lookup_type(def_id) in {
+                    .Some(mapped) then self.drop_function_pointer(mapped),
+                    .None() then "NULL",
+                }
+            },
+            .TypeVar(_) then "NULL",
+            _ then "NULL",
+        };
+    };
+
+    /// 为没有现成 `void (*)(void*)` glue 的类型物化一个 thunk，并返回函数名。
+    module_private materialize_drop_thunk(self, var_type Type) String = {
+        let key = self.c_type_name(var_type);
+        when self.drop_thunk_names.get(key) in {
+            .Some(existing) then { return existing; },
+            .None() then {},
+        };
+        let name = "__koral_drop_thunk_\(self.drop_thunk_defs.count())";
+        self.drop_thunk_names.insert(key, name);
+
+        let saved_buffer = self.buffer;
+        self.buffer = CodegenBuffer.new();
+        self.buffer.push_string("    ");
+        self.buffer.push_string(self.c_type_name(var_type));
+        self.buffer.push_string(" __koral_thunk_self = *(");
+        self.buffer.push_string(self.c_type_name(var_type));
+        self.buffer.push_string("*)raw_value;\n");
+        self.buffer.push_string("    ");
+        self.append_drop_statement(var_type, "__koral_thunk_self");
+        let body = self.buffer.into_string();
+        self.buffer = saved_buffer;
+
+        self.drop_thunk_defs.push("static void \(name)(void* raw_value) {\n\(body)}\n");
+        return name;
+    };
+
+    /// 在类型声明之后、函数体之前插入 thunk 定义。
+    public emit_drop_thunk_definitions(self, source String) String = {
+        if self.drop_thunk_defs.count() == 0 then { return source; };
+        let mutable code = StringBuilder.new();
+        for thunk in self.drop_thunk_defs then {
+            code.push_string(thunk);
+            code.push_string("\n");
+        };
+        return source.replace_all(drop_thunk_marker(), with: code.to_string());
     };
 
     public append_drop_statement(self, var_type Type, value String) Void = {
@@ -66,19 +352,21 @@ given CodeGen {
             .EnumType(def_id) then {
                 self.append_drop_call_line(self.c_name_for_def_id(def_id), value);
             },
-            .ReferenceType(_) then self.append_release_control_line("__koral_release", value),
-            .MutableReferenceType(_) then self.append_release_control_line("__koral_release", value),
+            .BorrowedReferenceType(_) then {},
+            .MutableBorrowedReferenceType(_) then {},
+            .ReferenceType(_) then self.append_release_handle_statement(var_type, value),
+            .MutableReferenceType(_) then self.append_release_handle_statement(var_type, value),
             .FunctionType(_, _) then {
                 self.buffer.push_string("__koral_closure_release(");
                 self.buffer.push_string(value);
                 self.buffer.push_string(");\n");
             },
-            .WeakReferenceType(_) then self.append_release_control_line("__koral_weak_release", value),
-            .MutableWeakReferenceType(_) then self.append_release_control_line("__koral_weak_release", value),
+            .WeakReferenceType(_) then self.append_release_handle_statement(var_type, value),
+            .MutableWeakReferenceType(_) then self.append_release_handle_statement(var_type, value),
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then when mapped in {
-                        .TraitObject(_, _, _) then self.append_release_control_line("__koral_release", value),
+                        .TraitObject(_, _, _) then self.append_release_handle_statement(var_type, value),
                         .OpaqueType(_) then {},
                         _ then self.append_drop_statement(mapped, value),
                     },
@@ -99,12 +387,12 @@ given CodeGen {
                 };
                 self.append_drop_call_line(type_name, value);
             },
-            .TraitObject(_, _, _) then {
-                self.append_release_control_line("__koral_release", value);
-            },
+            .TraitObject(_, _, _) then self.append_release_handle_statement(var_type, value),
             .TypeVar(_) then {
-                // TypeVar contains TypeVariable; release the control block.
-                self.append_release_control_line("__koral_release", value);
+                // TypeVar 是编译器内部的类型擦除，落到 codegen 时内层类型已不可知。
+                // 头里不存析构函数之后只能传 NULL（drop glue 不会跑）——这是一个
+                // 已存在的擦除空洞，不是本次改动引入的。
+                self.append_release_value_line(value, "NULL");
             },
             _ then {},
         };

@@ -565,6 +565,9 @@ given CodeGen {
     public generate_vtable_struct_definition(self, trait_name String, concrete_type_c_name String, members List[MIRTraitVTableMethod]) Void = {
         let struct_name = self.specialized_vtable_struct_name(trait_name, concrete_type_c_name);
         self.buffer.push_string("struct \(struct_name) {\n");
+        // 公共前缀必须是第一个成员：trait object 的类型擦除销毁统一读 base.destroy，
+        // 不用知道具体 trait。布局上 base.destroy 落在 offset 0。
+        self.buffer.push_string("    struct __koral_VTableHeader base;\n");
 
         for member in members then {
             let method_c_name = self.sanitize_codegen_identifier(member.name);
@@ -679,10 +682,10 @@ given CodeGen {
         if dynamic_trait_self_wrapper then {
             let ref_var = self.next_temp_with_init(
                 "struct __koral_Ref",
-                "(struct __koral_Ref){ .ptr = self_val.ptr, .control = self_val.control }"
+                "(struct __koral_Ref){ .ptr = self_val.ptr }"
             );
-            self.buffer.push_string("    __koral_retain(self_val.control);\n");
-            self.buffer.push_string("    __koral_retain(\(ref_var).control);\n");
+            self.buffer.push_string("    __koral_retain_value(self_val.ptr);\n");
+            self.buffer.push_string("    __koral_retain_value(\(ref_var).ptr);\n");
 
             let mutable wrapper_param_types = List[String].new();
             wrapper_param_types.push("struct __koral_Ref");
@@ -706,10 +709,10 @@ given CodeGen {
 
             if is_void_return then {
                 self.buffer.push_string("    \(vt_call_target)(\(dynamic_call_args_str));\n");
-                self.buffer.push_string("    __koral_release(self_ref.control);\n");
+                self.buffer.push_string("    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n");
             } else {
                 self.buffer.push_string("    \(return_c_type) __koral_ret = \(vt_call_target)(\(dynamic_call_args_str));\n");
-                self.buffer.push_string("    __koral_release(self_ref.control);\n");
+                self.buffer.push_string("    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n");
                 self.buffer.push_string("    return __koral_ret;\n");
             };
 
@@ -719,10 +722,10 @@ given CodeGen {
 
         if is_void_return then {
             self.buffer.push_string("    \(actual_method_c_name)(\(call_args_str));\n");
-            self.buffer.push_string("    __koral_release(self_ref.control);\n");
+            self.buffer.push_string("    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n");
         } else {
             self.buffer.push_string("    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n");
-            self.buffer.push_string("    __koral_release(self_ref.control);\n");
+            self.buffer.push_string("    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n");
             self.buffer.push_string("    return __koral_ret;\n");
         };
 
@@ -750,6 +753,8 @@ given CodeGen {
         let struct_name = self.specialized_vtable_struct_name_with_args(trait_name, trait_type_args, concrete_type_c_name);
 
         self.buffer.push_string("static const struct \(struct_name) \(instance_name) = {\n");
+        // 公共前缀：trait object 释放时从这里取具体类型的 drop glue。
+        self.buffer.push_string("    .base = { \(self.drop_function_pointer(concrete_type)) },\n");
 
         for member in members then {
             let method_c_name = self.sanitize_codegen_identifier(member.name);
@@ -1620,8 +1625,7 @@ given CodeGen {
         self.add_indent();
         self.buffer.push_string("\(result).ptr = \(ref_value).ptr;\n");
         self.add_indent();
-        self.buffer.push_string("\(result).control = \(ref_value).control;\n");
-        self.add_indent();
+                self.add_indent();
         if trait_object_like_source then {
             self.buffer.push_string("\(result).vtable = \(ref_value).vtable;\n");
         } else {
@@ -1629,7 +1633,7 @@ given CodeGen {
         };
         if retain_source then {
             self.add_indent();
-            self.buffer.push_string("__koral_retain(\(result).control);\n");
+            self.buffer.push_string("__koral_retain_value(\(result).ptr);\n");
         };
         return result;
     };

@@ -2,7 +2,7 @@ type MIRValueCleanup(name String, cleanup_type Type);
 
 type MIRValueEmission(expression String, cleanup Option[MIRValueCleanup]);
 
-type MIRPlaceAccess(path String, control String, cleanup Option[MIRValueCleanup]);
+type MIRPlaceAccess(path String, cleanup Option[MIRValueCleanup]);
 
 type MIRLocalLifetimePlan(
     root_locals List[MIRLocalID],
@@ -771,27 +771,21 @@ given MIRFunctionCodeEmitter {
         when value_type in {
             .ReferenceType(_) then {
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (((");
+                self.codegen.buffer.push_string("__koral_retain_value((");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)) { __koral_retain(((");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)); }\n");
+                self.codegen.buffer.push_string(").ptr);\n");
             },
             .MutableReferenceType(_) then {
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (((");
+                self.codegen.buffer.push_string("__koral_retain_value((");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)) { __koral_retain(((");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)); }\n");
+                self.codegen.buffer.push_string(").ptr);\n");
             },
             .TraitObject(_, _, _) then {
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string("if (((");
+                self.codegen.buffer.push_string("__koral_retain_value((");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)) { __koral_retain(((");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)); }\n");
+                self.codegen.buffer.push_string(").ptr);\n");
             },
             .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {},
             .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
@@ -897,11 +891,9 @@ given MIRFunctionCodeEmitter {
                     // releases cause a double-free.
                     if self.is_parameter_operand(op) and is_reference_like_type(return_type) then {
                         self.codegen.add_indent();
-                        self.codegen.buffer.push_string("if ((");
+                        self.codegen.buffer.push_string("__koral_retain_value((");
                         self.codegen.buffer.push_string(emission.expression);
-                        self.codegen.buffer.push_string(").control) { __koral_retain((");
-                        self.codegen.buffer.push_string(emission.expression);
-                        self.codegen.buffer.push_string(").control); }\n");
+                        self.codegen.buffer.push_string(").ptr);\n");
                     };
                     emission.expression
                 };
@@ -1446,19 +1438,12 @@ given MIRFunctionCodeEmitter {
                 if fields.count() == aggregate.fields.count() and self.codegen.uses_managed_nominal_representation(aggregate.aggregate_type) then {
                     let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(aggregate.aggregate_type));
                     let payload_type = self.codegen.managed_payload_type_name(aggregate.aggregate_type);
-                    let nominal_name = self.codegen.nominal_type_c_name(aggregate.aggregate_type);
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type)));\n");
+                    self.codegen.buffer.push_string("\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type))));\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n");
+                    self.codegen.buffer.push_string("__koral_control_of(\(expression).ptr)->strong_count = 1;\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(nominal_name)_payload_drop;\n");
+                    self.codegen.buffer.push_string("__koral_control_of(\(expression).ptr)->weak_count = 0;\n");
                     let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
                     let mutable index UInt = 0;
                     while index < aggregate.fields.count() and index < fields.count() then {
@@ -1500,23 +1485,29 @@ given MIRFunctionCodeEmitter {
         if self.codegen.uses_managed_nominal_representation(construction.enum_type) then {
             let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(construction.enum_type));
             let payload_type = self.codegen.managed_payload_type_name(construction.enum_type);
-            let nominal_name = self.codegen.nominal_type_c_name(construction.enum_type);
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("\(expression).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type)));\n");
+            self.codegen.buffer.push_string("\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type))));\n");
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("\(expression).ptr = (char*)\(expression).control + sizeof(struct __koral_Control);\n");
+            self.codegen.buffer.push_string("__koral_control_of(\(expression).ptr)->strong_count = 1;\n");
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->strong_count = 1;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->weak_count = 0;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->ptr = \(expression).ptr;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)\(expression).control)->dtor = (__koral_Dtor)__koral_\(nominal_name)_payload_drop;\n");
+            self.codegen.buffer.push_string("__koral_control_of(\(expression).ptr)->weak_count = 0;\n");
             let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
             let case_info = self.enum_case_info(construction.enum_type, construction.case_name);
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("\(payload_expr)->tag = \(case_info.first.to_string());\n");
+            when self.codegen.enum_niche_layout_for_type(construction.enum_type) in {
+                .Some(layout) then {
+                    if case_info.second.is_empty() then {
+                        // niche 布局：空 case 没有自己的存储，必须把空位模式写进 payload case 的字段，
+                        // 否则后面 niche 测试读到脏值会判成 payload case。
+                        let field_path = "\(payload_expr)->data.\(self.codegen.sanitize_codegen_identifier(layout.payload_case_name)).\(self.codegen.sanitize_codegen_identifier(layout.payload_field_name))";
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string(self.codegen.niche_null_assignment(layout.payload_field_type, field_path));
+                    };
+                },
+                .None() then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("\(payload_expr)->tag = \(case_info.first.to_string());\n");
+                },
+            };
             let member_base = "\(payload_expr)->data.\(self.codegen.sanitize_codegen_identifier(construction.case_name))";
             let mutable argument_index UInt = 0;
             for field in case_info.second then {
@@ -1541,11 +1532,24 @@ given MIRFunctionCodeEmitter {
         };
         let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(construction.enum_type));
         let case_info = self.enum_case_info(construction.enum_type, construction.case_name);
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(expression);
-        self.codegen.buffer.push_string(".tag = ");
-        self.codegen.buffer.push_string(case_info.first.to_string());
-        self.codegen.buffer.push_string(";\n");
+        when self.codegen.enum_niche_layout_for_type(construction.enum_type) in {
+            .Some(layout) then {
+                if case_info.second.is_empty() then {
+                    // niche 布局：空 case 没有自己的存储，必须把空位模式写进 payload case 的字段，
+                    // 否则后面 niche 测试读到脏值会判成 payload case。
+                    let field_path = "\(expression).data.\(self.codegen.sanitize_codegen_identifier(layout.payload_case_name)).\(self.codegen.sanitize_codegen_identifier(layout.payload_field_name))";
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(self.codegen.niche_null_assignment(layout.payload_field_type, field_path));
+                };
+            },
+            .None() then {
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(expression);
+                self.codegen.buffer.push_string(".tag = ");
+                self.codegen.buffer.push_string(case_info.first.to_string());
+                self.codegen.buffer.push_string(";\n");
+            },
+        };
         let mutable argument_index UInt = 0;
         for field in case_info.second then {
             if not self.codegen.type_is_void(field.param_type) then {
@@ -1570,20 +1574,30 @@ given MIRFunctionCodeEmitter {
 
     module_private emit_enum_tag(self, tag MIREnumTag) MIRValueEmission = {
         let subject = self.emit_value_source(tag.subject);
-        let mutable tag_expr = "\(subject.expression).tag";
+        let niche = self.codegen.enum_niche_layout_for_type(tag.enum_type);
+        let mutable base_expr = subject.expression;
+        let mutable member_op = ".";
         if self.codegen.uses_managed_nominal_representation(tag.enum_type) then {
             let payload_type = self.codegen.managed_payload_type_name(tag.enum_type);
-            tag_expr = "((struct \(payload_type)*)\(subject.expression).ptr)->tag";
+            base_expr = "((struct \(payload_type)*)\(subject.expression).ptr)";
+            member_op = "->";
         } else {
             when self.type_of_value(tag.subject) in {
-                .ReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
-                .MutableReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
-                .BorrowedReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
-                .MutableBorrowedReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
-                .WeakReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
-                .MutableWeakReferenceType(inner) then { tag_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr).tag";},
+                .ReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
+                .MutableReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
+                .BorrowedReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
+                .MutableBorrowedReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
+                .WeakReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
+                .MutableWeakReferenceType(inner) then { base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";},
                 _ then {},
             };
+        };
+        let tag_expr = when niche in {
+            .Some(layout) then {
+                let value_expr = "\(base_expr)\(member_op)data.\(self.codegen.sanitize_codegen_identifier(layout.payload_case_name)).\(self.codegen.sanitize_codegen_identifier(layout.payload_field_name))";
+                self.codegen.niche_tag_expression(layout, value_expr)
+            },
+            .None() then "\(base_expr)\(member_op)tag",
         };
         let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.IntType()), tag_expr);
         self.emit_cleanup(subject.cleanup);
@@ -1605,65 +1619,11 @@ given MIRFunctionCodeEmitter {
             let mutable pointee_c_type = self.codegen.c_type_name(inner_type);
             let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref");
             self.codegen.add_indent();
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(");
-            self.codegen.buffer.push_string(pointee_c_type);
-            self.codegen.buffer.push_string("));\n");
+            self.codegen.buffer.push_string("\(ref_temp).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(\(pointee_c_type))));\n");
             self.codegen.add_indent();
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".ptr = (char*)");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n");
+            self.codegen.buffer.push_string("__koral_control_of(\(ref_temp).ptr)->strong_count = 1;\n");
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control)->strong_count = 1;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control)->weak_count = 0;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control)->ptr = ");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".ptr;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string("((struct __koral_Control*)");
-            self.codegen.buffer.push_string(ref_temp);
-            self.codegen.buffer.push_string(".control)->dtor = ");
-            when inner_type in {
-                .StructureType(def_id) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_\(self.codegen.c_name_for_def_id(def_id))_drop;\n");
-                },
-                .EnumType(def_id) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_\(self.codegen.c_name_for_def_id(def_id))_drop;\n");
-                },
-                .ReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-                },
-                .MutableReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-                },
-                .BorrowedReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-                },
-                .MutableBorrowedReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-                },
-                .WeakReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n");
-                },
-                .MutableWeakReferenceType(_) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n");
-                },
-                .FunctionType(_, _) then {
-                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_closure_drop;\n");
-                },
-                _ then {
-                    self.codegen.buffer.push_string("NULL;\n");
-                },
-            };
+            self.codegen.buffer.push_string("__koral_control_of(\(ref_temp).ptr)->weak_count = 0;\n");
             let dest_expr = "*(" + pointee_c_type + "*)" + ref_temp + ".ptr";
             self.codegen.append_copy_or_move_assignment(inner_type, inner.expression, dest_expr, false);
             ref_expression = ref_temp;
@@ -1746,17 +1706,11 @@ given MIRFunctionCodeEmitter {
                         let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref");
                         let c_type = self.codegen.c_type_name(source_type);
                         self.codegen.add_indent();
-                        self.codegen.buffer.push_string(ref_temp);
-                        self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(\(c_type)));\n");
+                        self.codegen.buffer.push_string("\(ref_temp).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(\(c_type))));\n");
                         self.codegen.add_indent();
-                        self.codegen.buffer.push_string(ref_temp);
-                        self.codegen.buffer.push_string(".ptr = (char*)\(ref_temp).control + sizeof(struct __koral_Control);\n");
+                        self.codegen.buffer.push_string("__koral_control_of(\(ref_temp).ptr)->strong_count = 1;\n");
                         self.codegen.add_indent();
-                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->strong_count = 1;\n");
-                        self.codegen.add_indent();
-                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->weak_count = 0;\n");
-                        self.codegen.add_indent();
-                        self.codegen.buffer.push_string("((struct __koral_Control*)\(ref_temp).control)->ptr = \(ref_temp).ptr;\n");
+                        self.codegen.buffer.push_string("__koral_control_of(\(ref_temp).ptr)->weak_count = 0;\n");
                         self.codegen.add_indent();
                         self.codegen.buffer.push_string("*(\(c_type)*)\(ref_temp).ptr = \(expression);\n");
                         self.codegen.generate_trait_object_conversion_from_ref_value(ref_temp, trait_name, self.trait_object_target_type_args(target_type), concrete_type, false)
@@ -1832,12 +1786,12 @@ given MIRFunctionCodeEmitter {
             method_param_types.push(self.codegen.c_type_name(expected_type));
             arg_index += 1;
         };
-        let ref_var = self.codegen.next_temp_with_init("struct __koral_Ref", "(struct __koral_Ref){ .ptr = \(receiver_result).ptr, .control = \(receiver_result).control }");
+        let ref_var = self.codegen.next_temp_with_init("struct __koral_Ref", "(struct __koral_Ref){ .ptr = \(receiver_result).ptr }");
         if receiver_ownership is .Copy() or receiver_ownership is .Borrow() then {
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("__koral_retain(");
+            self.codegen.buffer.push_string("__koral_retain_value(");
             self.codegen.buffer.push_string(ref_var);
-            self.codegen.buffer.push_string(".control);\n");
+            self.codegen.buffer.push_string(".ptr);\n");
         };
         let mutable call_args = List[String].new();
         call_args.push(ref_var);
@@ -1861,7 +1815,7 @@ given MIRFunctionCodeEmitter {
 
     module_private vtable_prefix_struct_type_for_mir_method(self, members List[MIRTraitVTableMethod], method_name String, method_field_type String) String = {
         let mutable code = StringBuilder.new();
-        code.push_string("struct { ");
+        code.push_string("struct { struct __koral_VTableHeader base; ");
         if members.is_empty() then {
             code.push_string(method_field_type);
             code.push_string("; ");
@@ -1913,9 +1867,6 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".ptr = &");
         self.codegen.buffer.push_string(value_temp);
         self.codegen.buffer.push_string(";\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control = NULL;\n");
         return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
 
@@ -1936,11 +1887,6 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".ptr = &");
         self.codegen.buffer.push_string(access.path);
         self.codegen.buffer.push_string(";\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control = ");
-        self.codegen.buffer.push_string(access.control);
-        self.codegen.buffer.push_string(";\n");
         self.emit_cleanup(access.cleanup);
         return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
@@ -1956,65 +1902,11 @@ given MIRFunctionCodeEmitter {
         let should_transfer = allocation is .HeapOwnedMove();
         // Merged layout: allocate control block + payload in one malloc
         self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(");
-        self.codegen.buffer.push_string(pointee_c_type);
-        self.codegen.buffer.push_string("));\n");
+        self.codegen.buffer.push_string("\(result).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(\(pointee_c_type))));\n");
         self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".ptr = (char*)");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n");
+        self.codegen.buffer.push_string("__koral_control_of(\(result).ptr)->strong_count = 1;\n");
         self.codegen.add_indent();
-        self.codegen.buffer.push_string("((struct __koral_Control*)");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control)->strong_count = 1;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("((struct __koral_Control*)");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control)->weak_count = 0;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("((struct __koral_Control*)");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control)->ptr = ");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".ptr;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("((struct __koral_Control*)");
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".control)->dtor = ");
-        when pointee_type in {
-            .StructureType(def_id) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_\(self.codegen.c_name_for_def_id(def_id))_drop;\n");
-            },
-            .EnumType(def_id) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_\(self.codegen.c_name_for_def_id(def_id))_drop;\n");
-            },
-            .ReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-            },
-            .MutableReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-            },
-            .BorrowedReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-            },
-            .MutableBorrowedReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n");
-            },
-            .WeakReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n");
-            },
-            .MutableWeakReferenceType(_) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n");
-            },
-            .FunctionType(_, _) then {
-                self.codegen.buffer.push_string("(__koral_Dtor)__koral_closure_drop;\n");
-            },
-            _ then {
-                self.codegen.buffer.push_string("NULL;\n");
-            },
-        };
+        self.codegen.buffer.push_string("__koral_control_of(\(result).ptr)->weak_count = 0;\n");
         self.codegen.append_copy_or_move_assignment(pointee_type, access.path, "*(\(pointee_c_type)*)\(result).ptr", not should_transfer);
         if should_transfer then {
             self.consume_moved_place(place);
@@ -2147,17 +2039,15 @@ given MIRFunctionCodeEmitter {
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string("\(expression).ptr = \(emission.expression).ptr;\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("\(expression).control = \(emission.expression).control;\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("if (\(expression).control) { __koral_retain(\(expression).control); }\n");
+                    self.codegen.buffer.push_string("__koral_retain_value(\(expression).ptr);\n");
                 } else {
                     let concrete_c_type = self.codegen.c_type_name(result_type);
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string("\(expression) = *(\(concrete_c_type)*)\(emission.expression).ptr;\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("if (\(emission.expression).control) { __koral_retain(\(emission.expression).control); }\n");
+                    self.codegen.buffer.push_string("__koral_retain_value((\(emission.expression)).ptr);\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("if (\(emission.expression).control) { __koral_release(\(emission.expression).control); }\n");
+                    self.codegen.append_release_handle_statement(self.type_of_value(value), emission.expression);
                 };
                 self.emit_cleanup(emission.cleanup);
                 MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type))
@@ -2264,75 +2154,16 @@ given MIRFunctionCodeEmitter {
             let dest = "\(env_var)->\(field_name)";
             when capture.symbol_type in {
                 .ReferenceType(inner_ref) then {
-                    let pointee_type = inner_ref;
-                    let pointee_c_type = self.codegen.c_type_name(pointee_type);
-                    let source_ptr = self.codegen.next_temp_with_decl("void*");
+                    let _ = inner_ref;
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string(dest);
                     self.codegen.buffer.push_string(" = ");
                     self.codegen.buffer.push_string(source);
                     self.codegen.buffer.push_string(";\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("if ((");
+                    self.codegen.buffer.push_string("__koral_retain_value((");
                     self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").control != NULL) {\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("__koral_retain((");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").control);\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("} else if ((");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").ptr != NULL) {\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(source_ptr);
-                    self.codegen.buffer.push_string(" = (");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").ptr;\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(");
-                    self.codegen.buffer.push_string(pointee_c_type);
-                    self.codegen.buffer.push_string("));\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".ptr = (char*)");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".control)->strong_count = 1;\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".control)->weak_count = 0;\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("((struct __koral_Control*)");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".control)->ptr = ");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(".ptr;\n");
-                    let source_value_expr = when pointee_type in {
-                        .StructureType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(pointee_c_type)*)\(source_ptr))",
-                        .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(pointee_c_type)*)\(source_ptr))",
-                        _ then "*(\(pointee_c_type)*)\(source_ptr)",
-                    };
-                    self.codegen.append_copy_or_move_assignment(
-                        pointee_type,
-                        source_value_expr,
-                        "*(\(pointee_c_type)*)\(dest).ptr",
-                        true,
-                    );
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("}\n");
+                    self.codegen.buffer.push_string(").ptr);\n");
                 },
                 .MutableReferenceType(inner_ref) then {
                     let _ = inner_ref;
@@ -2342,16 +2173,9 @@ given MIRFunctionCodeEmitter {
                     self.codegen.buffer.push_string(source);
                     self.codegen.buffer.push_string(";\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("if ((");
+                    self.codegen.buffer.push_string("__koral_retain_value((");
                     self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").control != NULL) {\n");
-                    self.codegen.add_indent();
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("__koral_retain((");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").control);\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("}\n");
+                    self.codegen.buffer.push_string(").ptr);\n");
                 },
                 _ then self.codegen.append_copy_or_move_assignment(capture.symbol_type, source, dest, true),
             };
@@ -2492,25 +2316,23 @@ given MIRFunctionCodeEmitter {
         return when place in {
             .Local(local) then {
                 let name = self.local_name(local);
-                MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[MIRValueCleanup].None())
+                MIRPlaceAccess(name, Option[MIRValueCleanup].None())
             },
             .Global(def_id) then {
                 let name = when self.codegen.context.get_symbol(def_id) in {
                     .Some(symbol) then self.codegen.c_identifier_for_symbol_value(symbol),
                     .None() then self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(self.context_name(def_id)),
                 };
-                MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[MIRValueCleanup].None())
+                MIRPlaceAccess(name, Option[MIRValueCleanup].None())
             },
             .Field(base, field) then {
                 let base_access = self.emit_place_access(base);
                 let field_name = self.codegen.sanitize_codegen_identifier(self.codegen.context.symbol_name(field));
                 let base_type = self.type_of_place(base);
                 let mutable path = "";
-                let mutable control = base_access.control;
                 if self.codegen.uses_managed_nominal_representation(base_type) then {
                     let payload_type = self.codegen.managed_payload_type_name(base_type);
                     path = "((struct \(payload_type)*)\(base_access.path).ptr)->\(field_name)";
-                    control = "\(base_access.path).control";
                 } else when base_type in {
                     .ReferenceType(inner) then {
                         path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
@@ -2537,7 +2359,6 @@ given MIRFunctionCodeEmitter {
                         } else {
                             path = "\(base_access.path)->\(field_name)";
                         };
-                        control = "NULL";
                     },
                     .MutablePointerType(pointee) then {
                         if self.codegen.uses_managed_nominal_representation(pointee) then {
@@ -2546,13 +2367,12 @@ given MIRFunctionCodeEmitter {
                         } else {
                             path = "\(base_access.path)->\(field_name)";
                         };
-                        control = "NULL";
                     },
                     _ then {
                         path = "\(base_access.path).\(field_name)";
                     },
                 };
-                MIRPlaceAccess(path, control, base_access.cleanup)
+                MIRPlaceAccess(path, base_access.cleanup)
             },
             .EnumPayload(base, case_name, field_name, _, _) then {
                 let base_access = self.emit_place_access(base);
@@ -2562,7 +2382,7 @@ given MIRFunctionCodeEmitter {
                     let payload_type = self.codegen.managed_payload_type_name(base_type);
                     path = "((struct \(payload_type)*)\(base_access.path).ptr)->data.\(self.codegen.sanitize_codegen_identifier(case_name)).\(self.codegen.sanitize_codegen_identifier(field_name))";
                 };
-                MIRPlaceAccess(path, base_access.control, base_access.cleanup)
+                MIRPlaceAccess(path, base_access.cleanup)
             },
             .Deref(base, pointee) then {
                 let base_emission = self.emit_value_source(base);
@@ -2571,10 +2391,7 @@ given MIRFunctionCodeEmitter {
                     .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {
                         when self.trait_object_target_name(pointee) in {
                             .Some(_) then {
-                                let mutable control = StringBuilder.new();
-                                control.push_string(base_emission.expression);
-                                control.push_string(".control");
-                                MIRPlaceAccess(base_emission.expression, control.to_string(), base_emission.cleanup)
+                                MIRPlaceAccess(base_emission.expression, base_emission.cleanup)
                             },
                             .None() then {},
                         };
@@ -2584,10 +2401,7 @@ given MIRFunctionCodeEmitter {
                         path.push_string("*)");
                         path.push_string(base_emission.expression);
                         path.push_string(".ptr)");
-                        let mutable control = StringBuilder.new();
-                        control.push_string(base_emission.expression);
-                        control.push_string(".control");
-                        MIRPlaceAccess(path.to_string(), control.to_string(), base_emission.cleanup)
+                        MIRPlaceAccess(path.to_string(), base_emission.cleanup)
                     },
                     _ then {
                         let mutable path = StringBuilder.new();
@@ -2596,7 +2410,7 @@ given MIRFunctionCodeEmitter {
                         path.push_string("*)");
                         path.push_string(base_emission.expression);
                         path.push_string(")");
-                        MIRPlaceAccess(path.to_string(), "NULL", base_emission.cleanup)
+                        MIRPlaceAccess(path.to_string(), base_emission.cleanup)
                     },
                 }
             },
@@ -2608,7 +2422,7 @@ given MIRFunctionCodeEmitter {
                 path.push_string("*)");
                 path.push_string(base_emission.expression);
                 path.push_string(")");
-                MIRPlaceAccess(path.to_string(), "NULL", base_emission.cleanup)
+                MIRPlaceAccess(path.to_string(), base_emission.cleanup)
             },
         };
     };
@@ -2846,24 +2660,6 @@ given MIRFunctionCodeEmitter {
         };
     };
 
-    module_private control_expression(self, value_type Type, value String) String = {
-        if self.codegen.uses_managed_nominal_representation(value_type) then {
-            let mutable control = StringBuilder.new();
-            control.push_string(value);
-            control.push_string(".control");
-            return control.to_string();
-        };
-        return when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _, _) then {
-                let mutable control = StringBuilder.new();
-                control.push_string(value);
-                control.push_string(".control");
-                control.to_string()
-            },
-            _ then "NULL",
-        };
-    };
-
     module_private context_name(self, def_id DefId) String = self.codegen.context.get_name(def_id) or else "global_\(def_id.id)";
 
     module_private switch_case_expression(self, constant MIRConstant) String = self.constant_expression(constant);
@@ -2930,7 +2726,7 @@ given MIRFunctionCodeEmitter {
         let value_type = self.type_of_value(value);
         // For managed nominal types, convert to __koral_Ref before calling downgrade.
         if self.codegen.uses_managed_nominal_representation(value_type) then {
-            let ref_expr = "(struct __koral_Ref){.ptr = \(emission.expression).ptr, .control = \(emission.expression).control}";
+            let ref_expr = "(struct __koral_Ref){.ptr = \(emission.expression).ptr}";
             let result = self.codegen.next_temp_with_init("struct __koral_WeakRef", "__koral_downgrade_ref(\(ref_expr))");
             self.emit_cleanup(emission.cleanup);
             return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type));
@@ -2943,9 +2739,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(weak_temp);
                 self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".ptr, ");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".control});\n");
+                self.codegen.buffer.push_string(".ptr});\n");
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(result);
                 self.codegen.buffer.push_string(".control = ");
@@ -2966,9 +2760,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(weak_temp);
                 self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".ptr, ");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".control});\n");
+                self.codegen.buffer.push_string(".ptr});\n");
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(result);
                 self.codegen.buffer.push_string(".control = ");
@@ -2989,9 +2781,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(weak_temp);
                 self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".ptr, ");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".control});\n");
+                self.codegen.buffer.push_string(".ptr});\n");
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(result);
                 self.codegen.buffer.push_string(".control = ");
@@ -3012,9 +2802,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(weak_temp);
                 self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".ptr, ");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(".control});\n");
+                self.codegen.buffer.push_string(".ptr});\n");
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(result);
                 self.codegen.buffer.push_string(".control = ");
@@ -3055,24 +2843,22 @@ given MIRFunctionCodeEmitter {
         if is_trait_weak then {
             let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))");
             let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
+            let niche = self.codegen.enum_niche_layout_for_type(result_type);
             self.codegen.add_indent();
             self.codegen.buffer.push_string("if (");
             self.codegen.buffer.push_string(success);
             self.codegen.buffer.push_string(") {\n");
             self.codegen.push_indent_level();
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string(result);
-            self.codegen.buffer.push_string(".tag = 1;\n");
+            if niche is .None() then {
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(result);
+                self.codegen.buffer.push_string(".tag = 1;\n");
+            };
             self.codegen.add_indent();
             self.codegen.buffer.push_string(result);
             self.codegen.buffer.push_string(".data.Some.value.ptr = ");
             self.codegen.buffer.push_string(upgraded);
             self.codegen.buffer.push_string(".ptr;\n");
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string(result);
-            self.codegen.buffer.push_string(".data.Some.value.control = ");
-            self.codegen.buffer.push_string(upgraded);
-            self.codegen.buffer.push_string(".control;\n");
             self.codegen.add_indent();
             self.codegen.buffer.push_string(result);
             self.codegen.buffer.push_string(".data.Some.value.vtable = ");
@@ -3082,9 +2868,18 @@ given MIRFunctionCodeEmitter {
             self.codegen.add_indent();
             self.codegen.buffer.push_string("} else {\n");
             self.codegen.push_indent_level();
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string(result);
-            self.codegen.buffer.push_string(".tag = 0;\n");
+            when niche in {
+                .Some(layout) then {
+                    let field_path = "\(result).data.\(self.codegen.sanitize_codegen_identifier(layout.payload_case_name)).\(self.codegen.sanitize_codegen_identifier(layout.payload_field_name))";
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(self.codegen.niche_null_assignment(layout.payload_field_type, field_path));
+                },
+                .None() then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(result);
+                    self.codegen.buffer.push_string(".tag = 0;\n");
+                },
+            };
             self.codegen.pop_indent_level();
             self.codegen.add_indent();
             self.codegen.buffer.push_string("}\n");
@@ -3102,31 +2897,38 @@ given MIRFunctionCodeEmitter {
     ) MIRValueEmission = {
         let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(emission.expression), &\(success))");
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type));
+        let niche = self.codegen.enum_niche_layout_for_type(result_type);
         self.codegen.add_indent();
         self.codegen.buffer.push_string("if (");
         self.codegen.buffer.push_string(success);
         self.codegen.buffer.push_string(") {\n");
         self.codegen.push_indent_level();
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".tag = 1;\n");
+        if niche is .None() then {
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(result);
+            self.codegen.buffer.push_string(".tag = 1;\n");
+        };
         self.codegen.add_indent();
         self.codegen.buffer.push_string(result);
         self.codegen.buffer.push_string(".data.Some.value.ptr = ");
         self.codegen.buffer.push_string(upgraded);
         self.codegen.buffer.push_string(".ptr;\n");
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".data.Some.value.control = ");
-        self.codegen.buffer.push_string(upgraded);
-        self.codegen.buffer.push_string(".control;\n");
         self.codegen.pop_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string("} else {\n");
         self.codegen.push_indent_level();
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(result);
-        self.codegen.buffer.push_string(".tag = 0;\n");
+        when niche in {
+            .Some(layout) then {
+                let field_path = "\(result).data.\(self.codegen.sanitize_codegen_identifier(layout.payload_case_name)).\(self.codegen.sanitize_codegen_identifier(layout.payload_field_name))";
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(self.codegen.niche_null_assignment(layout.payload_field_type, field_path));
+            },
+            .None() then {
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(result);
+                self.codegen.buffer.push_string(".tag = 0;\n");
+            },
+        };
         self.codegen.pop_indent_level();
         self.codegen.add_indent();
         self.codegen.buffer.push_string("}\n");

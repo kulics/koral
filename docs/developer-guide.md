@@ -34,7 +34,7 @@ swift build -c release     # -> compiler/.build/release/koralc
 
 The debug binary is roughly **6x slower** at generating C for a large package and **3.7x
 slower** end-to-end than the release one, so the choice is not cosmetic. Measured on
-`bootstrap/koral.json` (see `docs/compile-performance-status.md`):
+`bootstrap/koral.json`:
 
 | host build | `emit-c` | `build` (codegen + clang) |
 |---|---|---|
@@ -828,7 +828,8 @@ compiler/.build/release/koralc build --package-config tests/compiler-runner/kora
 - Output assertions are comment-based and order-sensitive:
     - `// EXPECT: <substring>`
     - `// EXPECT-ERROR: <substring>`
-- Each run uses an isolated temp output directory under `tests/compiler-cases_output/<caseName>/<uuid>/`, then cleans it up.
+- Each run uses an isolated output directory under `tests/compiler-cases_output/<caseName>/`.
+- **Output is auto-cleaned at the start of each run**: everything under `tests/compiler-cases_output/` is removed except `_reports/`. So the directory only ever holds the most recent run's artifacts (for debugging a failure) and cannot accumulate — left unchecked it grew to 110 GB.
 
 ### Add Multi-file / Module Tests
 

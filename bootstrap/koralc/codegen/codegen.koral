@@ -91,6 +91,14 @@ public type mutable CodeGen(
     mutable foreign_type_def_ids Set[UInt],
     mutable struct_fields_by_def_id Dict[UInt, List[TypedField]],
     mutable enum_cases_by_def_id Dict[UInt, List[TypedEnumCase]],
+
+    // ── Drop glue thunk ─────────────────────────────────────────────────────
+    // 头里不存析构函数之后，`__koral_release_value` 的 dtor 参数要按内层类型
+    // 单态化出函数指针。没有现成 `void (*)(void*)` glue 的类型（典型是
+    // `Ref[Y]`，其 drop 依赖内层类型）按需物化一个 thunk。
+    // thunk 定义要出现在使用它之前，所以先占位、最后 splice。
+    mutable drop_thunk_defs List[String],
+    mutable drop_thunk_names Dict[String, String],
 );
 
 given CodeGen {
@@ -138,6 +146,10 @@ given CodeGen {
             Dict[UInt, List[TypedField]].new(),
             // enum_cases_by_def_id
             Dict[UInt, List[TypedEnumCase]].new(),
+            // drop_thunk_defs
+            List[String].new(),
+            // drop_thunk_names
+            Dict[String, String].new(),
         );
         cg.build_def_id_indices();
         return cg;
@@ -2461,9 +2473,9 @@ given CodeGen {
 
     public push_indented_control_assignment(self, ref_name String, field String, source String) Void = {
         self.buffer.push_string(self.indent.to_string());
-        self.buffer.push_string("((struct __koral_Control*)");
+        self.buffer.push_string("__koral_control_of(");
         self.buffer.push_string(ref_name);
-        self.buffer.push_string(".control)->");
+        self.buffer.push_string(".ptr)->");
         self.buffer.push_string(field);
         self.buffer.push_string(" = ");
         self.buffer.push_string(source);

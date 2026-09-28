@@ -1,0 +1,64 @@
+// EXPECT: PASS
+// Option[T] 在 T 的 C 表示是「单字可空指针」时用 niche 布局（无 tag，NULL = None）；
+// 否则回落到带 tag 的布局。这里把两条路径和「嵌套 Option 不撞车」都锁住。
+
+let label_of(v Option[String]) String = when v in {
+    .Some(s) then s,
+    .None() then "<none>",
+};
+
+let label_of_int(v Option[Int]) String = when v in {
+    .Some(n) then n.to_string(),
+    .None() then "<none>",
+};
+
+// Option[String] —— String 是 managed wrapper（单字指针），走 niche 布局。
+let round_trip_string(src Option[String]) Option[String] = {
+    // 拷贝一份再传回：_copy / _drop 都必须认得 niche。
+    let copy = src;
+    return copy;
+};
+
+// Option[Int] —— Int 没有 niche，回落 tag 布局。
+let round_trip_int(src Option[Int]) Option[Int] = {
+    let copy = src;
+    return copy;
+};
+
+// Option[Option[String]] —— 内层已经用掉唯一的 niche，外层必须仍能区分
+// `.None()` 与 `.Some(Option.None())`。两套并存时这个性质必须成立。
+let shape_of_nested(v Option[Option[String]]) String = when v in {
+    .Some(inner) then "outer.some(\(label_of(inner)))",
+    .None() then "outer.none",
+};
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    // niche 路径：Some / None 都能进能出
+    passed = check("string.some", label_of(round_trip_string(Option[String].Some("hi"))), "hi") and passed;
+    passed = check("string.none", label_of(round_trip_string(Option[String].None())), "<none>") and passed;
+
+    // tag 回落路径：同样必须正确
+    passed = check("int.some", label_of_int(round_trip_int(Option[Int].Some(7))), "7") and passed;
+    passed = check("int.none", label_of_int(round_trip_int(Option[Int].None())), "<none>") and passed;
+
+    // 嵌套：三种可区分的值
+    passed = check("nested.outer.none", shape_of_nested(Option[Option[String]].None()), "outer.none") and passed;
+    passed = check("nested.inner.none", shape_of_nested(Option[Option[String]].Some(Option[String].None())), "outer.some(<none>)") and passed;
+    passed = check("nested.inner.some", shape_of_nested(Option[Option[String]].Some(Option[String].Some("x"))), "outer.some(x)") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

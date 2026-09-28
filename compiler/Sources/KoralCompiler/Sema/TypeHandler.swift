@@ -925,45 +925,100 @@ public class ReferenceHandler: TypeHandler {
         if case .mutableBorrowedReference = type {
             return true
         }
+        // trait object 在 C 层面是 struct __koral_TraitRef，与 reference 同构（ptr + vtable），
+        // 所有权语义一致（retain/release ptr）。不接住它就会掉进 PrimitiveHandler，
+        // 拷贝不 retain、析构不 release —— 引用计数直接失衡。
+        if case .traitObject = type {
+            return true
+        }
         return false
     }
     
     public func needsCopyFunction(_ type: Type) -> Bool {
+        // 借用是非拥有的瘦指针，不参与引用计数。
+        if isBorrowedReferenceType(type) { return false }
         // 引用类型需要增加引用计数
         return true
     }
-    
+
     public func needsDropFunction(_ type: Type) -> Bool {
+        if isBorrowedReferenceType(type) { return false }
         // 引用类型需要减少引用计数
         return true
     }
-    
+
+    /// 借用（`ref *T` / `ref mutable *T`）是**非拥有的瘦指针**：
+    /// 只承载「目标值的地址」，不带 control 字、不 retain、不 release，
+    /// 寿命由借用点的栈作用域保证（借用不可存储、不可返回、不可捕获）。
+    public func isBorrowedReferenceType(_ type: Type) -> Bool {
+        switch type {
+        case .borrowedReference, .mutableBorrowedReference: return true
+        default: return false
+        }
+    }
+
     public func generateCTypeName(_ type: Type) -> String {
+        if isBorrowedReferenceType(type) {
+            // 瘦借用：就是指向目标值的裸指针。
+            let inner: Type
+            switch type {
+            case .borrowedReference(let resolvedInner), .mutableBorrowedReference(let resolvedInner):
+                inner = resolvedInner
+            default:
+                return "void*"
+            }
+            let elementCType = TypeHandlerRegistry.shared.handler(for: inner).generateCTypeName(inner)
+            return "\(elementCType)*"
+        }
         let context = TypeHandlerRegistry.shared.currentContext
+        if case .traitObject = type {
+            return "struct __koral_TraitRef"
+        }
         if case .reference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
         if case .mutableReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
-        if case .borrowedReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
-            return "struct __koral_TraitRef"
-        }
-        if case .mutableBorrowedReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
-            return "struct __koral_TraitRef"
-        }
         return "struct __koral_Ref"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
+        if isBorrowedReferenceType(type) {
+            // 瘦借用：拷贝就是复制裸指针，不 retain。
+            return "\(dest) = \(source);"
+        }
         return """
         \(dest) = \(source);
-        __koral_retain((\(dest)).control);
+        __koral_retain_value((\(dest)).ptr);
         """
     }
-    
+
     public func generateDropCode(_ type: Type, value: String) -> String {
-        return "__koral_release((\(value)).control);"
+        if isBorrowedReferenceType(type) {
+            // 瘦借用：不 release。
+            return ""
+        }
+        // 头里不存析构函数，dtor 必须在释放调用点就绪。
+        // 普通引用：dtor 是内层类型的原地 drop glue。
+        // trait object：dtor 是动态的，从句柄自带的 vtable 取。
+        if case .traitObject = type {
+            return "__koral_release_value((\(value)).ptr, ((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy);"
+        }
+        if case .reference(let inner) = type, usesTraitObjectRefStorage(inner, context: TypeHandlerRegistry.shared.currentContext) {
+            return "__koral_release_value((\(value)).ptr, ((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy);"
+        }
+        if case .mutableReference(let inner) = type, usesTraitObjectRefStorage(inner, context: TypeHandlerRegistry.shared.currentContext) {
+            return "__koral_release_value((\(value)).ptr, ((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy);"
+        }
+        let dtor: String
+        switch type {
+        case .reference(let inner), .mutableReference(let inner):
+            dtor = TypeHandlerRegistry.shared.dropFunctionPointer(for: inner)
+        default:
+            dtor = "NULL"
+        }
+        return "__koral_release_value((\(value)).ptr, \(dtor));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -1289,6 +1344,11 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
 
     /// 可选的 C 类型名解析器（用于 CodeGen 注入冲突安全命名）
     private var cTypeNameResolver: ((Type) -> String?)?
+
+    /// 可选的 drop glue 函数指针解析器（CodeGen 注入）。
+    /// 头里不存析构函数之后，`__koral_release_value` 的 dtor 参数要按内层类型
+    /// 单态化出函数名 —— 只有 CodeGen 有完整的 DefId → C 名映射，所以从那边注入。
+    private var dropFunctionPointerResolver: ((Type) -> String)?
     
     /// 默认处理器（用于未知类型）
     private let defaultHandler: TypeHandler
@@ -1324,6 +1384,20 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     /// 用于 CodeGen 注入冲突安全的 struct/enum 命名规则。
     public func setCTypeNameResolver(_ resolver: ((Type) -> String?)?) {
         cTypeNameResolver = resolver
+    }
+
+    /// 设置 drop glue 函数指针解析器
+    public func setDropFunctionPointerResolver(_ resolver: ((Type) -> String)?) {
+        dropFunctionPointerResolver = resolver
+    }
+
+    /// 「原地销毁一个 `type` 类型 C 值」的 `__koral_Dtor` 表达式。
+    /// 没有 drop glue 的类型返回 `NULL`。
+    public func dropFunctionPointer(for type: Type) -> String {
+        if let resolver = dropFunctionPointerResolver {
+            return resolver(type)
+        }
+        return "NULL"
     }
 
     /// 设置当前编译上下文

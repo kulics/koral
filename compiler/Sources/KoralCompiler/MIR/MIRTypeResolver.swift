@@ -94,6 +94,8 @@ struct MIRTypeResolver {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
          .weakReference(let inner),
          .mutableWeakReference(let inner),
          .pointer(let inner),
@@ -126,13 +128,15 @@ struct MIRTypeResolver {
       return conversion.type
     case .traitMethodCall(let call):
       return call.type
-    case .ref(let place, let kind, _):
+    case .ref(let place, let kind, let allocation):
       guard let pointee = type(of: place) else { return nil }
+      // stackBorrow = 非拥有借用：瘦指针，不参与引用计数。
+      let borrowed = allocation == .stackBorrow
       switch kind {
       case .shared:
-        return .reference(inner: pointee)
+        return borrowed ? .borrowedReference(inner: pointee) : .reference(inner: pointee)
       case .mutable:
-        return .mutableReference(inner: pointee)
+        return borrowed ? .mutableBorrowedReference(inner: pointee) : .mutableReference(inner: pointee)
       case .weak:
         return .weakReference(inner: pointee)
       case .mutableWeak:

@@ -27,6 +27,11 @@ public class CodeGen {
   /// Tracks generated vtable instance names to avoid duplicate generation.
   /// Key format: `__koral_vtable_{TraitName}_for_{ConcreteType}`
   var generatedVtableInstances: Set<String> = []
+
+  // MARK: - Drop Glue Thunk Tracking
+  /// 按需物化的 drop thunk 定义，最后 splice 进 `dropThunkMarker` 处。
+  private var dropThunkDefs: [(name: String, body: String)] = []
+  private var dropThunkNameByTypeKey: [String: String] = [:]
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -88,7 +93,6 @@ public class CodeGen {
       }
       buffer += "struct \(decl.name) {\n"
       buffer += "    void* ptr;\n"
-      buffer += "    void* control;\n"
       buffer += "};\n\n"
     }
   }
@@ -126,6 +130,10 @@ public class CodeGen {
       default:
         return nil
       }
+    }
+    TypeHandlerRegistry.shared.setDropFunctionPointerResolver { [weak self] type in
+      guard let self else { return "NULL" }
+      return self.dropFunctionPointer(for: type)
     }
   }
 
@@ -171,6 +179,7 @@ public class CodeGen {
   deinit {
     TypeHandlerRegistry.shared.setContext(nil)
     TypeHandlerRegistry.shared.setCTypeNameResolver(nil)
+    TypeHandlerRegistry.shared.setDropFunctionPointerResolver(nil)
   }
 
   func defIdKey(_ defId: DefId) -> UInt64 {
@@ -434,7 +443,9 @@ public class CodeGen {
     switch type {
     case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .function, .weakReference, .mutableWeakReference, .traitObject:
       return true
-    case .structure, .`enum`:
+    // 泛型实例化和非泛型名义类型一样有单态化出来的 copy/drop，
+    // 漏掉它们会让「是否需要拷贝/析构」的判断静默变成 false。
+    case .structure, .`enum`, .genericStruct, .genericEnum:
       return hasNontrivialNominalDrop(type)
     default:
       return false
@@ -472,8 +483,9 @@ public class CodeGen {
       """
 
     generateProgram()
+    emitDropThunkDefinitions()
     emitMIRFunctionTimingSummary()
-    
+
     return buffer
   }
 
@@ -851,6 +863,9 @@ public class CodeGen {
         generateForeignStructDeclaration(identifier, fields)
       }
     }
+
+    // drop thunk 要在使用它的函数体之前定义，先占位，函数体生成完再 splice。
+    buffer += Self.dropThunkMarker
 
     if !foreignFunctions.isEmpty {
       for (identifier, params) in foreignFunctions {
@@ -1250,21 +1265,14 @@ public class CodeGen {
     if usesManagedNominalRepresentation(type) {
       let resultVar = nextTemp()
       let payloadType = managedPayloadTypeName(for: type)
-      let nominalName = nominalTypeCName(type)
       addIndent()
       buffer += "\(cType) \(resultVar);\n"
       addIndent()
-      buffer += "\(resultVar).control = malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType)));\n"
+      buffer += "\(resultVar).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n"
       addIndent()
-      buffer += "\(resultVar).ptr = (char*)\(resultVar).control + sizeof(struct __koral_Control);\n"
+      buffer += "__koral_control_of(\(resultVar).ptr)->strong_count = 1;\n"
       addIndent()
-      buffer += "((struct __koral_Control*)\(resultVar).control)->strong_count = 1;\n"
-      addIndent()
-      buffer += "((struct __koral_Control*)\(resultVar).control)->weak_count = 0;\n"
-      addIndent()
-      buffer += "((struct __koral_Control*)\(resultVar).control)->ptr = \(resultVar).ptr;\n"
-      addIndent()
-      buffer += "((struct __koral_Control*)\(resultVar).control)->dtor = (__koral_Dtor)__koral_\(nominalName)_payload_drop;\n"
+      buffer += "__koral_control_of(\(resultVar).ptr)->weak_count = 0;\n"
       addIndent()
       buffer += "((struct \(payloadType)*)\(resultVar).ptr)->data = \(dataVar);\n"
       addIndent()
@@ -1325,8 +1333,11 @@ public class CodeGen {
     case .`enum`(let defId):
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
-    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
-      return "\(dest) = \(source);\n__koral_retain(\(dest).control);\n"
+    case .borrowedReference, .mutableBorrowedReference:
+      // 瘦借用：拷贝就是复制裸指针。
+      return "\(dest) = \(source);\n"
+    case .reference, .mutableReference, .traitObject:
+      return "\(dest) = \(source);\n__koral_retain_value(\(dest).ptr);\n"
     case .weakReference, .mutableWeakReference:
       return "\(dest) = \(source);\n__koral_weak_retain(\(dest).control);\n"
     default:
@@ -1347,10 +1358,222 @@ public class CodeGen {
     case .`enum`(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&(\(value)));\n")
+    case .borrowedReference, .mutableBorrowedReference:
+      // 借用不拥有目标值，销毁时什么都不做。
+      break
+    case .reference, .mutableReference, .weakReference, .mutableWeakReference, .traitObject:
+      // 引用的析构要传 drop glue，只能在 CodeGen 这边算（TypeHandler 拿不到函数名）。
+      appendReleaseHandleStatement(handleType: type, value: value, indent: indent)
     default:
       let dropCode = TypeHandlerRegistry.shared.generateDropCode(type, value: value)
       appendIndentedCode(dropCode, indent: indent)
     }
+  }
+
+  // MARK: - Enum niche layout
+  //
+  // 两 case、其中恰好一个无参数、另一个恰好一个参数且该参数的 C 表示整段就是
+  // 一个可空指针字时，枚举可以不带 tag —— 用那个指针的 NULL 位模式表示空 case。
+  // 这正是 `Option[T] { None(), Some(value T) }` 的形状。
+
+  /// niche 布局的描述：用「空位模式」而不是 tag 来区分 case。
+  struct EnumNicheLayout {
+    /// 无参数 case 的序号（tag 布局下的 `switch` 分支号）
+    let emptyCaseIndex: Int
+    /// 唯一有参数 case 的序号
+    let payloadCaseIndex: Int
+    /// 有参数 case 的名字（构造 payload 路径用）
+    let payloadCaseName: String
+    /// 该 case 的唯一字段名
+    let payloadFieldName: String
+    /// 该字段的类型
+    let payloadFieldType: Type
+  }
+
+  /// C 表示是否整段就是一个可空指针字 —— NULL 是未使用的位模式。
+  ///
+  /// 不变量：**活的 owning handle 永不为 NULL**。`__koral_upgrade_ref` 失败时返回的
+  /// null ref 是瞬时值，生成代码立刻转成 Option 的 None，从不作为活值流出。
+  /// 将来若有「可空句柄」类型，必须先排除出 niche 名单。
+  func hasNullNiche(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .enum, .genericStruct, .genericEnum:
+      // managed 名义 wrapper 是 `struct X { void* ptr; }`，单字。
+      return usesManagedNominalRepresentation(type)
+    case .reference, .mutableReference,
+         .borrowedReference, .mutableBorrowedReference,
+         .weakReference, .mutableWeakReference:
+      return true
+    default:
+      // Int/Float 全位模式有效；Closure 是三字；TraitRef 是两字；裸指针的 NULL 合法。
+      return false
+    }
+  }
+
+  /// 承载 niche 的那个字段的「置空」语句。`fieldPath` 是该字段的完整 C 路径。
+  func nicheNullAssignment(_ type: Type, fieldPath: String) -> String {
+    switch type {
+    case .weakReference, .mutableWeakReference:
+      return "\(fieldPath).control = NULL;\n"
+    default:
+      return "\(fieldPath).ptr = NULL;\n"
+    }
+  }
+
+  /// 「值为空」的 C 条件表达式。
+  func nicheNullTest(_ type: Type, valueExpr: String) -> String {
+    switch type {
+    case .weakReference, .mutableWeakReference:
+      return "(\(valueExpr).control == NULL)"
+    default:
+      return "(\(valueExpr).ptr == NULL)"
+    }
+  }
+
+  /// 由值表达式算出 case 序号（`intptr_t`），供 `switch` 分派使用。
+  func nicheTagExpression(layout: EnumNicheLayout, valueExpr: String) -> String {
+    return "(\(nicheNullTest(layout.payloadFieldType, valueExpr: valueExpr)) ? \(layout.emptyCaseIndex) : \(layout.payloadCaseIndex))"
+  }
+
+  /// 按 case 列表判定 niche 布局；形状不对（或参数类型没有 niche）返回 nil。
+  func enumNicheLayout(cases: [EnumCase]) -> EnumNicheLayout? {
+    guard cases.count == 2 else { return nil }
+    let empty = cases.enumerated().filter { $0.element.parameters.isEmpty }
+    let payload = cases.enumerated().filter { !$0.element.parameters.isEmpty }
+    guard empty.count == 1, payload.count == 1 else { return nil }
+    let (payloadIndex, payloadCase) = payload[0]
+    // Void 参数不占存储，先滤掉再数。
+    let fields = payloadCase.parameters.filter { param in
+      if case .void = param.type { return false }
+      return true
+    }
+    guard fields.count == 1 else { return nil }
+    let field = fields[0]
+    guard hasNullNiche(field.type) else { return nil }
+    return EnumNicheLayout(
+      emptyCaseIndex: empty[0].offset,
+      payloadCaseIndex: payloadIndex,
+      payloadCaseName: payloadCase.name,
+      payloadFieldName: field.name,
+      payloadFieldType: field.type
+    )
+  }
+
+  /// 从类型出发判定 niche 布局（泛型实例化会先解析到模板的 case 列表）。
+  func enumNicheLayout(for type: Type) -> EnumNicheLayout? {
+    guard let cases = enumCases(of: type) else { return nil }
+    return enumNicheLayout(cases: cases)
+  }
+
+  private func enumCases(of type: Type) -> [EnumCase]? {
+    switch type {
+    case .enum(let defId):
+      return context.getEnumCases(defId)
+    case .genericEnum(let template, _, _):
+      guard let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template) else { return nil }
+      return context.getEnumCases(templateDefId)
+    default:
+      return nil
+    }
+  }
+
+  // MARK: - Drop glue as a function pointer
+  //
+  // 头里不存析构函数之后，`__koral_release_value` 的第二个参数必须在**释放调用点**
+  // 就绪。绝大多数类型已有同构的 `__koral_*_drop(void*)`，直接取函数名即可；
+  // 剩下的（典型是 `Ref[Y]`，其 drop 依赖内层类型）按需物化一个 thunk。
+
+  private static let dropThunkMarker = "/* __koral_drop_thunks__ */\n"
+
+  /// 「原地销毁一个 `type` 类型 C 值」的 `__koral_Dtor` 表达式。
+  /// 没有 drop glue 的类型返回 `NULL`。
+  ///
+  /// 注意：`.traitObject` 的销毁是**动态**的（具体类型的 glue 在 vtable 里），
+  /// 不要对 trait object 句柄用本函数 —— 用 `appendReleaseHandleStatement`。
+  func dropFunctionPointer(for type: Type) -> String {
+    guard needsDrop(type) else { return "NULL" }
+    switch type {
+    case .structure(let defId), .enum(let defId):
+      let name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      return "(__koral_Dtor)__koral_\(name)_drop"
+    case .genericStruct, .genericEnum:
+      // 泛型实例化同样有单态化出的 __koral_<layout>_drop，直接复用，不必物化 thunk。
+      return "(__koral_Dtor)__koral_\(nominalTypeCName(type))_drop"
+    case .function:
+      return "(__koral_Dtor)__koral_closure_drop"
+    case .weakReference, .mutableWeakReference:
+      return "(__koral_Dtor)__koral_weakref_drop"
+    case .traitObject:
+      return "(__koral_Dtor)__koral_traitref_drop"
+    case .borrowedReference, .mutableBorrowedReference:
+      // 借用不拥有目标值，销毁时什么都不做。
+      return "NULL"
+    default:
+      return "(__koral_Dtor)\(materializeDropThunk(for: type))"
+    }
+  }
+
+  /// 为没有现成 `void (*)(void*)` glue 的类型物化一个 thunk，并返回函数名。
+  private func materializeDropThunk(for type: Type) -> String {
+    let key = type.cTypeName
+    if let existing = dropThunkNameByTypeKey[key] { return existing }
+    let name = "__koral_drop_thunk_\(dropThunkDefs.count)"
+    dropThunkNameByTypeKey[key] = name
+
+    let savedBuffer = buffer
+    let savedIndent = indent
+    buffer = ""
+    indent = "    "
+    appendToBuffer("\(key) __koral_thunk_self = *(\(key)*)raw_value;\n")
+    appendDropStatement(for: type, value: "__koral_thunk_self", indent: "    ")
+    let body = buffer
+    buffer = savedBuffer
+    indent = savedIndent
+
+    dropThunkDefs.append((
+      name: name,
+      body: "static void \(name)(void* raw_value) {\n\(body)}}\n"
+    ))
+    return name
+  }
+
+  /// 释放一个**句柄**。`value` 的静态类型是引用或 managed nominal wrapper。
+  ///
+  /// - owning reference：`value.ptr` 指向一个 C 值，dtor 是该值的原地 drop glue。
+  /// - trait object reference：dtor 是**动态**的（具体类型的 glue 在 `value.vtable` 里）。
+  /// - weak reference：只减 weak 计数，不碰 payload（可能已死）。
+  /// - 借用：不拥有，什么都不做。
+  func appendReleaseHandleStatement(handleType: Type, value: String, indent: String = "    ") {
+    switch handleType {
+    case .borrowedReference, .mutableBorrowedReference:
+      break
+    case .weakReference, .mutableWeakReference:
+      appendToBuffer("\(indent)__koral_weak_release((\(value)).control);\n")
+    case .reference(let inner), .mutableReference(let inner):
+      if case .traitObject = inner {
+        appendToBuffer(
+          "\(indent)__koral_release_value((\(value)).ptr, ((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy);\n"
+        )
+      } else {
+        appendToBuffer("\(indent)__koral_release_value((\(value)).ptr, \(dropFunctionPointer(for: inner)));\n")
+      }
+    case .traitObject:
+      appendToBuffer(
+        "\(indent)__koral_release_value((\(value)).ptr, ((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy);\n"
+      )
+    default:
+      fatalError("appendReleaseHandleStatement called with non-reference type: \(handleType)")
+    }
+  }
+
+  /// 在类型声明之后、函数体之前插入 thunk 定义。
+  func emitDropThunkDefinitions() {
+    guard !dropThunkDefs.isEmpty else { return }
+    var thunkCode = ""
+    for thunk in dropThunkDefs {
+      thunkCode += thunk.body + "\n"
+    }
+    buffer = buffer.replacingOccurrences(of: Self.dropThunkMarker, with: thunkCode)
   }
 
   func emitPointerReadCopy(pointerExpr: String, elementType: Type) -> String {

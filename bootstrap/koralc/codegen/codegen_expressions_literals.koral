@@ -13,6 +13,8 @@ let format_hex_byte(b UInt8) String = {
     return result.to_string();
 };
 
+file_private let immortal_refcount() String = "-1";
+
 given CodeGen {
     generate_string_literal(self, value String, str_type Type) String = {
         let bytes_var = self.next_temp();
@@ -36,11 +38,14 @@ given CodeGen {
         // The payload is __koral_payload_Std_String with {data, len} fields.
         let storage_c_type = self.managed_payload_type_name(str_type);
         let byte_count = utf8_bytes.count();
+        // Immortal 头（Swift 的 immortal object 做法）：静态字面量的 control 块
+        // strong_count = -1，retain/release 直接早退，永不释放。
+        // 布局仍是 [Control | payload]，所以 __koral_control_of(ptr) 能反推回来。
         self.add_indent();
-        self.buffer.push_string("static const struct \(storage_c_type) \(storage_var_name) = { (uint8_t*)\(bytes_var_name), \(byte_count) };\n");
+        self.buffer.push_string("static const struct { struct __koral_Control ctrl; struct \(storage_c_type) payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n");
 
         let c_type = self.c_type_name(str_type);
-        return self.next_temp_with_init(c_type, "(\(c_type)){ .ptr = (void*)&\(storage_var_name), .control = NULL }");
+        return self.next_temp_with_init(c_type, "(\(c_type)){ .ptr = (void*)&\(storage_var_name)_block.payload }");
     };
 
     sanitize_c_numeric_literal(self, value String) String = {
