@@ -422,23 +422,48 @@ bootstrap 编译器自己的包（约 10 万行）里 **243 个 `Option` 实例�
 
 每个 niche 实例化从 16 B 降到 8 B（payload 是 8 B 句柄，tag 是 8 B）。
 
-#### 顺带发现：bootstrap 与 Swift 的一处既有分歧
+#### 后续修复：bootstrap 的 `break` 分支边界误判（已修）
 
-`bin/bootstrap/koralc check --package-config bootstrap/koral.json` 会报
+原先 `bin/bootstrap/koralc check --package-config bootstrap/koral.json` 会报
 
 ```
 bootstrap/koralc/mono/mono_expr_substitution.koral:1152:65: error: break cannot penetrate through branch boundary
 ```
 
-同一个文件 Swift 编译器接受。**与本次改动无关**，已做对照排除：
+同一个文件 Swift 编译器接受。已确认**不是本次表示层改动引起的**（规则实现在 `mono/` 与 `sema/`，
+本次改动前零改动；关掉 niche 重建同样报错），随后单独修掉了。
 
-- 规则实现在 `bootstrap/koralc/mono/` 与 `sema/`，本次**零改动**（`git diff --name-only` 不含这些文件）
-- 加开关 `KORAL_DISABLE_NICHE=1` 重建 bootstrap 后**同样报错** → 与 niche 无关
-- 简单的 `break` 穿 `when` 分支两边都接受；只有 bootstrap 自己源码里那个超深嵌套处会拒
+根因：bootstrap 里有一套**未完成的「branch break target」脚手架**——`BranchBreakTarget`
+的三个字段（`did_explicit_branch_break` / `construct_stack_depth_at_creation`）和
+`current_branch_break_target()`、MIR 侧的 `lower_branch_break()`、
+`typed_expr_contains_branch_break()` **全部只声明不调用**。唯一活着的副作用是
+`push_branch_break_target()` 往 `exitable_construct_stack` 压了一个 `.Branch()` 标记，
+于是 `break` 的检查把 `or else` 默认值、`and then` 变换体、`if` 表达式里的 `break`
+误判成「穿越分支边界」。而 `when` 分支体和 `if` 语句不触发，行为自相矛盾。
 
-这是一个待单独跟进的 bootstrap 落后于 Swift 的点。它也意味着
-「bootstrap `check` 自举包」这条测负载目前跑不起来，4a/4b 的**动态**分配字节差
-本轮没有重测（静态布局收益已实测）。
+对齐 Swift 的语义（实测钉死）：`break` 绑到最内层循环，`if` / `when` / `or else` /
+`and then` / `if` 表达式都不拦截。修法是把整套死脚手架删掉（-279 行），并把
+break/continue/defer 的报错文案对齐 Swift。
+
+新增 `tests/compiler-cases/break_across_branch_test.koral` 与
+`break_outside_loop_error.koral` 等看护。`docs/document.md` / `docs/document-zh.md`
+里「不能穿透分支边界」的描述已改写。
+
+**随后又发现并修掉了 Swift 侧的对偶缺陷**：`break` / `continue` 写在**闭包**里时，
+Swift 不报错、而是**静默生成空操作**（循环照跑满），因为 `inferLambdaExpression`
+只重置了 `insideDefer`，没重置 `loopDepth`。bootstrap 一直是拦对的。修法是在
+lambda body 检查前把 `loopDepth` / `exitableConstructStack` 归零，两个语句都拦。
+
+最后把两侧的死脚手架清干净并收敛到同一形态：Swift 删掉
+`ExitableConstruct` / `exitableConstructStack` / 那条永不触发的 `.branch` 检查，
+把 `loopDepth: Int` 换成 `inLoop: Bool`（2 个循环点原本没有 `defer`，异常时会泄漏深度，
+一并改成 save/restore）；bootstrap 删掉只写不读的 `loop_depth`。两边现在都只有
+`in_loop` / `inLoop` + `in_defer` / `insideDefer` 两个状态字段，并在
+decl / member / lambda / 全局表达式四处函数边界统一归零。
+
+最终 541/541（双侧），`break` / `continue` 在
+`if` / `when` / `or else` / `and then` / `if` 表达式 / 闭包边界
+六类位置的行为两边完全一致。
 
 ---
 ---

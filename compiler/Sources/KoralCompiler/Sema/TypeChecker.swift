@@ -24,11 +24,6 @@ enum ExpressionUsage: Equatable {
   case statement
 }
 
-enum ExitableConstruct {
-  case loop
-  case branch
-}
-
 struct ConformanceKey: Hashable {
   let selfType: ConformanceTypeKey
   let traitName: String
@@ -229,10 +224,12 @@ public class TypeChecker {
   var currentFunctionReturnType: Type?
   var inferredFunctionReturnType: Type?
   var isInferringFunctionReturnType: Bool = false
-  var loopDepth: Int = 0
+  /// Is there a loop in the current function scope? `break` / `continue` bind to
+  /// it; a function or lambda boundary resets it so neither statement can reach
+  /// outward past a closure.
+  var inLoop: Bool = false
   var insideDefer: Bool = false
   var currentBlockExpressionDepth: Int = 0
-  var exitableConstructStack: [ExitableConstruct] = []
 
   var synthesizedTempIndex: Int = 0
   

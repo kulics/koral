@@ -987,8 +987,8 @@ for (left, right) in pairs then {
 
 #### break 和 continue
 
-- `break`：退出循环。不能穿透最内层可退出结构（循环或分支）。
-- `continue`：跳过当前迭代。
+- `break`：退出最内层的 `while` / `for` 循环。
+- `continue`：跳过当前迭代。它与 `break` 一样绑定到循环。
 
 ```koral
 let mutable i = 0;
@@ -1007,7 +1007,7 @@ while true then {
 - `return` 带值（或 `Void`）离开所在函数。
 - 裸 `break`（不带表达式）退出最近的 `while` / `for` 循环。
 
-`break` 不能穿透最内层可退出结构：它不能跨越分支边界到达外层循环目标。
+`break` 始终绑定到最内层的循环。分支不会拦截它：`if`、`when` 的分支体、`or else` 的默认值、`and then` 的变换体，以及作为表达式使用的 `if`，都只是位于 `break` 与它的循环之间，不改变绑定目标。函数或 lambda 边界会拦截这两个语句——闭包里的 `break` 或 `continue` 没有可绑定的循环，是错误。
 
 ### 用 `defer` 做清理
 

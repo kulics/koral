@@ -1164,12 +1164,9 @@ extension TypeChecker {
 
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
 
-    loopDepth += 1
-    exitableConstructStack.append(.loop)
-    defer {
-      loopDepth -= 1
-      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
-    }
+    let savedInLoop = inLoop
+    inLoop = true
+    defer { inLoop = savedInLoop }
 
     let typedBody = try withNewScope {
       for symbol in extractPatternSymbols(from: typedPattern) {
@@ -1401,13 +1398,9 @@ extension TypeChecker {
       return nil
     }
 
-    let previousLoopDepth = loopDepth
-    loopDepth += 1
-    exitableConstructStack.append(.loop)
-    defer {
-      loopDepth = previousLoopDepth
-      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
-    }
+    let savedInLoop = inLoop
+    inLoop = true
+    defer { inLoop = savedInLoop }
 
     let breakExpr = makeBreakBlock(span: condition.span)
     guard let loweredBody = try lowerIfConditionWithBindings(
@@ -7955,12 +7948,10 @@ extension TypeChecker {
             try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
           }
         }
-        loopDepth += 1
-        exitableConstructStack.append(.loop)
-        let result = try inferCheckedStatementBodyExpression(body)
-        loopDepth -= 1
-        if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
-        return result
+        let savedInLoop = inLoop
+        inLoop = true
+        defer { inLoop = savedInLoop }
+        return try inferCheckedStatementBodyExpression(body)
       }
       bodyStatements.append(.expression(typedBody))
 
@@ -8221,12 +8212,10 @@ extension TypeChecker {
       }
 
       // Type check body
-      loopDepth += 1
-      exitableConstructStack.append(.loop)
-      let result = try inferCheckedStatementBodyExpression(body)
-      loopDepth -= 1
-      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
-      return result
+      let savedInLoop = inLoop
+      inLoop = true
+      defer { inLoop = savedInLoop }
+      return try inferCheckedStatementBodyExpression(body)
     }
     
     // Build None case with break

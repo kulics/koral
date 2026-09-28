@@ -86,7 +86,6 @@ given TypeChecker {
                     return typed_op;
                 };
                 let mutable success_type = self.infer_or_else_success_type(typed_op.expr_type);
-                self.push_branch_break_target(span);
                 // The `it` symbol bound by the Error arm must be the SAME symbol the
                 // default expression was checked against, so its references resolve.
                 let mutable it_symbol = Option[Symbol].None();
@@ -97,11 +96,10 @@ given TypeChecker {
                     let it_sym = Symbol(it_def_id, err_type, SymbolKind.Variable(VariableKind.Value()));
                     def_scope.define(self.context(), it_sym);
                     it_symbol = Option[Symbol].Some(it_sym);
-                    self.check_expr_in_branch_break_body_context(default_expr, .Some(success_type), def_scope)
+                    self.check_value_body_expr(default_expr, .Some(success_type), def_scope)
                 } else {
-                    self.check_expr_in_branch_break_body_context(default_expr, .Some(success_type), scope)
+                    self.check_value_body_expr(default_expr, .Some(success_type), scope)
                 };
-                self.pop_branch_break_target();
                 let result_type = when success_type in {
                     .Unknown() then typed_def.expr_type,
                     _ then success_type,
@@ -222,9 +220,7 @@ given TypeChecker {
                 let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable());
                 let it_sym = Symbol(it_def_id, inner_type, SymbolKind.Variable(VariableKind.Value()));
                 tr_scope.define(self.context(), it_sym);
-                self.push_branch_break_target(expr_span(transform_expr));
-                let typed_tr = self.check_expr_in_branch_break_body_context(transform_expr, .None(), tr_scope);
-                self.pop_branch_break_target();
+                let typed_tr = self.check_value_body_expr(transform_expr, .None(), tr_scope);
                 let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty();
                 let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty();
                 let mutable computed_final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type);
@@ -314,7 +310,6 @@ given TypeChecker {
                 let mutable typed_arms = List[TypedWhenArm].new();
                 let mutable patterns = List[TypedPattern].new();
                 let mutable result_type = Type.Unknown();
-                self.push_branch_break_target(span);
                 let mutable running_expected = expected;
                 let mutable arm_index UInt = 0;
                 for arm in arms then {
@@ -335,7 +330,7 @@ given TypeChecker {
                             _ then Option[Type].Some(result_type),
                         },
                     };
-                    let raw_typed_body = self.check_expr_in_branch_break_body_context(arm.body, hard_arm_expected, arm_scope);
+                    let raw_typed_body = self.check_value_body_expr(arm.body, hard_arm_expected, arm_scope);
                     let typed_body = when hard_arm_expected in {
                         .Some(_) then self.adapt_expr_to_expected_type_at(
                             raw_typed_body,
@@ -391,7 +386,6 @@ given TypeChecker {
                     typed_arms.push(TypedWhenArm(lowered_pattern_ref, typed_body, typed_arm_type));
                     arm_index += 1;
                 };
-                let _ = self.pop_branch_break_target();
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
                     patterns,
@@ -447,23 +441,14 @@ given TypeChecker {
                     };
                     let prev_function_return_context = self.clone_function_return_context();
                     let prev_in_loop = self.storage.in_loop;
-                    let prev_loop_depth = self.storage.loop_depth;
-                    let prev_exitable_construct_stack = self.storage.exitable_construct_stack;
                     let prev_in_defer = self.storage.in_defer;
-                    let prev_branch_break_targets = self.storage.branch_break_targets;
                     defer {
-                        self.storage.branch_break_targets = prev_branch_break_targets;
                         self.storage.function_return_context = prev_function_return_context;
                         self.storage.in_loop = prev_in_loop;
-                        self.storage.loop_depth = prev_loop_depth;
-                        self.storage.exitable_construct_stack = prev_exitable_construct_stack;
                         self.storage.in_defer = prev_in_defer;
                     };
                     self.storage.in_loop = false;
-                    self.storage.loop_depth = 0;
-                    self.storage.exitable_construct_stack = List[ExitableConstruct].new();
                     self.storage.in_defer = false;
-                    self.storage.branch_break_targets = List[BranchBreakTarget].new();
                     let infer_return_type_from_block_returns = return_type is .None() and body is .Block(_, _, _);
                     let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret) and body is .Block(_, _, _);
                     if infer_return_type_from_block_returns then {
@@ -477,7 +462,7 @@ given TypeChecker {
                         self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns;
                     };
                     let body_expected = if body is .Block(_, _, _) then Option[Type].None() else if self.is_unresolved_expr_type(ret) then Option[Type].None() else Option[Type].Some(ret);
-                    let typed_body = self.check_expr_in_branch_break_body_context(body, body_expected, lambda_scope);
+                    let typed_body = self.check_value_body_expr(body, body_expected, lambda_scope);
                     let inferred_return_type = self.storage.function_return_context.inferred_return_type;
                     self.validate_lambda_captures(typed_params, typed_body);
                     if not self.is_unresolved_expr_type(ret) and not self.contains_generic_parameter(ret) then {
@@ -852,14 +837,13 @@ given TypeChecker {
                         let chain = self.collect_if_chain(condition, then_branch, else_branch);
 
                         let mutable typed_arms = List[Pair[TypedExpr, TypedExpr]].new();
-                        self.push_branch_break_target(expr_span(expr));
                         for arm in chain.arms then {
                             let typed_cond = when arm.first in {
                                 .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
                                 .ComparisonChainExpr(operands, operators, _) then self.check_comparison_chain_expr_ref(operands, operators, scope),
                                 _ then self.check_expr_core_ref(arm.first, .Some(Type.BoolType()), scope),
                             };
-                            let typed_then = self.check_expr_in_branch_break_body_context(arm.second, expected, scope);
+                            let typed_then = self.check_value_body_expr(arm.second, expected, scope);
                             typed_arms.push(Pair[TypedExpr, TypedExpr](typed_cond, typed_then));
                         };
 
@@ -870,7 +854,7 @@ given TypeChecker {
 
                         let mutable current_else = when chain.final_else in {
                             .Some(eb) then {
-                                let typed_else = self.check_expr_in_branch_break_body_context(eb, final_else_expected, scope);
+                                let typed_else = self.check_value_body_expr(eb, final_else_expected, scope);
                                 Option[TypedExpr].Some(typed_else)
                             },
                             .None() then Option[TypedExpr].None(),
@@ -922,7 +906,7 @@ given TypeChecker {
                                                     .Some(self.typed_expr_span(typed_else_ref))
                                                 ));
                                             } else {
-                                                typed_then = self.check_expr_in_branch_break_body_context(source_arm.second, .Some(else_t), scope);
+                                                typed_then = self.check_value_body_expr(source_arm.second, .Some(else_t), scope);
                                             };
                                         };
                                     };
@@ -967,7 +951,6 @@ given TypeChecker {
                             final_if_expr = node;
                             current_else = Option[TypedExpr].Some(node);
                         };
-                        let _ = self.pop_branch_break_target();
                         final_if_expr
                     },
                 }

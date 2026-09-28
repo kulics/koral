@@ -1,9 +1,3 @@
-type MIRBranchBreakTargetContext(
-    result_local Option[MIRLocalID],
-    join_block MIRBlockID,
-    base_scope_depth UInt,
-);
-
 type MIRLoopBuilderContext(
     continue_block MIRBlockID,
     break_block MIRBlockID,
@@ -33,7 +27,6 @@ type mutable MIRFunctionBuilder(
     mutable loop_stack List[MIRLoopBuilderContext],
     mutable scope_stack List[MIRScopeID],
     mutable deferred_exprs_by_scope Dict[UInt, List[TypedExpr]],
-    mutable branch_break_target_stack List[MIRBranchBreakTargetContext],
     mutable pattern_subject_operand Option[MIROperand],
     mutable pattern_subject_tag Option[MIROperand],
     mutable pattern_comparison_local Option[MIRLocalID],
@@ -76,7 +69,6 @@ given MIRFunctionBuilder {
             List[MIRLoopBuilderContext].new(),
             List[MIRScopeID].new(),
             Dict[UInt, List[TypedExpr]].new(),
-            List[MIRBranchBreakTargetContext].new(),
             Option[MIROperand].None(),
             Option[MIROperand].None(),
             Option[MIRLocalID].None(),
@@ -494,151 +486,6 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(Type.VoidType(), ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Constant(MIRConstant.Void())), Option[MIRPlace].None()));
     };
 
-    file_private typed_expr_contains_branch_break(self, expr TypedExpr) Bool = {
-        let _ = self;
-        return when expr.expr_kind in {
-            .Variable(_) then false,
-            .IntegerLiteral(_) then false,
-            .FloatLiteral(_) then false,
-            .StringLiteral(_) then false,
-            .BoolLiteral(_) then false,
-            .Unary(_, inner) then self.typed_expr_contains_branch_break(inner),
-            .ArithmeticExpr(left, _, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .WrappingArithmeticExpr(left, _, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .WrappingShiftExpr(left, _, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .BitwiseExpr(left, _, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .ComparisonExpr(left, _, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .AndExpr(left, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .OrExpr(left, right) then self.typed_expr_contains_branch_break(left) or self.typed_expr_contains_branch_break(right),
-            .DerefExpr(inner) then self.typed_expr_contains_branch_break(inner),
-            .UnsafeDerefExpr(inner) then self.typed_expr_contains_branch_break(inner),
-            .RefExpr(inner) then self.typed_expr_contains_branch_break(inner),
-            .PtrExpr(inner) then self.typed_expr_contains_branch_break(inner),
-            .CastExpr(_, inner) then self.typed_expr_contains_branch_break(inner),
-            .MemberPath(base, _) then self.typed_expr_contains_branch_break(base),
-            .TypeConstruction(_, _, args) then {
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .EnumConstruction(_, _, args) then {
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .Call(callee, args) then {
-                if self.typed_expr_contains_branch_break(callee) then { return true;};
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .GenericCall(_, _, args) then {
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .IntrinsicCall(node) then self.typed_intrinsic_contains_branch_break(node),
-            .StaticMethodCall(_, _, _, _, _, args) then {
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .MethodReference(base, _, _, _, _, _) then self.typed_expr_contains_branch_break(base),
-            .TraitMethodPlaceholder(base, _, _, _, _) then self.typed_expr_contains_branch_break(base),
-            .TraitObjectConversion(inner, _, _) then self.typed_expr_contains_branch_break(inner),
-            .TraitMethodCall(receiver, _, _, _, args) then {
-                if self.typed_expr_contains_branch_break(receiver) then { return true;};
-                for arg in args then {
-                    if self.typed_expr_contains_branch_break(arg) then { return true;};
-                };
-                false
-            },
-            .Block(statements, tail_expression) then {
-                if self.typed_statements_contain_branch_break(statements) then { return true;};
-                when tail_expression in {
-                    .Some(tail) then self.typed_expr_contains_branch_break(tail),
-                    .None() then false,
-                }
-            },
-            .IfExpr(condition, then_branch, else_branch) then {
-                let else_has = when else_branch in {
-                    .Some(value) then self.typed_expr_contains_branch_break(value),
-                    .None() then false,
-                };
-                self.typed_expr_contains_branch_break(condition) or self.typed_expr_contains_branch_break(then_branch) or else_has
-            },
-            .WhenExpr(subject, arms) then {
-                if self.typed_expr_contains_branch_break(subject) then { return true;};
-                for arm in arms then {
-                    if self.typed_expr_contains_branch_break(arm.body) then { return true;};
-                };
-                false
-            },
-            .LambdaExpr(_, _, body) then self.typed_expr_contains_branch_break(body),
-            .IsExpr(subject, _, _) then self.typed_expr_contains_branch_break(subject),
-            .GenericInstantiation(_, _) then false,
-        };
-    };
-
-    file_private typed_intrinsic_contains_branch_break(self, node TypedIntrinsic) Bool = {
-        let _ = self;
-        return when node in {
-            .DowngradeRef(ref_expr, _) then self.typed_expr_contains_branch_break(ref_expr),
-            .UpgradeRef(weak_expr, _) then self.typed_expr_contains_branch_break(weak_expr),
-            .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-                self.typed_expr_contains_branch_break(out_handle) or self.typed_expr_contains_branch_break(out_tid) or self.typed_expr_contains_branch_break(closure) or self.typed_expr_contains_branch_break(stack_size)
-            },
-            .AllocMemory(count, _) then self.typed_expr_contains_branch_break(count),
-            .DeallocMemory(pointer_expr) then self.typed_expr_contains_branch_break(pointer_expr),
-            .CopyMemory(dest, source, count) then self.typed_expr_contains_branch_break(dest) or self.typed_expr_contains_branch_break(source) or self.typed_expr_contains_branch_break(count),
-            .MoveMemory(dest, source, count) then self.typed_expr_contains_branch_break(dest) or self.typed_expr_contains_branch_break(source) or self.typed_expr_contains_branch_break(count),
-            .InitMemory(pointer_expr, value_expr) then self.typed_expr_contains_branch_break(pointer_expr) or self.typed_expr_contains_branch_break(value_expr),
-            .DeinitMemory(pointer_expr) then self.typed_expr_contains_branch_break(pointer_expr),
-            .TakeMemory(pointer_expr, _) then self.typed_expr_contains_branch_break(pointer_expr),
-            .NullPtr(_) then false,
-        };
-    };
-
-    file_private typed_statements_contain_branch_break(self, statements List[TypedStatement]) Bool = {
-        let _ = self;
-        for stmt in statements then {
-            when stmt in {
-                .LetStmt(_, value, _) then if self.typed_expr_contains_branch_break(value) then { return true;},
-                .PairLetStmt(_, _, _, value, _) then if self.typed_expr_contains_branch_break(value) then { return true;},
-                .AssignmentStmt(target, value, _) then if self.typed_expr_contains_branch_break(target) or self.typed_expr_contains_branch_break(value) then { return true;},
-                .ExprStmt(value, _) then if self.typed_expr_contains_branch_break(value) then { return true;},
-                .IfStmt(condition, then_branch, else_branch, _) then {
-                    let else_has = when else_branch in {
-                        .Some(value) then self.typed_expr_contains_branch_break(value),
-                        .None() then false,
-                    };
-                    if self.typed_expr_contains_branch_break(condition) or self.typed_expr_contains_branch_break(then_branch) or else_has then {
-                        return true;
-                    };
-                },
-                .WhileStmt(condition, body, _) then if self.typed_expr_contains_branch_break(condition) or self.typed_expr_contains_branch_break(body) then { return true;},
-                .WhenStmt(subject, arms, _) then {
-                    if self.typed_expr_contains_branch_break(subject) then { return true;};
-                    for arm in arms then {
-                        if self.typed_expr_contains_branch_break(arm.body) then { return true;};
-                    };
-                },
-                .ReturnStmt(value_opt, _) then when value_opt in {
-                    .Some(value) then if self.typed_expr_contains_branch_break(value) then { return true;},
-                    .None() then {},
-                },
-                .DeferStmt(value, _) then if self.typed_expr_contains_branch_break(value) then { return true;},
-                _ then {},
-            };
-        };
-        return false;
-    };
-
     // Mirrors Swift MIRLowerer block lowering: statements are lowered as
     // statements, and the optional tail expression produces the block's value.
     file_private lower_block(self, statements List[TypedStatement], tail_expression Option[TypedExpr], block_type Type) Option[MIRExprResult] = {
@@ -873,17 +720,6 @@ given MIRFunctionBuilder {
         let loop = self.loop_stack[self.loop_stack.count() - 1(UInt)];
         self.emit_scope_exits(loop.scope_depth);
         self.terminate(MIRTerminator.Goto(loop.continue_block));
-    };
-
-    file_private lower_branch_break(self, value TypedExpr) Void = {
-        if self.branch_break_target_stack.is_empty() then { return;};
-        let target = self.branch_break_target_stack[self.branch_break_target_stack.count() - 1(UInt)];
-        when target.result_local in {
-            .Some(local_id) then self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), self.lower_value(value))),
-            .None() then { let _ = self.lower_expression(value);},
-        };
-        self.emit_scope_exits(target.base_scope_depth);
-        self.terminate(MIRTerminator.Goto(target.join_block));
     };
 
     file_private emit_scope_exits(self, base_scope_depth UInt) Void = {

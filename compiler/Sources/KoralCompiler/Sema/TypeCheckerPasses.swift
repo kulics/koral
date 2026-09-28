@@ -2045,6 +2045,18 @@ extension TypeChecker {
   }
 
   func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
+    // A declaration body is a fresh function scope: `break` / `continue` must not
+    // see a loop (or a defer) left behind by a previously checked declaration.
+    // Mirrors the reset bootstrap does at every decl / member body boundary.
+    let savedInLoop = inLoop
+    let savedInsideDefer = insideDefer
+    inLoop = false
+    insideDefer = false
+    defer {
+      inLoop = savedInLoop
+      insideDefer = savedInsideDefer
+    }
+
     switch decl {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here

@@ -26,27 +26,11 @@ given TypeChecker {
     };
 
 
-    module_private check_expr_in_branch_break_body_context(self, expr Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_value_body_expr(self, expr Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .Block(statements, tail_expression, _) then self.check_block(statements, tail_expression, expected, scope),
             _ then self.check_expr_scoped_ref(expr, expected, scope),
         };
-    };
-
-    module_private push_branch_break_target(self, span SourceSpan) Void = {
-        self.storage.exitable_construct_stack.push(ExitableConstruct(ExitableConstructKind.Branch()));
-        self.storage.branch_break_targets.push(BranchBreakTarget(span, false, self.storage.exitable_construct_stack.count()));
-    };
-
-    module_private pop_branch_break_target(self) Option[BranchBreakTarget] = {
-        if not self.storage.exitable_construct_stack.is_empty() then {
-            let _ = self.storage.exitable_construct_stack.pop();
-        };
-        return if self.storage.branch_break_targets.is_empty() then Option[BranchBreakTarget].None() else self.storage.branch_break_targets.pop();
-    };
-
-    module_private current_branch_break_target(self) Option[BranchBreakTarget] = {
-        return if self.storage.branch_break_targets.is_empty() then Option[BranchBreakTarget].None() else self.storage.branch_break_targets.get(self.storage.branch_break_targets.count() - 1(UInt));
     };
 
     module_private merge_inferred_function_return_type(self, new_type Type) Void = {
@@ -359,14 +343,8 @@ given TypeChecker {
                 };
                 let prev_in_loop = self.storage.in_loop;
                 self.storage.in_loop = true;
-                self.storage.loop_depth = self.storage.loop_depth + 1;
-                self.storage.exitable_construct_stack.push(ExitableConstruct(ExitableConstructKind.Loop()));
                 let typed_body = self.check_statement_body_expr(body, scope);
                 self.storage.in_loop = prev_in_loop;
-                self.storage.loop_depth = self.storage.loop_depth - 1;
-                if not self.storage.exitable_construct_stack.is_empty() then {
-                    let _ = self.storage.exitable_construct_stack.pop();
-                };
                 TypedStatement.WhileStmt(typed_cond, typed_body, span)
             },
             _ then {
@@ -958,31 +936,25 @@ given TypeChecker {
             },
             .BreakStmt(span) then {
                 if self.storage.in_defer then {
-                    self.push_diagnostic_at_span("'break' is not allowed inside 'defer'", span);
-                };
-                if not self.storage.exitable_construct_stack.is_empty() then {
-                    let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)];
-                    if last.kind is .Branch() then {
-                        self.push_diagnostic_at_span("break cannot penetrate through branch boundary", span);
-                    };
+                    self.push_diagnostic_at_span("control flow statement 'break' is not allowed in defer expression", span);
                 };
                 if not self.storage.in_loop then {
-                    self.push_diagnostic_at_span("'break' used outside of loop", span);
+                    self.push_diagnostic_at_span("Invalid operation break outside of while between types  and ", span);
                 };
                 return TypedStatement.BreakStmt(span);
             },
             .ContinueStmt(span) then {
                 if not self.storage.in_loop then {
-                    self.push_diagnostic_at_span("'continue' used outside of loop", span);
+                    self.push_diagnostic_at_span("Invalid operation continue outside of while between types  and ", span);
                 };
                 if self.storage.in_defer then {
-                    self.push_diagnostic_at_span("'continue' is not allowed inside 'defer'", span);
+                    self.push_diagnostic_at_span("control flow statement 'continue' is not allowed in defer expression", span);
                 };
                 return TypedStatement.ContinueStmt(span);
             },
             .DeferStmt(expr, span) then {
                 if self.storage.in_defer then {
-                    self.push_diagnostic_at_span("'defer' is not allowed inside 'defer'", span);
+                    self.push_diagnostic_at_span("defer statement is not allowed inside defer expression", span);
                 };
                 let prev_in_defer = self.storage.in_defer;
                 self.storage.in_defer = true;

@@ -260,12 +260,9 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
-      loopDepth += 1
-      exitableConstructStack.append(.loop)
-      defer {
-        loopDepth -= 1
-        if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
-      }
+      let savedInLoop = inLoop
+      inLoop = true
+      defer { inLoop = savedInLoop }
       let typedBody = try inferStatementBodyExpression(body)
       return .whileStatement(condition: typedCondition, body: typedBody)
 
@@ -843,12 +840,7 @@ extension TypeChecker {
         throw SemanticError(.generic(
           "control flow statement 'break' is not allowed in defer expression"))
       }
-      // Check if the innermost exitable construct is a branch (not a loop)
-      if let lastConstruct = exitableConstructStack.last, lastConstruct == .branch {
-        throw SemanticError(.generic(
-          "break cannot penetrate through branch boundary"), span: span)
-      }
-      if loopDepth <= 0 {
+      if !inLoop {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
       }
       return .break
@@ -859,7 +851,7 @@ extension TypeChecker {
         throw SemanticError(.generic(
           "control flow statement 'continue' is not allowed in defer expression"))
       }
-      if loopDepth <= 0 {
+      if !inLoop {
         throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
       }
       return .continue

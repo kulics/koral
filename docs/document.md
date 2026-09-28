@@ -992,8 +992,8 @@ for (left, right) in pairs then {
 
 #### break and continue
 
-- `break`: Exit the loop. Cannot penetrate through the innermost exitable construct (loop or branch).
-- `continue`: Skip the current iteration.
+- `break`: Exit the innermost enclosing `while` / `for` loop.
+- `continue`: Skip the current iteration. It binds to the loop the same way `break` does.
 
 ```koral
 let mutable i = 0;
@@ -1012,7 +1012,7 @@ while true then {
 - `return` leaves the enclosing function with a value (or `Void`).
 - Plain `break` (without expression) exits the nearest enclosing `while` / `for` loop.
 
-`break` cannot penetrate the innermost exitable construct: it cannot cross a branch boundary to reach an outer loop target.
+`break` always binds to the innermost enclosing loop. Branches do not intercept it: an `if`, a `when` arm, an `or else` default, an `and then` transform, or an `if` used as an expression all sit between the `break` and its loop without changing the target. A function or lambda boundary does intercept both statements — `break` or `continue` inside a closure has no loop to bind to and is an error.
 
 ### Cleanup with `defer`
 

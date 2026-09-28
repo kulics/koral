@@ -1,0 +1,117 @@
+// EXPECT: PASS
+// `break` binds to the innermost enclosing loop. Crossing a branch boundary --
+// `if`, `when` arms, `or else` defaults, `and then` transforms, and `if` used as
+// an expression -- must not stop it from reaching that loop.
+//
+// This guards a real regression: the bootstrap compiler used to reject `break`
+// inside `or else` / `and then` / `if`-expression bodies ("break cannot penetrate
+// through branch boundary") while accepting the very same break inside `when`
+// arms and `if` statements. The rejection came from unfinished "branch break
+// target" scaffolding that had no tests and no working implementation.
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+    let mutable log String = "";
+
+    // 1. break through an `if` statement inside `for`
+    let mutable a Int = 0;
+    for i in 0..10 then {
+        if i == 3 then { break; };
+        a = a + 1;
+    };
+    passed = check("if-stmt", a.to_string(), "3") and passed;
+
+    // 2. break through a `when` arm (directly in the arm body)
+    let mutable b Int = 0;
+    for i in 0..10 then {
+        when i % 2 in {
+            0 then { if i == 4 then { break; }; b = b + 1; },
+            _ then { b = b + 10; },
+        };
+    };
+    passed = check("when-arm", b.to_string(), "22") and passed;
+
+    // 3. break through an `or else` default expression
+    let mutable c Int = 0;
+    for i in 0..10 then {
+        let v = Option[Int].None() or else {
+            if i == 2 then { break; };
+            99
+        };
+        c = c + v;
+    };
+    passed = check("or-else", c.to_string(), "198") and passed;
+
+    // 4. break through an `and then` transform expression
+    let mutable d Int = 0;
+    for i in 0..10 then {
+        let v = Option[Int].Some(i) and then {
+            if it == 2 then { break; };
+            it + 1
+        } or else 0;
+        d = d + v;
+    };
+    passed = check("and-then", d.to_string(), "3") and passed;
+
+    // 5. break through an `if` used as an expression
+    let mutable e Int = 0;
+    for i in 0..10 then {
+        let v = if i % 2 == 0 then {
+            if i == 4 then { break; };
+            1
+        } else {
+            10
+        };
+        e = e + v;
+    };
+    passed = check("if-expr", e.to_string(), "22") and passed;
+
+    // 6. `break` in the inner of two nested loops binds to the inner loop only
+    let mutable f Int = 0;
+    for i in 0..3 then {
+        for j in 0..3 then {
+            if j == 1 then { break; };
+            f = f + 1;
+        };
+        f = f + 100;
+    };
+    passed = check("nested-loop", f.to_string(), "404") and passed;
+
+    // 7. `continue` behaves the same way across branches.
+    // `0..5` is inclusive, so the loop runs 6 times and `continue` skips one of them.
+    let mutable g Int = 0;
+    for i in 0..5 then {
+        let v = Option[Int].None() or else {
+            if i == 2 then { continue; };
+            7
+        };
+        g = g + v;
+    };
+    passed = check("continue-through-or-else", g.to_string(), "35") and passed;
+
+    // 8. A lambda is a function boundary -- but `break` still binds to a loop
+    //    declared *inside* that lambda.
+    let k Func() Int = () -> {
+        let mutable n Int = 0;
+        for i in 0..10 then {
+            if i == 3 then { break; };
+            n = n + 1;
+        };
+        return n;
+    };
+    passed = check("loop-inside-lambda", k().to_string(), "3") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

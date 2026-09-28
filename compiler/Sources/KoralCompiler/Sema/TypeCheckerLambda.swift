@@ -82,6 +82,15 @@ extension TypeChecker {
       insideDefer = false
       defer { insideDefer = savedInsideDefer }
 
+      // A lambda is a function boundary: `break` and `continue` written inside it
+      // have no loop to bind to, so they must not reach a loop in the enclosing
+      // function. Reset the loop context for the body check so both statements
+      // report "outside of while" instead of silently binding outward (or, in the
+      // generated code, doing nothing at all).
+      let savedInLoop = inLoop
+      inLoop = false
+      defer { inLoop = savedInLoop }
+
       let resolvedExplicitReturnType = try returnType.map { try resolveTypeNode($0) }
       let inferReturnTypeFromBlockReturns =
         resolvedExplicitReturnType == nil &&
