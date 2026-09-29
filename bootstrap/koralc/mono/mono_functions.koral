@@ -127,8 +127,9 @@ public let instantiate_function(mono Monomorphizer, template GenericFunctionTemp
         },
         .None() then {
             // Fall back to resolving from template parameters via TypeNode.
+            let node_subst = template_substitution(template.type_parameters, substitution);
             for p in template.parameters then {
-                let mutable resolved_type = mono.resolve_type_node_impl(p.param_type, substitution);
+                let mutable resolved_type = mono.resolve_type_node_impl(p.param_type, node_subst);
                 concrete_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named));
                 concrete_param_types.push(resolved_type);
             };
@@ -138,7 +139,7 @@ public let instantiate_function(mono Monomorphizer, template GenericFunctionTemp
     // Resolve return type.
     let concrete_return_type = when template.checked_return_type in {
         .Some(checked_ret) then resolve_parameterized_type(mono, mono.substitute_type_impl(checked_ret, substitution)),
-        .None() then mono.resolve_type_node_impl(template.return_type, substitution),
+        .None() then mono.resolve_type_node_impl(template.return_type, template_substitution(template.type_parameters, substitution)),
     };
 
     // h. Build the concrete FunctionType, preserving declared pass kinds.
@@ -1539,8 +1540,9 @@ public let instantiate_extension_method_from_entry(
             };
         },
         .None() then {
+            let node_subst = template_substitution(resolved_template.type_params, substitution);
             for p in resolved_template.method.params then {
-                let mutable resolved_type = resolve_parameterized_type(mono, mono.resolve_type_node_impl(p.param_type, substitution));
+                let mutable resolved_type = resolve_parameterized_type(mono, mono.resolve_type_node_impl(p.param_type, node_subst));
                 concrete_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named));
                 concrete_param_types.push(resolved_type);
             };
@@ -1553,7 +1555,8 @@ public let instantiate_extension_method_from_entry(
             resolve_parameterized_type(mono, substituted_return_type)
         },
         .None() then {
-            let mutable resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution);
+            let node_subst = template_substitution(resolved_template.type_params, substitution);
+            let mutable resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, node_subst);
             resolve_parameterized_type(mono, resolved_node_type)
         },
     };
@@ -2096,18 +2099,21 @@ file_private let infer_trait_args_from_extension_template_binding(
             };
 
             let mutable solved = Dict[String, Type].new();
+            // The method's own TypeNodes are resolved against the template's
+            // parameters; `bindings` only supplies the ones the caller knows.
+            let node_subst = template_substitution(template.type_params, bindings);
             for member in info.members then {
                 if member.name <> template.method.name then {
                     continue;
                 };
                 let concrete_return_type = when template.checked_return_type in {
-                    .Some(checked_return_type) then resolve_parameterized_type(mono, substitute_type(mono, checked_return_type, bindings)),
-                    .None() then resolve_parameterized_type(mono, mono.resolve_type_node_impl(template.method.return_type, bindings)),
+                    .Some(checked_return_type) then resolve_parameterized_type(mono, substitute_type(mono, checked_return_type, node_subst)),
+                    .None() then resolve_parameterized_type(mono, mono.resolve_type_node_impl(template.method.return_type, node_subst)),
                 };
                 collect_trait_type_args_by_unification(mono, wanted, member.return_type, concrete_return_type, solved);
                 let mutable p UInt = 0;
                 while p < member.params.count() and p < template.method.params.count() then {
-                    let concrete_param_type = resolve_parameterized_type(mono, mono.resolve_type_node_impl(template.method.params[p].param_type, bindings));
+                    let concrete_param_type = resolve_parameterized_type(mono, mono.resolve_type_node_impl(template.method.params[p].param_type, node_subst));
                     collect_trait_type_args_by_unification(mono, wanted, member.params[p].param_type, concrete_param_type, solved);
                     p += 1;
                 };

@@ -2090,16 +2090,16 @@ given TypeChecker {
             _ then {},
         };
 
-        // Fill in any remaining unresolved trait type params from global_scope
+        // A trait type parameter the receiver and the constraints did not bind
+        // means ITSELF -- it is the declaration's own parameter, and we are on
+        // the declaration side of this trait. It must never be filled in by
+        // looking the name up: a user's `type T` would then become the meaning
+        // of the trait's `T`, and the two types print identically.
         when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
                 for type_param in info.type_params then {
                     if not bindings.contains_key(type_param) then {
-                        let mutable bound_type = when self.resolve_type_name_binding(type_param) in {
-                            .Some(existing) then existing,
-                            .None() then Type.GenericParameter(type_param),
-                        };
-                        bindings.insert(type_param, bound_type);
+                        bindings.insert(type_param, Type.GenericParameter(type_param));
                     };
                 };
             },
@@ -2195,16 +2195,14 @@ given TypeChecker {
 
     module_private collect_ancestor_bindings(self, t Type, bindings Dict[String, Type]) Void = {
         when t in {
+            // A GenericParameter that nothing has bound means itself. It must not
+            // be resolved by name: `resolve_type_name_binding` would find a
+            // same-named global and the binding would then claim the parameter
+            // meant that declaration. Binding it to itself also stops every
+            // later consumer from repeating the lookup.
             .GenericParameter(name) then {
                 if not bindings.contains_key(name) then {
-                    when self.resolve_type_name_binding(name) in {
-                        .Some(resolved) then {
-                            if not (resolved is .GenericParameter(_) and when resolved in { .GenericParameter(n) then n == name, _ then false }) then {
-                                bindings.insert(name, resolved);
-                            };
-                        },
-                        .None() then {},
-                    };
+                    bindings.insert(name, Type.GenericParameter(name));
                 };
             },
             .ReferenceType(inner) then self.collect_ancestor_bindings(inner, bindings),

@@ -249,10 +249,7 @@ file_private let infer_type_construction_type_from_args(
             // typed `T` stays `GenericParameter("T")`. Leaving them unbound made
             // the resolver fall through to the bare-name concrete-type table and
             // pick up whatever global happened to be called `T`.
-            let self_subst = Dict[String, Type].new();
-            for type_param in template.type_parameters then {
-                self_subst.insert(type_param.name, Type.GenericParameter(type_param.name));
-            };
+            let self_subst = template_substitution(template.type_parameters, Dict[String, Type].new());
             let mutable i UInt = 0;
             while i < args.count() then {
                 let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, self_subst);
@@ -842,9 +839,12 @@ file_private let recover_member_field_type(
                         subst.insert(template.type_parameters[i].name, (args[i]));
                         i += 1;
                     };
+                    // `args` may be shorter than the parameter list, so the floor
+                    // matters here: an unmentioned parameter must stay itself.
+                    let field_subst = template_substitution(template.type_parameters, subst);
                     for field in template.fields then {
                         if field.name == member_name then {
-                            return resolve_parameterized_type(mono, mono.resolve_type_node_impl(field.field_type, subst));
+                            return resolve_parameterized_type(mono, mono.resolve_type_node_impl(field.field_type, field_subst));
                         };
                     };
                 },

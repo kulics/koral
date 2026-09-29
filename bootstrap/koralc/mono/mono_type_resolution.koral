@@ -1143,6 +1143,25 @@ public let resolve_parameterized_type(mono Monomorphizer, t Type) Type = {
 
 // ── resolve_type_node ─────────────────────────────────────────────────────────
 
+// The substitution for resolving a template's OWN TypeNodes.
+//
+// A template's parameters are bound to themselves and `override` wins. This
+// floor is what makes the priority below safe: without it a parameter name that
+// `override` does not mention falls past the substitution map into the
+// bare-name concrete-type tables, so a user's `type T` becomes the meaning of
+// std's `[T ...]` parameter and the two types print identically.
+//
+// The parameter list is the authority on "is this name a parameter of the
+// template I am resolving". It is never guessed from the spelling.
+public let template_substitution(type_parameters List[TypeParameterDecl], override Dict[String, Type]) Dict[String, Type] = {
+    let mutable out = Dict[String, Type].new();
+    for type_param in type_parameters then {
+        out.insert(type_param.name, Type.GenericParameter(type_param.name));
+    };
+    out.insert_dict(override);
+    return out;
+};
+
 // Resolve a TypeNode to a concrete Type using the substitution map.
 //
 // Priority for TypeNode.Identifier:
@@ -1150,6 +1169,8 @@ public let resolve_parameterized_type(mono Monomorphizer, t Type) Type = {
 //   2. Built-in types (Int, Bool, String, etc.)
 //   3. Concrete type mutable registry (struct/enum types)
 //
+// Anything resolving a generic template's nodes must pass its parameters
+// through `template_substitution` so step 1 always answers for them.
 public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dict[String, Type]) Type = {
     return when node in {
         // TypeNode.Identifier: priority: substitution map → built-in types → concrete registry
@@ -2393,10 +2414,7 @@ file_private let infer_type_construction_type_from_args(
             // typed `T` stays `GenericParameter("T")`. Leaving them unbound made
             // the resolver fall through to the bare-name concrete-type table and
             // pick up whatever global happened to be called `T`.
-            let self_subst = Dict[String, Type].new();
-            for type_param in template.type_parameters then {
-                self_subst.insert(type_param.name, Type.GenericParameter(type_param.name));
-            };
+            let self_subst = template_substitution(template.type_parameters, Dict[String, Type].new());
             let mutable i UInt = 0;
             while i < args.count() then {
                 let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, self_subst);
@@ -4857,9 +4875,12 @@ file_private let resolve_member_field_type(
                         subst.insert(template.type_parameters[i].name, (args[i]));
                         i += 1;
                     };
+                    // `args` may be shorter than the parameter list, so the floor
+                    // matters here: an unmentioned parameter must stay itself.
+                    let field_subst = template_substitution(template.type_parameters, subst);
                     for field in template.fields then {
                         if field.name == member_name then {
-                            return resolve_parameterized_type(mono, mono.resolve_type_node_impl(field.field_type, subst));
+                            return resolve_parameterized_type(mono, mono.resolve_type_node_impl(field.field_type, field_subst));
                         };
                     };
                 },
@@ -5440,6 +5461,11 @@ file_private let bind_generic_function_call_callee(
 
             let concrete_expected_return = resolve_parameterized_type(mono, expected_return_type);
             if not has_generic_parameter(concrete_expected_return) then {
+                // The pattern is the template's own signature, so it is resolved
+                // with the template's parameters bound to themselves -- not with
+                // an empty substitution, which lets a bare `T` fall through to
+                // whatever global is called `T`.
+                let self_subst = template_substitution(template.type_parameters, Dict[String, Type].new());
                 let mutable pattern_param_types = List[Type].new();
                 when template.checked_parameters in {
                     .Some(checked_params) then {
@@ -5449,14 +5475,14 @@ file_private let bind_generic_function_call_callee(
                     },
                     .None() then {
                         for param in template.parameters then {
-                            pattern_param_types.push(resolve_type_node(mono, param.param_type, Dict[String, Type].new()));
+                            pattern_param_types.push(resolve_type_node(mono, param.param_type, self_subst));
                         };
                     },
                 };
 
                 let pattern_return_type = when template.checked_return_type in {
                     .Some(checked_ret) then checked_ret,
-                    .None() then resolve_type_node(mono, template.return_type, Dict[String, Type].new()),
+                    .None() then resolve_type_node(mono, template.return_type, self_subst),
                 };
 
                 let mutable actual_param_types = List[Type].new();
@@ -6828,28 +6854,32 @@ file_private let infer_extension_method_type_args(
     };
 
     let mutable pattern_param_types = List[Type].new();
+    // The method's own TypeNodes are resolved with the template's parameters
+    // bound to themselves, so one the caller did not substitute stays itself
+    // instead of falling through to a same-named global.
+    let ext_subst = template_substitution(ext.type_params, substitution);
     let use_checked_signature = when ext.checked_parameters in {
         .Some(_) then ext.checked_return_type is .Some(_),
         .None() then false,
     };
     let pattern_return_type = if use_checked_signature then {
-        resolve_parameterized_type(mono, substitute_type(mono, ext.checked_return_type or else Type.Unknown(), substitution))
+        resolve_parameterized_type(mono, substitute_type(mono, ext.checked_return_type or else Type.Unknown(), ext_subst))
     } else {
-        resolve_parameterized_type(mono, mono.resolve_type_node_impl(ext.method.return_type, substitution))
+        resolve_parameterized_type(mono, mono.resolve_type_node_impl(ext.method.return_type, ext_subst))
     };
 
     if use_checked_signature then {
         when ext.checked_parameters in {
             .Some(checked_params) then {
                 for checked_param in checked_params then {
-                    pattern_param_types.push(resolve_parameterized_type(mono, substitute_type(mono, checked_param.symbol_type, substitution)));
+                    pattern_param_types.push(resolve_parameterized_type(mono, substitute_type(mono, checked_param.symbol_type, ext_subst)));
                 };
             },
             .None() then {},
         };
     } else {
         for method_param in ext.method.params then {
-            pattern_param_types.push(resolve_parameterized_type(mono, mono.resolve_type_node_impl(method_param.param_type, substitution)));
+            pattern_param_types.push(resolve_parameterized_type(mono, mono.resolve_type_node_impl(method_param.param_type, ext_subst)));
         };
     };
 
