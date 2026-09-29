@@ -1,0 +1,28 @@
+// EXPECT-ERROR: does not explicitly implement trait
+// Design guard: calling a bound-constrained extension method on a type that
+// violates the bound is a type error -- the method is not a member there.
+//
+// `join_to_string` is declared in `given[T ToString] Iterator[T]`, so it is only
+// a member of `Iterator[T]` where `T: ToString`. `Pair[A, B]` is `ToString` only
+// when both components are; `Opaque` is not. So `join_to_string` on a
+// `List[Opaque]` must be rejected at the call site, not silently monomorphized.
+//
+// The mirror image of `bound_constrained_extension_not_instantiated_test`: that
+// one asserts the method does not leak into instantiations that violate the
+// bound; this one asserts the call site is diagnosed when someone asks for it.
+// Swift rejects it via `enforceGenericConstraints` at
+// `resolveGenericExtensionMethod`, which is the behaviour baseline.
+
+type Opaque(v Int);
+
+given Opaque {
+    public show(self) Int = self.v;
+};
+
+let main() Int = {
+    let items = List[Opaque].new();
+    items.push(Opaque(1));
+    // `Opaque` is not `ToString`, so `T ToString` fails here.
+    let text = items.join_to_string(",");
+    return text.count();
+};

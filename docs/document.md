@@ -1375,6 +1375,22 @@ type, as `downgrade` / `upgrade` do):
 let consume[I Iterator[Int]](iter I) Void = {};
 ```
 
+A bound-constrained extension block only contributes members where the bound
+actually holds. Given
+
+```koral
+given[T Add[T] and Zero] Iterator[T] {
+    public sum(self) T = { ... };
+};
+```
+
+`sum` is a member of `Iterator[T]` only for `T` that satisfy `Add[T] and Zero`.
+`Pair[A, B]` satisfies neither, so `Iterator[Pair[A, B]]` does not acquire `sum`,
+and a call to it there is a type error. Constraints that are still open are not
+rejections: for a generic conformance such as
+`given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T]`, `T` may still
+become `Int`, so `sum` remains available and is checked again at each call site.
+
 #### Generic Methods
 
 `given` blocks can also define generic methods:
@@ -1511,6 +1527,24 @@ let result = when x in {
     1 then "one",
     2 then "two",
     _ then "other",
+};
+```
+
+A pattern binding is scoped to its own branch. Inside the branch it names the
+matched payload; outside the `when` it does not exist, and an outer binding of
+the same name keeps its meaning. Different branches may reuse a name freely --
+their bindings are independent.
+
+```koral
+let f(s Shape, radius String) String = {
+    let mutable inner = "";
+    when s in {
+        // `radius` here is the payload of `Circle`.
+        .Circle(radius) then { inner = radius.to_string(); },
+        _ then { inner = "none"; },
+    };
+    // `radius` here is the `String` parameter again.
+    return radius + "/" + inner;
 };
 ```
 

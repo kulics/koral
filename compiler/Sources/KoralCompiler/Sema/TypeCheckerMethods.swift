@@ -982,7 +982,7 @@ extension TypeChecker {
           // Bind trait type parameters to their actual type arguments
           // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A
           if let traitInfo = visibleTraitInfo(traitName) {
-            if case .generic(_, let argNodes) = traitConstraint {
+            if case .trait(_, _, let argNodes) = traitConstraint {
               for (i, typeParam) in traitInfo.typeParameters.enumerated() {
                 if i < argNodes.count {
                   let argType = try resolveTypeNode(argNodes[i])
@@ -1051,36 +1051,38 @@ extension TypeChecker {
     }
   }
 
+  /// What `base[i]` means for `base`.
+  ///
+  /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict` and for
+  /// raw pointers. Which std type is meant is a question about the DECLARATION
+  /// identity -- a user type also named `List` does not get subscripting.
   func resolveBuiltinSubscriptKind(baseType: Type) -> BuiltinSubscriptKind? {
     let unwrapped = builtinSubscriptBaseType(baseType)
     switch unwrapped {
     case .structure(let defId):
-      if context.getName(defId) == "String" {
+      if context.isStdNominal(defId, context.stdStringDefId) {
         return .string
       }
-      if let template = context.getTemplateName(defId),
-         let typeArgs = context.getTypeArguments(defId),
-         typeArgs.count == 1
-      {
-        if template == "List" {
+      if let typeArgs = context.getTypeArguments(defId), !typeArgs.isEmpty {
+        if context.isStdNominal(defId, context.stdListTemplateDefId), typeArgs.count == 1 {
           return .list(element: typeArgs[0])
         }
-        if template == "Deque" {
+        if context.isStdNominal(defId, context.stdDequeTemplateDefId), typeArgs.count == 1 {
           return .deque(element: typeArgs[0])
         }
-        if template == "Dict", typeArgs.count == 2 {
+        if context.isStdNominal(defId, context.stdDictTemplateDefId), typeArgs.count == 2 {
           return .dict(key: typeArgs[0], value: typeArgs[1])
         }
       }
       return nil
-    case .genericStruct(let template, _, let args):
-      if template == "List", args.count == 1 {
+    case .genericStruct(_, let templateDefId, let args):
+      if context.isStdNominal(templateDefId, context.stdListTemplateDefId), args.count == 1 {
         return .list(element: args[0])
       }
-      if template == "Deque", args.count == 1 {
+      if context.isStdNominal(templateDefId, context.stdDequeTemplateDefId), args.count == 1 {
         return .deque(element: args[0])
       }
-      if template == "Dict", args.count == 2 {
+      if context.isStdNominal(templateDefId, context.stdDictTemplateDefId), args.count == 2 {
         return .dict(key: args[0], value: args[1])
       }
       return nil
@@ -1300,6 +1302,7 @@ extension TypeChecker {
     let call: TypedExpressionNode = .traitMethodCall(
       receiver: finalBase,
       traitName: traitName,
+      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
       methodName: methodName,
       methodIndex: methodIndex,
       arguments: typedArguments,

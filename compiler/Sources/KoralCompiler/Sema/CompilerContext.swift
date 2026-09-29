@@ -186,13 +186,6 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isForeignStruct(defId)
     }
 
-    public func setNotDeref(_ defId: DefId) {
-        defIdMap.setNotDeref(defId)
-    }
-
-    public func isNotDeref(_ defId: DefId) -> Bool {
-        defIdMap.isNotDeref(defId)
-    }
 
     public func setCname(_ defId: DefId, _ cname: String) {
         defIdMap.setCname(defId, cname)
@@ -392,10 +385,14 @@ public final class CompilerContext: @unchecked Sendable {
         isMutable: Bool = false
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
+        // The template's identity is resolved here, once, at the point the
+        // instance is registered. Later questions ("is this std's List?") compare
+        // the stored identity and never the spelling.
+        let resolvedTemplateDefId = defIdMap.getTemplateDefId(defId)
+            ?? resolvedTemplateName.flatMap { defIdMap.lookupGenericStructTemplateDefId($0) }
         let inheritedTemplateMutability: Bool
-        if let resolvedTemplateName,
-           let templateDefId = defIdMap.lookupGenericStructTemplateDefId(resolvedTemplateName) {
-            inheritedTemplateMutability = isGenericStructTemplateMutable(templateDefId)
+        if let resolvedTemplateDefId {
+            inheritedTemplateMutability = isGenericStructTemplateMutable(resolvedTemplateDefId)
         } else {
             inheritedTemplateMutability = false
         }
@@ -406,6 +403,7 @@ public final class CompilerContext: @unchecked Sendable {
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
             templateName: resolvedTemplateName,
+            templateDefId: resolvedTemplateDefId,
             isMutable: resolvedIsMutable
         )
     }
@@ -418,17 +416,98 @@ public final class CompilerContext: @unchecked Sendable {
         templateName: String? = nil
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
+        let resolvedTemplateDefId = defIdMap.getTemplateDefId(defId)
+            ?? resolvedTemplateName.flatMap { defIdMap.lookupGenericEnumTemplateDefId($0) }
         defIdMap.addEnumInfo(
             defId: defId,
             cases: cases,
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
-            templateName: resolvedTemplateName
+            templateName: resolvedTemplateName,
+            templateDefId: resolvedTemplateDefId
         )
     }
 
     public func updateForeignStructFields(defId: DefId, fields: [(name: String, type: Type)]) {
         defIdMap.setForeignStructFields(defId, fields)
+    }
+
+    // MARK: - Std nominal lang items
+
+    /// Std nominal types the compiler gives built-in behaviour to: collection
+    /// literals, subscripting, `..`, destructuring, string matching.
+    ///
+    /// Each is resolved ONCE from its spelling in module `Std`. Every later
+    /// question compares the DECLARATION identity, so a user type with the same
+    /// spelling is a different type and never inherits the built-in behaviour.
+    /// This is the same lang-item pattern as `stdDropTraitDefId` /
+    /// `stdOptionEnumDefId`.
+    public var stdStringDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "String") }
+    public var stdRuneDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "Rune") }
+    public var stdPairTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Pair")
+    }
+    public var stdListTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "List")
+    }
+    public var stdDequeTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Deque")
+    }
+    public var stdDictTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Dict")
+    }
+    public var stdSetTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Set")
+    }
+    /// `Range` is a generic ENUM in std, so it lives in the enum-template table.
+    public var stdRangeTemplateDefId: DefId? {
+        defIdMap.lookupGenericEnumTemplateDefId(modulePath: ["Std"], name: "Range")
+    }
+
+    /// Whether `defId` names `stdDefId`, or is a monomorphized instantiation of
+    /// it. Declaration identity only -- the spelling is never consulted.
+    public func isStdNominal(_ defId: DefId, _ stdDefId: DefId?) -> Bool {
+        guard let stdDefId else { return false }
+        return defId == stdDefId || defIdMap.getTemplateDefId(defId) == stdDefId
+    }
+
+    /// Same, for a type that may be wrapped in references/pointers.
+    public func isStdNominalType(_ type: Type, _ stdDefId: DefId?) -> Bool {
+        switch unwrapAll(type) {
+        case .structure(let defId):
+            return isStdNominal(defId, stdDefId)
+        case .`enum`(let defId):
+            return isStdNominal(defId, stdDefId)
+        case .genericStruct(_, let templateDefId, _):
+            return isStdNominal(templateDefId, stdDefId)
+        case .genericEnum(_, let templateDefId, _):
+            return isStdNominal(templateDefId, stdDefId)
+        default:
+            return false
+        }
+    }
+
+    private func unwrapAll(_ type: Type) -> Type {
+        switch type {
+        case .reference(let inner):
+            return unwrapAll(inner)
+        case .mutableReference(let inner):
+            return unwrapAll(inner)
+        case .borrowedReference(let inner):
+            return unwrapAll(inner)
+        case .mutableBorrowedReference(let inner):
+            return unwrapAll(inner)
+        case .weakReference(let inner):
+            return unwrapAll(inner)
+        case .mutableWeakReference(let inner):
+            return unwrapAll(inner)
+        case .pointer(let element):
+            return unwrapAll(element)
+        case .mutablePointer(let element):
+            return unwrapAll(element)
+        default:
+            return type
+        }
     }
 
     // MARK: - Type Queries

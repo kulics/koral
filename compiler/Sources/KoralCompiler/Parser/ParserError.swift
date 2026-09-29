@@ -48,8 +48,15 @@ extension LexerError: CustomStringConvertible {
 
 public enum ParserError: Error {
   case unexpectedToken(span: SourceSpan, got: String, expected: String? = nil)
-  case expectedIdentifier(span: SourceSpan, got: String)
+  /// An identifier was expected where `context` names the role it would play
+  /// ("field name", "parameter", ...). The role is what makes the message
+  /// actionable -- "Expected identifier for field name, got: let" tells you both
+  /// what was missing and where the parser was.
+  case expectedIdentifier(span: SourceSpan, got: String, context: String? = nil)
   case expectedTypeIdentifier(span: SourceSpan, got: String)
+  /// A type parameter was declared without any constraint. `[T]` is not a valid
+  /// way to write "no constraints" -- the vacuous constraint is spelled `Any`.
+  case missingTypeParameterConstraint(span: SourceSpan, name: String)
   case missingReturnType(span: SourceSpan)
   case unexpectedEndOfFile(span: SourceSpan)
   case invalidVariableName(span: SourceSpan, name: String)
@@ -76,12 +83,14 @@ public enum ParserError: Error {
   case emptyInterpolationExpression(span: SourceSpan)
   case invalidAccessModifierOrder(span: SourceSpan, message: String)
   case invalidComparisonChain(span: SourceSpan, message: String)
+  case defaultValuesRequireNamedParameter(span: SourceSpan)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
     switch self {
     case .unexpectedToken(let span, _, _): return span
-    case .expectedIdentifier(let span, _): return span
+    case .expectedIdentifier(let span, _, _): return span
+    case .missingTypeParameterConstraint(let span, _): return span
     case .expectedTypeIdentifier(let span, _): return span
     case .missingReturnType(let span): return span
     case .unexpectedEndOfFile(let span): return span
@@ -105,6 +114,7 @@ public enum ParserError: Error {
     case .emptyInterpolationExpression(let span): return span
     case .invalidAccessModifierOrder(let span, _): return span
     case .invalidComparisonChain(let span, _): return span
+    case .defaultValuesRequireNamedParameter(let span): return span
     }
   }
   
@@ -121,8 +131,13 @@ public enum ParserError: Error {
         return "Unexpected token: \(token), expected: \(exp)"
       }
       return "Unexpected token: \(token)"
-    case .expectedIdentifier(_, let token):
+    case .expectedIdentifier(_, let token, let context):
+      if let context {
+        return "Expected identifier for \(context), got: \(token)"
+      }
       return "Expected identifier, got: \(token)"
+    case .missingTypeParameterConstraint(_, let name):
+      return "Type parameter '\(name)' requires a constraint"
     case .expectedTypeIdentifier(_, let token):
       return "Expected type identifier, got: \(token)"
     case .missingReturnType:
@@ -172,6 +187,8 @@ public enum ParserError: Error {
       return message
     case .invalidComparisonChain(_, let message):
       return message
+    case .defaultValuesRequireNamedParameter:
+      return "Default values are only allowed for named parameters (use 'name: Type = value' syntax)"
     }
   }
 }

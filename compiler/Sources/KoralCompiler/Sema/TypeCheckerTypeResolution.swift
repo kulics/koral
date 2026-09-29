@@ -184,6 +184,13 @@ extension TypeChecker {
       args: args)
   }
 
+  /// Builds a generic enum type from a known declaration, bypassing name lookup.
+  /// Used for std lang items, where a user template with the same spelling must
+  /// not win.
+  func genericEnumType(template name: String, templateDefId: DefId, args: [Type]) -> Type {
+    .genericEnum(template: name, templateDefId: templateDefId, args: args)
+  }
+
   /// Builds a trait-object type with the trait's declaration identity.
   func traitObjectType(traitName name: String, typeArgs: [Type]) -> Type {
     .traitObject(
@@ -486,7 +493,7 @@ extension TypeChecker {
     // Cache check: include full constraint signatures to avoid collisions between
     // templates that share type parameter names but have different trait bounds.
     let paramKey = typeParameters.map { param in
-      let constraintsKey = param.constraints.map { $0.description }.joined(separator: "&")
+      let constraintsKey = param.constraints.map { boundIdentity($0) }.joined(separator: "&")
       return "\(param.name):\(constraintsKey)"
     }.joined(separator: ",")
     let argsKey = args.map { $0.description }.joined(separator: ",")
@@ -500,63 +507,50 @@ extension TypeChecker {
     }
     
     for (i, param) in typeParameters.enumerated() {
-      for c in param.constraints {
-        let constraint = try SemaUtils.resolveTraitConstraint(from: c)
-        
+      for constraint in param.constraints {
         switch constraint {
-        case .simple(let traitName):
-          // Simple trait constraint (e.g., T Any, T Equatable)
-          // If the argument is a generic parameter, check if it has the required constraint
-          // in its bounds rather than checking for concrete method implementations
+        case .mutable:
+          // `mutable` is a shape requirement, not a trait. Generic-parameter
+          // arguments are checked at their own declaration; concrete types must
+          // have been declared `type mutable`.
+          if case .genericParameter = args[i] {
+            continue
+          }
+          let ctx = "checking constraint \(param.name): mutable"
+          try enforceMutableConstraint(args[i], context: ctx)
+
+        case .trait(_, let traitName, let traitArgs):
+          // A real trait bound (e.g. `T Equatable`, `R [T]Iterator`).
+          // Identity is the trait's declaration; `traitName` is display-only.
+
+          // Substitute type parameters in the trait arguments.
+          let resolvedTraitArgs = try traitArgs.map { arg -> Type in
+            try resolveTypeNodeWithSubstitution(arg, substitution: substitution)
+          }
+
+          // If the argument is a generic parameter, the requirement is that its
+          // own declaration carries a bound for the SAME trait -- decided by
+          // declaration identity, not by comparing spellings.
           if case .genericParameter(let argName) = args[i] {
-            // Check if the generic parameter has the required trait bound
-            let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == traitName }) ?? false
-            if traitName != "Any" && traitName != "mutable" && !hasRequiredBound {
-              let ctx = "checking constraint \(param.name): \(traitName)"
+            let requiredDefId = resolveBound(constraint).defId ?? .invalid
+            let hasRequiredBound =
+              (genericTraitBounds[argName] ?? []).contains { boundRequires($0, requiredDefId) }
+            if !hasRequiredBound {
+              let ctx = "checking constraint \(param.name): \(constraint)"
               throw SemanticError(.generic(
                 "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"
               ), span: currentSpan)
             }
-            // If bounds exist and contain the trait (or trait is Any/mutable), constraint is satisfied
             continue
           }
 
-          // 'mutable' constraint: type must be declared as 'type mutable'
-          if traitName == "mutable" {
-            let ctx = "checking constraint \(param.name): mutable"
-            try enforceMutableConstraint(args[i], context: ctx)
-            continue
-          }
-
-          let ctx = "checking constraint \(param.name): \(traitName)"
-          try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
-          
-        case .generic(let baseTrait, let traitArgs):
-          // Generic trait constraint (e.g., R [T]Iterator)
-          // We need to check that the actual type implements the trait with the correct type arguments
-          
-          // First, substitute type parameters in the trait arguments
-          let resolvedTraitArgs = try traitArgs.map { arg -> Type in
-            try resolveTypeNodeWithSubstitution(arg, substitution: substitution)
-          }
-          
-          // If the argument is a generic parameter, check if it has a matching generic trait bound
-          if case .genericParameter(let argName) = args[i] {
-            // For now, check if the generic parameter has the base trait bound
-            // A more sophisticated check would verify the type arguments match
-            let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == baseTrait }) ?? false
-            if !hasRequiredBound {
-              let ctx = "checking constraint \(param.name): \(constraint)"
-              throw SemanticError(.generic(
-                "Type \(argName) does not explicitly implement trait \(baseTrait) (\(ctx))"
-              ), span: currentSpan)
-            }
-            continue
-          }
-          
           // For concrete types, check trait conformance with the resolved type arguments
           let ctx = "checking constraint \(param.name): \(constraint)"
-          try enforceGenericTraitConformance(args[i], traitName: baseTrait, traitTypeArgs: resolvedTraitArgs, context: ctx)
+          if traitArgs.isEmpty {
+            try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
+          } else {
+            try enforceGenericTraitConformance(args[i], traitName: traitName, traitTypeArgs: resolvedTraitArgs, context: ctx)
+          }
         }
       }
     }
@@ -645,10 +639,6 @@ extension TypeChecker {
     traitRef: CanonicalTraitRef,
     context: String? = nil
   ) throws {
-    if traitRef.traitName == "Any" {
-      return
-    }
-
     if case .genericParameter(let paramName) = selfType {
       let satisfiesBound = traitRef.traitTypeArgs.isEmpty
         ? hasTraitBound(paramName, traitRef.traitName)
@@ -846,13 +836,10 @@ extension TypeChecker {
     }
   }
 
+  /// Std's `String`, by declaration identity -- a user type also named `String`
+  /// is a different type and must not be treated as one.
   func isStringType(_ type: Type) -> Bool {
-    switch type {
-    case .structure(let defId):
-      return context.getName(defId) == "String"
-    default:
-      return false
-    }
+    return context.isStdNominalType(type, context.stdStringDefId)
   }
   
   func singleByteASCII(from value: String) -> UInt8? {
@@ -871,12 +858,9 @@ extension TypeChecker {
     return scalar.value
   }
   
-  /// Check if a type is the Rune struct type.
+  /// Check if a type is std's `Rune`, by declaration identity.
   func isRuneType(_ type: Type) -> Bool {
-    if case .structure(let defId) = type {
-      return context.getName(defId) == "Rune"
-    }
-    return false
+    return context.isStdNominalType(type, context.stdRuneDefId)
   }
 
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
@@ -1040,6 +1024,7 @@ extension TypeChecker {
         let conversion: TypedExpressionNode = .traitObjectConversion(
           inner: tempRef,
           traitName: traitName,
+          traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
           traitTypeArgs: traitTypeArgs,
           concreteType: expr.type,
           type: expected
@@ -1063,6 +1048,7 @@ extension TypeChecker {
     return .traitObjectConversion(
       inner: sourceForConversion,
       traitName: traitName,
+      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
       traitTypeArgs: traitTypeArgs,
       concreteType: concreteType,
       type: expected

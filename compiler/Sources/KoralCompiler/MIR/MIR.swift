@@ -60,14 +60,17 @@ enum MIRGlobal {
 
 struct MIRTraitVTable {
   let concreteType: Type
+  /// Display and C mangling only.
   let traitName: String
+  /// Identity of the trait's declaration -- what the vtable is keyed on.
+  let traitDefId: DefId
   let traitTypeArguments: [Type]
   let methods: [MIRTraitVTableMethod]
 
   var key: MIRTraitVTableKey {
     MIRTraitVTableKey(
       concreteType: concreteType,
-      traitName: traitName,
+      traitDefId: traitDefId,
       traitTypeArguments: traitTypeArguments
     )
   }
@@ -86,9 +89,12 @@ struct MIRTraitVTableParameter {
   let isSelf: Bool
 }
 
+/// Identity of a vtable: (concrete type, trait declaration, trait arguments).
+/// Deliberately does NOT contain the trait's spelling -- two same-named traits
+/// from different modules are different traits and need different vtables.
 struct MIRTraitVTableKey: Hashable {
   let concreteType: Type
-  let traitName: String
+  let traitDefId: DefId
   let traitTypeArguments: [Type]
 }
 
@@ -277,6 +283,7 @@ struct MIRTraitObjectConversion {
   let inner: MIRValue
   let sourceOwnership: MIROwnershipUse
   let traitName: String
+  let traitDefId: DefId
   let traitTypeArguments: [Type]
   let concreteType: Type
   let type: Type
@@ -284,7 +291,7 @@ struct MIRTraitObjectConversion {
   var vtableKey: MIRTraitVTableKey {
     MIRTraitVTableKey(
       concreteType: concreteType,
-      traitName: traitName,
+      traitDefId: traitDefId,
       traitTypeArguments: traitTypeArguments
     )
   }
@@ -294,6 +301,7 @@ struct MIRTraitMethodCall {
   let receiver: MIRValue
   let receiverOwnership: MIROwnershipUse
   let traitName: String
+  let traitDefId: DefId
   let traitTypeArguments: [Type]
   let methodName: String
   let methodIndex: Int
@@ -317,7 +325,7 @@ indirect enum MIRIntrinsic {
   case moveMemory(dest: MIRValue, source: MIRValue, count: MIRValue)
   case downgradeRef(value: MIRValue, resultType: Type)
   case upgradeRef(value: MIRValue, resultType: Type)
-  case traitObjectMatches(value: MIRValue, traitName: String, traitTypeArguments: [Type], concreteType: Type)
+  case traitObjectMatches(value: MIRValue, traitName: String, traitDefId: DefId, traitTypeArguments: [Type], concreteType: Type)
   case traitObjectDowncast(value: MIRValue, resultType: Type)
   case initMemory(ptr: MIRValue, value: MIRValue)
   case deinitMemory(ptr: MIRValue)

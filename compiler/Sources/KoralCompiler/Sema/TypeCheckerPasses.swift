@@ -805,15 +805,6 @@ extension TypeChecker {
     }
   }
 
-  private func markNotDerefType(typeParams: [TypeParameterDecl], typeNode: TypeNode, traitName: String, span: SourceSpan) throws {
-    _ = typeParams
-    _ = typeNode
-    if traitName == "Deref" {
-      throw SemanticError(.generic("The 'Deref' trait has been removed from the language model"), span: span)
-    }
-    throw SemanticError(.generic("Only 'not Deref' was previously supported; this legacy trait hook is no longer active"), span: span)
-  }
-  
   // MARK: - Pass 1: Type Collection
   
   /// Collects type definitions without checking function bodies.
@@ -825,7 +816,6 @@ extension TypeChecker {
       // Using declarations are handled separately, skip here
       return
 
-    case .givenNotTraitDeclaration:
       return
       
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
@@ -1186,9 +1176,9 @@ extension TypeChecker {
 
         let traitArgNodes: [TypeNode]
         switch traitConstraint {
-        case .simple:
+        case .mutable:
           traitArgNodes = []
-        case .generic(_, let args):
+        case .trait(_, _, let args):
           traitArgNodes = args
         }
 
@@ -1315,7 +1305,7 @@ extension TypeChecker {
 
             if isTraitTarget {
               currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
-              genericTraitBounds["Self"] = [.generic(base: baseName, args: args)]
+              genericTraitBounds["Self"] = [.trait(defId: .invalid, name: baseName, args: args)]
             }
 
             // Register method-level type parameters
@@ -1557,17 +1547,17 @@ extension TypeChecker {
         try recordGenericTraitBounds(typeParams)
         try currentScope.defineType("Self", type: selfType)
         switch traitConstraint {
-        case .simple:
+        case .mutable:
           return []
-        case .generic(_, let argNodes):
+        case .trait(_, _, let argNodes):
           return try argNodes.map { try resolveTypeNode($0) }
         }
       }
 
-      let key = ConformanceKey(
-        selfType: exactConformanceTypeKey(selfType),
+      let key = conformanceKey(
+        selfType: selfType,
         traitName: traitName,
-        traitTypeArgs: traitArgTypes.map { exactConformanceTypeKey($0) }
+        traitTypeArgs: traitArgTypes
       )
       if declaredConformances.contains(key) {
         let origin = conformanceDeclOrigins[key]
@@ -1590,11 +1580,7 @@ extension TypeChecker {
         let modifierName = modifierBaseName(for: typeNode) ?? ""
         if !modifierName.isEmpty {
           let constraintNames = typeParams.flatMap { param in
-            param.constraints.compactMap { constraint -> String? in
-              if case .identifier(let name) = constraint { return name }
-              if case .generic(let name, _) = constraint { return name }
-              return nil
-            }
+            param.constraints.map { $0.baseName }
           }
           let blanketKey = "\(modifierName):\(traitName)"
           blanketGivenConstraints[blanketKey] = constraintNames
@@ -1677,7 +1663,7 @@ extension TypeChecker {
         }
       }
 
-      if traitName == "Drop" {
+      if isStdDropTrait(resolveBound(traitConstraint).defId) {
         markExplicitDropConformanceTarget(selfType)
       }
       
@@ -2062,9 +2048,6 @@ extension TypeChecker {
       // Using declarations are handled separately, skip here
       return nil
 
-    case .givenNotTraitDeclaration(let typeParams, let typeNode, let traitName, let span):
-      self.currentSpan = span
-      try markNotDerefType(typeParams: typeParams, typeNode: typeNode, traitName: traitName, span: span)
       return nil
       
     case .traitDeclaration(let name, let typeParameters, let superTraits, _, _, let span):
@@ -2084,8 +2067,13 @@ extension TypeChecker {
         for parent in superTraits {
           let constraint = try SemaUtils.resolveTraitConstraint(from: parent)
           try validateTraitName(constraint.baseName)
-          if case .generic(let base, let args) = constraint {
-            let traitInfo = traits[base]
+          // Arity is checked only when type arguments were WRITTEN. A bare
+          // parent name (`trait Child Mul`, where `Mul` takes one argument) is
+          // accepted without them -- bootstrap's `validate_trait_parent_arity`
+          // returns early on `actual_count == 0` for the same spelling, and the
+          // two compilers must agree.
+          if case .generic(_, let args) = parent {
+            let traitInfo = traits[constraint.baseName]
             let expectedCount = traitInfo?.typeParameters.count ?? 0
             if expectedCount != args.count {
               throw SemanticError.typeMismatch(
@@ -2600,7 +2588,7 @@ extension TypeChecker {
             if isTraitTarget {
               currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
               if case .generic(_, let traitArgs) = typeNode {
-                genericTraitBounds["Self"] = [.generic(base: baseName, args: traitArgs)]
+                genericTraitBounds["Self"] = [.trait(defId: .invalid, name: baseName, args: traitArgs)]
               }
             }
             
@@ -2818,9 +2806,9 @@ extension TypeChecker {
 
       let traitArgNodes: [TypeNode] = {
         switch traitConstraint {
-        case .simple:
+        case .mutable:
           return []
-        case .generic(_, let args):
+        case .trait(_, _, let args):
           return args
         }
       }()
@@ -2890,10 +2878,10 @@ extension TypeChecker {
       }
 
       let makeConformanceKey = { (targetType: Type, targetTrait: String, targetTraitArgs: [Type]) -> ConformanceKey in
-        ConformanceKey(
-          selfType: self.exactConformanceTypeKey(targetType),
+        self.conformanceKey(
+          selfType: targetType,
           traitName: targetTrait,
-          traitTypeArgs: targetTraitArgs.map { self.exactConformanceTypeKey($0) }
+          traitTypeArgs: targetTraitArgs
         )
       }
 
@@ -2943,14 +2931,11 @@ extension TypeChecker {
 
       for parentConstraint in traitInfo.superTraits {
         let parentTraitName = parentConstraint.baseName
-        if SemaUtils.isBuiltinTrait(parentTraitName) {
-          continue
-        }
         let parentTraitArgTypes: [Type]
         switch parentConstraint {
-        case .simple:
+        case .mutable:
           parentTraitArgTypes = []
-        case .generic(_, let parentArgNodes):
+        case .trait(_, _, let parentArgNodes):
           parentTraitArgTypes = try parentArgNodes.map {
             try resolveTypeNodeWithSubstitution($0, substitution: traitTypeSubstitution)
           }
@@ -3044,7 +3029,7 @@ extension TypeChecker {
             )
           }
 
-          if traitName == "Drop" && method.name == "drop" {
+          if isStdDropTrait(traitDefId) && method.name == "drop" {
             try validateCompilerDropSignature(params: resolvedParams, returnType: resolvedReturn, selfType: selfType)
           }
 
@@ -3086,9 +3071,8 @@ extension TypeChecker {
               continue
             }
             var mergedBounds = genericTraitBounds[mappedParamName] ?? []
-            for constraintNode in toolParam.constraints {
-              let constraint = try SemaUtils.resolveTraitConstraint(from: constraintNode)
-              if !mergedBounds.contains(where: { $0.description == constraint.description }) {
+            for constraint in toolParam.constraints {
+              if !mergedBounds.contains(where: { boundIdentity($0) == boundIdentity(constraint) }) {
                 mergedBounds.append(constraint)
               }
             }
@@ -3179,7 +3163,7 @@ extension TypeChecker {
         // in the params used for MIR/codegen (checkedParameters), while keeping the
         // functionType (used for conformance checking) unchanged.
         let mirParams: [Symbol]
-        if traitName == "Drop" && method.name == "drop",
+        if isStdDropTrait(traitDefId) && method.name == "drop",
            let first = params.first, context.getName(first.defId) == "self" {
           switch first.type {
           case .mutablePointer:
@@ -3210,7 +3194,7 @@ extension TypeChecker {
           // For Drop trait: accept both drop(self) and drop(*unsafe mutable Self) signatures.
           // The trait defines drop(self), but implementations may use either form.
           var typeMatches = false
-          if traitName == "Drop" && method.name == "drop" {
+          if isStdDropTrait(traitDefId) && method.name == "drop" {
             // Try building the expected type with self wrapped as *unsafe mutable Self
             let pointerExpectedType = try expectedFunctionTypeForGenericTraitMethod(
               requirement,
@@ -3382,9 +3366,8 @@ extension TypeChecker {
                 continue
               }
               var mergedBounds = genericTraitBounds[mappedParamName] ?? []
-              for constraintNode in toolParam.constraints {
-                let constraint = try SemaUtils.resolveTraitConstraint(from: constraintNode)
-                if !mergedBounds.contains(where: { $0.description == constraint.description }) {
+              for constraint in toolParam.constraints {
+                if !mergedBounds.contains(where: { boundIdentity($0) == boundIdentity(constraint) }) {
                   mergedBounds.append(constraint)
                 }
               }

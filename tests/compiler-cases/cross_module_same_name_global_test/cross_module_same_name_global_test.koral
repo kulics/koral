@@ -1,0 +1,28 @@
+using cross_module_same_name_global_test::alpha { run_alpha, counter as counter_alpha };
+using cross_module_same_name_global_test::beta { run_beta, counter as counter_beta };
+
+// EXPECT: 10
+// EXPECT: 20
+// EXPECT: 100
+// EXPECT: 200
+// Design guard: a top-level symbol is identified by (module, name), not by name.
+//
+// `alpha` and `beta` each declare `let dup` and `let counter`, and each module
+// calls its own `dup` by bare name. Both must resolve to the LOCAL declaration.
+//
+// This guards a real regression. `UnifiedScope` kept a single unqualified
+// `names[name] -> DefId` entry per spelling, so whichever module registered
+// last won: while checking `alpha`, `alpha`'s own `dup()` resolved to `beta`'s
+// and the compile failed with "'dup' is defined in module 'Beta'. Import it
+// explicitly". Bootstrap resolves by module and never had the bug.
+//
+// Module-scoped globals are now stored under a module-qualified key as well,
+// and lookup prefers the binding declared in the module being checked.
+
+let main() Int = {
+    println(run_alpha().to_string());
+    println(run_beta().to_string());
+    println(counter_alpha().to_string());
+    println(counter_beta().to_string());
+    return 0;
+};

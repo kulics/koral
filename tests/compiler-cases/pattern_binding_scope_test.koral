@@ -1,0 +1,96 @@
+// EXPECT: PASS
+// Design guard: a `when` pattern binding is scoped to its own arm.
+//
+// Inside the arm it names the matched payload; outside the `when` it must not
+// exist, and an outer binding of the same name must keep its meaning.
+//
+// This guards a real regression. Bootstrap's MIR builder saved the pattern-place
+// tables before lowering a `when` arm with `let saved = self.pattern_place_by_name`
+// and restored them afterwards. `Dict` is a managed reference, so the "saved"
+// alias pointed at the SAME table the arm was inserting into; the restore was a
+// no-op and every arm's bindings stayed visible afterwards. In
+// `when base_type in { .GenericEnum(_, _, args) then ... }` the binder `args`
+// then leaked out and shadowed the enclosing parameter `args List[TypedExpr]`
+// hundreds of lines later. The generated C passed a `List[Type]` where a
+// `List[TypedExpr]` was expected and self-hosting failed to compile. The fix
+// snapshots with `.clone()`. The Swift compiler scopes bindings correctly, which
+// is the behaviour baseline.
+
+type Shape {
+    Circle(radius Int),
+    Rect(w Int, h Int),
+    Point(),
+};
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+// Parameter `radius` is a String; the `Circle` arm binds `radius` to an Int.
+// After the `when`, `radius` must be the parameter again.
+let after_when(s Shape, radius String) String = {
+    let mutable inner String = "";
+    when s in {
+        .Circle(radius) then {
+            // Here `radius` is the payload (Int).
+            inner = radius.to_string();
+        },
+        .Rect(w, h) then {
+            inner = (w * h).to_string();
+        },
+        .Point() then {
+            inner = "point";
+        },
+    };
+    return radius + "/" + inner;
+};
+
+// Two arms bind the same name to different types; neither may escape.
+let two_arms(s Shape, v String) String = {
+    when s in {
+        .Circle(v) then { return "circle:" + v.to_string(); },
+        .Rect(v, _) then { return "rect:" + v.to_string(); },
+        .Point() then { return "point:" + v; },
+    };
+};
+
+// The outer binding must survive nested `when`s that reuse the name.
+let nested(s Shape, v String) String = {
+    let mutable acc String = "";
+    when s in {
+        .Circle(v) then {
+            when v in {
+                0 then { acc = "zero"; },
+                _ then { acc = "nonzero"; },
+            };
+        },
+        _ then { acc = "other"; },
+    };
+    return v + ":" + acc;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    passed = check("after-when-circle", after_when(Shape.Circle(7), "r"), "r/7") and passed;
+    passed = check("after-when-rect", after_when(Shape.Rect(2, 3), "r"), "r/6") and passed;
+    passed = check("after-when-point", after_when(Shape.Point(), "r"), "r/point") and passed;
+
+    passed = check("two-arms-circle", two_arms(Shape.Circle(4), "v"), "circle:4") and passed;
+    passed = check("two-arms-rect", two_arms(Shape.Rect(5, 1), "v"), "rect:5") and passed;
+    passed = check("two-arms-point", two_arms(Shape.Point(), "v"), "point:v") and passed;
+
+    passed = check("nested-zero", nested(Shape.Circle(0), "v"), "v:zero") and passed;
+    passed = check("nested-nonzero", nested(Shape.Circle(9), "v"), "v:nonzero") and passed;
+    passed = check("nested-other", nested(Shape.Point(), "v"), "v:other") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

@@ -462,7 +462,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
+    case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, let type):
       print("\(indent)TraitMethodPlaceholder: \(traitName).\(methodName) : \(type)")
       if !methodTypeArgs.isEmpty {
         withIndent {
@@ -476,7 +476,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+    case .traitObjectConversion(let inner, let traitName, let traitDefId, let traitTypeArgs, let concreteType, let type):
       print("\(indent)TraitObjectConversion: \(concreteType) → \(traitName) ref : \(type)")
       if !traitTypeArgs.isEmpty {
         withIndent {
@@ -487,7 +487,7 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(inner)
       }
 
-    case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+    case .traitMethodCall(let receiver, let traitName, let traitDefId, let methodName, let methodIndex, let arguments, let type):
       print("\(indent)TraitMethodCall: \(traitName).\(methodName) [vtable:\(methodIndex)] : \(type)")
       withIndent {
         print("\(indent)Receiver:")

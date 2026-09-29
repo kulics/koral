@@ -1,0 +1,64 @@
+// EXPECT: PASS
+// Design guard: a bound-constrained tool must not be EMITTED for a type that
+// violates the bound, even when nothing calls it.
+//
+// This is the shape that actually broke self-hosting, and it is the one the
+// other bound tests do not cover. `join_to_string` needs `T ToString`, `into_set`
+// needs `T Hash`. Iterating a `Dict[String, Opaque]` yields `Pair[String, Opaque]`,
+// which satisfies neither -- so those tools are not members there. No code below
+// calls them; if the compiler materializes them anyway, the bodies reference
+// `Pair[String, Opaque].to_string()` / `Set[Pair[String, Opaque]].new()` which
+// cannot resolve, and the generated C stops compiling.
+//
+// Compare `bound_constrained_extension_not_instantiated_test` (the method must
+// still exist where the bound HOLDS) and `bound_constrained_extension_call_error`
+// (a call where the bound fails is a type error). This one asserts the third
+// case: bound fails, nobody calls, nothing may be emitted.
+
+type Opaque(v Int);
+
+given Opaque {
+    public show(self) Int = self.v;
+};
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    // `Dict[K Hash, V Any]` accepts `V = Opaque`, and `Pair[String, Opaque]` is
+    // not `ToString` and not `Hash`. Iterating must compile and run.
+    let mutable d = Dict[String, Opaque].new();
+    d.insert("a", Opaque(1));
+    d.insert("b", Opaque(2));
+    d.insert("c", Opaque(3));
+
+    let mutable n = 0;
+    for kv in d then {
+        n = n + kv.second.show();
+    };
+    passed = check("dict-sum-show", n.to_string(), "6") and passed;
+    passed = check("dict-count", d.count().to_string(), "3") and passed;
+
+    // `List` iteration is the same shape with a different iterator.
+    let items = List[Opaque].new();
+    items.push(Opaque(10));
+    items.push(Opaque(20));
+    let mutable m = 0;
+    for x in items then {
+        m = m + x.show();
+    };
+    passed = check("list-sum-show", m.to_string(), "30") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

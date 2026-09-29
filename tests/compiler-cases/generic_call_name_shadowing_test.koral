@@ -1,0 +1,78 @@
+// EXPECT: PASS
+// Design guard: a call `f(x)` is decided by the INNERMOST binding of `f`.
+//
+// A parameter or local `let` named `f` shadows any global function of the same
+// name, exactly as it does for every other name. The generic-function template
+// table is a global name table and must not reach over that binding.
+//
+// This guards a real regression. The Swift compiler tried the generic function
+// template BEFORE resolving the callee as a value, keyed by bare name. Declaring
+// `let f[U Marker](x U) U = x;` in user code therefore hijacked `f(it)` inside
+// std's `given[T Any] Option[T] { map[U Any](self, f Func(T) U) Option[U] = ... }`
+// -- whose parameter is also called `f` -- and std stopped compiling:
+//
+//     std/option.koral:18:1: error: Type T does not explicitly implement trait
+//     Marker (checking constraint U: Marker)
+//
+// With no trait bound the same collision surfaced as
+// "Type mismatch: expected Option[U], got Option[T]". Note that merely
+// DECLARING the global was enough; nothing had to call it. Any user function
+// called `f` broke every program, because std is always linked in.
+//
+// Bootstrap never had the bug: it resolves the callee first and looks the
+// template up by the resolved symbol's DefId, so a parameter `f` simply is not
+// the global `f`. Swift now also refuses to treat a name as a generic function
+// template when it is bound to a value.
+
+trait Marker {
+};
+
+// The colliding global. The bound is what makes the collision loud: std's `T`
+// does not satisfy `Marker`, so a hijacked call is a hard type error. Its
+// parameter is deliberately NOT called `f`.
+let f[U Marker](x U) U = x;
+
+type MarkerBox(v Int);
+given MarkerBox as Marker {
+};
+
+// A generic function whose parameter is called `f`, mirroring std's `map`.
+// Its body calls `f(x)`, which must mean the parameter.
+let call_it[T Any, U Any](f Func(T) U, x T) U = f(x);
+
+// The same, with an explicit type argument at the call site.
+let call_it_explicit[T Any, U Any](f Func(T) U, x T) U = f(x);
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    // The global `f` is still reachable when nothing shadows it.
+    passed = check("global", f(MarkerBox(7)).v.to_string(), "7") and passed;
+
+    // A parameter named `f` is the callee, not the global `f` above.
+    passed = check("param", call_it((x Int) -> "p" + x.to_string(), 5), "p5") and passed;
+    passed = check("param-explicit", call_it_explicit[Int, String]((x Int) -> "q" + x.to_string(), 6), "q6") and passed;
+
+    // The same with a local `let` that shadows the global.
+    let mutable shadowed Func(Int) String = (x Int) -> "l" + x.to_string();
+    passed = check("local", call_it(shadowed, 5), "l5") and passed;
+
+    // std itself takes a parameter called `f`; it must keep working while a
+    // global generic `f` is in scope.
+    let mapped = Option[Int].Some(3).map((x Int) -> x + 1);
+    passed = check("option-map", mapped.to_string(), "Some(4)") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

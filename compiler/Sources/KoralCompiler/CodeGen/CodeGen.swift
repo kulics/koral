@@ -1639,16 +1639,14 @@ public class CodeGen {
   /// Get user defined drop function for a type
   func getUserDefinedDrop(for typeName: String) -> String? {
     func isStdDropTraitConformance(_ trait: TypedTraitConformance?) -> Bool {
-      guard let trait, trait.traitName == "Drop" else { return false }
-      guard let traitInfo = mirProgram.traits[trait.traitName] else { return false }
-      return traitInfo.modulePath == ["Std"]
+      guard let trait else { return false }
+      return isStdDropTraitDefId(trait.traitDefId)
     }
 
     func isStdDropTraitDefId(_ traitDefId: DefId?) -> Bool {
       guard let traitDefId else { return false }
-      guard let traitName = context.getName(traitDefId), traitName == "Drop" else { return false }
-      guard let traitInfo = mirProgram.traits[traitName] else { return false }
-      return traitInfo.defId == traitDefId && traitInfo.modulePath == ["Std"]
+      guard let traitInfo = mirProgram.traits["Drop"], traitInfo.modulePath == ["Std"] else { return false }
+      return traitInfo.defId == traitDefId
     }
 
     func dropOwnerTypeName(_ type: Type) -> String? {

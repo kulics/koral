@@ -89,7 +89,7 @@ extension TypeChecker {
          .traitObjectConversion:
       return true
      case .methodReference(let base, _, _, _, _),
-        .traitMethodPlaceholder(_, _, let base, _, _):
+        .traitMethodPlaceholder(_, _, _, let base, _, _):
       return typedExpressionHasObservableStatementEffect(base)
     case .castExpression(let inner, _),
          .notExpression(let inner, _),
@@ -384,8 +384,8 @@ extension TypeChecker {
       let valueType = typedValue.type
 
       // Verify the value is a Pair type
-      guard case .genericStruct(let templateName, _, let typeArgs) = valueType,
-            templateName == "Pair",
+      guard case .genericStruct(_, let templateDefId, let typeArgs) = valueType,
+            context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(
           expected: "Pair", got: valueType.description))

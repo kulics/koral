@@ -102,28 +102,21 @@ extension TypeChecker {
         continue
       }
 
-      for constraintNode in param.constraints {
-        let constraint = try SemaUtils.resolveTraitConstraint(from: constraintNode)
+      for constraint in param.constraints {
         switch constraint {
-        case .simple(let traitName):
-          // 'mutable' and 'Any' constraints are always satisfied for generic parameters
-          if traitName == "mutable" || traitName == "Any" {
-            continue
-          }
-          let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == traitName }) ?? false
-          if !hasRequiredBound {
-            let ctx = "checking constraint \(param.name): \(traitName)"
-            throw SemanticError(.generic(
-              "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"
-            ), span: currentSpan)
-          }
+        case .mutable:
+          // `mutable` is a shape requirement and is always satisfied for a
+          // generic parameter (checked at its own declaration).
+          continue
 
-        case .generic(let baseTrait, _):
-          let hasRequiredBound = genericTraitBounds[argName]?.contains(where: { $0.baseName == baseTrait }) ?? false
+        case .trait(_, let traitName, _):
+          let requiredDefId = resolveBound(constraint).defId ?? .invalid
+          let hasRequiredBound =
+            (genericTraitBounds[argName] ?? []).contains { boundRequires($0, requiredDefId) }
           if !hasRequiredBound {
             let ctx = "checking constraint \(param.name): \(constraint)"
             throw SemanticError(.generic(
-              "Type \(argName) does not explicitly implement trait \(baseTrait) (\(ctx))"
+              "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"
             ), span: currentSpan)
           }
         }
@@ -132,13 +125,8 @@ extension TypeChecker {
   }
 
   private func isStdDropTraitConformance(_ conformance: TypedTraitConformance?) -> Bool {
-    guard let conformance, conformance.traitName == "Drop" else {
-      return false
-    }
-    guard let traitInfo = traits[conformance.traitName] else {
-      return false
-    }
-    return traitInfo.modulePath == ["Std"]
+    guard let conformance else { return false }
+    return isStdDropTrait(conformance.traitDefId)
   }
 
   private func isStdDropMethodSymbol(_ method: Symbol) -> Bool {
@@ -151,10 +139,7 @@ extension TypeChecker {
       return true
     }
     if let dispatch = receiverMethodDispatchByDefId[method.defId],
-       case .extensionTemplate(let ownerName) = dispatch.owner,
-       ownerName == "Drop",
-       let traitDefId = dispatch.conformanceTraitDefId,
-       isStdDropTraitConformance(TypedTraitConformance(traitDefId: traitDefId, traitName: ownerName, traitTypeArgs: [])) {
+       isStdDropTrait(dispatch.conformanceTraitDefId) {
       return true
     }
     return false
@@ -378,16 +363,6 @@ extension TypeChecker {
       || nominalInstantiationMatchesGeneric(right, genericCandidate: left)
   }
 
-  func checkNotDerefConstraint(for innerType: Type) throws {
-    guard let defId = nominalDefId(for: innerType), context.isNotDeref(defId) else {
-      return
-    }
-    let name = context.getName(defId) ?? innerType.description
-    throw SemanticError(.generic(
-      "Type '\(name)' is marked as 'not Deref' and cannot be dereferenced with '*'"
-    ), span: currentSpan)
-  }
-
   func requireDerefablePointee(
     _ innerType: Type,
     operation: String,
@@ -408,7 +383,6 @@ extension TypeChecker {
       // Generic pointees are allowed to be dereferenced based on their concrete
       // target type/indirection semantics rather than a legacy trait bound.
     }
-    try checkNotDerefConstraint(for: innerType)
   }
 
   func canTakeMutableReference(to expr: TypedExpressionNode) -> Bool {
@@ -3046,9 +3020,9 @@ extension TypeChecker {
 
     let traitTypeArgs: [Type]
     switch traitConstraint {
-    case .simple:
+    case .mutable:
       traitTypeArgs = []
-    case .generic(_, let args):
+    case .trait(_, _, let args):
       traitTypeArgs = try args.map { try resolveTypeNode($0) }
     }
 
@@ -3227,6 +3201,7 @@ extension TypeChecker {
         baseType: selfType, methodName: methodName, methodTypeArgs: resolvedMethodTypeArgs ?? [])
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
+        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
         methodName: methodName,
         base: receiver,
         methodTypeArgs: resolvedMethodTypeArgs ?? [],
@@ -3285,7 +3260,7 @@ extension TypeChecker {
           if let sig = methods[methodName], sig.parameters.first?.name != "self" {
             let traitInfo = traits[traitName]
             var traitTypeArgs: [Type] = []
-            if case .generic(_, let argNodes) = traitConstraint {
+            if case .trait(_, _, let argNodes) = traitConstraint {
               for argNode in argNodes {
                 let argType = try resolveTypeNode(argNode)
                 traitTypeArgs.append(argType)
@@ -3767,7 +3742,12 @@ extension TypeChecker {
     // Check if it is a constructor call OR implicit generic function call
     if case .identifier(let name) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
-      if let template = visibleGenericFunctionTemplate(name) {
+      // A local binding of the same name shadows the template: `f(x)` where `f`
+      // is a parameter or local `let` calls that value. Consulting the global
+      // template table first would let any user declaration named `f` hijack
+      // e.g. std's `map(self, f Func(T) U)`, whose parameter is called `f`.
+      if !currentScope.isValueBinding(name, sourceFile: currentSourceFile),
+         let template = visibleGenericFunctionTemplate(name) {
         try validateCallArgumentOrder(callArgs, functionName: name)
         return try inferImplicitGenericFunctionCall(
           template: template,
@@ -3839,8 +3819,8 @@ extension TypeChecker {
     var typedCallee = try inferTypedExpression(callee)
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
-    if case .traitMethodPlaceholder(let traitName, let methodName, _, _, _) = typedCallee,
-       traitName == "Drop" && methodName == "drop" {
+    if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _) = typedCallee,
+       isStdDropTrait(visibleTraitInfo(traitName)?.defId) && methodName == "drop" {
       throw SemanticError(
         .generic("compiler protocol method drop cannot be called explicitly"),
         span: currentSpan)
@@ -3864,7 +3844,7 @@ extension TypeChecker {
     }
 
     // Trait method placeholder call (for trait methods on generic parameters)
-    if case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
+    if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
       // For trait method placeholders, we need to handle the call similarly to method calls
       // The base is already included in the placeholder, so we just need to type-check the arguments
       guard case .function(let params, let returns) = methodType else {
@@ -3940,6 +3920,7 @@ extension TypeChecker {
       
       let adjustedCallee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
+        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
         methodName: methodName,
         base: adjustedBase,
         methodTypeArgs: methodTypeArgs,
@@ -4106,7 +4087,8 @@ extension TypeChecker {
         arguments: typedArguments,
         type: genericType
       )
-    } else if let template = visibleGenericFunctionTemplate(base) {
+    } else if !currentScope.isValueBinding(base, sourceFile: currentSourceFile),
+              let template = visibleGenericFunctionTemplate(base) {
       if let callArgs {
         try validateCallArgumentOrder(callArgs, functionName: "function call")
       }
@@ -4966,6 +4948,7 @@ extension TypeChecker {
       // Create a traitMethodPlaceholder instead of methodReference
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
+        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
         methodName: methodName,
         base: finalBase,
         methodTypeArgs: resolvedMethodTypeArgs,
@@ -5597,7 +5580,7 @@ extension TypeChecker {
           
           let traitInfo = visibleTraitInfo(traitName)
           var traitTypeArgs: [Type] = []
-          if case .generic(_, let argNodes) = traitConstraint {
+          if case .trait(_, _, let argNodes) = traitConstraint {
             for argNode in argNodes {
               let argType = try resolveTypeNode(argNode)
               traitTypeArgs.append(argType)
@@ -5624,6 +5607,7 @@ extension TypeChecker {
           )
           return .traitMethodPlaceholder(
             traitName: traitName,
+            traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -5647,6 +5631,7 @@ extension TypeChecker {
           )
           return .traitMethodPlaceholder(
             traitName: traitName,
+            traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -6028,9 +6013,8 @@ extension TypeChecker {
 
       for typeParam in typeParameters {
         for constraint in typeParam.constraints {
-          let traitConstraint = try SemaUtils.resolveTraitConstraint(from: constraint)
-          switch traitConstraint {
-          case .generic(let traitName, let traitArgs):
+          switch constraint {
+          case .trait(_, let traitName, let traitArgs):
             guard let concreteSelfType = inferred[typeParam.name],
                   let concreteTraitArgs = try inferTraitTypeArgumentsFromConformance(
                     selfType: concreteSelfType,
@@ -6054,7 +6038,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .simple:
+          case .mutable:
             continue
           }
         }
@@ -6072,7 +6056,12 @@ extension TypeChecker {
     return inferredArgs
   }
 
-  private func inferTraitTypeArgumentsFromConformance(
+  /// Solve a concrete type's trait arguments for `traitName` by unifying the
+  /// trait's required method signatures against the type's own methods.
+  ///
+  /// Generic: it names no trait. Used to read `A...` out of a bound `[A...]Trait`
+  /// once the bounded parameter's type is known.
+  func inferTraitTypeArgumentsFromConformance(
     selfType: Type,
     traitName: String
   ) throws -> [Type]? {
@@ -6222,7 +6211,7 @@ extension TypeChecker {
             
             let traitInfo = visibleTraitInfo(traitName)
             var traitTypeArgs: [Type] = []
-            if case .generic(_, let argNodes) = traitConstraint {
+            if case .trait(_, _, let argNodes) = traitConstraint {
               for argNode in argNodes {
                 let argType = try resolveTypeNode(argNode)
                 traitTypeArgs.append(argType)
@@ -6643,6 +6632,7 @@ extension TypeChecker {
 
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
+        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -6719,6 +6709,7 @@ extension TypeChecker {
 
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
+        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -6986,6 +6977,7 @@ extension TypeChecker {
 
     let callee: TypedExpressionNode = .traitMethodPlaceholder(
       traitName: traitName,
+      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
       methodName: methodName,
       base: base,
       methodTypeArgs: [],
@@ -7658,8 +7650,8 @@ extension TypeChecker {
     // Extract expected element type from expectedType (e.g. [UInt]Range -> UInt)
     let expectedElementType: Type?
     if let expected = expectedType,
-       case .genericEnum(let template, let defId, let args) = expected,
-       template == "Range",
+       case .genericEnum(_, let templateDefId, let args) = expected,
+       context.isStdNominal(templateDefId, context.stdRangeTemplateDefId),
        args.count == 1 {
       expectedElementType = args[0]
     } else {
@@ -8000,14 +7992,12 @@ extension TypeChecker {
     }
     
     // Check if return type is Option<T>
-    switch returnType {
-    case .genericEnum(let template, let defId, let args) where template == "Option" && args.count == 1:
-      return args[0]
-    default:
-      throw SemanticError(.generic(
-        "Iterator.next() must return [T]Option, got \(returnType)"
-      ), span: currentSpan)
+    if let inner = stdOptionInner(returnType) {
+      return inner
     }
+    throw SemanticError(.generic(
+      "Iterator.next() must return [T]Option, got \(returnType)"
+    ), span: currentSpan)
   }
 
   private func typeCheckForBindingPattern(
@@ -8018,8 +8008,8 @@ extension TypeChecker {
     case .binding(let binding):
       return try typeCheckForBindingElement(binding, expectedType: elementType)
     case .pair(let first, let second, let span):
-      guard case .genericStruct(let templateName, _, let typeArgs) = elementType,
-            templateName == "Pair",
+      guard case .genericStruct(_, let templateDefId, let typeArgs) = elementType,
+            context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(expected: "Pair", got: elementType.description), span: span)
       }
@@ -8361,22 +8351,24 @@ extension TypeChecker {
     }
   }
 
-  /// The fixed error type for Result: `Error ref` (trait object)
+  /// The fixed error type for Result: `Error ref` (trait object), where `Error`
+  /// is std's trait -- identified by declaration, not spelling.
   private var resultErrorType: Type {
-    .reference(inner: traitObjectType(traitName: "Error", typeArgs: []))
+    .reference(inner: .traitObject(
+      traitName: "Error",
+      traitDefId: stdErrorTraitDefId ?? .invalid,
+      typeArgs: []))
   }
 
   /// Extracts Option/Result kind from a type, or throws a diagnostic.
   private func extractOptionResultKind(
     _ type: Type, span: SourceSpan, operation: String
   ) throws -> OptionResultKind {
-    if case .genericEnum(let template, let defId, let args) = type {
-      if template == "Option", args.count == 1 {
-        return .option(innerType: args[0])
-      }
-      if template == "Result", args.count == 1 {
-        return .result(okType: args[0], errType: resultErrorType)
-      }
+    if let inner = stdOptionInner(type) {
+      return .option(innerType: inner)
+    }
+    if let ok = stdResultInner(type) {
+      return .result(okType: ok, errType: resultErrorType)
     }
     throw SemanticError(
       .generic("'\(operation)' can only be used with Option or Result types, got '\(type)'"),
@@ -8521,20 +8513,25 @@ extension TypeChecker {
     switch operandKind {
     case .option:
       // If transform already returns Option, flatten
-      if case .genericEnum(let template, _, _) = transformResultType, template == "Option" {
+      if stdOptionInner(transformResultType) != nil {
         return (transformResultType, true)
       }
       // Otherwise wrap in Option
-      return (genericEnumType(template: "Option", args: [transformResultType]), false)
+      guard let optionDefId = stdOptionEnumDefId else {
+        return (transformResultType, false)
+      }
+      return (genericEnumType(template: "Option", templateDefId: optionDefId, args: [transformResultType]), false)
 
     case .result:
       // If transform already returns Result (1 type param), flatten
-      if case .genericEnum(let template, let defId, let args) = transformResultType,
-         template == "Result", args.count == 1 {
+      if stdResultInner(transformResultType) != nil {
         return (transformResultType, true)
       }
       // Otherwise wrap in Result
-      return (genericEnumType(template: "Result", args: [transformResultType]), false)
+      guard let resultDefId = stdResultEnumDefId else {
+        return (transformResultType, false)
+      }
+      return (genericEnumType(template: "Result", templateDefId: resultDefId, args: [transformResultType]), false)
     }
   }
 

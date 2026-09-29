@@ -215,7 +215,7 @@ private final class MIRStatsCounter {
       self.count(count)
     case .downgradeRef(let value, _),
          .upgradeRef(let value, _),
-         .traitObjectMatches(let value, _, _, _),
+         .traitObjectMatches(let value, _, _, _, _),
          .traitObjectDowncast(let value, _):
       count(value)
     case .initMemory(let ptr, let owner):

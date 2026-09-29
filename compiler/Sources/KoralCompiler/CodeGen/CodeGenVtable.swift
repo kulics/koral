@@ -39,10 +39,15 @@ extension CodeGen {
   private func resolveMethodDefIdFromWitness(
     concreteType: Type,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type],
     methodName: String
   ) -> DefId? {
-    let traitRef = CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let traitRef = CanonicalTraitRef(
+      traitName: traitName,
+      traitDefId: traitDefId,
+      traitTypeArgs: traitTypeArgs
+    )
     let key = ConformanceWitness.key(selfType: concreteType, traitRef: traitRef)
     guard let witness = mirProgram.conformanceWitnesses[key] else {
       return nil
@@ -56,6 +61,7 @@ extension CodeGen {
       if let defId = resolveMethodDefIdFromWitness(
         concreteType: concreteType,
         traitName: parentTraitRef.traitName,
+        traitDefId: parentTraitRef.traitDefId,
         traitTypeArgs: parentTraitRef.traitTypeArgs,
         methodName: methodName
       ) {
@@ -80,12 +86,14 @@ extension CodeGen {
   private func resolveMethodCName(
     concreteType: Type,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type],
     methodName: String
   ) -> String? {
     if let witnessDefId = resolveMethodDefIdFromWitness(
       concreteType: concreteType,
       traitName: traitName,
+      traitDefId: traitDefId,
       traitTypeArgs: traitTypeArgs,
       methodName: methodName
     ) {
@@ -166,6 +174,7 @@ extension CodeGen {
         guard let actualCName = resolveMethodCName(
           concreteType: request.concreteType,
           traitName: traitName,
+          traitDefId: request.traitDefId,
           traitTypeArgs: request.traitTypeArguments,
           methodName: methodName
         ) else {

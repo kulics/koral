@@ -7,64 +7,24 @@ extension TypeChecker {
 
   func recordGenericTraitBounds(_ typeParameters: [TypeParameterDecl]) throws {
     for param in typeParameters {
-      var bounds: [TraitConstraint] = []
-      for c in param.constraints {
-        let constraint = try SemaUtils.resolveTraitConstraint(from: c)
-        let traitName = constraint.baseName
-        try validateTraitName(traitName)
-        bounds.append(constraint)
+      var bounds: [Bound] = []
+      for bound in param.constraints {
+        // `mutable` is a shape requirement, not a trait, so it has no trait
+        // declaration to validate. Real trait bounds are resolved to their
+        // declaration identity here -- the one boundary where a bound's
+        // spelling becomes a declaration -- and every later comparison is on
+        // that identity.
+        if case .mutable = bound {
+          bounds.append(bound)
+          continue
+        }
+        try validateTraitName(bound.baseName)
+        bounds.append(resolveBound(bound))
       }
       genericTraitBounds[param.name] = bounds
     }
   }
 
-  /// Infers type parameters from Iterable trait bounds.
-  /// Given a concrete collection type, looks up its iterator() method
-  /// and extracts the iterator type and element type.
-  /// 
-  /// For example, if `concreteType = [Int]List`:
-  /// - Looks up `iterator()` method on `[Int]List`
-  /// - Gets return type `[Int]ListIterator`
-  /// - Looks up `next()` method on `[Int]ListIterator`
-  /// - Gets return type `[Int]Option`
-  /// - Extracts element type `Int`
-  /// 
-  /// Returns: (elementType: T, iteratorType: R) or nil if inference fails
-  private func inferIterableTypeParams(from concreteType: Type) -> (elementType: Type, iteratorType: Type)? {
-    // Look up the iterator() method on the concrete type
-    guard let iteratorMethod = try? lookupConcreteMethodSymbol(on: concreteType, name: "iterator") else {
-      return nil
-    }
-    
-    // Get the return type of iterator()
-    guard case .function(_, let iteratorType) = iteratorMethod.type else {
-      return nil
-    }
-    
-    // Now look up the next() method on the iterator type to get the element type
-    guard let nextMethod = try? lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
-      return nil
-    }
-    
-    // Get the return type of next() which should be [T]Option
-    guard case .function(_, let optionType) = nextMethod.type else {
-      return nil
-    }
-    
-    // Extract T from [T]Option
-    guard case .genericEnum(let templateName, _, let typeArgs) = optionType,
-          templateName == "Option",
-          typeArgs.count == 1 else {
-      return nil
-    }
-    
-    let elementType = typeArgs[0]
-    return (elementType: elementType, iteratorType: iteratorType)
-  }
-  
-  /// Enhanced unify that also handles trait-based inference.
-  /// After basic unification, tries to infer remaining type parameters
-  /// from trait bounds.
   func unifyWithTraitInference(
     template: GenericFunctionTemplate,
     arguments: [TypedExpressionNode],
@@ -105,59 +65,41 @@ extension TypeChecker {
       
       for typeParam in template.typeParameters {
         for constraint in typeParam.constraints {
-          let traitConstraint = try SemaUtils.resolveTraitConstraint(from: constraint)
-          
-          switch traitConstraint {
-          case .generic(let traitName, let traitArgs):
-            // Handle Iterable trait: [T, R]Iterable
-            // If C has constraint [T, R]Iterable and C is inferred, we can infer T and R
-            if traitName == "Iterable" && traitArgs.count == 2 {
-              // Get the type parameter names from the trait args
-              guard case .identifier(let tParamName) = traitArgs[0],
-                    case .identifier(let rParamName) = traitArgs[1] else {
-                continue
+          switch constraint {
+          case .trait(_, let traitName, let traitArgs):
+            // A bound `[A...]Trait` on a parameter whose type is already known
+            // gives us the trait arguments of that conformance, and therefore
+            // `A...`.
+            //
+            // Nothing here names a particular trait. The arguments are read off
+            // the conformance itself, by unifying the trait's required method
+            // signatures against the concrete type's. Chains resolve because
+            // this loop repeats: `[T, R]Iterable` yields `R` first, and `R`'s
+            // own `[T]Iterator` bound then yields `T` on the next pass.
+            guard !traitArgs.isEmpty,
+                  let concreteSelfType = inferred[typeParam.name],
+                  let concreteTraitArgs = try? inferTraitTypeArgumentsFromConformance(
+                    selfType: concreteSelfType, traitName: traitName),
+                  concreteTraitArgs.count == traitArgs.count else {
+              continue
+            }
+
+            let unresolvedTraitArgs: [Type] = try withNewScope {
+              for genericParam in template.typeParameters {
+                currentScope.defineGenericParameter(
+                  genericParam.name, type: .genericParameter(name: genericParam.name))
               }
-              
-              // The current type parameter (with Iterable constraint) should be the collection type
-              // Check if it's already inferred
-              if let concreteCollectionType = inferred[typeParam.name] {
-                // Infer T and R from the concrete collection type
-                if let (elementType, iteratorType) = inferIterableTypeParams(from: concreteCollectionType) {
-                  if inferred[tParamName] == nil {
-                    inferred[tParamName] = elementType
-                    madeProgress = true
-                  }
-                  if inferred[rParamName] == nil {
-                    inferred[rParamName] = iteratorType
-                    madeProgress = true
-                  }
-                }
+              return try traitArgs.map { try resolveTypeNode($0) }
+            }
+
+            for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              let before = inferred
+              _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
+              if before != inferred {
+                madeProgress = true
               }
             }
-            
-            // Handle Iterator trait: [T]Iterator
-            // If R has constraint [T]Iterator and R is inferred, we can infer T
-            if traitName == "Iterator" && traitArgs.count == 1 {
-              guard case .identifier(let tParamName) = traitArgs[0] else {
-                continue
-              }
-              
-              // If we know the iterator type, extract the element type
-              if let concreteIteratorType = inferred[typeParam.name] {
-                if inferred[tParamName] == nil {
-                  if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
-                     case .function(_, let optionType) = nextMethod.type,
-                     case .genericEnum(let templateName, _, let typeArgs) = optionType,
-                     templateName == "Option",
-                     typeArgs.count == 1 {
-                    inferred[tParamName] = typeArgs[0]
-                    madeProgress = true
-                  }
-                }
-              }
-            }
-            
-          case .simple:
+          case .mutable:
             continue
           }
         }
@@ -298,60 +240,47 @@ extension TypeChecker {
       
       for typeParam in template.typeParameters {
         for constraint in typeParam.constraints {
-          let traitConstraint = try SemaUtils.resolveTraitConstraint(from: constraint)
-          
-          switch traitConstraint {
-          case .generic(let traitName, let traitArgs):
-            // Handle Iterator trait: [T]Iterator
-            // If R has constraint [T]Iterator and R is inferred, we can infer T
-            if traitName == "Iterator" && traitArgs.count == 1 {
-              guard case .identifier(let tParamName) = traitArgs[0] else {
-                continue
+          switch constraint {
+          case .trait(_, let traitName, let traitArgs):
+            // A bound `[A...]Trait` on a parameter whose type is already known
+            // gives us the trait arguments of that conformance, and therefore
+            // `A...`.
+            //
+            // Nothing here names a particular trait. The arguments are read off
+            // the conformance itself, by unifying the trait's required method
+            // signatures against the concrete type's. Chains resolve because
+            // this loop repeats: `[T, R]Iterable` yields `R` first, and `R`'s
+            // own `[T]Iterator` bound then yields `T` on the next pass.
+            guard !traitArgs.isEmpty,
+                  let concreteSelfType = inferred[typeParam.name],
+                  let concreteTraitArgs = try? inferTraitTypeArgumentsFromConformance(
+                    selfType: concreteSelfType, traitName: traitName),
+                  concreteTraitArgs.count == traitArgs.count else {
+              continue
+            }
+
+            let unresolvedTraitArgs: [Type] = try withNewScope {
+              for genericParam in template.typeParameters {
+                currentScope.defineGenericParameter(
+                  genericParam.name, type: .genericParameter(name: genericParam.name))
               }
-              
-              // If we know the iterator type, extract the element type
-              if let concreteIteratorType = inferred[typeParam.name] {
-                if inferred[tParamName] == nil {
-                  if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
-                     case .function(_, let optionType) = nextMethod.type,
-                     case .genericEnum(let templateName, _, let typeArgs) = optionType,
-                     templateName == "Option",
-                     typeArgs.count == 1 {
-                    inferred[tParamName] = typeArgs[0]
-                    madeProgress = true
-                  }
-                }
+              return try traitArgs.map { try resolveTypeNode($0) }
+            }
+
+            for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              let before = inferred
+              _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
+              if before != inferred {
+                madeProgress = true
               }
             }
-            
-            // Handle Iterable trait: [T, R]Iterable
-            if traitName == "Iterable" && traitArgs.count == 2 {
-              guard case .identifier(let tParamName) = traitArgs[0],
-                    case .identifier(let rParamName) = traitArgs[1] else {
-                continue
-              }
-              
-              if let concreteCollectionType = inferred[typeParam.name] {
-                if let (elementType, iteratorType) = inferIterableTypeParams(from: concreteCollectionType) {
-                  if inferred[tParamName] == nil {
-                    inferred[tParamName] = elementType
-                    madeProgress = true
-                  }
-                  if inferred[rParamName] == nil {
-                    inferred[rParamName] = iteratorType
-                    madeProgress = true
-                  }
-                }
-              }
-            }
-            
-          case .simple:
+          case .mutable:
             continue
           }
         }
       }
     }
-    
+
     // Build resolved type arguments
     let resolvedArgs = try template.typeParameters.map { param -> Type in
       guard let type = inferred[param.name] else {

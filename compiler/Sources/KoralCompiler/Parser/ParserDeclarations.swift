@@ -53,7 +53,7 @@ extension Parser {
       }
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "let declaration")
       }
       try match(.identifier(name))
 
@@ -125,7 +125,7 @@ extension Parser {
       }
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "type declaration")
       }
 
       if !isValidTypeName(name) {
@@ -205,7 +205,7 @@ extension Parser {
     try match(.traitKeyword)
 
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait declaration")
     }
 
     if !isValidTypeName(name) {
@@ -239,7 +239,7 @@ extension Parser {
       let methodAccess = try parseAccessModifier(default: .public)
 
       guard case .identifier(let methodName) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait member")
       }
       if !isValidVariableName(methodName) {
         throw ParserError.invalidFunctionName(span: currentSpan, name: methodName)
@@ -277,7 +277,7 @@ extension Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "parameter")
         }
         if !isValidVariableName(pname) {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
@@ -295,7 +295,7 @@ extension Parser {
         // Parse optional default value for named parameters
         if currentToken === .equal {
           guard isNamed else {
-            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+            throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
@@ -361,7 +361,7 @@ extension Parser {
       // But verify no body.
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "given member")
       }
       if !isValidVariableName(name) {
         throw ParserError.invalidFunctionName(span: currentSpan, name: name)
@@ -399,7 +399,7 @@ extension Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "parameter")
         }
         if !isValidVariableName(pname) {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
@@ -417,7 +417,7 @@ extension Parser {
         // Parse optional default value for named parameters
         if currentToken === .equal {
           guard isNamed else {
-            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+            throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
@@ -463,18 +463,6 @@ extension Parser {
     try match(.givenKeyword)
     let typeParams = try parseTypeParameters()
     let type = try parseType()
-    if currentToken === .notKeyword {
-      try match(.notKeyword)
-      guard case .identifier(let traitName) = currentToken else {
-        throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
-      }
-      if !isValidTypeName(traitName) {
-        throw ParserError.invalidTypeName(span: currentSpan, name: traitName)
-      }
-      try match(.identifier(traitName))
-      return .givenNotTraitDeclaration(typeParams: typeParams, type: type, traitName: traitName, span: span)
-    }
-
     var trait: TypeNode? = nil
     if currentToken === .asKeyword {
       try match(.asKeyword)
@@ -486,7 +474,7 @@ extension Parser {
       let methodAccess = try parseAccessModifier(default: .module_private)
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "given member")
       }
       if !isValidVariableName(name) {
         throw ParserError.invalidFunctionName(span: currentSpan, name: name)
@@ -524,7 +512,7 @@ extension Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "parameter")
         }
         if !isValidVariableName(pname) {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
@@ -542,7 +530,7 @@ extension Parser {
         // Parse optional default value for named parameters
         if currentToken === .equal {
           guard isNamed else {
-            throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+            throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
@@ -711,14 +699,28 @@ extension Parser {
           )
         default:
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "type parameter")
         }
 
-        var constraints: [TypeNode] = []
-        constraints.append(try parseTraitConstraint())
+        // A type parameter must carry at least one constraint. `Any` is the
+        // vacuous one, so `[T]` is not accepted in its place -- say that, rather
+        // than letting the constraint parser fail on the closing bracket.
+        if currentToken !== .mutableKeyword && !isTypeStart(currentToken) {
+          throw ParserError.missingTypeParameterConstraint(
+            span: currentSpan, name: paramName)
+        }
+
+        var constraints: [Bound] = []
+        let firstNode = try parseTraitConstraint()
+        if let firstBound = try boundFromTypeNode(firstNode) {
+          constraints.append(firstBound)
+        }
         while currentToken === .andKeyword {
           try match(.andKeyword)
-          constraints.append(try parseTraitConstraint())
+          let nextNode = try parseTraitConstraint()
+          if let nextBound = try boundFromTypeNode(nextNode) {
+            constraints.append(nextBound)
+          }
         }
 
         parameters.append((name: paramName, constraints: constraints))
@@ -769,7 +771,7 @@ extension Parser {
         try match(.mutableKeyword)
       }
       guard case .identifier(let pname) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "parameter")
       }
       if !isValidVariableName(pname) {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
@@ -787,7 +789,7 @@ extension Parser {
       // Parse optional default value for named parameters
       if currentToken === .equal {
         guard isNamed else {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Only named parameters can have default values")
+          throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
         }
         try match(.equal)
         let defaultExpr = try parseDefaultValueLiteral()
@@ -848,7 +850,7 @@ extension Parser {
         try match(.mutableKeyword)
       }
       guard case .identifier(let pname) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "parameter")
       }
       if !isValidVariableName(pname) {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
@@ -903,7 +905,7 @@ extension Parser {
       fields = []
       while currentToken !== .rightParen {
         guard case .identifier(let fieldName) = currentToken else {
-          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "field name")
         }
         try match(.identifier(fieldName))
         let fieldType = try parseType()
@@ -980,7 +982,7 @@ extension Parser {
       }
 
       guard case .identifier(let paramName) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "field name")
       }
       if !isValidVariableName(paramName) {
         throw ParserError.invalidFieldName(span: currentSpan, name: paramName)
@@ -1036,7 +1038,7 @@ extension Parser {
 
     while currentToken !== .rightBrace {
       guard case .identifier(let caseName) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "enum case")
       }
       if !isValidTypeName(caseName) {
         throw ParserError.invalidEnumCaseName(span: currentSpan, name: caseName)
@@ -1050,7 +1052,7 @@ extension Parser {
       while currentToken !== .rightParen {
         guard case .identifier(let paramName) = currentToken else {
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "enum payload name")
         }
         if !isValidVariableName(paramName) {
           throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
@@ -1155,7 +1157,7 @@ extension Parser {
     }
     try match(.asKeyword)
     guard case .identifier(let alias) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "using alias")
     }
     try match(currentToken)
     return alias
@@ -1185,7 +1187,7 @@ extension Parser {
     var pathSegments: [String] = []
 
     guard case .identifier(let firstSegment) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "module path segment")
     }
     if !isValidModuleName(firstSegment) {
       throw ParserError.invalidModuleName(span: currentSpan, name: firstSegment)
@@ -1196,7 +1198,7 @@ extension Parser {
     while currentToken === .doubleColon {
       try match(.doubleColon)
       guard case .identifier(let segment) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "module path segment")
       }
       if !isValidModuleName(segment) {
         throw ParserError.invalidModuleName(span: currentSpan, name: segment)
@@ -1223,7 +1225,7 @@ extension Parser {
         sawAllPublic = true
       } else {
         guard case .identifier(let symbolName) = currentToken else {
-          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "import item")
         }
         try match(currentToken)
         let alias = try parseUsingAliasIfPresent()

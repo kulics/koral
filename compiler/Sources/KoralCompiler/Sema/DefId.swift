@@ -328,6 +328,10 @@ public class DefIdMap {
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
+        /// Identity of the generic template this instance was built from.
+        /// `templateName` is display-only; anything asking "is this std's
+        /// `List`?" must compare this.
+        public let templateDefId: DefId?
         public let isMutable: Bool
 
         public init(
@@ -335,12 +339,14 @@ public class DefIdMap {
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
             templateName: String? = nil,
+            templateDefId: DefId? = nil,
             isMutable: Bool = false
         ) {
             self.members = members
             self.isGenericInstantiation = isGenericInstantiation
             self.typeArguments = typeArguments
             self.templateName = templateName
+            self.templateDefId = templateDefId
             self.isMutable = isMutable
         }
     }
@@ -350,17 +356,21 @@ public class DefIdMap {
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
+        /// Identity of the generic template this instance was built from.
+        public let templateDefId: DefId?
 
         public init(
             cases: [EnumCase],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
-            templateName: String? = nil
+            templateName: String? = nil,
+            templateDefId: DefId? = nil
         ) {
             self.cases = cases
             self.isGenericInstantiation = isGenericInstantiation
             self.typeArguments = typeArguments
             self.templateName = templateName
+            self.templateDefId = templateDefId
         }
     }
     
@@ -412,7 +422,6 @@ public class DefIdMap {
     private var genericFunctionTemplateInfo: [UInt64: GenericFunctionTemplateInfo] = [:]
 
     /// 标记禁止 `.val` 解引用的类型
-    private var notDerefTypes: Set<UInt64> = []
 
     /// 显式实现 Drop 的 nominal / template DefId
     private var explicitDropTypes: Set<UInt64> = []
@@ -429,7 +438,6 @@ public class DefIdMap {
         structInfoMap.removeAll()
         enumInfoMap.removeAll()
         foreignStructFields.removeAll()
-        notDerefTypes.removeAll()
         explicitDropTypes.removeAll()
     }
     
@@ -765,6 +773,7 @@ public class DefIdMap {
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
         templateName: String? = nil,
+        templateDefId: DefId? = nil,
         isMutable: Bool = false
     ) {
         structInfoMap[defId.id] = StructTypeInfo(
@@ -772,6 +781,7 @@ public class DefIdMap {
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
             templateName: templateName,
+            templateDefId: templateDefId,
             isMutable: isMutable
         )
     }
@@ -781,14 +791,21 @@ public class DefIdMap {
         cases: [EnumCase],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
-        templateName: String? = nil
+        templateName: String? = nil,
+        templateDefId: DefId? = nil
     ) {
         enumInfoMap[defId.id] = EnumTypeInfo(
             cases: cases,
             isGenericInstantiation: isGenericInstantiation,
             typeArguments: typeArguments,
-            templateName: templateName
+            templateName: templateName,
+            templateDefId: templateDefId
         )
+    }
+
+    /// Identity of the generic template a monomorphized nominal came from.
+    public func getTemplateDefId(_ defId: DefId) -> DefId? {
+        return structInfoMap[defId.id]?.templateDefId ?? enumInfoMap[defId.id]?.templateDefId
     }
 
     public func addSignature(defId: DefId, signature: FunctionSignature) {
@@ -819,13 +836,7 @@ public class DefIdMap {
         return foreignStructFields[defId.id] != nil
     }
 
-    public func setNotDeref(_ defId: DefId) {
-        notDerefTypes.insert(defId.id)
-    }
 
-    public func isNotDeref(_ defId: DefId) -> Bool {
-        return notDerefTypes.contains(defId.id)
-    }
 
     public func setExplicitDrop(_ defId: DefId) {
         explicitDropTypes.insert(defId.id)
@@ -990,6 +1001,20 @@ public class DefIdMap {
         return genericEnumTemplates[qualified] ?? genericEnumTemplates[name]
     }
 
+    /// The generic enum template named `name` declared in a SPECIFIC module.
+    /// Used to reach a std lang item without letting a same-named user template
+    /// shadow it.
+    public func lookupGenericEnumTemplateDefId(modulePath: [String], name: String) -> DefId? {
+        return genericEnumTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
+    }
+
+    /// The generic struct template named `name` declared in a SPECIFIC module.
+    /// Same purpose as the enum variant: reach a std lang item by declaration
+    /// without letting a same-named user template shadow it.
+    public func lookupGenericStructTemplateDefId(modulePath: [String], name: String) -> DefId? {
+        return genericStructTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
+    }
+
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
         return genericFunctionTemplates[name]
     }
@@ -1033,6 +1058,13 @@ public class DefIdMap {
     /// ## 键格式
     /// - 不带 sourceFile: "module1.module2.name"
     /// - 带 sourceFile: "module1.module2.name@filename.koral"
+    /// The key a module-scoped symbol is stored under. Scope lookup uses it to
+    /// prefer the binding declared in the module being checked over a same-named
+    /// one from another module.
+    public func symbolKey(modulePath: [String], name: String) -> String {
+        makeKey(modulePath: modulePath, name: name, sourceFile: nil)
+    }
+
     private func makeKey(modulePath: [String], name: String, sourceFile: String?) -> String {
         var parts = modulePath
         parts.append(name)

@@ -1,0 +1,85 @@
+// EXPECT: PASS
+// Design guard: a bound-constrained extension block must never be instantiated
+// for a type whose arguments violate the bound.
+//
+// `sum` / `product` / `average` live in `given[T Add[T] and Zero] Iterator[T]`.
+// They are members of `Iterator[T]` only where `T` satisfies `Add[T] and Zero`.
+// `Pair[A, B]` satisfies neither, so `Iterator[Pair[...]]` must not acquire them.
+//
+// This guards a real regression. When bootstrap materialized the trait-tool
+// methods of `Iterator` onto each conforming type, it treated a bound as
+// "undecided" whenever the constrained type merely CONTAINED a generic
+// parameter. `DictIterator[K, V] as Iterator[Pair[K, V]]` binds `T` to
+// `Pair[K, V]`, which is still generic -- so the check let `sum` through even
+// though `Pair` has no `as Add` / `as Zero` block in any substitution. `sum`
+// was materialized with `T = Pair[K, V]`, `T.zero()` resolved to
+// `Pair[K, V].zero()`, and monomorphization reported "Unresolved static method
+// call before MIR: zero". The same defect broke bootstrap self-hosting.
+// The Swift compiler rejects the call at the site, which is the behaviour
+// baseline. See `trait_tool_type_params_satisfied` in bootstrap.
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    // 1. Happy path: the aggregations ARE members where the bound holds.
+    //    `Int` satisfies `Add`, `Mul`, `Zero` and `One`.
+    let nums = [1, 2, 3, 4];
+    passed = check("int-sum", nums.iterator().sum().to_string(), "10") and passed;
+    passed = check("int-product", nums.iterator().product().to_string(), "24") and passed;
+
+    // 2. `Dict` iteration yields `Pair[String, Int]`. Reaching the `Iterator`
+    //    trait-tool surface through this receiver is what used to drag `sum`,
+    //    `product` and `average` onto `DictIterator` and crash the compiler.
+    let mutable d = Dict[String, Int].new();
+    d.insert("a", 1);
+    d.insert("b", 2);
+    d.insert("c", 3);
+    let mutable keys String = "";
+    let mutable values Int = 0;
+    for kv in d then {
+        keys = keys + kv.first;
+        values = values + kv.second;
+    };
+    passed = check("dict-key-count", keys.count().to_string(), "3") and passed;
+    passed = check("dict-values", values.to_string(), "6") and passed;
+    passed = check("dict-iter-count", d.iterator().count().to_string(), "3") and passed;
+    passed = check("dict-into-list", d.iterator().into_list().count().to_string(), "3") and passed;
+    let mapped = d.iterator().map((kv) -> kv.second).into_list();
+    passed = check("dict-map", mapped.count().to_string(), "3") and passed;
+
+    // 3. Tools whose bound involves the ELEMENT type must still appear where the
+    //    element satisfies it. `join_to_string` needs `T ToString`, `into_set`
+    //    needs `T Hash`; `Pair[String, Int]` satisfies both. Getting this wrong in
+    //    either direction is a regression: over-rejecting erases them for every
+    //    conforming type, under-rejecting emits them with unresolvable call
+    //    targets and the generated C no longer compiles -- which is exactly what
+    //    broke self-hosting for `DictIterator[K, V] as Iterator[Pair[K, V]]`.
+    let mut_one = Dict[String, Int].new();
+    mut_one.insert("a", 1);
+    passed = check("dict-join", mut_one.iterator().join_to_string("|"), "(a, 1)") and passed;
+    passed = check("dict-into-set", d.iterator().into_set().count().to_string(), "3") and passed;
+
+    // 4. `enumerate` yields `Pair[UInt, T]` -- same shape, different arguments.
+    let mutable ekeys String = "";
+    let mutable ecount Int = 0;
+    for indexed in ["x", "y"].enumerate() then {
+        ekeys = ekeys + indexed.second;
+        ecount = ecount + 1;
+    };
+    passed = check("enumerate", ekeys, "xy") and passed;
+    passed = check("enumerate-count", ecount.to_string(), "2") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

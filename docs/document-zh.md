@@ -1368,6 +1368,16 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 let consume[I Iterator[Int]](iter I) Void = {};
 ```
 
+带约束的扩展块只在约束真正成立的类型上贡献成员。给定
+
+```koral
+given[T Add[T] and Zero] Iterator[T] {
+    public sum(self) T = { ... };
+};
+```
+
+`sum` 只是那些满足 `Add[T] and Zero` 的 `Iterator[T]` 的成员。`Pair[A, B]` 两者都不满足，因此 `Iterator[Pair[A, B]]` 上没有 `sum`，在那里调用它是类型错误。仍未确定的约束不算拒绝：对 `given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T]` 这样的泛型实现，`T` 仍可能变成 `Int`，所以 `sum` 依旧可用，并在每个调用点再次检查。
+
 #### 泛型方法
 
 `given` 块也可以定义泛型方法：
@@ -1503,6 +1513,21 @@ let result = when x in {
     1 then "one",
     2 then "two",
     _ then "other",
+};
+```
+
+模式绑定只在它所在的分支内可见。在分支内部它指代匹配到的载荷；离开 `when` 之后它不存在，同名的外层绑定保持原义。不同分支可以自由复用同一个名字，彼此的绑定互不影响。
+
+```koral
+let f(s Shape, radius String) String = {
+    let mutable inner = "";
+    when s in {
+        // 这里的 `radius` 是 `Circle` 的载荷。
+        .Circle(radius) then { inner = radius.to_string(); },
+        _ then { inner = "none"; },
+    };
+    // 这里的 `radius` 又是那个 `String` 参数了。
+    return radius + "/" + inner;
 };
 ```
 

@@ -1,0 +1,33 @@
+// EXPECT-ERROR: Undefined trait: Any
+// Design guard: `Any` is an ordinary trait name in trait position.
+//
+// A parent trait is resolved exactly like any other name: if nothing declares
+// it, the program is rejected. `Any` gets no free pass.
+//
+// This guards against reintroducing `SemaUtils.isBuiltinTrait`, which answered
+// `true` for the spellings `Any` and `mutable` and made three lookups skip the
+// declaration entirely -- `validateTraitName`, `flattenedTraitMethods` and
+// `orderedTraitMethods`. Under that rule `trait Bar Any` compiled with `Any`
+// undeclared, and a `given` implementing `Bar` did not have to implement the
+// parent at all, because the parent's method list came back empty. A user who
+// declared their OWN `trait Any { m(self) Int; }` then found that the bound
+// `T Any` still granted no methods -- the same spelling meant one thing in a
+// bound and another in a parent list.
+//
+// The rule is now uniform: the name is looked up, and an unbound name is an
+// error. Compare `given_undefined_trait_error.koral`, which asserts the same
+// message for a user-chosen name.
+
+trait Bar Any {
+    n(self) Int;
+};
+
+type Demo(v Int);
+
+given Demo as Bar {
+    public n(self) Int = 1;
+};
+
+let main() Int = {
+    return 0;
+};

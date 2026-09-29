@@ -597,7 +597,7 @@ extension Parser {
         
         guard case .identifier(let member) = currentToken else {
           throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description)
+            span: currentSpan, got: currentToken.description, context: "member access")
         }
         try match(.identifier(member))
 
@@ -932,7 +932,7 @@ extension Parser {
     
     // Expect an identifier (member name)
     guard case .identifier(let memberName) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "implicit member name")
     }
     try match(.identifier(memberName))
     

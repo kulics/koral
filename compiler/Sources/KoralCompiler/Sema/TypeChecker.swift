@@ -26,17 +26,35 @@ enum ExpressionUsage: Equatable {
 
 struct ConformanceKey: Hashable {
   let selfType: ConformanceTypeKey
+  /// Identity of the conformed trait's declaration. `traitName` is display-only.
+  let traitDefId: DefId
   let traitName: String
   let traitTypeArgs: [ConformanceTypeKey]
 }
 
+/// A trait reference normalised to (declaration identity, type arguments).
+///
+/// `traitDefId` is the DECLARATION identity and is what `==` compares.
+/// `traitName` exists only so diagnostics can print it. Two spellings that
+/// resolve to the same declaration are therefore the same reference, and two
+/// same-named traits from different modules are different references.
+///
+/// A spelling that does not resolve carries `.invalid`; such a reference is
+/// always on its way to a diagnostic, and comparing identity only is what
+/// bootstrap does too.
 public struct CanonicalTraitRef: Equatable, CustomStringConvertible {
   public let traitName: String
+  public let traitDefId: DefId
   public let traitTypeArgs: [Type]
 
-  public init(traitName: String, traitTypeArgs: [Type] = []) {
+  public init(traitName: String, traitDefId: DefId = .invalid, traitTypeArgs: [Type] = []) {
     self.traitName = traitName
+    self.traitDefId = traitDefId
     self.traitTypeArgs = traitTypeArgs
+  }
+
+  public static func == (lhs: CanonicalTraitRef, rhs: CanonicalTraitRef) -> Bool {
+    return lhs.traitDefId == rhs.traitDefId && lhs.traitTypeArgs == rhs.traitTypeArgs
   }
 
   public var description: String {
@@ -47,8 +65,14 @@ public struct CanonicalTraitRef: Equatable, CustomStringConvertible {
     return "[\(args)]\(traitName)"
   }
 
+  /// A cache/visit key within one compilation.
+  ///
+  /// Keyed on the trait's declaration identity, so two same-named traits from
+  /// different modules can never share a slot. `traitDefId` is carried on the
+  /// typed AST and through MIR, so both sides of a witness lookup build the
+  /// same key from the same identity.
   public var cacheKey: String {
-    description
+    "\(traitDefId.id)#\(description)"
   }
 }
 
@@ -145,9 +169,10 @@ public class TypeChecker {
   // This avoids order-dependent false negatives across modules/submodules.
   var deferGenericConstraintValidation: Bool = false
 
-  // Generic parameter name -> list of trait constraints currently in scope
-  // Stores full TraitConstraint to preserve type arguments for generic traits
-  var genericTraitBounds: [String: [TraitConstraint]] = [:]
+  // Generic parameter name -> list of bounds currently in scope
+  // Stores the full `Bound` (not just a name) to preserve type arguments for
+  // generic traits and to keep `mutable` as an explicit shape kind.
+  var genericTraitBounds: [String: [Bound]] = [:]
 
   // Generic Template Extensions: TemplateName -> [GenericExtensionMethodTemplate]
   var genericExtensionMethods: [String: [GenericExtensionMethodTemplate]] = [:]
@@ -696,7 +721,8 @@ public class TypeChecker {
   }
 
   private func conformanceKeyMatches(_ pattern: ConformanceKey, _ actual: ConformanceKey) -> Bool {
-    guard pattern.traitName == actual.traitName else {
+    // Identity is the trait's declaration, not its spelling.
+    guard pattern.traitDefId == actual.traitDefId else {
       return false
     }
     guard conformanceTypeKeyMatches(pattern.selfType, actual.selfType) else {
@@ -712,11 +738,123 @@ public class TypeChecker {
     "\(selfType):\(traitRef.cacheKey)"
   }
 
-  func hasNominalConformance(selfType: Type, traitRef: CanonicalTraitRef) -> Bool {
-    let actual = ConformanceKey(
+  // MARK: - Std flow-typing lang items
+
+  /// Std's `Option` and `Result`, resolved once from their spellings.
+  ///
+  /// `and then` / `or else` / `or return` are defined over exactly these two
+  /// shapes -- that is a language rule. Everything that asks "is this std's
+  /// Option?" must compare the DECLARATION identity afterwards, so a user type
+  /// also named `Option` (which the test suite contains) is a different type and
+  /// does not silently gain monadic treatment.
+  var stdOptionEnumDefId: DefId? {
+    defIdMap.lookupGenericEnumTemplateDefId(modulePath: ["Std"], name: "Option")
+  }
+
+  var stdResultEnumDefId: DefId? {
+    defIdMap.lookupGenericEnumTemplateDefId(modulePath: ["Std"], name: "Result")
+  }
+
+  /// Std's `Error` trait -- what `Result`'s failure case carries. Resolved once
+  /// by (module, name); a user trait named `Error` is a different trait.
+  var stdErrorTraitDefId: DefId? {
+    qualifiedTraits[qualifiedTraitKey("Error", modulePath: ["Std"])]?.defId
+  }
+
+  /// Std's `Option` payload type, if `type` is std's `Option`.
+  func stdOptionInner(_ type: Type) -> Type? {
+    guard case .genericEnum(_, let defId, let args) = type,
+          defId == stdOptionEnumDefId, args.count == 1 else { return nil }
+    return args[0]
+  }
+
+  /// Std's `Result` ok-type, if `type` is std's `Result`.
+  func stdResultInner(_ type: Type) -> Type? {
+    guard case .genericEnum(_, let defId, let args) = type,
+          defId == stdResultEnumDefId, args.count == 1 else { return nil }
+    return args[0]
+  }
+
+  /// The std `Drop` trait's declaration identity.
+  ///
+  /// Resolved once from its spelling at lookup time -- the lang-item pattern.
+  /// Every later recognition compares identities, so a user-declared trait also
+  /// named `Drop` is a different trait and is never mistaken for the protocol
+  /// the compiler implements drop glue for.
+  var stdDropTraitDefId: DefId? {
+    guard let info = traits["Drop"], info.modulePath == ["Std"] else { return nil }
+    return info.defId
+  }
+
+  /// Whether `defId` is the std `Drop` trait.
+  func isStdDropTrait(_ defId: DefId?) -> Bool {
+    guard let defId, let std = stdDropTraitDefId else { return false }
+    return defId == std
+  }
+
+  /// Resolve a bound's trait spelling to its declaration identity.
+  ///
+  /// Bounds leave the parser with `.invalid` identity, because the parser has
+  /// no symbol table. This is the boundary where the spelling becomes a
+  /// declaration; after it, comparisons use the identity. Mirrors bootstrap's
+  /// `resolve_constraint_bound`.
+  func resolveBound(_ bound: Bound) -> Bound {
+    switch bound {
+    case .trait(let defId, let name, let args):
+      guard !defId.isValid else { return bound }
+      return .trait(defId: visibleTraitInfo(name)?.defId ?? .invalid, name: name, args: args)
+    case .mutable:
+      return .mutable
+    }
+  }
+
+  /// Identity of a bound, for caching and set membership: the trait
+  /// declaration's identity plus the written type arguments. The spelling is
+  /// not part of it, so two spellings of one trait share a cache slot and two
+  /// same-named traits from different modules do not.
+  func boundIdentity(_ bound: Bound) -> String {
+    switch resolveBound(bound) {
+    case .trait(let defId, _, let args):
+      let argsStr = args.map { $0.description }.joined(separator: ",")
+      return "t\(defId.id)<\(argsStr)>"
+    case .mutable:
+      return "m"
+    }
+  }
+
+  /// Whether `bound` requires exactly the trait whose declaration is
+  /// `requiredDefId`. Shape bounds require no trait and never match one.
+  func boundRequires(_ bound: Bound, _ requiredDefId: DefId) -> Bool {
+    guard case .trait(let defId, _, _) = resolveBound(bound) else {
+      return false
+    }
+    return defId == requiredDefId
+  }
+
+  /// Builds a conformance key. The trait spelling is resolved to the
+  /// declaration's identity here, once -- the same boundary bootstrap uses in
+  /// `trait_conformance_key`. Every later comparison is on the identity.
+  func conformanceKey(
+    selfType: Type,
+    traitName: String,
+    traitDefId: DefId = .invalid,
+    traitTypeArgs: [Type] = []
+  ) -> ConformanceKey {
+    let resolved = traitDefId.isValid ? traitDefId : (visibleTraitInfo(traitName)?.defId ?? .invalid)
+    return ConformanceKey(
       selfType: exactConformanceTypeKey(selfType),
+      traitDefId: resolved,
+      traitName: traitName,
+      traitTypeArgs: traitTypeArgs.map { exactConformanceTypeKey($0) }
+    )
+  }
+
+  func hasNominalConformance(selfType: Type, traitRef: CanonicalTraitRef) -> Bool {
+    let actual = conformanceKey(
+      selfType: selfType,
       traitName: traitRef.traitName,
-      traitTypeArgs: traitRef.traitTypeArgs.map { exactConformanceTypeKey($0) }
+      traitDefId: traitRef.traitDefId,
+      traitTypeArgs: traitRef.traitTypeArgs
     )
     return explicitConformances.contains(where: { conformanceKeyMatches($0, actual) })
       || declaredConformances.contains(where: { conformanceKeyMatches($0, actual) })
@@ -725,7 +863,7 @@ public class TypeChecker {
   func hasNominalConformance(selfType: Type, traitName: String, traitTypeArgs: [Type]) -> Bool {
     hasNominalConformance(
       selfType: selfType,
-      traitRef: CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+      traitRef: canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
     )
   }
   

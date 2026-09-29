@@ -564,10 +564,9 @@ extension ExhaustivenessChecker {
         }
     }
     
+    /// Std's `String`, by declaration identity -- string patterns get their own
+    /// exhaustiveness rule, and it must not apply to a user type of the same name.
     private func isStringType(_ type: Type) -> Bool {
-        if case .structure(let defId) = type {
-            return context.getName(defId) == "String"
-        }
-        return false
+        return context.isStdNominalType(type, context.stdStringDefId)
     }
 }

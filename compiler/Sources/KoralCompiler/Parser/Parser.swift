@@ -163,7 +163,7 @@ public class Parser {
       mutable = true
     }
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "let declaration")
     }
 
     if !isValidVariableName(name) {
@@ -200,7 +200,7 @@ public class Parser {
       mutable = true
     }
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "let declaration")
     }
 
     if !isValidVariableName(name) {
@@ -259,7 +259,7 @@ public class Parser {
 
     // Expect identifier
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "pair let binding")
     }
 
     if !isValidVariableName(name) {
@@ -308,7 +308,7 @@ public class Parser {
     }
 
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "for binding")
     }
 
     if !isValidVariableName(name) {

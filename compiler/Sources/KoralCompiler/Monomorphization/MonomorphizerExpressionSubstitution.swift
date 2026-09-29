@@ -355,7 +355,7 @@ extension Monomorphizer {
                 }
             }
 
-            if case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, _) = newCallee,
+            if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, _) = newCallee,
                extractTraitObjectType(base.type) == nil,
                !context.containsGenericParameter(base.type) {
                 let lookupBaseType = substitutionMethodLookupBaseType(for: base)
@@ -406,6 +406,7 @@ extension Monomorphizer {
                 } else {
                     newCallee = .traitMethodPlaceholder(
                         traitName: traitName,
+                        traitDefId: traitDefId,
                         methodName: methodName,
                         base: base,
                         methodTypeArgs: methodTypeArgs,
@@ -498,7 +499,7 @@ extension Monomorphizer {
             // This handles the case where a generic function like [T ToString]f(a T ref)
             // is instantiated with T = traitObject("ToString") — method calls on the
             // trait object parameter must use vtable dynamic dispatch.
-            if case .traitMethodPlaceholder(_, let methodName, let base, _, _) = newCallee {
+            if case .traitMethodPlaceholder(_, _, let methodName, let base, _, _) = newCallee {
                 if let traitObjInfo = extractTraitObjectType(base.type) {
                     if let methodIndex = vtableMethodIndex(traitName: traitObjInfo.traitName, methodName: methodName) {
                         // If the base is a deref of a trait object reference, use the
@@ -519,6 +520,7 @@ extension Monomorphizer {
                         return .traitMethodCall(
                             receiver: receiver,
                             traitName: traitObjInfo.traitName,
+                            traitDefId: traitObjInfo.traitDefId,
                             methodName: methodName,
                             methodIndex: methodIndex,
                             arguments: newArguments,
@@ -645,7 +647,7 @@ extension Monomorphizer {
                 type: resolvedExpressionType
             )
             
-        case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
+        case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, let type):
             // Substitute types in the placeholder
             let newBase = substituteTypesInExpression(base, substitution: substitution)
             let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
@@ -669,6 +671,7 @@ extension Monomorphizer {
                 if extractTraitObjectType(lookupBaseType) != nil {
                     return .traitMethodPlaceholder(
                         traitName: traitName,
+                        traitDefId: traitDefId,
                         methodName: methodName,
                         base: newBase,
                         methodTypeArgs: substitutedMethodTypeArgs,
@@ -721,13 +724,14 @@ extension Monomorphizer {
             // Keep as placeholder if base type is still generic
             return .traitMethodPlaceholder(
                 traitName: traitName,
+                traitDefId: traitDefId,
                 methodName: methodName,
                 base: newBase,
                 methodTypeArgs: substitutedMethodTypeArgs,
                 type: substitutedType
             )
 
-        case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+        case .traitObjectConversion(let inner, let traitName, let traitDefId, let traitTypeArgs, let concreteType, let type):
             let substitutedInner = substituteTypesInExpression(inner, substitution: substitution)
             let substitutedTraitTypeArgs = traitTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedConcreteType = substituteType(concreteType, substitution: substitution)
@@ -735,10 +739,11 @@ extension Monomorphizer {
 
             // Collect vtable request when concrete type is fully resolved
             if !context.containsGenericParameter(substitutedConcreteType) {
-                let traitRef = CanonicalTraitRef(traitName: traitName, traitTypeArgs: substitutedTraitTypeArgs)
+                let traitRef = CanonicalTraitRef(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: substitutedTraitTypeArgs)
                 vtableRequests.insert(VtableRequest(
                     concreteType: substitutedConcreteType,
                     traitName: traitName,
+                    traitDefId: traitDefId,
                     traitTypeArgs: substitutedTraitTypeArgs,
                     witnessKey: ConformanceWitness.key(selfType: substitutedConcreteType, traitRef: traitRef)
                 ))
@@ -747,15 +752,17 @@ extension Monomorphizer {
             return .traitObjectConversion(
                 inner: substitutedInner,
                 traitName: traitName,
+                traitDefId: traitDefId,
                 traitTypeArgs: substitutedTraitTypeArgs,
                 concreteType: substitutedConcreteType,
                 type: substitutedType
             )
 
-        case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+        case .traitMethodCall(let receiver, let traitName, let traitDefId, let methodName, let methodIndex, let arguments, let type):
             return .traitMethodCall(
                 receiver: substituteTypesInExpression(receiver, substitution: substitution),
                 traitName: traitName,
+                traitDefId: traitDefId,
                 methodName: methodName,
                 methodIndex: methodIndex,
                 arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) },

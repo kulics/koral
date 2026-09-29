@@ -183,9 +183,6 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
 
-        case .givenNotTraitDeclaration:
-            return
-            
         case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span):
             try resolveStructSignature(
                 name: name,

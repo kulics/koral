@@ -13,8 +13,12 @@ import Foundation
 public struct VtableRequest: Hashable {
     /// The concrete type that implements the trait (e.g., .structure(defId))
     public let concreteType: Type
-    /// The trait name (e.g., "Error")
+    /// The trait name (e.g., "Error"). Display and C-mangling only.
     public let traitName: String
+    /// Identity of the trait's declaration. This is what deduplicates requests:
+    /// two same-named traits from different modules are different traits and
+    /// need different vtables.
+    public let traitDefId: DefId
     /// The trait's type arguments (e.g., [] for non-generic traits)
     public let traitTypeArgs: [Type]
     /// Canonical witness key for this conformance request.
@@ -22,7 +26,7 @@ public struct VtableRequest: Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(concreteType)
-        hasher.combine(traitName)
+        hasher.combine(traitDefId)
         for arg in traitTypeArgs {
             hasher.combine(arg)
         }
@@ -31,7 +35,7 @@ public struct VtableRequest: Hashable {
 
     public static func == (lhs: VtableRequest, rhs: VtableRequest) -> Bool {
         return lhs.concreteType == rhs.concreteType
-            && lhs.traitName == rhs.traitName
+            && lhs.traitDefId == rhs.traitDefId
             && lhs.traitTypeArgs == rhs.traitTypeArgs
             && lhs.witnessKey == rhs.witnessKey
     }

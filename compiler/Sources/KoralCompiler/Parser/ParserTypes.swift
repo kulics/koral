@@ -10,7 +10,7 @@ extension Parser {
   }
 
 
-  private func isTypeStart(_ token: Token) -> Bool {
+  func isTypeStart(_ token: Token) -> Bool {
     switch token {
     case .selfTypeKeyword, .multiply, .questionMark, .identifier:
       return true

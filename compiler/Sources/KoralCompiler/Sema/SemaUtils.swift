@@ -2,29 +2,7 @@
 // Shared utility functions used by both TypeChecker and Monomorphizer.
 // This file contains common logic that was previously duplicated between the two components.
 
-/// Represents a trait constraint, which can be either a simple trait name or a generic trait.
-public enum TraitConstraint: CustomStringConvertible {
-    case simple(name: String)
-    case generic(base: String, args: [TypeNode])
-    
-    public var description: String {
-        switch self {
-        case .simple(let name):
-            return name
-        case .generic(let base, let args):
-            let argsStr = args.map { $0.description }.joined(separator: ", ")
-            return "[\(argsStr)]\(base)"
-        }
-    }
-    
-    /// Returns the base trait name (e.g., "Iterator" for [T]Iterator)
-    public var baseName: String {
-        switch self {
-        case .simple(let name): return name
-        case .generic(let base, _): return base
-        }
-    }
-}
+// NOTE: The `Bound` (alias `TraitConstraint`) type now lives in `Bound.swift`.
 
 /// Namespace for shared semantic analysis utility functions.
 public enum SemaUtils {
@@ -58,9 +36,9 @@ public enum SemaUtils {
     public static func resolveTraitConstraint(from node: TypeNode) throws -> TraitConstraint {
         switch node {
         case .identifier(let name):
-            return .simple(name: name)
+            return .trait(defId: .invalid, name: name, args: [])
         case .generic(let base, let args):
-            return .generic(base: base, args: args)
+            return .trait(defId: .invalid, name: base, args: args)
         default:
             throw SemanticError.invalidOperation(
                 op: "invalid trait bound",
@@ -128,15 +106,6 @@ public enum SemaUtils {
         }
     }
     
-    // MARK: - Built-in Trait Checking
-    
-    /// Checks if a trait name is a built-in trait that doesn't require explicit method implementations.
-    /// - Parameter name: The trait name to check
-    /// - Returns: true if the trait is a built-in trait in the current model
-    public static func isBuiltinTrait(_ name: String) -> Bool {
-        return name == "Any" || name == "mutable"
-    }
-    
     // MARK: - Trait Method Flattening
     
     /// Returns all methods required by a trait, including inherited methods.
@@ -167,10 +136,6 @@ public enum SemaUtils {
             return [:]
         }
         visited.insert(traitName)
-        
-        if isBuiltinTrait(traitName) {
-            return [:]
-        }
         
         guard let decl = traits[traitName] else {
             let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
@@ -219,8 +184,6 @@ public enum SemaUtils {
         if visited.contains(traitName) { return [] }
         visited.insert(traitName)
         
-        if isBuiltinTrait(traitName) { return [] }
-        
         guard let decl = traits[traitName] else {
             let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
             throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
@@ -260,9 +223,6 @@ public enum SemaUtils {
         traits: [String: TraitDeclInfo],
         currentLine: Int?
     ) throws {
-        if isBuiltinTrait(name) {
-            return
-        }
         if traits[name] == nil {
             let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
             throw SemanticError(.generic("Undefined trait: \(name)"), span: span)

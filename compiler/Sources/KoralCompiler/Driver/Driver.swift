@@ -213,6 +213,25 @@ public class Driver {
       writeStderr("\(error.fileName): Semantic Error: \(error)")
       exit(1)
     } catch let error as ModuleError {
+      // A parse failure inside the module pipeline is still a syntax error, and
+      // must be reported like one -- same location/stage/message shape as every
+      // other parse diagnostic. Only genuine module-resolution problems get the
+      // `Module Error` framing.
+      if case .parseError(let file, let underlying) = error {
+        let stage: DiagnosticError.Stage
+        if underlying is LexerError {
+          stage = .lexer
+        } else if underlying is ParserError {
+          stage = .parser
+        } else {
+          stage = .other
+        }
+        var diagnostic = DiagnosticError(
+          stage: stage, fileName: file, underlying: underlying)
+        diagnostic.sourceManager = sourceManager
+        writeStderr(diagnostic.renderForCLI())
+        exit(1)
+      }
       writeStderr("Module Error: \(error)")
       exit(1)
     } catch let error as AccessError {

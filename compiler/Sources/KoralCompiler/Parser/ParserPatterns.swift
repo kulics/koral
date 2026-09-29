@@ -238,7 +238,7 @@ extension Parser {
     if currentToken === .mutableKeyword {
       try match(.mutableKeyword)
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "mutable pattern variable")
       }
       if !isValidVariableName(name) {
         throw ParserError.invalidVariableName(span: currentSpan, name: name)
@@ -258,7 +258,7 @@ extension Parser {
     if currentToken === .dot {
       try match(.dot)
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "enum case pattern")
       }
       if !isValidTypeName(name) {
         throw ParserError.invalidEnumCaseName(span: currentSpan, name: name)

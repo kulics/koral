@@ -184,7 +184,7 @@ final class MIRFunctionCodeEmitter {
            .takeMemory(let ptr, _),
            .downgradeRef(let ptr, _),
            .upgradeRef(let ptr, _),
-           .traitObjectMatches(let ptr, _, _, _),
+           .traitObjectMatches(let ptr, _, _, _, _),
            .traitObjectDowncast(let ptr, _):
         walkValue(ptr)
       case .copyMemory(let dest, let source, let count),
@@ -2149,7 +2149,7 @@ final class MIRFunctionCodeEmitter {
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
 
-    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+    case .traitObjectMatches(let value, let traitName, _, let traitTypeArguments, let concreteType):
       let valueEmission = emitValue(value, sourceMode: true)
       // DEBUG
       let concreteTypeCName = codeGen.concreteTypeCIdentifier(concreteType) ?? codeGen.cTypeName(concreteType)

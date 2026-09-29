@@ -1,0 +1,63 @@
+// EXPECT: PASS
+// Design guard: passing a trait object as an argument preserves its vtable.
+//
+// A trait object is a fat reference -- a pointer plus a vtable. Handing one to a
+// function must pass both halves, and the callee's virtual dispatch must go
+// through the vtable that came with the value.
+//
+// This guards a real regression. Bootstrap's codegen wrapped such an argument in
+// a stack borrow that set only `result.ptr` and never `result.vtable`, so the
+// callee dispatched through garbage and crashed -- which is why the self-hosted
+// compiler printed nothing at all for every parse error (the diagnostic is
+// passed to `wrap_error_as_diagnostic` as an `Error` trait object). The Swift
+// compiler passes the fat reference straight through.
+
+type Boom(msg String);
+given Boom as Error {
+    public message(self) String = self.msg;
+};
+
+type Soft(msg String);
+given Soft as Error {
+    public message(self) String = self.msg;
+};
+
+// Callee takes the trait object by value and dispatches virtually.
+let report(e Error) String = e.message();
+
+// Two hops: the second call receives a trait object that is already erased.
+let report_twice(e Error) String = report(e) + "/" + report(e);
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    // Concrete value widened to `Error` at the call site.
+    passed = check("direct-boom", report(Boom("hard")), "hard") and passed;
+    passed = check("direct-soft", report(Soft("soft")), "soft") and passed;
+
+    // Already-erased trait object passed on unchanged.
+    let e1 Error = Boom("one");
+    let e2 Error = Soft("two");
+    passed = check("erased-1", report(e1), "one") and passed;
+    passed = check("erased-2", report(e2), "two") and passed;
+
+    // The vtable must survive being forwarded through another call.
+    passed = check("twice", report_twice(e1), "one/one") and passed;
+
+    // Distinct implementations must not share a vtable.
+    passed = check("distinct", report(e1) + report(e2), "onetwo") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

@@ -291,6 +291,9 @@ public indirect enum TypedExpressionNode {
   /// - type: The expected function type of the method
   case traitMethodPlaceholder(
     traitName: String,
+    /// Identity of the trait's declaration. `traitName` is display and C
+    /// mangling only; comparisons use this.
+    traitDefId: DefId,
     methodName: String,
     base: TypedExpressionNode,
     methodTypeArgs: [Type],
@@ -305,6 +308,7 @@ public indirect enum TypedExpressionNode {
   case traitObjectConversion(
     inner: TypedExpressionNode,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type],
     concreteType: Type,
     type: Type
@@ -319,6 +323,7 @@ public indirect enum TypedExpressionNode {
   case traitMethodCall(
     receiver: TypedExpressionNode,
     traitName: String,
+    traitDefId: DefId,
     methodName: String,
     methodIndex: Int,
     arguments: [TypedExpressionNode],
@@ -482,11 +487,11 @@ extension TypedExpressionNode {
       return type
     case .lambdaExpression(_, _, _, let type):
       return type
-    case .traitMethodPlaceholder(_, _, _, _, let type):
+    case .traitMethodPlaceholder(_, _, _, _, _, let type):
       return type
-    case .traitObjectConversion(_, _, _, _, let type):
+    case .traitObjectConversion(_, _, _, _, _, let type):
       return type
-    case .traitMethodCall(_, _, _, _, _, let type):
+    case .traitMethodCall(_, _, _, _, _, _, let type):
       return type
     }
   }

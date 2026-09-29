@@ -57,9 +57,6 @@ extension TypeChecker {
   }
 
   func validateTraitName(_ name: String) throws {
-    if SemaUtils.isBuiltinTrait(name) {
-      return
-    }
     guard let traitInfo = visibleTraitInfo(name) else {
       let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
       throw SemanticError(.generic("Undefined trait: \(name)"), span: span)
@@ -106,10 +103,6 @@ extension TypeChecker {
     }
     visited.insert(visitKey)
 
-    if SemaUtils.isBuiltinTrait(traitName) {
-      return [:]
-    }
-
     guard let decl = traitInfo(traitName, modulePath: modulePath) else {
       let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
@@ -128,8 +121,17 @@ extension TypeChecker {
     return methods
   }
 
-  func canonicalTraitRef(traitName: String, traitTypeArgs: [Type] = []) -> CanonicalTraitRef {
-    CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+  /// Builds a canonical trait reference. The spelling is resolved to the trait
+  /// declaration's identity here, once; every later comparison uses the
+  /// identity, not the spelling. An unresolvable spelling yields `.invalid`,
+  /// which the caller is expected to reject through `validateCanonicalTraitRef`.
+  func canonicalTraitRef(
+    traitName: String,
+    traitDefId: DefId = .invalid,
+    traitTypeArgs: [Type] = []
+  ) -> CanonicalTraitRef {
+    let resolved = traitDefId.isValid ? traitDefId : (visibleTraitInfo(traitName)?.defId ?? .invalid)
+    return CanonicalTraitRef(traitName: traitName, traitDefId: resolved, traitTypeArgs: traitTypeArgs)
   }
 
   func resolveCanonicalTraitRef(from constraint: TraitConstraint) throws -> CanonicalTraitRef {
@@ -141,11 +143,17 @@ extension TypeChecker {
     substitution: [String: Type]
   ) throws -> CanonicalTraitRef {
     switch constraint {
-    case .simple(let name):
-      return canonicalTraitRef(traitName: name)
-    case .generic(let base, let args):
+    case .trait(let defId, let name, let args):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-      return canonicalTraitRef(traitName: base, traitTypeArgs: resolvedArgs)
+      return canonicalTraitRef(traitName: name, traitDefId: defId, traitTypeArgs: resolvedArgs)
+    case .mutable:
+      // `mutable` is a shape requirement, not a trait, so it has no canonical
+      // trait reference. Callers look up bounds with `try?` and skip this.
+      throw SemanticError.invalidOperation(
+        op: "invalid trait bound",
+        type1: "mutable",
+        type2: ""
+      )
     }
   }
 
@@ -343,7 +351,8 @@ extension TypeChecker {
     guard visited.insert(actual.cacheKey).inserted else {
       return nil
     }
-    if actual.traitName == traitName {
+    // Identity is the declaration, not the spelling.
+    if actual.traitDefId == (visibleTraitInfo(traitName)?.defId ?? .invalid) {
       return actual
     }
 
@@ -384,26 +393,6 @@ extension TypeChecker {
     resolvedTraitBound(paramName, traitName: traitName, traitTypeArgs: traitTypeArgs) != nil
   }
   
-  /// Finds the trait constraint for a given type parameter and trait name.
-  /// Returns the full TraitConstraint including type arguments.
-  func findTraitConstraint(_ paramName: String, _ traitName: String, traitTypeArgs: [Type]? = nil) -> TraitConstraint? {
-    guard let bounds = genericTraitBounds[paramName] else {
-      return nil
-    }
-    if let traitTypeArgs {
-      for bound in bounds {
-        guard let resolved = try? resolveCanonicalTraitRef(from: bound) else {
-          continue
-        }
-        if resolved == canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs) {
-          return bound
-        }
-      }
-      return nil
-    }
-    return bounds.first(where: { $0.baseName == traitName })
-  }
-  
   /// Checks if a trait inherits from another trait (directly or transitively).
   private func hasTraitInheritance(_ traitName: String, _ targetTrait: String) -> Bool {
     var visited: Set<String> = []
@@ -414,24 +403,24 @@ extension TypeChecker {
     guard visited.insert(traitName).inserted else {
       return false
     }
-    if traitName == targetTrait {
-      return true
-    }
-    
     guard let traitInfo = visibleTraitInfo(traitName) else {
       return false
     }
-    
-    if traitInfo.superTraits.contains(where: { $0.baseName == targetTrait }) {
+    // "Is this the trait?" is a question about declarations, not spellings.
+    let targetDefId = visibleTraitInfo(targetTrait)?.defId ?? .invalid
+    if traitInfo.defId == targetDefId {
       return true
     }
-    
+
     for superTrait in traitInfo.superTraits {
+      if case .trait(let defId, _, _) = resolveBound(superTrait), defId == targetDefId {
+        return true
+      }
       if hasTraitInheritance(superTrait.baseName, targetTrait, visited: &visited) {
         return true
       }
     }
-    
+
     return false
   }
 
@@ -468,7 +457,7 @@ extension TypeChecker {
           for parent in info.superTraits {
             let parentName = parent.baseName
             guard let parentInfo = self.traitInfo(parentName, modulePath: info.modulePath) else { continue }
-            if case .generic(_, let argNodes) = parent, !parentInfo.typeParameters.isEmpty {
+            if case .trait(_, _, let argNodes) = parent, !parentInfo.typeParameters.isEmpty {
               for (i, typeParam) in parentInfo.typeParameters.enumerated() {
                 if i < argNodes.count {
                   // Resolve the arg node using the current substitution context
@@ -679,8 +668,6 @@ extension TypeChecker {
     let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
     if visited.contains(visitKey) { return [] }
     visited.insert(visitKey)
-
-    if SemaUtils.isBuiltinTrait(traitName) { return [] }
 
     guard let decl = traitInfo(traitName, modulePath: modulePath) else {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)

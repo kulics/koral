@@ -16,6 +16,17 @@ final class MIRLowerer {
     self.context = context
   }
 
+  /// Whether a conformance is to the std `Drop` trait, decided by the trait
+  /// declaration's identity. A user trait also named `Drop` is a different
+  /// declaration and must not receive the compiler's drop calling convention.
+  private func isStdDropTraitConformance(_ conformance: TypedTraitConformance?) -> Bool {
+    guard let conformance,
+          let stdDrop = program.traits["Drop"], stdDrop.modulePath == ["Std"] else {
+      return false
+    }
+    return conformance.traitDefId == stdDrop.defId
+  }
+
   func lower() -> MIRProgram {
     var globals: [MIRGlobal] = []
     var functions: [MIRFunction] = []
@@ -57,7 +68,7 @@ final class MIRLowerer {
           // If the parameter is already *unsafe mutable Self (old syntax), keep as-is.
           // We preserve the original defId so body references to 'self' still resolve.
           let params: [Symbol]
-          let isDropMethod = (trait?.traitName == "Drop")
+          let isDropMethod = isStdDropTraitConformance(trait)
             && (context.getName(method.identifier.defId) == "drop")
           if isDropMethod, let first = method.parameters.first,
              context.getName(first.defId) == "self" {
@@ -115,13 +126,18 @@ final class MIRLowerer {
     return MIRTraitVTable(
       concreteType: request.concreteType,
       traitName: request.traitName,
+      traitDefId: request.traitDefId,
       traitTypeArguments: request.traitTypeArgs,
       methods: methods
     )
   }
 
   private func makeTraitVTableMethods(for request: VtableRequest) -> [MIRTraitVTableMethod] {
-    let traitRef = CanonicalTraitRef(traitName: request.traitName, traitTypeArgs: request.traitTypeArgs)
+    let traitRef = CanonicalTraitRef(
+      traitName: request.traitName,
+      traitDefId: request.traitDefId,
+      traitTypeArgs: request.traitTypeArgs
+    )
     if let witness = program.conformanceWitnesses[request.witnessKey] {
       return witness.requirementSlots.map { slot in
         MIRTraitVTableMethod(
@@ -241,16 +257,17 @@ final class MIRLowerer {
     substitution: [String: Type]
   ) -> CanonicalTraitRef? {
     switch constraint {
-    case .simple(let name):
-      return CanonicalTraitRef(traitName: name, traitTypeArgs: [])
-    case .generic(let base, let args):
+    case .trait(let defId, let name, let args):
       let resolvedArgs = args.compactMap {
         resolveVTableTypeNode($0, traitTypeParamSubstitution: substitution)
       }
       guard resolvedArgs.count == args.count else {
         return nil
       }
-      return CanonicalTraitRef(traitName: base, traitTypeArgs: resolvedArgs)
+      return CanonicalTraitRef(traitName: name, traitDefId: defId, traitTypeArgs: resolvedArgs)
+    case .mutable:
+      // `mutable` is a shape requirement, not a trait; it has no vtable ref.
+      return nil
     }
   }
 
@@ -865,9 +882,9 @@ private final class MIRFunctionBuilder {
       )
       let result = materialize(value, type: type)
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
-    case .traitMethodPlaceholder(let traitName, let methodName, _, _, _):
+    case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _):
       fatalError("Unsupported trait method placeholder reached MIR lowering: \(traitName).\(methodName)")
-    case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+    case .traitObjectConversion(let inner, let traitName, let traitDefId, let traitTypeArgs, let concreteType, let type):
       let loweredInner: MIRValue
       if case .referenceExpression(let sourceExpr, let refType) = inner,
          let place = lowerPlace(sourceExpr) {
@@ -882,6 +899,7 @@ private final class MIRFunctionBuilder {
             inner: loweredInner,
             sourceOwnership: ownershipUse(for: inner),
             traitName: traitName,
+            traitDefId: traitDefId,
             traitTypeArguments: traitTypeArgs,
             concreteType: concreteType,
             type: type
@@ -890,12 +908,13 @@ private final class MIRFunctionBuilder {
         type: type
       )
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
-    case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+    case .traitMethodCall(let receiver, let traitName, let traitDefId, let methodName, let methodIndex, let arguments, let type):
       let value = MIRValue.traitMethodCall(
         MIRTraitMethodCall(
           receiver: lowerValue(receiver),
           receiverOwnership: ownershipUse(for: receiver),
           traitName: traitName,
+          traitDefId: traitDefId,
           traitTypeArguments: traitObjectTypeArguments(from: receiver.type),
           methodName: methodName,
           methodIndex: methodIndex,
@@ -1503,6 +1522,7 @@ private final class MIRFunctionBuilder {
         .traitObjectMatches(
           value: subjectValue,
           traitName: info.traitName,
+          traitDefId: info.traitDefId,
           traitTypeArguments: info.traitTypeArguments,
           concreteType: info.concreteType
         )
@@ -1836,11 +1856,11 @@ private final class MIRFunctionBuilder {
     case .identifier(let name):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
       guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
-      return .traitObject(traitName: name, traitDefId: .invalid, typeArgs: [])
+      return .traitObject(traitName: name, traitDefId: program.traits[name]?.defId ?? .invalid, typeArgs: [])
     case .generic(let base, let args):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedArgs.count == args.count else { return nil }
-      return .traitObject(traitName: base, traitDefId: .invalid, typeArgs: resolvedArgs)
+      return .traitObject(traitName: base, traitDefId: program.traits[base]?.defId ?? .invalid, typeArgs: resolvedArgs)
     default:
       return nil
     }
@@ -2377,17 +2397,20 @@ private final class MIRFunctionBuilder {
     ))
   }
 
-  private func traitObjectPatternInfo(subjectType: Type, targetType: Type) -> (traitName: String, traitTypeArguments: [Type], concreteType: Type)? {
-    guard case .traitObject(let traitName, _, let traitTypeArguments) = subjectType else {
+  private func traitObjectPatternInfo(
+    subjectType: Type,
+    targetType: Type
+  ) -> (traitName: String, traitDefId: DefId, traitTypeArguments: [Type], concreteType: Type)? {
+    guard case .traitObject(let traitName, let traitDefId, let traitTypeArguments) = subjectType else {
       return nil
     }
 
     switch targetType {
     case .reference(let concreteType), .mutableReference(let concreteType):
-      return (traitName, traitTypeArguments, concreteType)
+      return (traitName, traitDefId, traitTypeArguments, concreteType)
     // New syntax: bare concrete type (no * prefix)
     case .structure, .enum, .genericStruct, .genericEnum:
-      return (traitName, traitTypeArguments, targetType)
+      return (traitName, traitDefId, traitTypeArguments, targetType)
     default:
       return nil
     }
@@ -2411,13 +2434,12 @@ private final class MIRFunctionBuilder {
   }
 
   private func isRunePatternType(_ type: Type) -> Bool {
-    guard case .structure(let defId) = type else { return false }
-    return context.getName(defId) == "Rune"
+    return context.isStdNominalType(type, context.stdRuneDefId)
   }
 
   private func runePatternValueAccess(subjectPlace: MIRPlace, subjectType: Type) -> (place: MIRPlace, type: Type)? {
     guard case .structure(let defId) = subjectType,
-          context.getName(defId) == "Rune",
+          context.isStdNominal(defId, context.stdRuneDefId),
           let members = context.getStructMembers(defId),
           let valueMember = members.first(where: { $0.name == "value" }) else {
       return nil

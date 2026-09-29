@@ -61,7 +61,11 @@ final class MIRVerifier {
       for argument in vtable.traitTypeArguments where context.containsGenericParameter(argument) {
         throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): unresolved trait type argument")
       }
-      let traitRef = CanonicalTraitRef(traitName: vtable.traitName, traitTypeArgs: vtable.traitTypeArguments)
+      let traitRef = CanonicalTraitRef(
+        traitName: vtable.traitName,
+        traitDefId: vtable.traitDefId,
+        traitTypeArgs: vtable.traitTypeArguments
+      )
       let witnessKey = ConformanceWitness.key(selfType: vtable.concreteType, traitRef: traitRef)
       guard let witness = program.conformanceWitnesses[witnessKey] else {
         throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): missing conformance witness")
@@ -95,10 +99,9 @@ final class MIRVerifier {
         }
         if witness.localImplementationDefIdsByMethodName[method.name] == nil &&
             !witness.directParentTraitRefs.contains(where: { parent in
-              parent.traitName == slot.declaringTraitRef.traitName && parent.traitTypeArgs == slot.declaringTraitRef.traitTypeArgs
+              parent == slot.declaringTraitRef
             }) &&
-            slot.declaringTraitRef.traitName == witness.traitRef.traitName &&
-            slot.declaringTraitRef.traitTypeArgs == witness.traitRef.traitTypeArgs {
+            slot.declaringTraitRef == witness.traitRef {
           throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): requirement slot has no implementation witness")
         }
       }
@@ -332,7 +335,7 @@ final class MIRVerifier {
     case .downgradeRef(let value, _),
          .upgradeRef(let value, _):
       try verifyValue(value, in: function, localIDs: Set(function.locals.map(\.id)))
-    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+    case .traitObjectMatches(let value, let traitName, let traitDefId, let traitTypeArguments, let concreteType):
       let localIDs = Set(function.locals.map(\.id))
       try verifyValue(value, in: function, localIDs: localIDs)
       try verifyConcrete(concreteType, in: function, description: "trait object match intrinsic has unresolved concrete type")
@@ -344,12 +347,12 @@ final class MIRVerifier {
             let actual = traitObjectReferenceInfo(valueType) else {
         try fail(function, "trait object match intrinsic value is not a trait object")
       }
-      if actual.traitName != traitName || actual.typeArguments != traitTypeArguments {
+      if actual.traitDefId != traitDefId || actual.typeArguments != traitTypeArguments {
         try fail(function, "trait object match intrinsic value type does not match intrinsic trait metadata")
       }
       let key = MIRTraitVTableKey(
         concreteType: concreteType,
-        traitName: traitName,
+        traitDefId: traitDefId,
         traitTypeArguments: traitTypeArguments
       )
       guard traitVTableKeys.contains(key) else {
@@ -453,7 +456,7 @@ final class MIRVerifier {
     guard let target = traitObjectReferenceInfo(conversion.type) else {
       try fail(function, "trait object conversion result is not a trait object reference: \(context.getDebugName(conversion.type))")
     }
-    if target.traitName != conversion.traitName || target.typeArguments != conversion.traitTypeArguments {
+    if target.traitDefId != conversion.traitDefId || target.typeArguments != conversion.traitTypeArguments {
       try fail(function, "trait object conversion result type does not match conversion trait metadata")
     }
     try verifyValue(conversion.inner, in: function, localIDs: localIDs)
@@ -487,11 +490,11 @@ final class MIRVerifier {
     guard let receiver = traitObjectReferenceInfo(receiverType) else {
       try fail(function, "trait method call receiver is not a trait object reference: \(context.getDebugName(receiverType))")
     }
-    if receiver.traitName != call.traitName || receiver.typeArguments != call.traitTypeArguments {
+    if receiver.traitDefId != call.traitDefId || receiver.typeArguments != call.traitTypeArguments {
       try fail(function, "trait method call receiver type does not match call trait metadata")
     }
     let candidateTables = traitVTablesByKey.values.filter {
-      $0.traitName == call.traitName && $0.traitTypeArguments == call.traitTypeArguments
+      $0.traitDefId == call.traitDefId && $0.traitTypeArguments == call.traitTypeArguments
     }
     if candidateTables.isEmpty {
       try fail(function, "trait method call has no vtable inventory for trait metadata")
@@ -526,16 +529,20 @@ final class MIRVerifier {
     }
   }
 
-  private func traitObjectReferenceInfo(_ type: Type) -> (traitName: String, typeArguments: [Type])? {
+  /// The identity of a trait object type: the DECLARATION of its trait plus the
+  /// trait arguments. The spelling is returned for messages only.
+  private func traitObjectReferenceInfo(
+    _ type: Type
+  ) -> (traitName: String, traitDefId: DefId, typeArguments: [Type])? {
     switch type {
-    case .traitObject(let traitName, _, let typeArguments):
-      return (traitName, typeArguments)
+    case .traitObject(let traitName, let traitDefId, let typeArguments):
+      return (traitName, traitDefId, typeArguments)
     case .reference(let inner),
          .mutableReference(let inner),
          .borrowedReference(let inner),
          .mutableBorrowedReference(let inner):
-      if case .traitObject(let traitName, _, let typeArguments) = inner {
-        return (traitName, typeArguments)
+      if case .traitObject(let traitName, let traitDefId, let typeArguments) = inner {
+        return (traitName, traitDefId, typeArguments)
       }
       return nil
     default:
@@ -544,8 +551,11 @@ final class MIRVerifier {
   }
 
   private func render(_ key: MIRTraitVTableKey) -> String {
+    // The key carries the trait's declaration identity; the spelling is looked
+    // back up only to print a message.
+    let traitName = context.getName(key.traitDefId) ?? "<trait d\(key.traitDefId.id)>"
     let renderedArguments = key.traitTypeArguments.map { context.getDebugName($0) }.joined(separator: ", ")
-    let renderedTrait = renderedArguments.isEmpty ? key.traitName : "\(key.traitName)<\(renderedArguments)>"
+    let renderedTrait = renderedArguments.isEmpty ? traitName : "\(traitName)<\(renderedArguments)>"
     return "\(renderedTrait) for \(context.getDebugName(key.concreteType))"
   }
 

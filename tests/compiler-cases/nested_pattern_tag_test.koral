@@ -1,0 +1,77 @@
+// EXPECT: PASS
+// Design guard: a nested pattern tests the NESTED value's tag, not the outer one.
+//
+// `.Operand(.Fn(_))` must match only when the payload is `Fn`; `.Operand(.Num(_))`
+// must not match `Operand(Fn(..))`. Same for `is` and for struct fields.
+//
+// This guards a real regression. Bootstrap's MIR builder cached the subject's tag
+// operand (`pattern_subject_tag`), the subject operand (`pattern_subject_operand`)
+// and a comparison local while lowering a pattern test, and reused that cache when
+// recursing into enum payloads and struct fields. The inner pattern then compared
+// the OUTER enum's tag against the INNER case index -- so `is .Operand(.Fn(_))`
+// matched any `Operand(..)` in some shapes and none at all in others. The same
+// cache made `let f Func(Int, Int) Int = add` skip the closure wrap (codegen asks
+// `value is .Operand(.Function(_))` before deciding), assigning a bare function
+// pointer to a `struct __koral_Closure` and failing to compile.
+// The Swift compiler lowers nested patterns without such a cache and is correct.
+
+type Inner {
+    Fn(value Int),
+    Num(value Int),
+};
+
+type Outer {
+    Operand(value Inner),
+    Other(),
+};
+
+type Box {
+    Pair(left Inner, right Inner),
+    Empty(),
+};
+
+let check(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let via_when(v Outer) String = when v in {
+    .Operand(.Fn(_)) then "operand-fn",
+    .Operand(.Num(_)) then "operand-num",
+    .Other() then "other",
+};
+
+let via_is_fn(v Outer) Bool = v is .Operand(.Fn(_));
+let via_is_num(v Outer) Bool = v is .Operand(.Num(_));
+
+// Two nested payloads in one struct pattern: each must be tested independently.
+let both_fn(b Box) Bool = b is .Pair(.Fn(_), .Fn(_));
+let left_fn_right_num(b Box) Bool = b is .Pair(.Fn(_), .Num(_));
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    passed = check("when-fn", via_when(Outer.Operand(Inner.Fn(1))), "operand-fn") and passed;
+    passed = check("when-num", via_when(Outer.Operand(Inner.Num(1))), "operand-num") and passed;
+    passed = check("when-other", via_when(Outer.Other()), "other") and passed;
+
+    passed = check("is-fn-on-fn", via_is_fn(Outer.Operand(Inner.Fn(1))).to_string(), "true") and passed;
+    passed = check("is-fn-on-num", via_is_fn(Outer.Operand(Inner.Num(1))).to_string(), "false") and passed;
+    passed = check("is-num-on-fn", via_is_num(Outer.Operand(Inner.Fn(1))).to_string(), "false") and passed;
+    passed = check("is-num-on-num", via_is_num(Outer.Operand(Inner.Num(1))).to_string(), "true") and passed;
+    passed = check("is-fn-on-other", via_is_fn(Outer.Other()).to_string(), "false") and passed;
+
+    passed = check("both-fn", both_fn(Box.Pair(Inner.Fn(1), Inner.Fn(2))).to_string(), "true") and passed;
+    passed = check("both-fn-mixed", both_fn(Box.Pair(Inner.Fn(1), Inner.Num(2))).to_string(), "false") and passed;
+    passed = check("fn-num", left_fn_right_num(Box.Pair(Inner.Fn(1), Inner.Num(2))).to_string(), "true") and passed;
+    passed = check("fn-num-swap", left_fn_right_num(Box.Pair(Inner.Num(1), Inner.Fn(2))).to_string(), "false") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

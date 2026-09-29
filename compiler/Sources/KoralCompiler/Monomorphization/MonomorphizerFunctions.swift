@@ -2106,8 +2106,6 @@ extension Monomorphizer {
         if visited.contains(traitName) { return [] }
         visited.insert(traitName)
 
-        if SemaUtils.isBuiltinTrait(traitName) { return [] }
-
         guard let decl = input.genericTemplates.traits[traitName] else {
             return []
         }
@@ -2142,14 +2140,16 @@ extension Monomorphizer {
 
     /// Extracts the inner trait object type from a type, unwrapping reference if needed.
     /// Returns (traitName, typeArgs) if the type is a trait object or reference to trait object.
-    internal func extractTraitObjectType(_ type: Type) -> (traitName: String, typeArgs: [Type])? {
+    /// The identity of a trait object type: the DECLARATION of its trait plus
+    /// the trait arguments. The spelling is returned for display only.
+    internal func extractTraitObjectType(_ type: Type) -> (traitName: String, traitDefId: DefId, typeArgs: [Type])? {
         switch type {
-        case .traitObject(let traitName, _, let typeArgs):
-            return (traitName, typeArgs)
+        case .traitObject(let traitName, let traitDefId, let typeArgs):
+            return (traitName, traitDefId, typeArgs)
         case .reference(let inner), .mutableReference(let inner),
              .borrowedReference(let inner), .mutableBorrowedReference(let inner):
-            if case .traitObject(let traitName, _, let typeArgs) = inner {
-                return (traitName, typeArgs)
+            if case .traitObject(let traitName, let traitDefId, let typeArgs) = inner {
+                return (traitName, traitDefId, typeArgs)
             }
             return nil
         default:

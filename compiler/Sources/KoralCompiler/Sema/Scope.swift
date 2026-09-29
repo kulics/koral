@@ -124,7 +124,7 @@ public class UnifiedScope {
       kind: kind,
       isMutable: mutable
     )
-    names[name] = defId
+    defineScoped(name, defId)
   }
 
   public func definePrivate(_ name: String, sourceFile: String, defId: DefId) {
@@ -157,12 +157,12 @@ public class UnifiedScope {
   }
 
   public func defineDirectlyAccessible(_ name: String, defId: DefId) {
-    names[name] = defId
+    defineScoped(name, defId)
     directlyAccessible.insert(name)
   }
 
   public func defineFunction(_ name: String, defId: DefId, directlyAccessible: Bool = false, isPrivate: Bool = false, sourceFile: String? = nil) {
-    names[name] = defId
+    defineScoped(name, defId)
     functionSymbols.insert(name)
     if directlyAccessible {
       self.directlyAccessible.insert(name)
@@ -190,7 +190,7 @@ public class UnifiedScope {
       kind: .function,
       isMutable: false
     )
-    names[name] = defId
+    defineScoped(name, defId)
     functionSymbols.insert(name)
   }
 
@@ -264,10 +264,35 @@ public class UnifiedScope {
         return defId
       }
     }
+    if let defId = bindingInCurrentModule(name) {
+      return defId
+    }
     if let defId = names[name] {
       return defId
     }
     return parent?.lookup(name, sourceFile: sourceFile)
+  }
+
+  /// The binding for `name` declared in the module currently being checked.
+  ///
+  /// Module-scoped globals are stored under both their bare name and a
+  /// module-qualified one. The bare entry keeps whichever module registered
+  /// last, so a same-named `public let` in another module would shadow the
+  /// local one. Looking the qualified key up first is what makes `alpha`'s
+  /// `dup` resolve to `alpha`'s `dup` while checking `alpha`.
+  private func bindingInCurrentModule(_ name: String) -> DefId? {
+    guard let map = defIdMap, !map.currentModulePath.isEmpty else {
+      return nil
+    }
+    return names[map.symbolKey(modulePath: map.currentModulePath, name: name)]
+  }
+
+  /// Records a module-scoped binding under both its bare and qualified keys.
+  private func defineScoped(_ name: String, _ defId: DefId) {
+    names[name] = defId
+    if let map = defIdMap, let modulePath = map.getModulePath(defId), !modulePath.isEmpty {
+      names[map.symbolKey(modulePath: modulePath, name: name)] = defId
+    }
   }
 
   public func isGenericParameter(_ name: String) -> Bool {
@@ -275,6 +300,23 @@ public class UnifiedScope {
       return true
     }
     return parent?.isGenericParameter(name) ?? false
+  }
+
+  /// Whether the innermost binding of `name` is a VALUE (parameter, local `let`,
+  /// or generic parameter) rather than a function.
+  ///
+  /// Ordinary lexical scoping decides a call like `f(x)`: if `f` is bound to a
+  /// parameter or local, that binding is the callee. A same-named generic
+  /// function template lives in the global name space and must not reach over
+  /// the local binding -- otherwise a user's `let f[...]` silently hijacks
+  /// `f(it)` inside e.g. `std`'s `map`, whose parameter is also called `f`.
+  ///
+  /// Identity is decided by the binding's `DefKind`, not by its spelling.
+  public func isValueBinding(_ name: String, sourceFile: String? = nil) -> Bool {
+    guard let defId = lookup(name, sourceFile: sourceFile) else {
+      return false
+    }
+    return defIdMap?.getKind(defId) != .function
   }
 
   public func isFunction(_ name: String, sourceFile: String? = nil) -> Bool {
@@ -317,7 +359,8 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = names[name], let map = defIdMap, let type = map.getSymbolType(defId) {
+    if let defId = bindingInCurrentModule(name) ?? names[name],
+       let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
         mutable: map.isSymbolMutable(defId) ?? false,
@@ -351,7 +394,8 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = names[name], let map = defIdMap, let type = map.getSymbolType(defId) {
+    if let defId = bindingInCurrentModule(name) ?? names[name],
+       let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
         mutable: map.isSymbolMutable(defId) ?? false,
