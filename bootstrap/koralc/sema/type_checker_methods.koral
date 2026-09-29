@@ -138,50 +138,49 @@ given TypeChecker {
         };
     };
 
+    /// What `base[i]` means for `base`.
+    ///
+    /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict` and for
+    /// raw pointers. Which std type is meant is a question about the DECLARATION
+    /// identity -- a user type also named `List` does not get subscripting.
     module_private resolve_builtin_subscript_kind(self, base_type Type) Option[BuiltinSubscriptKind] = {
         let unwrapped = self.builtin_subscript_base_type(base_type);
+        if self.is_std_type(unwrapped, "String") then {
+            return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.String());
+        };
+        if self.is_std_type(unwrapped, "List") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args.count() == 1(UInt) then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List(args[0(UInt)]));
+            };
+        };
+        if self.is_std_type(unwrapped, "Deque") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args.count() == 1(UInt) then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(args[0(UInt)]));
+            };
+        };
+        if self.is_std_type(unwrapped, "Dict") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args.count() == 2(UInt) then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(args[0(UInt)], args[1(UInt)]));
+            };
+        };
         return when unwrapped in {
-            .StructureType(def_id) then {
-                let type_name = self.context().get_name(def_id) or else "";
-                if type_name == "String" then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.String());
-                };
-                let template_name_opt = self.context().get_template_name(def_id);
-                let type_args_opt = self.context().get_type_arguments(def_id);
-                when template_name_opt in {
-                    .Some(template_name) then when type_args_opt in {
-                        .Some(type_args) then {
-                            if type_args.count() == 1(UInt) and template_name == "List" then {
-                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List(type_args[0(UInt)]));
-                            };
-                            if type_args.count() == 1(UInt) and template_name == "Deque" then {
-                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(type_args[0(UInt)]));
-                            };
-                            if type_args.count() == 2(UInt) and template_name == "Dict" then {
-                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(type_args[0(UInt)], type_args[1(UInt)]));
-                            };
-                            Option[BuiltinSubscriptKind].None()
-                        },
-                        .None() then Option[BuiltinSubscriptKind].None(),
-                    },
-                    .None() then Option[BuiltinSubscriptKind].None(),
-                }
-            },
-            .GenericStruct(template_name, _, type_args) then {
-                if template_name == "List" and type_args.count() == 1(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List((type_args[0(UInt)])));
-                };
-                if template_name == "Deque" and type_args.count() == 1(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque((type_args[0(UInt)])));
-                };
-                if template_name == "Dict" and type_args.count() == 2(UInt) then {
-                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict((type_args[0(UInt)]), (type_args[1(UInt)])));
-                };
-                Option[BuiltinSubscriptKind].None()
-            },
             .PointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, false)),
             .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner, true)),
             _ then Option[BuiltinSubscriptKind].None(),
+        };
+    };
+
+    /// Type arguments of an applied nominal, whichever spelling it is in.
+    module_private std_type_arguments(self, t Type) List[Type] = {
+        return when t in {
+            .GenericStruct(_, _, args) then args,
+            .GenericEnum(_, _, args) then args,
+            .StructureType(def_id) then self.context().get_type_arguments(def_id) or else List[Type].new(),
+            .EnumType(def_id) then self.context().get_type_arguments(def_id) or else List[Type].new(),
+            _ then List[Type].new(),
         };
     };
 
@@ -364,13 +363,62 @@ given TypeChecker {
 
     // 提取 Option<T> 或 Result<T> 的内部类型 T，用于 and then / or else 的 _ 绑定
     module_private extract_option_result_inner(self, t Type) Type = {
-        if t is .GenericEnum(template, _, args) and (template == "Option" or template == "Result") then {
-            return when args.get(0) in {
-                .Some(arg_ref) then arg_ref,
-                .None() then Type.Unknown(),
+        if self.is_std_flow_enum(t, "Option") or self.is_std_flow_enum(t, "Result") then {
+            return when t in {
+                .GenericEnum(_, _, args) then when args.get(0) in {
+                    .Some(arg_ref) then arg_ref,
+                    .None() then Type.Unknown(),
+                },
+                _ then Type.Unknown(),
             };
         };
         return Type.Unknown();
+    };
+
+    /// Whether `t` is the std type registered under `name`, decided by
+    /// DECLARATION identity. Handles every spelling of a nominal: the declared
+    /// form, a monomorphized instance of a generic template, and either of those
+    /// wrapped in references/pointers.
+    ///
+    /// This is how every "is this std's `List`?" question must be asked. A user
+    /// type with the same spelling is a different type and gets none of the
+    /// built-in behaviour.
+    module_private is_std_type(self, t Type, name String) Bool = {
+        let want = self.context().std_type_def_id(name) or else { return false; };
+        return when t in {
+            .StructureType(def_id) then def_id == want or self.context().get_template_def_id(def_id) == want,
+            .EnumType(def_id) then def_id == want or self.context().get_template_def_id(def_id) == want,
+            .GenericStruct(_, template_def_id, _) then template_def_id == want,
+            .GenericEnum(_, template_def_id, _) then template_def_id == want,
+            .ReferenceType(inner) then self.is_std_type(inner, name),
+            .MutableReferenceType(inner) then self.is_std_type(inner, name),
+            .BorrowedReferenceType(inner) then self.is_std_type(inner, name),
+            .MutableBorrowedReferenceType(inner) then self.is_std_type(inner, name),
+            .WeakReferenceType(inner) then self.is_std_type(inner, name),
+            .MutableWeakReferenceType(inner) then self.is_std_type(inner, name),
+            .PointerType(inner) then self.is_std_type(inner, name),
+            .MutablePointerType(inner) then self.is_std_type(inner, name),
+            _ then false,
+        };
+    };
+
+    /// Whether `t` is the generic enum that std registered under `name`, decided
+    /// by DECLARATION identity. `and then` / `or else` are defined over std's
+    /// `Option` and `Result`; a user type with the same spelling is a different
+    /// type and must not be treated as one.
+    ///
+    /// Both spellings of an applied generic enum are covered: the template form
+    /// (`Option[Int]`) and the instantiated nominal form (`EnumType(def_id)`),
+    /// so nothing needs a structural fallback to recognise the second shape.
+    module_private is_std_flow_enum(self, t Type, name String) Bool = {
+        let want = self.context().std_type_def_id(name) or else { return false; };
+        return when t in {
+            .GenericEnum(_, template_def_id, _) then template_def_id == want,
+            .EnumType(def_id) then {
+                def_id == want or self.context().get_template_def_id(def_id) == want
+            },
+            _ then false,
+        };
     };
 
     module_private infer_or_else_success_type(self, t Type) Type = {
@@ -391,44 +439,39 @@ given TypeChecker {
             return err_fields[0(UInt)];
         };
         return when t in {
-            .GenericEnum(template, _, args) then
-            if template == "Result" and args.count() > 1 then (args[1]) else self.extract_option_result_inner(t),
+            .GenericEnum(_, _, args) then
+            if self.is_std_flow_enum(t, "Result") and args.count() > 1 then (args[1]) else self.extract_option_result_inner(t),
             _ then self.extract_option_result_inner(t),
         };
     };
 
+    /// Whether `t` is std's `Option`/`Result` named by `template_name`.
+    /// Declaration identity only -- a user enum with `Some`/`Ok`/`Error` cases
+    /// is a different type and must not be flattened by `and then`/`or else`.
     module_private is_option_result_wrapper(self, t Type, template_name String) Bool = {
-        when t in {
-            .GenericEnum(template, _, _) then {
-                return template == template_name;
-            },
-            _ then {},
-        };
-
-        if template_name == "Option" then {
-            return not self.get_enum_case_field_types(t, "Some").is_empty();
-        };
-        if template_name == "Result" then {
-            return not self.get_enum_case_field_types(t, "Ok").is_empty() and not self.get_enum_case_field_types(t, "Error").is_empty();
-        };
-        return false;
+        return self.is_std_flow_enum(t, template_name);
     };
 
+    /// The generic-enum template `t` was built from, when `t` is one of std's
+    /// flow enums. Identity only -- the spelling is never consulted.
     module_private option_result_template_def_id(self, t Type, template_name String) DefId = {
+        if not self.is_std_flow_enum(t, template_name) then {
+            return def_id_invalid();
+        };
         return when t in {
-            .GenericEnum(template, template_def_id, _) then if template == template_name then template_def_id else def_id_invalid(),
-            .EnumType(def_id) then {
-                let template_def_id = self.context().get_template_def_id(def_id);
-                if self.context().get_template_name(def_id) is .Some(name) and name == template_name then template_def_id else def_id_invalid()
-            },
+            .GenericEnum(_, template_def_id, _) then template_def_id,
+            .EnumType(def_id) then self.context().get_template_def_id(def_id),
             _ then def_id_invalid(),
         };
     };
 
+    /// Result type of `operand and then transform`, with flattening.
+    ///
+    /// Which of the two flow enums the operand is decides everything, and that
+    /// is a question about the operand's DECLARATION identity -- never about
+    /// which case names it happens to declare.
     module_private compute_and_then_result_type(self, operand_type Type, transform_result_type Type) Type = {
-        let has_ok = not self.get_enum_case_field_types(operand_type, "Ok").is_empty();
-        let has_error = not self.get_enum_case_field_types(operand_type, "Error").is_empty();
-        if has_ok and has_error then {
+        if self.is_std_flow_enum(operand_type, "Result") then {
             if self.is_option_result_wrapper(transform_result_type, "Result") then {
                 return transform_result_type;
             };
@@ -436,9 +479,7 @@ given TypeChecker {
             args.push(transform_result_type);
             return Type.GenericEnum("Result", self.option_result_template_def_id(operand_type, "Result"), args);
         };
-
-        let has_some = not self.get_enum_case_field_types(operand_type, "Some").is_empty();
-        if has_some then {
+        if self.is_std_flow_enum(operand_type, "Option") then {
             if self.is_option_result_wrapper(transform_result_type, "Option") then {
                 return transform_result_type;
             };
@@ -446,45 +487,16 @@ given TypeChecker {
             args.push(transform_result_type);
             return Type.GenericEnum("Option", self.option_result_template_def_id(operand_type, "Option"), args);
         };
-
-        when operand_type in {
-            .GenericEnum(template, template_def_id, _) then {
-                if template == "Result" then {
-                    if self.is_option_result_wrapper(transform_result_type, "Result") then {
-                        return transform_result_type;
-                    };
-                    let mutable args = List[Type].new();
-                    args.push(transform_result_type);
-                    return Type.GenericEnum("Result", template_def_id, args);
-                };
-                if template == "Option" then {
-                    if self.is_option_result_wrapper(transform_result_type, "Option") then {
-                        return transform_result_type;
-                    };
-                    let mutable args = List[Type].new();
-                    args.push(transform_result_type);
-                    return Type.GenericEnum("Option", template_def_id, args);
-                };
-            },
-            _ then {},
-        };
-
         return transform_result_type;
     };
 
     module_private refine_and_then_result_type_from_expected(self, operand_type Type, computed_type Type, expected Option[Type]) Type = {
         return when expected in {
             .Some(expected_type) then {
-                let operand_is_result = not self.get_enum_case_field_types(operand_type, "Ok").is_empty() and not self.get_enum_case_field_types(operand_type, "Error").is_empty();
-                let operand_is_option = not self.get_enum_case_field_types(operand_type, "Some").is_empty() or when operand_type in {
-                    .GenericEnum(template, _, _) then template == "Option",
-                    _ then false,
-                };
-
-                if operand_is_result and self.is_option_result_wrapper(expected_type, "Result") then {
+                if self.is_std_flow_enum(operand_type, "Result") and self.is_option_result_wrapper(expected_type, "Result") then {
                     return expected_type;
                 };
-                if operand_is_option and self.is_option_result_wrapper(expected_type, "Option") then {
+                if self.is_std_flow_enum(operand_type, "Option") and self.is_option_result_wrapper(expected_type, "Option") then {
                     return expected_type;
                 };
                 return computed_type;
@@ -1161,22 +1173,8 @@ given TypeChecker {
         // site like `names.borrow_ptr()` must report `String` lacking `Pod`.
         for tp in template.type_params then {
             for constraint in tp.constraints then {
-                let trait_name = self.type_node_name(constraint);
-                if trait_name == "Any" then {
-                    continue;
-                };
                 let bound_type = bindings.get(tp.name) or else Type.GenericParameter(tp.name);
-                let trait_args = self.trait_type_args_with_bindings(constraint, bindings);
-                if trait_args.is_empty() then {
-                    if trait_name == "mutable" then {
-                        if not self.satisfies_mutable_constraint(bound_type) then {
-                            self.push_diagnostic(self.mutable_constraint_violation_message(bound_type, "checking constraint \(tp.name): mutable"));
-                            return Option[Symbol].None();
-                        };
-                    } else if not self.enforce_explicit_trait_requirement_with_context(bound_type, trait_name, tp.name) then {
-                        return Option[Symbol].None();
-                    };
-                } else if not self.enforce_explicit_generic_trait_conformance(bound_type, trait_name, trait_args) then {
+                if not self.enforce_bound_requirement(bound_type, constraint, tp.name, bindings) then {
                     return Option[Symbol].None();
                 };
             };
@@ -1919,8 +1917,9 @@ given TypeChecker {
                 return Option[Symbol].None();
             },
         };
+        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         for template in templates then {
-            if template.trait_name <> trait_name then {
+            if template.trait_def_id <> requested_trait_id then {
                 continue;
             };
 
@@ -2047,8 +2046,9 @@ given TypeChecker {
             .GenericParameter(gp_name) then {
                 when self.storage.generic_param_constraints.get(gp_name) in {
                     .Some(constraints) then {
+                        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
                         for constraint in constraints then {
-                            if constraint.trait_name == trait_name then {
+                            if constraint.trait_def_id == requested_trait_id then {
                                 when self.storage.trait_registry.get(trait_name) in {
                                     .Some(info) then {
                                         let mutable idx UInt = 0;
@@ -2095,7 +2095,7 @@ given TypeChecker {
             .Some(info) then {
                 for type_param in info.type_params then {
                     if not bindings.contains_key(type_param) then {
-                        let mutable bound_type = when self.storage.global_scope.lookup_type(type_param) in {
+                        let mutable bound_type = when self.resolve_type_name_binding(type_param) in {
                             .Some(existing) then existing,
                             .None() then Type.GenericParameter(type_param),
                         };
@@ -2126,9 +2126,6 @@ given TypeChecker {
             .Some(info) then {
                 let mutable collected = bindings;
                 for parent in info.parent_traits then {
-                    if parent.name == "Any" then {
-                        continue;
-                    };
                     when self.storage.trait_registry.get(parent.name) in {
                         .Some(parent_info) then {
                             let mutable parent_bindings = Dict[String, Type].new();
@@ -2200,7 +2197,7 @@ given TypeChecker {
         when t in {
             .GenericParameter(name) then {
                 if not bindings.contains_key(name) then {
-                    when self.storage.global_scope.lookup_type(name) in {
+                    when self.resolve_type_name_binding(name) in {
                         .Some(resolved) then {
                             if not (resolved is .GenericParameter(_) and when resolved in { .GenericParameter(n) then n == name, _ then false }) then {
                                 bindings.insert(name, resolved);
@@ -2846,9 +2843,6 @@ given TypeChecker {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for constraint in constraints then {
                         let cn = constraint.trait_name;
-                        if cn == "Any" then {
-                            continue;
-                        };
                         when self.resolve_trait_registry_method_signature(cn, method_name, inner_type) in {
                             .Some(method) then { return Option[Symbol].Some(method);},
                             .None() then {},
@@ -3143,7 +3137,7 @@ given TypeChecker {
             },
             .None() then
             // 尝试从 enum case 字段获取参数类型
-            when self.storage.global_scope.lookup_type(type_name) in {
+            when self.resolve_type_name_binding(type_name) in {
                 .Some(t) then self.get_enum_case_field_types(t, method_name),
                 .None() then List[Type].new(),
             },
@@ -3169,7 +3163,7 @@ given TypeChecker {
         };
 
         let mutable bindings = Dict[String, Type].new();
-        let mutable receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+        let mutable receiver_type = when self.resolve_type_name_binding(type_name) in {
             .Some(t) then when t in {
                 .StructureType(template_def_id) then Type.GenericStruct(type_name, template_def_id, type_args),
                 .EnumType(template_def_id) then Type.GenericEnum(type_name, template_def_id, type_args),
@@ -3221,7 +3215,7 @@ given TypeChecker {
         };
 
         let mutable bindings = Dict[String, Type].new();
-        let mutable receiver_type = when self.storage.global_scope.lookup_type(type_name) in {
+        let mutable receiver_type = when self.resolve_type_name_binding(type_name) in {
             .Some(t) then when t in {
                 .StructureType(template_def_id) then Type.GenericStruct(type_name, template_def_id, type_args),
                 .EnumType(template_def_id) then Type.GenericEnum(type_name, template_def_id, type_args),
@@ -3284,7 +3278,7 @@ given TypeChecker {
                     .EnumType(_) then sym.symbol_type,
                     .GenericStruct(_, _, _) then sym.symbol_type,
                     .GenericEnum(_, _, _) then sym.symbol_type,
-                    _ then if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then t else Type.Unknown(),
+                    _ then if self.resolve_type_name_binding(sym_name) is .Some(t) then t else Type.Unknown(),
                 };
             },
             .MemberPath(base, path) then if not path.is_empty() then {

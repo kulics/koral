@@ -182,7 +182,7 @@ given TypeChecker {
                             return self.surface_named_type(self.canonicalize_alias_type(local_trait));
                         };
                     };
-                    if self.storage.current_scope.lookup_type(name) is .Some(t) then {
+                    if self.resolve_type_name_binding(name) is .Some(t) then {
                         return self.surface_named_type(self.canonicalize_alias_type(t));
                     };
                     self.surface_named_type(self.resolve_named_type(name))
@@ -234,7 +234,7 @@ given TypeChecker {
                 if self.storage.trait_registry.get(base) is .Some(_) then {
                     return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
-                when self.storage.current_scope.lookup_type(base) in {
+                when self.resolve_type_name_binding(base) in {
                     .Some(base_type) then {
                         return self.resolve_visible_generic_template_type(base, resolved_args, base_type);
                     },
@@ -262,9 +262,30 @@ given TypeChecker {
         };
     };
 
+    /// Resolve a bare type name written in source.
+    ///
+    /// A type parameter of the enclosing generic declaration is the innermost
+    /// binder and wins over any same-named module-level declaration -- that is
+    /// what keeps a user's `type T` from capturing std's `[T ...]` parameters.
+    /// Everything else goes through the ordinary chain, which keys module-level
+    /// declarations by (module, name).
+    module_private resolve_type_name_binding(self, name String) Option[Type] = {
+        let gp = self.storage.current_scope.lookup_generic_param_type(name);
+        when gp in {
+            .Some(t) then { return Option[Type].Some(t); },
+            .None() then {},
+        };
+        return self.storage.global_scope.lookup_type(name);
+    };
+
     module_private try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) Option[Type] = {
         if name == "Self" then {
             return scope.lookup_type("Self");
+        };
+        // A type parameter shadows any same-named module-level declaration.
+        when scope.lookup_generic_param_type(name) in {
+            .Some(t) then { return Option[Type].Some(t); },
+            .None() then {},
         };
         if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
             if local_trait is .TraitObject(_, _, _) then {
@@ -410,6 +431,19 @@ given TypeChecker {
         if name == "Self" then {
             return self.storage.global_scope.lookup_type("Self");
         };
+        // A TYPE PARAMETER of the enclosing generic declaration wins over any
+        // same-named declaration at file or global scope. That is what lexical
+        // scoping means, and it is what keeps a user's `type T` from hijacking
+        // std's `[T ...]` parameters and `T.zero()` calls.
+        //
+        // Only generic parameters get this privilege. Module-level names still
+        // resolve through the (module, name)-qualified tables below -- routing
+        // them through the scope's bare-name table would let whichever module
+        // registered last shadow the current module's own declaration.
+        when self.storage.current_scope.lookup_generic_param_type(name) in {
+            .Some(t) then { return Option[Type].Some(t); },
+            .None() then {},
+        };
         if self.lookup_current_file_type_symbol(name) is .Some(t) then {
             return Option[Type].Some(self.canonicalize_alias_type(t));
         };
@@ -526,9 +560,12 @@ given TypeChecker {
         return self.lower_rune_literal(value, Option[Type].None());
     };
 
-    module_private is_string_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "String";
+    /// Std's `String`, by declaration identity -- a user type also named
+    /// `String` is a different type and gets none of the built-in behaviour.
+    module_private is_string_type(self, t Type) Bool = self.is_std_type(self.canonicalize_alias_type(t), "String");
 
-    module_private is_rune_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "Rune";
+    /// Std's `Rune`, by declaration identity.
+    module_private is_rune_type(self, t Type) Bool = self.is_std_type(self.canonicalize_alias_type(t), "Rune");
 
     module_private type_module_path(self, t Type) Option[List[String]] = {
         return when t in {
@@ -551,6 +588,13 @@ given TypeChecker {
         // Declaration identity wins over the global textual type scope. This keeps
         // same-named traits/types from different modules distinct while preserving
         // local generic-parameter lookup through current_scope below.
+        //
+        // A type parameter goes first: it is the innermost binder, so a user's
+        // `type T` must not capture std's `[T ...]` parameters.
+        when self.storage.current_scope.lookup_generic_param_type(name) in {
+            .Some(t) then { return self.canonicalize_alias_type(t); },
+            .None() then {},
+        };
         if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
             if local_trait is .TraitObject(_, _, _) then {
                 return self.canonicalize_alias_type(local_trait);

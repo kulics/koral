@@ -34,9 +34,10 @@ given TypeChecker {
             .MutableBorrowedReferenceType(inner) then self.trait_object_dispatch_type(inner) or else inner,
             _ then receiver_type,
         };
+        let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when normalized in {
             .TraitObject(existing_trait_name, existing_trait_def_id, existing_args) then {
-                if existing_trait_name == trait_name then Type.TraitObject(existing_trait_name, existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
+                if existing_trait_def_id == requested_trait_id then Type.TraitObject(existing_trait_name, existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
             },
             _ then self.canonical_trait_object_type(trait_name),
         };
@@ -49,24 +50,24 @@ given TypeChecker {
                 let mutable supports_or_else = false;
                 let mutable is_result = false;
                 when typed_op.expr_type in {
-                    .GenericEnum(template, _, _) then {
-                        if template == "Result" or template == "Option" then {
+                    .GenericEnum(_, _, _) then {
+                        if self.is_std_flow_enum(typed_op.expr_type, "Result") or self.is_std_flow_enum(typed_op.expr_type, "Option") then {
                             supports_or_else = true;
                         };
-                        if template == "Result" then {
+                        if self.is_std_flow_enum(typed_op.expr_type, "Result") then {
                             is_result = true;
                         };
                     },
                     _ then {},
                 };
                 if not supports_or_else then {
-                    let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty();
-                    let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty();
-                    let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty();
-                    if has_ok and has_error then {
+                    // `or else` is defined over std's `Option` and `Result`.
+                    // Declaration identity only: an enum that merely declares
+                    // `Some`/`Ok`/`Error` cases is a different type.
+                    if self.is_std_flow_enum(typed_op.expr_type, "Result") then {
                         supports_or_else = true;
                         is_result = true;
-                    } else if has_some then {
+                    } else if self.is_std_flow_enum(typed_op.expr_type, "Option") then {
                         supports_or_else = true;
                     };
                 };
@@ -163,20 +164,17 @@ given TypeChecker {
                     let mutable is_result = false;
                     let mutable is_option = false;
                     when typed_op.expr_type in {
-                        .GenericEnum(template, _, _) then {
-                            if template == "Result" then { is_result = true;};
-                            if template == "Option" then { is_option = true;};
+                        .GenericEnum(_, _, _) then {
+                            if self.is_std_flow_enum(typed_op.expr_type, "Result") then { is_result = true;};
+                            if self.is_std_flow_enum(typed_op.expr_type, "Option") then { is_option = true;};
                         },
                         _ then {},
                     };
 
                     if not is_result and not is_option then {
-                        let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty();
-                        let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty();
-                        let has_some = not self.get_enum_case_field_types(typed_op.expr_type, "Some").is_empty();
-                        if has_ok and has_error then {
+                        if self.is_std_flow_enum(typed_op.expr_type, "Result") then {
                             is_result = true;
-                        } else if has_some then {
+                        } else if self.is_std_flow_enum(typed_op.expr_type, "Option") then {
                             is_option = true;
                         };
                     };
@@ -221,11 +219,10 @@ given TypeChecker {
                 let it_sym = Symbol(it_def_id, inner_type, SymbolKind.Variable(VariableKind.Value()));
                 tr_scope.define(self.context(), it_sym);
                 let typed_tr = self.check_value_body_expr(transform_expr, .None(), tr_scope);
-                let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty();
-                let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty();
+                let is_result_operand = self.is_std_flow_enum(typed_op.expr_type, "Result");
                 let mutable computed_final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type);
                 let mutable final_type = self.refine_and_then_result_type_from_expected(typed_op.expr_type, computed_final_type, expected);
-                let flattened = if has_ok and has_error then {
+                let flattened = if is_result_operand then {
                     self.is_option_result_wrapper(typed_tr.expr_type, "Result")
                 } else {
                     self.is_option_result_wrapper(typed_tr.expr_type, "Option")
@@ -233,7 +230,7 @@ given TypeChecker {
 
                 let mutable arms = List[TypedWhenArm].new();
                 let result_span = unknown_span();
-                if has_ok and has_error then {
+                if is_result_operand then {
                     let mutable ok_elems = List[PatternElement].new();
                     ok_elems.push(PatternElement(Option[String].None(), PatternNode.Variable("it", false, result_span)));
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span);
@@ -1588,9 +1585,15 @@ given TypeChecker {
                 for ta in type_args then {
                     resolved_args.push(self.resolve_type_in_scope(ta, scope));
                 };
-                let base_type_opt = when self.lookup_current_file_type_symbol(base) in {
+                // A type parameter first: `T.zero()` inside `[T Zero]` names the
+                // parameter, not a global that happens to be called `T`. Module
+                // names still resolve through the qualified tables below.
+                let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(base) in {
                     .Some(t) then Option[Type].Some(t),
-                    .None() then self.storage.global_scope.lookup_type(base),
+                    .None() then when self.lookup_current_file_type_symbol(base) in {
+                        .Some(t) then Option[Type].Some(t),
+                        .None() then self.storage.global_scope.lookup_type(base),
+                    },
                 };
                 if base_type_opt is .Some(base_type) then {
                     let is_enum = when base_type in {

@@ -268,7 +268,7 @@ given TypeChecker {
                         return self_type;
                     };
                     // Check current_scope before falling back (Swift: currentScope.resolveType)
-                    if self.storage.current_scope.lookup_type(name) is .Some(t) then {
+                    if self.resolve_type_name_binding(name) is .Some(t) then {
                         return self.surface_named_type(self.canonicalize_alias_type(t));
                     };
                     self.surface_named_type(self.resolve_named_type(name))
@@ -344,9 +344,9 @@ given TypeChecker {
                     return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 if self.is_enum_base_name(base) then {
-                    return Type.GenericEnum(base, self.storage.generic_templates.lookup_enum_def_id(base), resolved_args);
+                    return Type.GenericEnum(base, self.generic_template_def_id(base), resolved_args);
                 };
-                return Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args);
+                return Type.GenericStruct(base, self.generic_template_def_id(base), resolved_args);
             },
             .InferredSelf() then self_type,
             .FunctionType(param_types, return_type) then {
@@ -569,6 +569,7 @@ given TypeChecker {
         declared_type_params List[TypeParameter],
         conformance_trait_name Option[String],
         retain_checked_template_bodies Bool,
+        tool_type_params List[TypeParameterDecl],
     ) List[TypedGivenMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params);
         self.register_generic_constraints(type_params);
@@ -607,7 +608,7 @@ given TypeChecker {
                     let mutable args = List[Type].new();
                     for trait_arg in trait_args then { args.push(trait_arg);};
                     let mutable constraints = List[GenericConstraintBound].new();
-                    constraints.push(GenericConstraintBound(trait_name, args));
+                    constraints.push(GenericConstraintBound(self.trait_def_id_of(trait_name) or else DefId(0(UInt)), trait_name, args));
                     self.storage.generic_param_constraints.insert("Self", constraints);
                     previous
                 },
@@ -773,6 +774,7 @@ given TypeChecker {
                     template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                     Option[Type].Some(ret),
+                    tool_type_params,
                 );
                 out.push(TypedGivenMember(
                     generic_method_def_id,
@@ -849,7 +851,10 @@ given TypeChecker {
     };
 
     module_private same_generic_constraint_bound(self, left GenericConstraintBound, right GenericConstraintBound) Bool = {
-        if left.trait_name <> right.trait_name then {
+        if left.trait_def_id <> right.trait_def_id then {
+            return false;
+        };
+        if left.trait_def_id.id == 0(UInt) and left.trait_name <> right.trait_name then {
             return false;
         };
         if left.type_args.count() <> right.type_args.count() then {
@@ -888,7 +893,7 @@ given TypeChecker {
         // Snapshot every parameter name we may touch, BEFORE touching any.
         let mutable touched = List[TypeParameter].new();
         for owner_type_param in owner_type_params then {
-            touched.push(TypeParameter(owner_type_param.name, List[TypeNode].new()));
+            touched.push(TypeParameter(owner_type_param.name, List[Bound].new()));
         };
         for arg in resolved_trait_args then {
             when arg in {
@@ -900,16 +905,21 @@ given TypeChecker {
                         };
                     };
                     if not already then {
-                        touched.push(TypeParameter(name, List[TypeNode].new()));
+                        touched.push(TypeParameter(name, List[Bound].new()));
                     };
                 },
                 _ then {},
             };
         };
         let snapshot = self.snapshot_generic_constraints(touched);
-        // Conformance bounds.
+        // Conformance bounds. The owner's whole parameter list is the binder
+        // scope for these constraints.
+        let mutable owner_param_names = List[String].new();
         for owner_type_param in owner_type_params then {
-            self.storage.generic_param_constraints.insert(owner_type_param.name, self.constraint_bounds_for_type_param(owner_type_param));
+            owner_param_names.push(owner_type_param.name);
+        };
+        for owner_type_param in owner_type_params then {
+            self.storage.generic_param_constraints.insert(owner_type_param.name, self.constraint_bounds_for_type_param(owner_type_param, owner_param_names));
         };
         // Tool block bounds, merged onto the mapped parameter.
         when self.storage.trait_registry.get(trait_name) in {
@@ -921,8 +931,12 @@ given TypeChecker {
                             when resolved_trait_args[search] in {
                                 .GenericParameter(mapped_name) then {
                                     let mutable bounds = self.storage.generic_param_constraints.get(mapped_name) or else List[GenericConstraintBound].new();
+                                    let mutable tool_param_names = List[String].new();
+                                    for tool_name in tool_type_params then {
+                                        tool_param_names.push(tool_name.name);
+                                    };
                                     for constraint_node in tool_param.constraints then {
-                                        let constraint = self.resolve_constraint_bound(constraint_node);
+                                        let constraint = self.resolve_constraint_bound(constraint_node, tool_param_names);
                                         let mutable already_known = false;
                                         for bound in bounds then {
                                             if self.same_generic_constraint_bound(bound, constraint) then {
@@ -1076,6 +1090,11 @@ given TypeChecker {
                             let prev_deferred = self.storage.constraint_enforcement_deferred;
                             self.storage.constraint_enforcement_deferred = true;
                             defer { self.storage.constraint_enforcement_deferred = prev_deferred;};
+                            // `entry.type_params` are the tool block's own generic
+                            // parameters -- the ones the body was written against.
+                            // They ride along on the template so monomorphization
+                            // can enforce their constraints against the concrete
+                            // trait arguments (Swift `enforceGenericConstraints`).
                             let typed_batch = self.check_given_members_for_type(
                                 single_method,
                                 target_type,
@@ -1083,6 +1102,7 @@ given TypeChecker {
                                 type_params,
                                 Option[String].Some(trait_name),
                                 retain_checked_template_bodies,
+                                entry.type_params,
                             );
                             for typed_member in typed_batch then {
                                 materialized_tool_members.push(typed_member);
@@ -1101,38 +1121,65 @@ given TypeChecker {
     };
 
     // Skips materializing a trait-tool method whose own constraints the target
-    // does not meet. A bound that is still generic is *undecided*, not missing —
-    // dropping the tool there erases `sum`/`product`/`average`/`copy_all_to` for
-    // every conforming type, and the call site then degrades to a member access
-    // instead of resolving one. Concrete bounds are enforced here; call sites
-    // enforce too (Swift `resolveGenericExtensionMethod` →
-    // `enforceGenericConstraints`, TypeCheckerMethods.swift:572).
+    // cannot meet. Bounds that are still open are left alone -- dropping the tool
+    // there erases `sum`/`product`/`average`/`copy_all_to` for every conforming
+    // type, and the call site then degrades to a member access instead of
+    // resolving one. Structurally impossible bounds are enforced here; call sites
+    // enforce too (Swift `resolveGenericExtensionMethod` ->
+    // `enforceGenericConstraints`, TypeCheckerMethods.swift:578).
     module_private trait_tool_type_params_satisfied(self, type_params List[TypeParameter], bindings Dict[String, Type]) Bool = {
         for type_param in type_params then {
             let bound_type = bindings.get(type_param.name) or else Type.GenericParameter(type_param.name);
-            if self.contains_generic_parameter(bound_type) or self.is_unresolved_expr_type(bound_type) then {
-                continue;
-            };
             for constraint in type_param.constraints then {
-                let constraint_name = self.type_node_name(constraint);
-                if constraint_name == "Any" then {
-                    continue;
-                };
-                let constraint_args = self.trait_type_args_with_bindings(constraint, bindings);
-                if constraint_args.is_empty() then {
-                    if constraint_name == "mutable" then {
-                        if not self.satisfies_mutable_constraint(bound_type) then {
+                // Shape bounds are not trait conformances and are not tool
+                // materialization requirements, so they are not checked here.
+                when bound_trait_name(constraint) in {
+                    .Some(_) then {
+                        if self.bound_may_hold(bound_type, constraint, bindings) then {
+                            continue;
+                        };
+                        if not self.satisfies_bound(bound_type, constraint, bindings) then {
                             return false;
                         };
-                    } else if not self.satisfies_trait_requirement_with_args(bound_type, constraint_name, List[Type].new()) then {
-                        return false;
-                    };
-                } else if not self.satisfies_trait_requirement_with_args(bound_type, constraint_name, constraint_args) then {
-                    return false;
+                    },
+                    .None() then {},
                 };
             };
         };
         return true;
+    };
+
+    // Can this bound still hold after substitution, or is it structurally
+    // impossible?
+    //
+    // It MAY HOLD when it is still open:
+    //   * the receiver is still a bare generic parameter (`FilterIterator[T, R] as
+    //     Iterator[T]` -- `T` may become `Int`, which does satisfy `Add`/`Zero`),
+    //   * or a conformance exists but is waiting on one of its own parameters
+    //     (`MissingConstraint`).
+    //
+    // It CANNOT hold when the receiver's nominal shape is already fixed and no
+    // conformance for this trait exists at all. `Pair[K, V]` is the case that
+    // mattered: its arguments are still generic, but `Pair` has no `as Add` /
+    // `as Zero` block in any substitution, so `Iterator[Pair[K, V]]` must never
+    // acquire `sum` / `product` / `average`. Treating "contains a generic
+    // parameter" as undecided is what let those through and broke self-hosting.
+    module_private trait_bound_may_hold(self, bound_type Type, trait_name String, trait_args List[Type]) Bool = {
+        if self.is_unresolved_expr_type(bound_type) then {
+            return true;
+        };
+        when bound_type in {
+            .GenericParameter(_) then { return true;},
+            _ then {},
+        };
+        when self.generic_trait_conformance_status(bound_type, trait_name, trait_args) in {
+            .Satisfied() then { return true;},
+            .MissingConstraint(constraint_target, _, _) then {
+                return self.contains_generic_parameter(constraint_target) or self.is_unresolved_expr_type(constraint_target);
+            },
+            .MissingBlanketGiven(_) then { return true;},
+            .MissingConformance() then { return false;},
+        };
     };
 
     module_private trait_tool_source_trait_bindings(
@@ -1159,11 +1206,7 @@ given TypeChecker {
             .None() then {},
         };
         let mutable visited = Set[String].new();
-        let collected = self.collect_trait_method_bindings_recursive(trait_name, bindings, visited);
-        if source_trait_name == trait_name then {
-            return collected;
-        };
-        return collected;
+        return self.collect_trait_method_bindings_recursive(trait_name, bindings, visited);
     };
 
     module_private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {

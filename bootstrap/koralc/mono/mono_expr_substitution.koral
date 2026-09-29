@@ -223,7 +223,7 @@ file_private let infer_type_construction_type_from_args(
         return Option[Type].None();
     };
 
-    if args.count() == 2(UInt) and (template_name == "Pair" or template_name.ends_with(".Pair")) then {
+    if args.count() == 2(UInt) and is_std_pair_def_id(mono.storage.context, identifier.def_id) then {
         let mutable pair_args = List[Type].new();
         pair_args.push(resolve_parameterized_type(mono, args[0(UInt)].expr_type));
         pair_args.push(resolve_parameterized_type(mono, args[1(UInt)].expr_type));
@@ -245,10 +245,17 @@ file_private let infer_type_construction_type_from_args(
                 return Option[Type].None();
             };
             let mutable bindings = Dict[String, Type].new();
-            let empty_subst = Dict[String, Type].new();
+            // The template's own parameters are bound to THEMSELVES, so a field
+            // typed `T` stays `GenericParameter("T")`. Leaving them unbound made
+            // the resolver fall through to the bare-name concrete-type table and
+            // pick up whatever global happened to be called `T`.
+            let self_subst = Dict[String, Type].new();
+            for type_param in template.type_parameters then {
+                self_subst.insert(type_param.name, Type.GenericParameter(type_param.name));
+            };
             let mutable i UInt = 0;
             while i < args.count() then {
-                let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, empty_subst);
+                let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, self_subst);
                 infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].expr_type), bindings);
                 i += 1;
             };
@@ -771,15 +778,7 @@ file_private let substitution_should_preserve_resolved_method_reference(
         return false;
     };
     return when mono.receiver_method_dispatch_info(method.def_id) in {
-        .Some(info) then when info.owner in {
-            .Some(owner) then when owner in {
-                .ExtensionTemplate(owner_name) then
-                owner_name == "Ref" or owner_name == "MutRef" or owner_name == "WeakRef" or owner_name == "MutWeakRef",
-                .ConcreteType(type_name) then
-                type_name == "Ref" or type_name == "MutRef" or type_name == "WeakRef" or type_name == "MutWeakRef",
-            },
-            .None() then false,
-        },
+        .Some(info) then is_ref_wrapper_owner(info.owner),
         .None() then false,
     };
 };
@@ -823,8 +822,8 @@ file_private let recover_member_field_type(
         .MutablePointerType(inner) then {
             return recover_member_field_type(mono, inner, member_name, fallback);
         },
-        .GenericStruct(template_name, _, args) then {
-            if template_name == "Pair" and args.count() == 2(UInt) then {
+        .GenericStruct(template_name, template_def_id, args) then {
+            if is_std_pair_def_id(mono.storage.context, template_def_id) and args.count() == 2(UInt) then {
                 when member_name in {
                     "first" then {
                         return resolve_parameterized_type(mono, (args[0(UInt)]));
@@ -937,7 +936,7 @@ file_private let substitute_expr_kind(
             };
             let mutable new_concrete_type = resolve_parameterized_type(mono, mono.substitute_type_impl(concrete_type, substitution));
             when new_trait_type in {
-                .TraitObject(trait_name, _, _) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
+                .TraitObject(trait_name, trait_def_id, _) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name, trait_def_id),
                 _ then {},
             };
             TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type)

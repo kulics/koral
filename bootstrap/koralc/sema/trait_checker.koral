@@ -30,6 +30,9 @@ public type TraitInfo(
 
 public type mutable TraitRegistry(
     mutable traits Dict[String, TraitInfo],
+    // Keyed on the trait DECLARATION's identity. Name lookup is a resolution
+    // step; anything that asks "is this the same trait" must come here.
+    mutable traits_by_def_id Dict[UInt, TraitInfo],
     mutable flattened_cache Dict[String, Dict[String, TypedTraitMember]],
     mutable object_safety_cache Dict[String, Bool],
 );
@@ -39,6 +42,7 @@ given TraitRegistry {
     public new() TraitRegistry = {
         return TraitRegistry(
             Dict[String, TraitInfo].new(),
+            Dict[UInt, TraitInfo].new(),
             Dict[String, Dict[String, TypedTraitMember]].new(),
             Dict[String, Bool].new()
         );
@@ -47,8 +51,13 @@ given TraitRegistry {
     public register(self, info TraitInfo) Void = {
         self.traits.insert(info.name, info);
         self.traits.insert(qualified_trait_key(info.module_path, info.name), info);
+        self.traits_by_def_id.insert(info.def_id.id, info);
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
         self.object_safety_cache = Dict[String, Bool].new();
+    };
+
+    public get_by_def_id(self, def_id DefId) Option[TraitInfo] = {
+        return self.traits_by_def_id.get(def_id.id);
     };
 
     public get(self, name String) Option[TraitInfo] = {
@@ -106,13 +115,6 @@ given TraitRegistry {
         if self.flattened_cache.get(cache_key) is .Some(cached) then {
             return Result[Dict[String, TypedTraitMember]].Ok(cached);
         };
-
-        // Swift flattenedTraitMethodsHelper: builtin constraints (`Any`, `mutable`)
-        // carry no methods — accept them, do not report them as undefined traits.
-        if is_builtin_trait(trait_name) then {
-            return Result[Dict[String, TypedTraitMember]].Ok(Dict[String, TypedTraitMember].new());
-        };
-
         when self.get_in_module(trait_name, module_path) in {
             .None() then {
                 let mutable message = StringBuilder.new();
@@ -250,27 +252,37 @@ given TraitRegistry {
         };
     };
 
-    // 检查 Trait 继承传递性：trait_name 是否继承自 target
-    public has_inheritance(self, trait_name String, target String) Bool = {
-        let mutable visited = Set[String].new();
-        return self.has_inheritance_internal(trait_name, target, visited);
+    /// Trait inheritance transitivity, by DECLARATION identity: does `trait_id`
+    /// inherit from (or equal) `target_id`? Same-named traits from different
+    /// modules are different traits and must not be conflated here.
+    public has_inheritance(self, trait_id DefId, target_id DefId) Bool = {
+        if trait_id == target_id then {
+            return true;
+        };
+        let mutable visited = Set[UInt].new();
+        return self.has_inheritance_internal(trait_id, target_id, visited);
     };
 
-    file_private has_inheritance_internal(self, trait_name String, target String, visited Set[String]) Bool = {
-        if visited.contains(trait_name) then {
+    file_private has_inheritance_internal(self, trait_id DefId, target_id DefId, visited Set[UInt]) Bool = {
+        if visited.contains(trait_id.id) then {
             return false;
         };
-        visited.insert(trait_name);
-        if trait_name == target then { return true;};
-        when self.traits.get(trait_name) in {
-            .None() then { return false;},
-            .Some(info) then {
-                for parent in info.parent_traits then {
-                    if self.has_inheritance_internal(parent.name, target, visited) then { return true;};
-                };
-                return false;
-            },
+        visited.insert(trait_id.id);
+        let info = self.traits_by_def_id.get(trait_id.id) or else {
+            return false;
         };
+        for parent in info.parent_traits then {
+            // A parent is written by name in the child's module; resolve it there.
+            when self.get_in_module(parent.name, info.module_path) in {
+                .Some(parent_info) then {
+                    if self.has_inheritance_internal(parent_info.def_id, target_id, visited) then {
+                        return true;
+                    };
+                },
+                .None() then {},
+            };
+        };
+        return false;
     };
 };
 

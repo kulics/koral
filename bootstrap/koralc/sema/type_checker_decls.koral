@@ -533,7 +533,8 @@ given TypeChecker {
                 TypedDecl.TraitDecl(access, name, typed_members, span)
             },
             .GivenDecl(target_type, type_params, members, span) then {
-                if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
+                if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                    or self.reject_invalid_generic_given_target_if_needed(target_type, type_params) then {
                     TypedDecl.GivenDecl(Type.Unknown(), List[TypedGivenMember].new(), span)
                 } else {
                     let trait_tool_name = self.trait_tool_target_name(target_type, type_params);
@@ -552,7 +553,7 @@ given TypeChecker {
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg));
                     };
-                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].None(), retain_checked_template_bodies);
+                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].None(), retain_checked_template_bodies, List[TypeParameterDecl].new());
                     if not self.contains_generic_parameter(resolved_target) then {
                         self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members, true, Option[DefId].None());
                     };
@@ -562,8 +563,9 @@ given TypeChecker {
                 }
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
-                let mutable result_decl = TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[TypedGivenMember].new(), span);
-                if not self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
+                let mutable result_decl = TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[TypedGivenMember].new(), span, self.trait_def_id_of(self.type_node_name(trait_type)) or else DefId(0(UInt)));
+                if not self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                    and not self.reject_invalid_generic_given_target_if_needed(target_type, type_params) then {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params);
                     self.register_generic_constraints(type_params);
                     let trait_name = self.type_node_name(trait_type);
@@ -572,7 +574,6 @@ given TypeChecker {
                     let resolved_trait_args = self.trait_type_args_with_bindings(trait_type, bindings);
                     self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args);
                     self.record_generic_trait_conformance_template(resolved_target, type_params, trait_name, resolved_trait_args);
-                    self.maybe_record_iterator_conformance_with_bindings(resolved_target, trait_type, bindings);
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
                         self.context(),
@@ -584,7 +585,7 @@ given TypeChecker {
                     if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg));
                     };
-                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].Some(trait_name), retain_checked_template_bodies);
+                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].Some(trait_name), retain_checked_template_bodies, List[TypeParameterDecl].new());
                     if self.is_std_drop_trait(trait_name) then {
                         self.validate_drop_member_signature(resolved_target, typed_members);
                         // Mark the target type as having explicit Drop conformance.
@@ -723,7 +724,7 @@ given TypeChecker {
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), conformance_trait_def_id, typed_members);
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), conformance_trait_def_id, tool_members);
                     self.restore_generic_constraints(generic_constraint_snapshot);
-                    result_decl = TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span);
+                    result_decl = TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span, self.trait_def_id_of(trait_name) or else DefId(0(UInt)));
                 };
                 result_decl
             },
@@ -735,7 +736,7 @@ given TypeChecker {
                     self.register_generic_constraints(type_params);
                     let bindings = self.generic_type_param_bindings(type_params);
                     let resolved_target = if type_params.is_empty() then self.resolve_type(target_type) else self.resolve_type_with_bindings(target_type, bindings);
-                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].None(), retain_checked_template_bodies);
+                    let mutable typed_members = self.check_given_members_for_type(members, resolved_target, type_params, type_params, Option[String].None(), retain_checked_template_bodies, List[TypeParameterDecl].new());
                     if not self.contains_generic_parameter(resolved_target) then {
                         self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members, true, Option[DefId].None());
                     };
@@ -743,10 +744,6 @@ given TypeChecker {
                     self.restore_generic_constraints(generic_constraint_snapshot);
                     TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }
-            },
-            .GivenNotTraitDecl(_, _, _, span) then {
-                // Reached only if a not-Deref declaration was not filtered by the pass driver.
-                TypedDecl.UsingDecl(AccessModifier.FilePrivate(), List[String].new(), span)
             },
         };
     };
@@ -761,6 +758,89 @@ given TypeChecker {
 
     module_private concrete_type_modifier_given_message(self) String = {
         return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T as SomeTrait { ... }'";
+    };
+
+    /// A generic given must target a generic type constructor applied to
+    /// exactly its own type parameters: `given [T Any] Box[T] { ... }`.
+    ///
+    /// A bare type name (`given [T Any] One { ... }`) leaves `T` unbound, and a
+    /// concrete specialization (`given [T Any] Box[Int]`) is not supported.
+    /// Type modifiers (`ref`, `ptr`, `?`) are the one non-nominal shape allowed.
+    ///
+    /// Returns true when the target was rejected. Mirrors Swift's
+    /// `decomposeGenericGivenTypeNode` and the checks around it.
+    module_private reject_invalid_generic_given_target_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
+        if type_params.is_empty() then {
+            return false;
+        };
+        let (base_name, args) = when target_type in {
+            .Generic(base, args) then (base, args),
+            .Reference(_, _) then ("Ref", List[TypeNode].new()),
+            .Pointer(_, _) then ("Ptr", List[TypeNode].new()),
+            .WeakReference(_, _) then ("WeakRef", List[TypeNode].new()),
+            _ then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "Invalid operation generic given on non-generic type between types  and "
+                    )
+                );
+                return true;
+            },
+        };
+        when target_type in {
+            .Generic(_, _) then {
+                if args.count() <> type_params.count() then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Type mismatch: expected \(type_params.count()) generic params, got \(args.count())"
+                        )
+                    );
+                    return true;
+                };
+                let mutable i UInt = 0;
+                while i < args.count() then {
+                    let arg_matches = when args[i] in {
+                        .Identifier(arg_name) then arg_name == type_params[i].name,
+                        _ then false,
+                    };
+                    if not arg_matches then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Invalid operation generic given specialization not supported between types \(type_node_display(args[i])) and "
+                            )
+                        );
+                        return true;
+                    };
+                    i += 1;
+                };
+            },
+            _ then {},
+        };
+        // `given [T Any] Iterator[T] { ... }` is a trait-ENTITY given -- it adds
+        // members to the trait itself. That shape is validated on its own path,
+        // so it is not subject to the nominal-target rule below.
+        let is_trait_entity = self.storage.trait_registry.get_in_module(base_name, self.storage.module_path) is .Some(_)
+            or self.storage.trait_registry.get(base_name) is .Some(_);
+        let is_type_constructor = self.storage.generic_templates.lookup_struct_def_id(base_name).is_valid()
+            or self.storage.generic_templates.lookup_enum_def_id(base_name).is_valid();
+        let is_type_modifier = base_name == "Ref" or base_name == "Ptr" or base_name == "WeakRef";
+        if not is_trait_entity and not is_type_constructor and not is_type_modifier then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Invalid operation generic given on non-generic type between types \(base_name) and "
+                )
+            );
+            return true;
+        };
+        return false;
     };
 
     module_private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {

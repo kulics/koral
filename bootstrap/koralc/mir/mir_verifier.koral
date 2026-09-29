@@ -315,7 +315,7 @@ given MIRVerifier {
 
     file_private verify_intrinsic(self, function MIRFunction, node MIRIntrinsic, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when node in {
-            .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
+            .TraitObjectMatches(value, trait_name, trait_def_id, trait_type_args, concrete_type) then {
                 let _ = self.verify_value(function, value, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(concrete_type) then {
                     return self.fail(function, "trait object match intrinsic has unresolved concrete type");
@@ -329,10 +329,10 @@ given MIRVerifier {
                 let actual = self.trait_object_reference_info(value_type) or else {
                     return self.fail(function, "trait object match intrinsic value is not a trait object");
                 };
-                if actual.first <> trait_name or not self.type_list_equals(actual.second, trait_type_args) then {
+                if actual.trait_def_id <> trait_def_id or not self.type_list_equals(actual.trait_type_args, trait_type_args) then {
                     return self.fail(function, "trait object match intrinsic value type does not match intrinsic trait metadata");
                 };
-                if self.lookup_vtable(concrete_type, trait_name, trait_type_args) is .None() then {
+                if self.lookup_vtable(concrete_type, trait_def_id, trait_type_args) is .None() then {
                     return self.fail(function, "trait object match intrinsic has no matching vtable");
                 };
                 Result[Void].Ok({})
@@ -422,7 +422,7 @@ given MIRVerifier {
                 return self.fail(function, "trait object conversion has unresolved trait type argument");
             };
         };
-        if self.lookup_vtable(conversion.concrete_type, conversion.trait_name, conversion.trait_type_args) is .None() then {
+        if self.lookup_vtable(conversion.concrete_type, conversion.trait_def_id, conversion.trait_type_args) is .None() then {
             return self.fail(function, "trait object conversion has no matching vtable");
         };
         let mutable inner_type = self.mir_type_of_value(conversion.inner, local_types);
@@ -442,7 +442,7 @@ given MIRVerifier {
         let target = self.trait_object_reference_info(conversion.result_type) or else {
             return self.fail(function, "trait object conversion result is not a trait object reference");
         };
-        if target.first <> conversion.trait_name or not self.type_list_equals(target.second, conversion.trait_type_args) then {
+        if target.trait_def_id <> conversion.trait_def_id or not self.type_list_equals(target.trait_type_args, conversion.trait_type_args) then {
             return self.fail(function, "trait object conversion result type does not match conversion trait metadata");
         };
         return self.verify_value(function, conversion.inner, local_ids, local_types);
@@ -476,7 +476,7 @@ given MIRVerifier {
                 "trait method call receiver is not a trait object reference: \(self.program.context.type_display_name(receiver_type)) for \(call.trait_name).\(call.method_name)",
             );
         };
-        if receiver_info.first <> call.trait_name or not self.type_list_equals(receiver_info.second, call.trait_type_args) then {
+        if receiver_info.trait_def_id <> call.trait_def_id or not self.type_list_equals(receiver_info.trait_type_args, call.trait_type_args) then {
             return self.fail(function, "trait method call receiver type does not match call trait metadata");
         };
         let ordered_names = self.ordered_trait_method_names_in_module(call.trait_name, self.function_module_path(function));
@@ -511,11 +511,14 @@ given MIRVerifier {
         return self.fail(function, "terminator targets missing block \(target.raw_value.to_string())");
     };
 
-    file_private lookup_vtable(self, concrete_type Type, trait_name String, trait_type_args List[Type]) Option[MIRTraitVTable] = {
+    // Lookup is by the vtable's IDENTITY: (concrete type, trait declaration,
+    // trait arguments). `MIRTraitVTable.matches` is the single definition of
+    // that identity -- never compare the trait's spelling here.
+    file_private lookup_vtable(self, concrete_type Type, trait_def_id DefId, trait_type_args List[Type]) Option[MIRTraitVTable] = {
         for global in self.program.globals then {
             when global in {
                 .TraitVTable(vtable) then {
-                    if self.same_type(vtable.concrete_type, concrete_type) and vtable.trait_name == trait_name and self.type_list_equals(vtable.trait_type_args, trait_type_args) then {
+                    if vtable.matches(concrete_type, trait_def_id, trait_type_args) then {
                         return Option[MIRTraitVTable].Some(vtable);
                     };
                 },
@@ -571,18 +574,21 @@ given MIRVerifier {
         };
     };
 
-    file_private trait_object_reference_info(self, t Type) Option[Pair[String, List[Type]]] = {
+    /// Resolves a trait-object type to the identity of the trait it names.
+    /// MIR keeps the declaration identity on every trait reference, so the
+    /// verifier compares identities and never spellings.
+    file_private trait_object_reference_info(self, t Type) Option[CanonicalTraitRef] = {
         return when t in {
-            .TraitObject(trait_name, _, trait_args) then {
+            .TraitObject(trait_name, trait_def_id, trait_args) then {
                 let mutable copied = List[Type].new();
                 for trait_arg in trait_args then { copied.push(trait_arg);};
-                Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](trait_name, copied))
+                Option[CanonicalTraitRef].Some(CanonicalTraitRef(trait_name, trait_def_id, copied))
             },
             .ReferenceType(inner) then self.trait_object_reference_info(inner),
             .MutableReferenceType(inner) then self.trait_object_reference_info(inner),
             .BorrowedReferenceType(inner) then self.trait_object_reference_info(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_reference_info(inner),
-            _ then Option[Pair[String, List[Type]]].None(),
+            _ then Option[CanonicalTraitRef].None(),
         };
     };
 

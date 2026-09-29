@@ -214,7 +214,7 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols));
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols, Option[DefId].None()));
                     };
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
@@ -226,10 +226,10 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols));
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols, Option[DefId].None()));
                     };
                 },
-                .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+                .GivenTraitDecl(target_type, trait_name, trait_args, members, _, trait_def_id) then {
                     let mutable copied_trait_args = List[Type].new();
                     for arg in trait_args then { copied_trait_args.push(arg);};
                     let mutable method_symbols = List[Symbol].new();
@@ -246,7 +246,7 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols));
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols, Option[DefId].Some(trait_def_id)));
                     };
                 },
                 .GenericFunctionDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
@@ -325,7 +325,7 @@ given MIRLowerer {
                 if self.should_lower_function(identifier) then {
                     let kind = when self.program.concrete_callables_by_def_id.get(identifier.def_id) in {
                         .Some(info) then when info.owner_type in {
-                            .Some(owner_type) then MIRFunctionKind.Given(owner_type, info.trait_conformance, List[Type].new()),
+                            .Some(owner_type) then MIRFunctionKind.Given(owner_type, info.trait_conformance, List[Type].new(), Option[DefId].None()),
                             .None() then MIRFunctionKind.Global(),
                         },
                         .None() then MIRFunctionKind.Global(),
@@ -357,7 +357,7 @@ given MIRLowerer {
                 };
             },
             .GivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new());
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new(), Option[DefId].None());
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -396,10 +396,10 @@ given MIRLowerer {
                     self.pending_work_items.push(methods_reversed.pop().unwrap());
                 };
             },
-            .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+            .GivenTraitDecl(target_type, trait_name, trait_args, members, _, trait_def_id) then {
                 let mutable copied_trait_args = List[Type].new();
                 for arg in trait_args then { copied_trait_args.push(arg);};
-                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args);
+                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args, Option[DefId].Some(trait_def_id));
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -439,7 +439,7 @@ given MIRLowerer {
                 };
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new());
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new(), Option[DefId].None());
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -595,6 +595,7 @@ given MIRLowerer {
         return MIRTraitVTable(
             request.concrete_type,
             request.trait_name,
+            request.trait_def_id,
             self.copy_type_ref_list(request.trait_type_args),
             self.make_trait_vtable_methods(request),
         );

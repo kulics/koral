@@ -18,13 +18,7 @@ public let qualified_trait_key(module_path List[String], name String) String = {
     return out.to_string();
 };
 
-// Swift `SemaUtils.isBuiltinTrait` — `Any` and `mutable` are constraint
 // keywords, not declarations. They impose no requirements and have no methods,
-// so every trait flattener must accept them and yield an empty method set
-// instead of reporting "Undefined trait: Any".
-public let is_builtin_trait(name String) Bool = {
-    return name == "Any" or name == "mutable";
-};
 
 given DefId as Eq {
     public equals(self, other DefId) Bool = self.id == other.id;
@@ -276,14 +270,17 @@ public type mutable DefIdMap(
     // 类型映射（DefId -> Type，用于占位类型或快速查找）
     mutable type_map Dict[UInt, Type],
 
-    // 标记禁止 `e` 解引用的 nominal 类型
-    mutable not_deref_types Set[UInt],
-
     // nominal mutability（type mutable 标记）
     mutable struct_mutables Dict[UInt, Bool],
 
     // 显式 Drop conformance 标记
     mutable explicit_drops Set[UInt],
+
+    // 标准 Drop trait 的声明身份（lang item）
+    mutable std_drop_trait_id Option[DefId],
+
+    // std 泛型枚举的声明身份（lang items：and then / or else 用的 Option、Result）
+    mutable std_flow_enum_ids Dict[String, DefId],
 );
 
 given DefIdMap {
@@ -319,9 +316,10 @@ given DefIdMap {
             Dict[UInt, List[StructField]].new(),
             Dict[UInt, String].new(),
             Dict[UInt, Type].new(),
-            Set[UInt].new(),
             Dict[UInt, Bool].new(),
-            Set[UInt].new()
+            Set[UInt].new(),
+            Option[DefId].None(),
+            Dict[String, DefId].new()
         );
     };
 
@@ -752,13 +750,6 @@ given DefIdMap {
         return self.type_map.get(id.id);
     };
 
-    public set_not_deref(self, id DefId) Void = {
-        self.not_deref_types.insert(id.id);
-    };
-
-    public is_not_deref(self, id DefId) Bool = {
-        return self.not_deref_types.contains(id.id);
-    };
 
     // ── Nominal Mutability（type mutable）──────────────────────────────
 

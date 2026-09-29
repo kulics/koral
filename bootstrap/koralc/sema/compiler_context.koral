@@ -470,12 +470,49 @@ given CompilerContext {
         return self.def_id_map.lookup_type(def_id);
     };
 
-    public is_not_deref(self, def_id DefId) Bool = {
-        return self.def_id_map.is_not_deref(def_id);
-    };
-
     public type_display_name(self, t Type) String = {
         return self.def_id_map.type_display_name(t);
+    };
+
+    /// The DECLARATION identity of the standard `Drop` trait, resolved once when
+    /// the trait is first recognised. Everything that has to answer "is this the
+    /// Drop protocol?" compares against this, never against the spelling "Drop"
+    /// -- a user trait that happens to be called Drop must not alias it.
+    public set_std_drop_trait_def_id(self, id DefId) Void = {
+        self.def_id_map.std_drop_trait_id = Option[DefId].Some(id);
+    };
+
+    /// The DECLARATION identity of a generic enum declared in std, recorded once
+    /// at registration. `and then` / `or else` are defined over std's `Option`
+    /// and `Result`; every later question "is this std's Option?" compares this
+    /// identity, never the spelling, so a user type also called `Option` is a
+    /// different type.
+    // ── Std nominal lang items ───────────────────────────────────────────
+    //
+    // Every std type the compiler gives built-in behaviour to (`Option` /
+    // `Result` for `and then`, `String` / `List` / `Deque` / `Dict` for
+    // subscripting and collection literals, `Range` for `..`, `Pair` for
+    // destructuring) is recorded here ONCE, by declaration identity, when the
+    // std module is registered. Later questions compare the identity, so a user
+    // type with the same spelling is a different type and never inherits the
+    // built-in behaviour.
+
+    public set_std_type_def_id(self, name String, id DefId) Void = {
+        self.def_id_map.std_flow_enum_ids.insert(name, id);
+    };
+
+    public std_type_def_id(self, name String) Option[DefId] = {
+        return self.def_id_map.std_flow_enum_ids.get(name);
+    };
+
+    public is_std_drop_impl_def_id(self, id Option[DefId]) Bool = {
+        return when self.def_id_map.std_drop_trait_id in {
+            .Some(want) then when id in {
+                .Some(got) then got == want,
+                .None() then false,
+            },
+            .None() then false,
+        };
     };
 
     public has_explicit_drop(self, def_id DefId) Bool = {
@@ -837,10 +874,6 @@ given CompilerContext {
 
     public add_type(self, def_id DefId, t Type) Void = {
         self.def_id_map.add_type(def_id, t);
-    };
-
-    public set_not_deref(self, def_id DefId) Void = {
-        self.def_id_map.set_not_deref(def_id);
     };
 
     public clear_variable_symbol_types_in_range(self, start_id UInt, end_exclusive UInt) Void = {
@@ -1316,7 +1349,6 @@ given CompilerContext {
         self.def_id_map.struct_generic_instantiation = Dict[UInt, Bool].new();
         self.def_id_map.enum_generic_instantiation = Dict[UInt, Bool].new();
         self.def_id_map.foreign_struct_fields = Dict[UInt, List[StructField]].new();
-        self.def_id_map.not_deref_types = Set[UInt].new();
     };
 };
 

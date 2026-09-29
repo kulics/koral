@@ -31,15 +31,45 @@ public type MIRFunctionWorkItem(
 
 public type MIRFunctionKind {
     Global(),
-    Given(target_type Type, trait_name Option[String], trait_type_args List[Type]),
+    Given(target_type Type, trait_name Option[String], trait_type_args List[Type], trait_def_id Option[DefId]),
 };
 
+/// Identity of a vtable is (concrete type, trait DECLARATION, trait arguments).
+/// `trait_name` is display/C-mangling only -- two same-named traits declared in
+/// different modules are different traits and need different vtables, so nothing
+/// may key on the spelling.
 public type MIRTraitVTable(
     concrete_type Type,
     trait_name String,
+    trait_def_id DefId,
     trait_type_args List[Type],
     methods List[MIRTraitVTableMethod],
 );
+
+given MIRTraitVTable {
+    /// The single place that decides "is this the vtable for (concrete type,
+    /// trait declaration, trait arguments)". Every lookup must go through here
+    /// so the identity cannot drift between call sites.
+    public matches(self, concrete_type Type, trait_def_id DefId, trait_type_args List[Type]) Bool = {
+        if self.trait_def_id <> trait_def_id then {
+            return false;
+        };
+        if stable_type_key(self.concrete_type) <> stable_type_key(concrete_type) then {
+            return false;
+        };
+        if self.trait_type_args.count() <> trait_type_args.count() then {
+            return false;
+        };
+        let mutable i UInt = 0;
+        while i < self.trait_type_args.count() then {
+            if stable_type_key(self.trait_type_args[i]) <> stable_type_key(trait_type_args[i]) then {
+                return false;
+            };
+            i += 1;
+        };
+        return true;
+    };
+};
 
 public type MIRTraitVTableMethod(
     name String,
@@ -63,7 +93,7 @@ public type MIRGlobal {
     StructDeclaration(identifier Symbol, fields List[TypedField]),
     EnumDeclaration(identifier Symbol, cases List[TypedEnumCase]),
     Function(identifier Symbol, params List[TypedParam], return_type Type, kind MIRFunctionKind),
-    Given(target_type Type, trait_name Option[String], trait_type_args List[Type], methods List[Symbol]),
+    Given(target_type Type, trait_name Option[String], trait_type_args List[Type], methods List[Symbol], trait_def_id Option[DefId]),
     TraitVTable(vtable MIRTraitVTable),
     TemplatePlaceholder(name String),
 };
@@ -255,6 +285,7 @@ public type MIRTraitObjectConversion(
     inner MIRValue,
     source_ownership MIROwnershipUse,
     trait_name String,
+    trait_def_id DefId,
     trait_type_args List[Type],
     concrete_type Type,
     result_type Type,
@@ -264,6 +295,7 @@ public type MIRTraitMethodCall(
     receiver MIRValue,
     receiver_ownership MIROwnershipUse,
     trait_name String,
+    trait_def_id DefId,
     trait_type_args List[Type],
     method_name String,
     method_index Int,
@@ -287,7 +319,7 @@ public type MIRIntrinsic {
     MoveMemory(dest MIRValue, source MIRValue, count MIRValue),
     DowngradeRef(value MIRValue, result_type Type),
     UpgradeRef(value MIRValue, result_type Type),
-    TraitObjectMatches(value MIRValue, trait_name String, trait_type_args List[Type], concrete_type Type),
+    TraitObjectMatches(value MIRValue, trait_name String, trait_def_id DefId, trait_type_args List[Type], concrete_type Type),
     TraitObjectDowncast(value MIRValue, result_type Type),
     InitMemory(pointer MIRValue, value MIRValue),
     DeinitMemory(pointer MIRValue),

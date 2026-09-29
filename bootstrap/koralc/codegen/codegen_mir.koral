@@ -234,7 +234,7 @@ file_private let mir_walk_intrinsic_uses(
         },
         .DowngradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
         .UpgradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
-        .TraitObjectMatches(value, _, _, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
+        .TraitObjectMatches(value, _, _, _, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
         .TraitObjectDowncast(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value, block, active_scopes),
         .InitMemory(pointer, value) then {
             mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer, block, active_scopes);
@@ -1103,7 +1103,7 @@ given MIRFunctionCodeEmitter {
                     // but the argument is a raw value, wrap it in a stack borrow.
                     let mutable arg_type = self.type_of_value(call.arguments[0(UInt)]);
                     let mutable expected_param_type = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown();
-                    let needs_wrap = is_borrowed_reference_like_type(expected_param_type) and not is_borrowed_reference_like_type(arg_type);
+                    let needs_wrap = is_borrowed_reference_like_type(expected_param_type) and not is_reference_like_type(arg_type);
                     let final_emission = if needs_wrap then self.wrap_value_as_stack_borrow(emission.expression, arg_type, expected_param_type) else self.unwrap_reference_like_argument_if_needed(emission, arg_type, expected_param_type);
                     let expression = self.emit_direct_call_1(function_name, final_emission.expression, call.result_type);
                     if ownership is .Move() or ownership is .Take() then {
@@ -1122,8 +1122,8 @@ given MIRFunctionCodeEmitter {
                     let mutable second_type = self.type_of_value(call.arguments[1(UInt)]);
                     let first_expected = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown();
                     let second_expected = self.codegen.function_type_param_type(function_type, 1(UInt)) or else Type.Unknown();
-                    let first = if is_borrowed_reference_like_type(first_expected) and not is_borrowed_reference_like_type(first_type) then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected) else self.unwrap_reference_like_argument_if_needed(first_emission, first_type, first_expected);
-                    let second = if is_borrowed_reference_like_type(second_expected) and not is_borrowed_reference_like_type(second_type) then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected) else self.unwrap_reference_like_argument_if_needed(second_emission, second_type, second_expected);
+                    let first = if is_borrowed_reference_like_type(first_expected) and not is_reference_like_type(first_type) then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected) else self.unwrap_reference_like_argument_if_needed(first_emission, first_type, first_expected);
+                    let second = if is_borrowed_reference_like_type(second_expected) and not is_reference_like_type(second_type) then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected) else self.unwrap_reference_like_argument_if_needed(second_emission, second_type, second_expected);
                     let expression = self.emit_direct_call_2(function_name, first.expression, second.expression, call.result_type);
                     if first_ownership is .Move() or first_ownership is .Take() then {
                         self.consume_moved_source(call.arguments[0(UInt)]);
@@ -1166,7 +1166,7 @@ given MIRFunctionCodeEmitter {
             // Auto-wrap: if the function parameter expects a borrowed reference
             // but the argument is a raw value, wrap it in a stack borrow.
             let mutable arg_type = self.type_of_value(arg);
-            let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_borrowed_reference_like_type(arg_type);
+            let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_reference_like_type(arg_type);
             if needs_wrap then {
                 let wrapped = self.wrap_value_as_stack_borrow(emission.expression, arg_type, fn_param_types[arg_i]);
                 emissions.push(wrapped);
@@ -1737,7 +1737,7 @@ given MIRFunctionCodeEmitter {
             self.emit_residual_cleanups(emission, call.argument_ownerships[idx] is .Move());
             idx += 1;
         };
-        let expression = self.emit_trait_method_call_abi(receiver.expression, call.receiver_ownership, call.trait_name, self.type_list_to_ref_list(call.trait_type_args), call.method_name, call.method_index, arg_values, arg_types, call.result_type);
+        let expression = self.emit_trait_method_call_abi(receiver.expression, call.receiver_ownership, call.trait_name, call.trait_def_id, self.type_list_to_ref_list(call.trait_type_args), call.method_name, call.method_index, arg_values, arg_types, call.result_type);
         if call.receiver_ownership is .Move() then {
             self.consume_moved_source(call.receiver);
         };
@@ -1750,6 +1750,7 @@ given MIRFunctionCodeEmitter {
         receiver_result String,
         receiver_ownership MIROwnershipUse,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         method_name String,
         method_index Int,
@@ -1757,7 +1758,7 @@ given MIRFunctionCodeEmitter {
         arg_types List[Type],
         result_type Type,
     ) String = {
-        let members = self.codegen.get_ordered_trait_members_for_vtable(trait_name, self.codegen.trait_object_type_from_name(trait_name), trait_type_args);
+        let members = self.codegen.get_ordered_trait_members_for_vtable(trait_name, trait_def_id, self.codegen.trait_object_type_from_name(trait_name), trait_type_args);
         let mutable dispatch_method_name = method_name;
         let mutable signature_return_type = result_type;
         let mutable signature_param_types = List[Type].new();
@@ -2023,7 +2024,7 @@ given MIRFunctionCodeEmitter {
             .MoveMemory(dest, source, count) then self.emit_memory_transfer("memmove", dest, source, count),
             .DowngradeRef(value, result_type) then self.emit_downgrade_ref(value, result_type),
             .UpgradeRef(value, result_type) then self.emit_upgrade_ref(value, result_type),
-            .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
+            .TraitObjectMatches(value, trait_name, _, trait_type_args, concrete_type) then {
                 let emission = self.emit_value_source(value);
                 let concrete_c_name = self.codegen.concrete_type_c_name_fallback(concrete_type) or else self.codegen.sanitize_codegen_identifier(self.codegen.c_type_name(concrete_type));
                 let vtable_name = self.codegen.vtable_instance_name(trait_name, concrete_c_name);
@@ -2489,7 +2490,7 @@ given MIRFunctionCodeEmitter {
             .AllocMemory(_, result_type) then result_type,
             .DowngradeRef(_, result_type) then result_type,
             .UpgradeRef(_, result_type) then result_type,
-            .TraitObjectMatches(_, _, _, _) then Type.BoolType(),
+            .TraitObjectMatches(_, _, _, _, _) then Type.BoolType(),
             .TraitObjectDowncast(_, result_type) then result_type,
             .TakeMemory(_, result_type) then result_type,
             .NullPtr(result_type) then result_type,
@@ -3175,7 +3176,7 @@ given CodeGen {
         let saved_owner_type = self.current_function_owner_type;
         let concrete_return_type = self.concretize_codegen_type(declared_return_type);
         self.current_function_owner_type = when function.kind in {
-            .Given(target_type, _, _) then Option[Type].Some(target_type),
+            .Given(target_type, _, _, _) then Option[Type].Some(target_type),
             .Global() then self.receiver_owner_type_from_typed_params(function.params),
         };
 

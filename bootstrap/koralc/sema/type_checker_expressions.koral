@@ -203,13 +203,29 @@ given TypeChecker {
         return false;
     };
 
+    /// Whether a module path names the standard library root.
+    module_private is_std_module_path(self, module_path List[String]) Bool = {
+        if module_path.is_empty() then { return false;};
+        let root = module_path[0(UInt)];
+        return root == "Std" or root == "std";
+    };
+
+    /// The single place where the Drop protocol is recognised. The spelling
+    /// "Drop" is read HERE (it has to be, this is the language's link point for
+    /// the compiler protocol) and the result is the declaration's DefId, which
+    /// every later comparison uses.
     module_private is_std_drop_trait(self, trait_name String) Bool = {
         if trait_name <> "Drop" then { return false;};
         return when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false;};
                 let root = info.module_path[0(UInt)];
-                root == "Std" or root == "std"
+                if root == "Std" or root == "std" then {
+                    self.context().set_std_drop_trait_def_id(info.def_id);
+                    true
+                } else {
+                    false
+                }
             },
             .None() then false,
         };
@@ -321,10 +337,9 @@ given TypeChecker {
                 .Some(template) then {
                     for tp in template.type_parameters then {
                         for constraint in tp.constraints then {
-                            let trait_name = self.type_node_name(constraint);
-                            if trait_name == "Any" then {
-                                continue;
-                            };
+                            // Shape bounds name no trait, so there is no trait
+                            // declaration to check visibility for.
+                            let trait_name = bound_trait_name(constraint) or else { continue;};
                             when self.storage.trait_registry.get(trait_name) in {
                                 .Some(info) then {
                                     if self.make_visibility_checker() is .Some(checker) then {
@@ -452,7 +467,7 @@ given TypeChecker {
                 };
                 let checked_inner_t = when inner_t in {
                     .Unknown() then inner_t,
-                    _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
+                    _ then inner_t,
                 };
                 when typed_inner.expr_type in {
                     .PointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), checked_inner_t),
@@ -492,7 +507,7 @@ given TypeChecker {
                 };
                 let checked_inner_t = when inner_t in {
                     .Unknown() then inner_t,
-                    _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
+                    _ then inner_t,
                 };
                 make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), checked_inner_t)
             },
@@ -1083,8 +1098,9 @@ given TypeChecker {
             .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                 .Some(constraints) then {
                     let mutable matched = false;
+                    let expected_trait_id = self.trait_def_id_of(expected_trait_name) or else DefId(0(UInt));
                     for constraint in constraints then {
-                        if constraint.trait_name == expected_trait_name then {
+                        if constraint.trait_def_id == expected_trait_id then {
                             matched = true;
                         };
                     };
@@ -1712,23 +1728,10 @@ given TypeChecker {
                         },
                         _ then {},
                     };
-                    let should_defer_generic_deref_receiver_ref = when expr.expr_type in {
-                        .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
-                            .Some(constraints) then {
-                                let mutable found = false;
-                                for c in constraints then {
-                                    if c.trait_name == "Deref" then { found = true;};
-                                };
-                                found
-                            },
-                            .None() then false,
-                        },
-                        _ then false,
-                    };
                     let ref_expr = when expr.expr_type in {
                         .ReferenceType(_) then expr,
                         .BorrowedReferenceType(_) then expr,
-                        _ then if not should_defer_generic_deref_receiver_ref and self.can_take_implicit_ref_receiver(expr_ref) and self.can_convert_to_trait_object(expr.expr_type, expected_trait_type) then make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(expr.expr_type)) else expr,
+                        _ then if self.can_take_implicit_ref_receiver(expr_ref) and self.can_convert_to_trait_object(expr.expr_type, expected_trait_type) then make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(expr.expr_type)) else expr,
                     };
                     let can_cast = when ref_expr.expr_type in {
                         .ReferenceType(inner) then self.can_convert_to_trait_object(inner, expected_trait_type),

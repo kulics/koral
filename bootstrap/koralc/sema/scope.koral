@@ -146,6 +146,35 @@ given Scope {
         return self.storage.generic_params.contains(name);
     };
 
+    /// The type parameter named `name`, if any enclosing scope declares one.
+    ///
+    /// Walks the scope chain and matches ONLY generic parameters -- never an
+    /// ordinary type entry. That distinction matters: a type parameter must
+    /// shadow a same-named module-level type, while two same-named module-level
+    /// types must still be disambiguated by their (module, name) identity.
+    public lookup_generic_param_type(self, name String) Option[Type] = {
+        let mutable current_opt = Option[Scope].Some(self);
+        let mutable traversed UInt = 0;
+        while current_opt is .Some(_) then {
+            let current = when current_opt in {
+                .Some(scope) then scope,
+                .None() then self,
+            };
+            if current.storage.generic_params.contains(name) then {
+                when current.storage.type_entries.get(name) in {
+                    .Some(t) then { return Option[Type].Some(t); },
+                    .None() then {},
+                };
+            };
+            traversed += 1;
+            if traversed > 4096(UInt) then {
+                return Option[Type].None();
+            };
+            current_opt = current.storage.parent;
+        };
+        return Option[Type].None();
+    };
+
     public is_local_type_binding(self, name String) Bool = {
         if self.storage.parent is .None() then {
             return false;

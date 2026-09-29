@@ -10,12 +10,27 @@ given TypeChecker {
         };
     };
 
+    module_private copied_bound(self, b Bound) Bound = {
+        return when b in {
+            .Trait(def_id, name, args) then Bound.Trait(def_id, name, self.copy_type_node_list(args)),
+            .Mutable() then Bound.Mutable(),
+        };
+    };
+
+    module_private copy_type_node_list(self, values List[TypeNode]) List[TypeNode] = {
+        let mutable copied = List[TypeNode].with_capacity(values.count());
+        for value in values then {
+            copied.push(self.copy_type_node(value));
+        };
+        return copied;
+    };
+
     module_private copy_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameterDecl] = {
         let mutable copied = List[TypeParameterDecl].new();
         for type_param in type_params then {
-            let mutable constraints = List[TypeNode].with_capacity(type_param.constraints.count());
+            let mutable constraints = List[Bound].with_capacity(type_param.constraints.count());
             for constraint in type_param.constraints then {
-                constraints.push(self.copy_type_node(constraint));
+                constraints.push(self.copied_bound(constraint));
             };
             copied.push(TypeParameterDecl(type_param.name, constraints));
         };
@@ -106,6 +121,7 @@ given TypeChecker {
         checked_body Option[TypedExpr],
         checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
+        tool_type_params List[TypeParameterDecl],
     ) GenericExtensionMethodTemplate = {
         return GenericExtensionMethodTemplate(
             self.copy_template_type_params(type_params),
@@ -121,6 +137,7 @@ given TypeChecker {
             self.copy_optional_checked_body(checked_body),
             self.copy_optional_symbols(checked_parameters),
             self.copy_optional_type(checked_return_type),
+            self.copy_template_type_params(tool_type_params),
         );
     };
 
@@ -139,6 +156,7 @@ given TypeChecker {
         checked_body Option[TypedExpr],
         checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
+        tool_type_params List[TypeParameterDecl],
     ) GenericExtensionMethodTemplate = {
         let _ = self;
         return GenericExtensionMethodTemplate(
@@ -155,6 +173,7 @@ given TypeChecker {
             checked_body,
             checked_parameters,
             checked_return_type,
+            tool_type_params,
         );
     };
 
@@ -207,7 +226,7 @@ given TypeChecker {
                 .Some(bound) then bound,
                 .None() then {
                     // Check current_scope before falling back (Swift: currentScope.resolveType)
-                    if self.storage.current_scope.lookup_type(name) is .Some(t) then {
+                    if self.resolve_type_name_binding(name) is .Some(t) then {
                         return self.canonicalize_alias_type(t);
                     };
                     self.resolve_type(node)
@@ -284,7 +303,7 @@ given TypeChecker {
                     resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
                 };
                 if self.is_enum_base_name(base) then {
-                    Type.GenericEnum(base, self.storage.generic_templates.lookup_enum_def_id(base), resolved_args)
+                    Type.GenericEnum(base, self.generic_template_def_id(base), resolved_args)
                 } else {
                     Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args)
                 }
@@ -393,6 +412,7 @@ given TypeChecker {
         checked_body Option[TypedExpr],
         checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
+        tool_type_params List[TypeParameterDecl],
     ) Void = {
         let copied_method_type_params = self.to_template_type_params(method_type_params);
         let copied_method_params = self.to_template_params(method_params);
@@ -435,7 +455,9 @@ given TypeChecker {
 
             checked_parameters,
 
-            template_checked_return_type
+            template_checked_return_type,
+
+            self.copy_template_type_params(tool_type_params)
         );
         self.upsert_extension_template(type_key, primary_template);
     };
@@ -488,7 +510,9 @@ given TypeChecker {
 
                             checked_parameters,
 
-                            Option[Type].Some(checked_return_type)
+                            Option[Type].Some(checked_return_type),
+
+                            current_ref.tool_type_params
                         );
                         self.storage.generic_templates.extension_methods.insert(type_key, updated);
                         return;
@@ -929,7 +953,9 @@ given TypeChecker {
 
                     template.checked_parameters,
 
-                    template.checked_return_type
+                    template.checked_return_type,
+
+                    template.tool_type_params
                 );
                 self.record_instantiation_request(InstantiationRequest(
                     InstantiationKind.ExtensionMethod(
@@ -996,7 +1022,9 @@ given TypeChecker {
 
                         matched_template.checked_parameters,
 
-                        matched_template.checked_return_type
+                        matched_template.checked_return_type,
+
+                        matched_template.tool_type_params
                     );
                     self.record_instantiation_request(InstantiationRequest(
                         InstantiationKind.ExtensionMethod(

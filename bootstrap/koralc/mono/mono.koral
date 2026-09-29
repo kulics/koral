@@ -36,6 +36,8 @@ public type ConcreteCallableInfo(
     logical_name String,
     owner_type Option[Type],
     trait_conformance Option[String],
+    // Declaration identity of `trait_conformance`; the name above is display-only.
+    trait_conformance_def_id Option[DefId],
 );
 
 file_private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
@@ -276,9 +278,13 @@ public type TemplateInfo(
 
 // A request to generate a vtable for a (concrete_type, trait) combination.
 // Collected during type resolution whenever a trait-object type is encountered.
+// `trait_def_id` is the trait DECLARATION's identity and is what deduplicates
+// requests: two same-named traits from different modules are different traits
+// and need different vtables.
 public type VtableRequest(
     concrete_type Type,
     trait_name String,
+    trait_def_id DefId,
     trait_type_args List[Type],
     witness_key String,
 );
@@ -468,7 +474,7 @@ file_private let is_non_generic_decl(decl TypedDecl) Bool = {
             let _ = members;
             not has_generic_parameter(target_type)
         },
-        .GivenTraitDecl(target_type, _, _, members, _) then {
+        .GivenTraitDecl(target_type, _, _, members, _, _) then {
             let _ = members;
             not has_generic_parameter(target_type)
         },
@@ -500,7 +506,7 @@ file_private let given_members_have_generic_parameter(members List[TypedGivenMem
 file_private let is_source_given_decl(decl TypedDecl) Bool = {
     return when decl in {
         .GivenDecl(_, _, _) then true,
-        .GivenTraitDecl(_, _, _, _, _) then true,
+        .GivenTraitDecl(_, _, _, _, _, _) then true,
         .IntrinsicGivenDecl(_, _, _) then true,
         _ then false,
     };
@@ -542,7 +548,7 @@ file_private let mono_decl_kind_name(decl TypedDecl) String = {
         .IntrinsicTypeDecl(_, _, _) then "intrinsic-type",
         .TraitDecl(_, _, _, _) then "trait",
         .GivenDecl(_, _, _) then "given",
-        .GivenTraitDecl(_, _, _, _, _) then "given-trait",
+        .GivenTraitDecl(_, _, _, _, _, _) then "given-trait",
         .IntrinsicGivenDecl(_, _, _) then "intrinsic-given",
         .ForeignTypeDecl(_, _, _, _, _) then "foreign-type",
         .UsingDecl(_, _, _) then "using",
@@ -567,7 +573,7 @@ file_private let mono_decl_dedup_key(decl TypedDecl) Option[String] = {
             };
             Option[String].Some(out.to_string())
         },
-        .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, _, _) then {
             let mutable out = StringBuilder.new();
             out.push_string("given-trait:\(layout_key(target_type)):\(trait_name)");
             for trait_arg in trait_args then {
@@ -615,9 +621,9 @@ file_private type MonoProgramInputs(
 
 file_private let source_given_trait_decl_skeleton(decl_ref TypedDecl) Option[TypedDecl] = {
     return when decl_ref in {
-        .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, span, decl_trait_id) then {
             let _ = members;
-            Option[TypedDecl].Some(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, List[TypedGivenMember].new(), span))
+            Option[TypedDecl].Some(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, List[TypedGivenMember].new(), span, decl_trait_id))
         },
         _ then Option[TypedDecl].None(),
     };
@@ -798,19 +804,19 @@ given Monomorphizer {
     file_private seed_given_method_def_ids(self, node TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].None(), members);
+                self.register_given_members_def_ids(target_type, Option[String].None(), Option[DefId].None(), members);
             },
-            .GivenTraitDecl(target_type, trait_name, _, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].Some(trait_name), members);
+            .GivenTraitDecl(target_type, trait_name, _, members, _, trait_id) then {
+                self.register_given_members_def_ids(target_type, Option[String].Some(trait_name), Option[DefId].Some(trait_id), members);
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, Option[String].None(), members);
+                self.register_given_members_def_ids(target_type, Option[String].None(), Option[DefId].None(), members);
             },
             _ then {},
         };
     };
 
-    file_private register_given_members_def_ids(self, target_type Type, trait_conformance Option[String], members List[TypedGivenMember]) Void = {
+    file_private register_given_members_def_ids(self, target_type Type, trait_conformance Option[String], trait_conformance_def_id Option[DefId], members List[TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -838,7 +844,7 @@ given Monomorphizer {
             let method_type = Type.FunctionType(param_entries, m_ref.return_type);
             let method_symbol = Symbol(m_ref.def_id, method_type, SymbolKind.Function());
             self.register_concrete_callable_if_absent(
-                ConcreteCallableInfo(m_ref.def_id, m_ref.name, Option[Type].Some(resolved_type), trait_conformance)
+                ConcreteCallableInfo(m_ref.def_id, m_ref.name, Option[Type].Some(resolved_type), trait_conformance, trait_conformance_def_id)
             );
             for type_key in type_keys then {
                 let key1 = "\(type_key).\(m_ref.name)";
@@ -865,7 +871,7 @@ given Monomorphizer {
                     ReceiverMethodDispatchInfo(
                         m_ref.def_id,
                         m_ref.name,
-                        Option[ReceiverMethodOwner].Some(ReceiverMethodOwner.ConcreteType(display_name)),
+                        Option[ReceiverMethodOwner].Some(ReceiverMethodOwner.ConcreteType(resolved_type)),
                         trait_conformance,
                         trait_conformance_def_id,
                     ),
@@ -1520,8 +1526,8 @@ given Monomorphizer {
         instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args);
     };
 
-    instantiate_trait_vtable_methods_impl(self, concrete_type Type, trait_name String, trait_type_args List[Type]) Void = {
-        instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args);
+    instantiate_trait_vtable_methods_impl(self, concrete_type Type, trait_name String, trait_def_id DefId, trait_type_args List[Type]) Void = {
+        instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_def_id, trait_type_args);
     };
 
     // Substitute generic type parameters in a Type.
@@ -1559,7 +1565,7 @@ given Monomorphizer {
         // GivenDecl (inherent) overwrites; GivenTraitDecl only inserts if absent.
         for node_ref in nodes then {
             when node_ref in {
-                .GivenTraitDecl(target_type, _, _, members, _) then {
+                .GivenTraitDecl(target_type, _, _, members, _, _) then {
                     for m_ref in members then {
                         if given_member_has_generic_parameter(m_ref) then { continue;};
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
@@ -1628,7 +1634,7 @@ given Monomorphizer {
                         };
                     };
                 },
-                .GivenTraitDecl(target_type, _, trait_args, members, _) then {
+                .GivenTraitDecl(target_type, _, trait_args, members, _, _) then {
                     let mutable trait_args_concrete = true;
                     for trait_arg in trait_args then {
                         if has_generic_parameter(trait_arg) then {
@@ -1841,7 +1847,7 @@ given Monomorphizer {
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
                 .GivenDecl(_, _, _) then {},
-                .GivenTraitDecl(_, _, _, _, _) then {},
+                .GivenTraitDecl(_, _, _, _, _, _) then {},
                 .FunctionDecl(_, name, _, _, _, _, fn_id) then {
                     c_identifier_by_def_id.insert(fn_id.def_id.id, self.codegen_emitted_identifier_for_def(fn_id.def_id, name, foreign_def_ids));
                 },
@@ -1883,7 +1889,7 @@ given Monomorphizer {
                         c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, method_name));
                     };
                 },
-                .GivenTraitDecl(target_type, _, _, members, _) then {
+                .GivenTraitDecl(target_type, _, _, members, _, _) then {
                     let type_c_name = self.codegen_emitted_type_name(c_identifier_by_def_id, type_def_ids_by_name, target_type);
                     for m_ref in members then {
                         let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
@@ -1943,7 +1949,7 @@ file_private let print_mono_node(node TypedDecl, context CompilerContext) Void =
         .GivenDecl(target_type, members, span) then {
             println("  given \(mono_type_name(target_type, context)) { \(members.count()) methods }");
         },
-        .GivenTraitDecl(target_type, trait_name, _, members, span) then {
+        .GivenTraitDecl(target_type, trait_name, _, members, span, _) then {
             println("  given \(mono_type_name(target_type, context)) as \(trait_name) { \(members.count()) methods }");
         },
         _ then {},

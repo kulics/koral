@@ -5,11 +5,12 @@
 // ── TypeParameterDecl ─────────────────────────────────────────────────────────
 
 // A single type-parameter declaration on a generic template (e.g. `T` in `[T Any]List`).
-// Constraints are stored as raw TypeNode (matching Swift's TypeParameterDecl = (name, constraints: [TypeNode])).
-// Resolution to semantic types happens lazily at constraint-checking time.
+// Bounds are semantic (`Bound`), not raw type syntax: the kind is known at parse
+// time and trait identity is resolved once in sema. Matching Swift's
+// `TypeParameterDecl` shape but with the syntax layer removed.
 public type TypeParameterDecl(
     name String,
-    constraints List[TypeNode],
+    constraints List[Bound],
 );
 
 // ── MethodDeclaration ─────────────────────────────────────────────────────────
@@ -106,9 +107,47 @@ public type TraitDeclInfo(
 // ── ReceiverMethodOwner ───────────────────────────────────────────────────────
 
 // Identifies the owner of a receiver-dispatched method.
+//
+// `ConcreteType` carries the owner's TYPE, not its display name: "is this owner
+// one of the reference/pointer wrapper constructors?" has a direct answer in the
+// `Type` model and must not be asked by round-tripping a type through its
+// printed name and comparing strings.
 public type ReceiverMethodOwner {
     ExtensionTemplate(owner_name String),
-    ConcreteType(type_name String),
+    ConcreteType(owner_type Type),
+};
+
+/// Whether `t` is one of the language's reference/pointer wrapper types.
+/// Variant test -- no names involved.
+public let is_ref_wrapper_type(t Type) Bool = {
+    return when t in {
+        .ReferenceType(_) then true,
+        .MutableReferenceType(_) then true,
+        .BorrowedReferenceType(_) then true,
+        .MutableBorrowedReferenceType(_) then true,
+        .WeakReferenceType(_) then true,
+        .MutableWeakReferenceType(_) then true,
+        .PointerType(_) then true,
+        .MutablePointerType(_) then true,
+        _ then false,
+    };
+};
+
+/// Whether a receiver method's owner is one of the reference/pointer wrapper
+/// types. Decided from the owner's TYPE -- the old version round-tripped the
+/// type through its display name and compared the strings, which would also
+/// have matched a user type named `Ref`.
+public let is_ref_wrapper_owner(owner Option[ReceiverMethodOwner]) Bool = {
+    return when owner in {
+        .Some(o) then when o in {
+            .ConcreteType(owner_type) then is_ref_wrapper_type(owner_type),
+            // An extension template owner is keyed by name in the template
+            // registry; a user type named `Ref` would be a different template
+            // and is not one of the wrapper constructors.
+            .ExtensionTemplate(_) then false,
+        },
+        .None() then false,
+    };
 };
 
 // ── ReceiverMethodDispatchInfo ────────────────────────────────────────────────
@@ -171,6 +210,13 @@ public type mutable GenericExtensionMethodTemplate(
     mutable checked_body Option[TypedExpr],
     mutable checked_parameters Option[List[Symbol]],
     mutable checked_return_type Option[Type],
+    // The trait-tool block's OWN generic parameters, when this template is a
+    // tool method materialized onto a conformance. `type_params` above is the
+    // conformance's parameter list (what `type_args` binds to); the body was
+    // written against the tool's parameters, whose constraints must still hold.
+    // Parameter `i` binds to `conformance_trait_args[i]`. Empty for templates
+    // registered directly from a `given` block.
+    tool_type_params List[TypeParameterDecl],
 );
 
 // ── GenericTemplateRegistry ───────────────────────────────────────────────────

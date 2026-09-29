@@ -273,41 +273,28 @@ given TypeChecker {
     };
 
     module_private collection_literal_target_error(self, t Type) String = {
-        return when t in {
-            .GenericStruct(template, _, _) then if template == "Dict" then "Collection literal without ':' cannot be inferred as Dict" else "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict",
-            _ then "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict",
-        };
+        return if self.is_std_type(t, "Dict") then "Collection literal without ':' cannot be inferred as Dict" else "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict";
     };
 
     // 从集合类型中提取元素类型。
     // 例如 [T]List -> Some(T), [T]Set -> Some(T)
+    // 身份判定 -- 集合字面量只对 std 的 List/Set 生效，用户自定义的同名类型
+    // 不会被当成集合字面量的目标。
     module_private extract_collection_element_type(self, t Type) Option[Type] = {
-        return when t in {
-            .StructureType(def_id) then {
-                let template_name = self.context().get_template_name(def_id) or else "";
-                let type_args = self.context().get_type_arguments(def_id) or else List[Type].new();
-                if (template_name == "List" or template_name == "Set") and type_args.count() > 0(UInt) then Option[Type].Some(type_args[0(UInt)]) else Option[Type].None()
-            },
-            .GenericStruct(template, _, args) then {
-                if (template == "List" or template == "Set") and args.count() > 0(UInt) then Option[Type].Some((args[0(UInt)])) else Option[Type].None()
-            },
-            _ then Option[Type].None(),
+        if not (self.is_std_type(t, "List") or self.is_std_type(t, "Set")) then {
+            return Option[Type].None();
         };
+        let args = self.std_type_arguments(t);
+        return if args.count() > 0(UInt) then Option[Type].Some(args[0(UInt)]) else Option[Type].None();
     };
 
     // 从 Dict 类型中提取 key/value 类型。
-    // 例如 [K, V]Dict -> (Some(K), Some(V))
+    // 例如 [K, V]Dict -> (Some(K), Some(V))。身份判定，同上。
     module_private extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
-        return when t in {
-            .StructureType(def_id) then {
-                let template_name = self.context().get_template_name(def_id) or else "";
-                let type_args = self.context().get_type_arguments(def_id) or else List[Type].new();
-                if template_name == "Dict" and type_args.count() > 1(UInt) then Pair[Option[Type], Option[Type]](Option[Type].Some(type_args[0(UInt)]), Option[Type].Some(type_args[1(UInt)])) else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None())
-            },
-            .GenericStruct(template, _, args) then {
-                if template == "Dict" and args.count() > 1(UInt) then Pair[Option[Type], Option[Type]](Option[Type].Some((args[0(UInt)])), Option[Type].Some((args[1(UInt)]))) else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None())
-            },
-            _ then Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None()),
+        if not self.is_std_type(t, "Dict") then {
+            return Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None());
         };
+        let args = self.std_type_arguments(t);
+        return if args.count() > 1(UInt) then Pair[Option[Type], Option[Type]](Option[Type].Some(args[0(UInt)]), Option[Type].Some(args[1(UInt)])) else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None());
     };
 };

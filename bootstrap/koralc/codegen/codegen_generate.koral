@@ -109,7 +109,7 @@ given CodeGen {
                         panic("Generic MIR global function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))");
                     };
                 },
-                .Given(target_type, trait_name, trait_type_args, methods) then {
+                .Given(target_type, trait_name, trait_type_args, methods, _) then {
                     if self.type_contains_generic(target_type) then {
                         let trait_label = when trait_name in { .Some(name) then name, .None() then "" };
                         panic("Generic given target reached codegen: \(trait_label) on \(self.context.type_display_name(target_type))");
@@ -238,18 +238,19 @@ given CodeGen {
         };
     };
 
-    module_private is_std_drop_trait(self, trait_name String) Bool = {
-        return trait_name == "Drop";
+    /// Drop glue is identified by the Drop trait's DECLARATION identity, not by
+    /// the spelling "Drop". Sema resolves that identity once
+    /// (`CompilerContext.set_std_drop_trait_def_id`) and stamps it on every
+    /// `MIRGlobal.Given`.
+    module_private is_std_drop_impl(self, trait_def_id Option[DefId]) Bool = {
+        return self.context.is_std_drop_impl_def_id(trait_def_id);
     };
 
     user_defined_drop_for_type_name(self, type_name String) Option[String] = {
         for global in self.program.globals then {
             when global in {
-                .Given(target_type, trait_name, _, methods) then {
-                    let is_drop_trait = when trait_name in {
-                        .Some(name) then self.is_std_drop_trait(name),
-                        .None() then false,
-                    };
+                .Given(target_type, _, _, methods, trait_def_id) then {
+                    let is_drop_trait = self.is_std_drop_impl(trait_def_id);
                     if is_drop_trait and self.is_concrete_nominal_instance(target_type) and self.user_defined_drop_type_key(target_type) == type_name then {
                         for method in methods then {
                             if self.context.symbol_name(method) == "drop" then {
@@ -267,8 +268,8 @@ given CodeGen {
             let concrete = entry.second;
             if concrete.logical_name == "drop" then {
                 when concrete.trait_conformance in {
-                    .Some(trait_name) then {
-                        if self.is_std_drop_trait(trait_name) then {
+                    .Some(_) then {
+                        if self.is_std_drop_impl(concrete.trait_conformance_def_id) then {
                             when concrete.owner_type in {
                                 .Some(owner_type) then {
                                     if self.is_concrete_nominal_instance(owner_type) and self.user_defined_drop_type_key(owner_type) == type_name then {
@@ -396,7 +397,7 @@ given CodeGen {
                         _ then {},
                     };
                 },
-                .Given(_, _, _, _) then {},
+                .Given(_, _, _, _, _) then {},
                 _ then {},
             };
         };
@@ -536,7 +537,7 @@ given CodeGen {
             when global in {
                 .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(initializer_function, emitted),
                 .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(identifier, params, return_type, emitted),
-                .Given(_, _, _, methods) then {
+                .Given(_, _, _, methods, _) then {
                     for method in methods then {
                         self.emit_symbol_function_declaration(method, emitted);
                     };

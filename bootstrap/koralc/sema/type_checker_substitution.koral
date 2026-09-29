@@ -45,12 +45,12 @@ given TypeChecker {
             .GivenDecl(target_type, members, span) then {
                 TypedDecl.GivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
             },
-            .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
+            .GivenTraitDecl(target_type, trait_name, trait_args, members, span, _) then {
                 let mutable substituted_trait_args = List[Type].new();
                 for trait_arg in trait_args then {
                     substituted_trait_args.push(subst.apply(trait_arg));
                 };
-                TypedDecl.GivenTraitDecl(subst.apply(target_type), trait_name, substituted_trait_args, self.apply_subst_to_given_members(subst, members), span)
+                TypedDecl.GivenTraitDecl(subst.apply(target_type), trait_name, substituted_trait_args, self.apply_subst_to_given_members(subst, members), span, self.trait_def_id_of(trait_name) or else DefId(0(UInt)))
             },
             .IntrinsicGivenDecl(target_type, members, span) then {
                 TypedDecl.IntrinsicGivenDecl(subst.apply(target_type), self.apply_subst_to_given_members(subst, members), span)
@@ -256,12 +256,23 @@ given TypeChecker {
         };
     };
 
+    /// Whether `name` names std's `Pair` type in the current scope.
+    ///
+    /// Used to recognise the tuple-construction desugaring. Name resolution
+    /// happens here, once; the caller then only compares the identity.
+    module_private constructs_std_pair(self, name String) Bool = {
+        return when self.resolve_type_name_binding(name) in {
+            .Some(resolved) then self.is_std_type(resolved, "Pair"),
+            .None() then false,
+        };
+    };
+
     module_private concretize_pair_constructor_binding_type(self, binding_type Type, value Expr, scope Scope) Type = {
         let mutable pair_template_def_id = Option[DefId].None();
         let needs_pair_args = when binding_type in {
-            .StructureType(def_id) then (self.context().get_name(def_id) or else "") == "Pair",
-            .GenericStruct(template_name, template_def_id, args) then {
-                if template_name <> "Pair" or args.count() <> 2(UInt) then {
+            .StructureType(def_id) then self.is_std_type(binding_type, "Pair"),
+            .GenericStruct(_, template_def_id, args) then {
+                if not self.is_std_type(binding_type, "Pair") or args.count() <> 2(UInt) then {
                     false
                 };
                 let mutable unresolved = false;
@@ -283,7 +294,14 @@ given TypeChecker {
         return when value in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then {
-                    if name <> "Pair" or args.count() <> 2(UInt) then {
+                    if args.count() <> 2(UInt) then {
+                        return binding_type;
+                    };
+                    // The parser desugars tuple syntax `(a, b)` into a `Pair(a, b)`
+                    // call. Confirm the callee name really names std's `Pair`
+                    // before using the argument types to refine the pair's type
+                    // arguments -- a user type called `Pair` must not match.
+                    if not self.constructs_std_pair(name) then {
                         return binding_type;
                     };
                     let first_arg = args[0(UInt)];

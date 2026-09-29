@@ -22,6 +22,7 @@ file_private let vtable_debug_enabled() Bool = {
 type VtableCodegenRequest(
     concrete_type Type,
     trait_name String,
+    trait_def_id DefId,
     trait_type_args List[Type],
     methods List[MIRTraitVTableMethod],
 );
@@ -345,32 +346,6 @@ given CodeGen {
         return layout_key(normalized_requested) == layout_key(normalized_candidate);
     };
 
-    module_private trait_vtable_receiver_has_full_impl(self, trait_name String, concrete_type Type) Bool = {
-        let mutable normalized_concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type));
-        let members = self.get_ordered_trait_members_for_vtable(trait_name, normalized_concrete_type, List[Type].new());
-        if members.is_empty() then {
-            return false;
-        };
-        for member in members then {
-            if self.resolve_method_def_id(normalized_concrete_type, trait_name, member.name, List[Type].new()) is .None() then {
-                return false;
-            };
-        };
-        return true;
-    };
-
-    module_private trait_vtable_receiver_type(self, trait_name String, concrete_type Type) Type = {
-        let mutable direct_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type));
-        if self.trait_vtable_receiver_has_full_impl(trait_name, direct_type) then {
-            return direct_type;
-        };
-        let mutable unwrapped_type = self.unwrap_vtable_receiver_value_type(concrete_type);
-        if self.trait_vtable_receiver_has_full_impl(trait_name, unwrapped_type) then {
-            return unwrapped_type;
-        };
-        return direct_type;
-    };
-
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
     /// Convert List[Type] to List[Type] for function calls
@@ -386,10 +361,11 @@ given CodeGen {
         self,
         concrete_type Type,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         method_name String,
     ) Option[DefId] = {
-        let trait_ref = CanonicalTraitRef(trait_name, trait_type_args);
+        let trait_ref = CanonicalTraitRef(trait_name, trait_def_id, trait_type_args);
         when self.program.conformance_witnesses.get(trait_ref.key(concrete_type)) in {
             .Some(witness) then {
                 when witness.local_implementation_def_ids_by_method_name.get(method_name) in {
@@ -400,6 +376,7 @@ given CodeGen {
                     when self.resolve_method_def_id_from_witness(
                         concrete_type,
                         parent_trait_ref.trait_name,
+                        parent_trait_ref.trait_def_id,
                         parent_trait_ref.trait_type_args,
                         method_name
                     ) in {
@@ -413,8 +390,8 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    resolve_method_def_id(self, concrete_type Type, trait_name String, method_name String, trait_type_args List[Type]) Option[DefId] = {
-        when self.resolve_method_def_id_from_witness(concrete_type, trait_name, trait_type_args, method_name) in {
+    resolve_method_def_id(self, concrete_type Type, trait_name String, trait_def_id DefId, method_name String, trait_type_args List[Type]) Option[DefId] = {
+        when self.resolve_method_def_id_from_witness(concrete_type, trait_name, trait_def_id, trait_type_args, method_name) in {
             .Some(def_id) then { return Option[DefId].Some(def_id); },
             .None() then {},
         };
@@ -438,8 +415,9 @@ given CodeGen {
 
         when self.trait_info(trait_name, self.type_module_path(concrete_type)) in {
             .Some(trait_info) then {
-                for parent_trait_name in trait_info.parent_traits then {
-                    when self.resolve_method_def_id(concrete_type, parent_trait_name.name, method_name, trait_type_args) in {
+                for parent_constraint in trait_info.parent_traits then {
+                    let parent_def_id = self.trait_def_id_by_name(parent_constraint.name, trait_info.module_path);
+                    when self.resolve_method_def_id(concrete_type, parent_constraint.name, parent_def_id, method_name, trait_type_args) in {
                         .Some(def_id) then {
                             return Option[DefId].Some(def_id);
                         },
@@ -470,6 +448,17 @@ given CodeGen {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
+        };
+    };
+
+    /// Resolves a trait spelling to the declaration identity it names, preferring
+    /// the trait declared in `preferred_module_path`. Used only where the caller
+    /// holds a name and nothing else (parent-trait walks); anything that already
+    /// carries the identity must pass it through instead of re-resolving.
+    module_private trait_def_id_by_name(self, trait_name String, preferred_module_path List[String]) DefId = {
+        return when self.trait_info(trait_name, preferred_module_path) in {
+            .Some(info) then info.def_id,
+            .None() then def_id_invalid(),
         };
     };
 
@@ -822,13 +811,14 @@ given CodeGen {
         self,
         members List[MIRTraitVTableMethod],
         trait_name String,
+        trait_def_id DefId,
         concrete_type Type,
     ) List[MIRTraitVTableMethod] = {
         let mutable members = members;
         let mutable idx UInt = 0;
         while idx < members.count() then {
             let member = members[idx];
-            when self.resolve_method_def_id(concrete_type, trait_name, member.name, List[Type].new()) in {
+            when self.resolve_method_def_id(concrete_type, trait_name, trait_def_id, member.name, List[Type].new()) in {
                 .Some(actual_method_def_id) then {
                     when self.context.get_function_type(actual_method_def_id) in {
                         .Some(raw_function_type) then {
@@ -866,9 +856,9 @@ given CodeGen {
         return members;
     };
 
-    get_ordered_trait_members_for_vtable(self, trait_name String, concrete_type Type, trait_type_args List[Type]) List[MIRTraitVTableMethod] = {
+    get_ordered_trait_members_for_vtable(self, trait_name String, trait_def_id DefId, concrete_type Type, trait_type_args List[Type]) List[MIRTraitVTableMethod] = {
         let effective_trait_type_args = if trait_type_args.is_empty() then self.trait_args_for_concrete_vtable(trait_name, concrete_type) else trait_type_args;
-        let trait_ref = CanonicalTraitRef(trait_name, effective_trait_type_args);
+        let trait_ref = CanonicalTraitRef(trait_name, trait_def_id, effective_trait_type_args);
         if vtable_debug_enabled() then {
             eprintln("[vtable-debug] members trait=\(trait_name) concrete=\(stable_type_key(concrete_type)) args=\(effective_trait_type_args.count().to_string()) witness=\(trait_ref.key(concrete_type))");
         };
@@ -887,7 +877,7 @@ given CodeGen {
         let mutable seen_methods = Set[String].new();
         let bindings = self.trait_member_type_bindings(trait_name, concrete_type, effective_trait_type_args);
         self.collect_instantiated_trait_members_for_vtable(trait_name, concrete_type, bindings, visited_traits, seen_methods, resolved_members);
-        resolved_members = self.overlay_concrete_trait_member_signatures(resolved_members, trait_name, concrete_type);
+        resolved_members = self.overlay_concrete_trait_member_signatures(resolved_members, trait_name, trait_def_id, concrete_type);
         let mutable receiver_members = List[MIRTraitVTableMethod].new();
         for member in resolved_members then {
             if self.trait_member_has_receiver(member) then {
@@ -1032,10 +1022,6 @@ given CodeGen {
         return MIRTraitVTableMethod(member.name, Option[Type].Some(bound_return_type), bound_params, self_by_value);
     };
 
-    get_ordered_trait_members(self, trait_name String) List[MIRTraitVTableMethod] = {
-        return self.get_ordered_trait_members_for_vtable(trait_name, self.trait_object_type_from_name(trait_name), List[Type].new());
-    };
-
     module_private mir_type_args_to_ref_list(self, args List[Type]) List[Type] = {
         let _ = self;
         let mutable out = List[Type].new();
@@ -1043,25 +1029,17 @@ given CodeGen {
         return out;
     };
 
-    module_private trait_target_type_name(self, t Type) Option[String] = {
+    /// Resolves a trait-object type to the identity of the trait it names.
+    /// This is the single place codegen turns a `Type` into a trait reference, so
+    /// the declaration identity cannot be dropped on the way down.
+    module_private trait_target_ref(self, t Type) Option[CanonicalTraitRef] = {
         return when t in {
-            .TraitObject(trait_name, _, _) then Option[String].Some(trait_name),
-            .ReferenceType(inner) then self.trait_target_type_name(inner),
-            .MutableReferenceType(inner) then self.trait_target_type_name(inner),
-            .BorrowedReferenceType(inner) then self.trait_target_type_name(inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_target_type_name(inner),
-            _ then Option[String].None(),
-        };
-    };
-
-    module_private trait_target_type_args(self, t Type) List[Type] = {
-        return when t in {
-            .TraitObject(_, _, args) then args,
-            .ReferenceType(inner) then self.trait_target_type_args(inner),
-            .MutableReferenceType(inner) then self.trait_target_type_args(inner),
-            .BorrowedReferenceType(inner) then self.trait_target_type_args(inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_target_type_args(inner),
-            _ then List[Type].new(),
+            .TraitObject(trait_name, trait_def_id, args) then Option[CanonicalTraitRef].Some(CanonicalTraitRef(trait_name, trait_def_id, args)),
+            .ReferenceType(inner) then self.trait_target_ref(inner),
+            .MutableReferenceType(inner) then self.trait_target_ref(inner),
+            .BorrowedReferenceType(inner) then self.trait_target_ref(inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_target_ref(inner),
+            _ then Option[CanonicalTraitRef].None(),
         };
     };
 
@@ -1155,16 +1133,15 @@ given CodeGen {
         target_type Type,
         requests List[VtableCodegenRequest],
     ) Void = {
-        when self.trait_target_type_name(target_type) in {
-            .Some(trait_name) then when self.trait_conversion_source_concrete_type(source_type) in {
+        when self.trait_target_ref(target_type) in {
+            .Some(trait_ref) then when self.trait_conversion_source_concrete_type(source_type) in {
                 .Some(concrete_type) then {
-                    if self.trait_target_type_name(concrete_type) is .Some(_) then {
+                    if self.trait_target_ref(concrete_type) is .Some(_) then {
                         return;
                     };
-                    let trait_type_args = self.trait_target_type_args(target_type);
-                    let methods = self.get_ordered_trait_members_for_vtable(trait_name, concrete_type, trait_type_args);
+                    let methods = self.get_ordered_trait_members_for_vtable(trait_ref.trait_name, trait_ref.trait_def_id, concrete_type, trait_ref.trait_type_args);
                     if not methods.is_empty() then {
-                        requests.push(VtableCodegenRequest(concrete_type, trait_name, trait_type_args, methods));
+                        requests.push(VtableCodegenRequest(concrete_type, trait_ref.trait_name, trait_ref.trait_def_id, trait_ref.trait_type_args, methods));
                     };
                 },
                 .None() then {},
@@ -1356,7 +1333,7 @@ given CodeGen {
             },
             .DowngradeRef(value, _) then self.collect_trait_object_conversions_in_value(value, out),
             .UpgradeRef(value, _) then self.collect_trait_object_conversions_in_value(value, out),
-            .TraitObjectMatches(value, _, _, _) then self.collect_trait_object_conversions_in_value(value, out),
+            .TraitObjectMatches(value, _, _, _, _) then self.collect_trait_object_conversions_in_value(value, out),
             .TraitObjectDowncast(value, _) then self.collect_trait_object_conversions_in_value(value, out),
             .InitMemory(pointer, value) then {
                 self.collect_trait_object_conversions_in_value(pointer, out);
@@ -1426,6 +1403,7 @@ given CodeGen {
                     requests.push(VtableCodegenRequest(
                         vtable.concrete_type,
                         vtable.trait_name,
+                        vtable.trait_def_id,
                         self.mir_type_args_to_ref_list(vtable.trait_type_args),
                         vtable.methods,
                     ));
@@ -1446,11 +1424,11 @@ given CodeGen {
         };
         for conversion in conversions then {
             if conversion.trait_name.is_empty() then { continue;};
-            if self.trait_target_type_name(conversion.concrete_type) is .Some(_) then { continue;};
+            if self.trait_target_ref(conversion.concrete_type) is .Some(_) then { continue;};
             let trait_type_args = self.mir_type_args_to_ref_list(conversion.trait_type_args);
-            let methods = self.get_ordered_trait_members_for_vtable(conversion.trait_name, conversion.concrete_type, trait_type_args);
+            let methods = self.get_ordered_trait_members_for_vtable(conversion.trait_name, conversion.trait_def_id, conversion.concrete_type, trait_type_args);
             if methods.is_empty() then { continue;};
-            requests.push(VtableCodegenRequest(conversion.concrete_type, conversion.trait_name, trait_type_args, methods));
+            requests.push(VtableCodegenRequest(conversion.concrete_type, conversion.trait_name, conversion.trait_def_id, trait_type_args, methods));
         };
 
         if vtable_debug_enabled() then {
@@ -1566,7 +1544,7 @@ given CodeGen {
             let mutable actual_method_def_ids = Dict[String, DefId].new();
 
             for member in ordered_members then {
-                let actual_method_def_id_opt = self.resolve_method_def_id(concrete_type, trait_name, member.name, self.deref_type_list(req.trait_type_args));
+                let actual_method_def_id_opt = self.resolve_method_def_id(concrete_type, trait_name, req.trait_def_id, member.name, self.deref_type_list(req.trait_type_args));
                 when actual_method_def_id_opt in {
                     .Some(actual_method_def_id) then {
                         actual_method_def_ids.insert(member.name, actual_method_def_id);

@@ -12,7 +12,7 @@ public type AccessModifier {
 
 public type TypeParameter(
     name String,
-    constraints List[TypeNode],
+    constraints List[Bound],
 );
 
 public type TypeNode {
@@ -24,6 +24,139 @@ public type TypeNode {
     Generic(base String, args List[TypeNode]),
     InferredSelf(),
     FunctionType(param_types List[TypeNode], return_type TypeNode),
+};
+
+// ── Bounds ──────────────────────────────────────────────────────────────────
+//
+// A generic parameter's bound, as a SEMANTIC kind rather than as type syntax.
+// Bounds used to be stored as `TypeNode`, which forced every consumer to
+// recover the meaning by string-matching the bound's name (`== "Any"`,
+// `== "mutable"`, a hard-coded primitive/trait table, ...). Making the kind
+// explicit is what lets those special cases disappear.
+//
+// The source spellings `Any` and `mutable` are still read by name exactly once,
+// in `bound_from_type_node` below -- the syntax writes them as ordinary
+// identifiers (and `mutable` as a keyword), so some boundary must read the
+// spelling. Everywhere after that boundary sees only the kind.
+
+public type Bound {
+    /// A real trait bound, e.g. `T Hash` or `T Add[Int]`.
+    ///
+    /// `def_id` is the DECLARATION identity and is what comparisons must use;
+    /// `name` exists only so diagnostics can print it. It is `DefId(0)` until
+    /// sema resolves the name.
+    Trait(def_id DefId, name String, args List[TypeNode]),
+    /// `T mutable` -- the subject must have been declared `type mutable`.
+    /// A shape requirement on the type itself, so it is not a trait.
+    Mutable(),
+};
+
+/// Recognise a bound from its source spelling. `Any` produces no bound at all
+/// -- it is the absence of a bound, not a bound.
+///
+/// Returns `None` for `Any` and for shapes that cannot be bounds (the other
+/// `TypeNode` cases); those used to degrade into a `"?"` sentinel that every
+/// consumer had to special-case.
+public let bound_from_type_node(node TypeNode) Option[Bound] = {
+    return when node in {
+        .Identifier(name) then {
+            if name == "Any" then {
+                Option[Bound].None()
+            } else if name == "mutable" then {
+                Option[Bound].Some(Bound.Mutable())
+            } else {
+                Option[Bound].Some(Bound.Trait(DefId(0(UInt)), name, List[TypeNode].new()))
+            }
+        },
+        .Generic(base, args) then {
+            if base == "Any" then {
+                Option[Bound].None()
+            } else {
+                Option[Bound].Some(Bound.Trait(DefId(0(UInt)), base, args))
+            }
+        },
+        _ then Option[Bound].None(),
+    };
+};
+
+/// The trait this bound requires, if it is a trait bound. `mutable` requires no
+/// trait declaration and returns `None`.
+public let bound_trait_name(b Bound) Option[String] = {
+    return when b in {
+        .Trait(_, name, _) then Option[String].Some(name),
+        .Mutable() then Option[String].None(),
+    };
+};
+
+/// The trait arguments of a trait bound (`T Add[Int]` -> `[Int]`), empty for
+/// shape bounds.
+public let bound_trait_args(b Bound) List[TypeNode] = {
+    return when b in {
+        .Trait(_, _, args) then args,
+        .Mutable() then List[TypeNode].new(),
+    };
+};
+
+/// The bare trait name, for messages that print it without type arguments.
+public let bound_base_name(b Bound) String = {
+    return when b in {
+        .Trait(_, name, _) then name,
+        .Mutable() then "mutable",
+    };
+};
+
+/// Render a type expression for diagnostics. Mirrors Swift's `TypeNode.description`
+/// closely enough that constraint argument printing matches exactly.
+public let type_node_display(node TypeNode) String = {
+    return when node in {
+        .Identifier(name) then name,
+        .Generic(base, args) then {
+            let mutable out = StringBuilder.new();
+            out.push_string(base);
+            out.push_byte('[');
+            let mutable first = true;
+            for a in args then {
+                if not first then { out.push_string(", ");};
+                out.push_string(type_node_display(a));
+                first = false;
+            };
+            out.push_byte(']');
+            out.to_string()
+        },
+        .Reference(inner, is_mutable) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
+        .BorrowedReference(inner, is_mutable) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
+        .Pointer(inner, is_mutable) then (if is_mutable then "mutable *" else "*") + type_node_display(inner),
+        .WeakReference(inner, _) then "?" + type_node_display(inner),
+        .InferredSelf() then "Self",
+        .FunctionType(_, _) then "Func",
+    };
+};
+
+/// The one place allowed to turn a bound back into text. Must reproduce the
+/// historical diagnostics exactly: bare names for simple traits, a PREFIXED
+/// bracket for parameterised ones (`[Int]Iterator`, not `Iterator[Int]`), and
+/// the keyword spellings for the type kinds.
+public let bound_display(b Bound) String = {
+    return when b in {
+        .Trait(_, name, args) then {
+            if args.is_empty() then {
+                name
+            } else {
+                let mutable inner = StringBuilder.new();
+                inner.push_byte('[');
+                let mutable first = true;
+                for a in args then {
+                    if not first then { inner.push_string(", ");};
+                    inner.push_string(type_node_display(a));
+                    first = false;
+                };
+                inner.push_byte(']');
+                inner.push_string(name);
+                inner.to_string()
+            }
+        },
+        .Mutable() then "mutable",
+    };
 };
 
 public type UnaryOperator {
@@ -128,7 +261,6 @@ public type Decl {
     TraitDecl(access AccessModifier, name String, type_params List[TypeParameter], parents List[TypeNode], members List[TraitMember], span SourceSpan),
     GivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
     GivenTraitDecl(target_type TypeNode, type_params List[TypeParameter], trait_type TypeNode, members List[GivenMember], span SourceSpan),
-    GivenNotTraitDecl(target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan),
     IntrinsicGivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
 };
 

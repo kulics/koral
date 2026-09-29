@@ -431,15 +431,11 @@ given Parser {
 
     module_private parse_trait_member(self, trait_name String) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public());
-        let name = self.expect_identifier("trait member") or else {
-            return .Error(self.parser_error("parse trait member error"));
-        };
+        let name = self.expect_identifier("trait member") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)));
+            return .Error(self.parser_error_at_current(self.invalid_function_name_error(name)));
         };
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(self.parser_error("parse trait member type parameter error"));
-        };
+        let type_params = self.parse_type_parameters() or return;
 
         when self.current().kind in {
             .LParen() then { self.advance();},
@@ -456,9 +452,7 @@ given Parser {
         if not self.is_type_start() then {
             return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"));
         };
-        let mutable return_type = self.parse_type() or else {
-            return .Error(self.parser_error("parse trait member return type error"));
-        };
+        let mutable return_type = self.parse_type() or return;
 
         if self.current().kind is .Assign() then {
             return .Error(self.parser_error("trait member cannot have a body"));
@@ -469,15 +463,11 @@ given Parser {
 
     module_private parse_given_member(self, allow_body Bool) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.ModulePrivate());
-        let name = self.expect_identifier("given member") or else {
-            return .Error(self.parser_error("parse given member error"));
-        };
+        let name = self.expect_identifier("given member") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)));
+            return .Error(self.parser_error_at_current(self.invalid_function_name_error(name)));
         };
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(self.parser_error("parse given member type parameter error"));
-        };
+        let type_params = self.parse_type_parameters() or return;
 
         when self.current().kind in {
             .LParen() then { self.advance();},
@@ -497,9 +487,7 @@ given Parser {
         if not self.is_type_start() then {
             return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"));
         };
-        let mutable return_type = self.parse_type() or else {
-            return .Error(self.parser_error("parse given member return type error"));
-        };
+        let mutable return_type = self.parse_type() or return;
 
         let mutable body = Option[Expr].None();
         if self.current().kind is .Assign() then {
@@ -511,7 +499,7 @@ given Parser {
                 let mutable message = StringBuilder.new();
                 message.push_string("parse given member body error: ");
                 message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-                return .Error(self.parser_error_without_span(message.to_string()));
+                return .Error(self.parser_error_at_current(message.to_string()));
             };
             body = .Some(expr);
         };
@@ -615,16 +603,14 @@ given Parser {
                     let alias = when self.current().kind in {
                         .KwAs() then {
                             self.advance();
-                            let alias_name = self.expect_identifier("using alias") or else {
-                                return .Error(self.parser_error("parse declaration error"));
-                            };
+                            let alias_name = self.expect_identifier("using alias") or return;
                             let name_is_upper = self.is_upper_first(name);
                             let alias_is_upper = self.is_upper_first(alias_name);
                             if name_is_upper <> alias_is_upper then {
                                 if name_is_upper then {
-                                    return .Error(self.parser_error_without_span("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"));
+                                    return .Error(self.parser_error_at_current("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"));
                                 };
-                                return .Error(self.parser_error_without_span("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"));
+                                return .Error(self.parser_error_at_current("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"));
                             };
                             Option[String].Some(alias_name)
                         },
@@ -633,7 +619,7 @@ given Parser {
                     items.push(UsingModuleItem(UsingModuleItemKind.Symbol(), Option[String].Some(name), alias));
                 },
                 _ then {
-                    return .Error(self.parser_error("Expected import item in using declaration"));
+                    return .Error(self.parser_error_at_current("Expected identifier for import item, got: \(token_kind_description(self.current()))"));
                 },
             };
 
@@ -697,7 +683,7 @@ given Parser {
                     return .Error(self.parser_error_at("Unexpected token: Identifier(\(name))", self.current()));
                 };
                 if not self.is_valid_module_segment_name(name) then {
-                    return .Error(self.parser_error_without_span(self.invalid_module_name_error(name)));
+                    return .Error(self.parser_error_at_current(self.invalid_module_name_error(name)));
                 };
                 path_segments.push(module_file_name_to_identifier(name));
             },
@@ -708,11 +694,9 @@ given Parser {
 
         while self.current().kind is .DoubleColon() then {
             self.advance();
-            let segment = self.expect_identifier("module path segment") or else {
-                return .Error(self.parser_error("parse declaration error"));
-            };
+            let segment = self.expect_identifier("module path segment") or return;
             if not self.is_valid_module_segment_name(segment) then {
-                return .Error(self.parser_error_without_span(self.invalid_module_name_error(segment)));
+                return .Error(self.parser_error_at_current(self.invalid_module_name_error(segment)));
             };
             path_segments.push(module_file_name_to_identifier(segment));
         };
@@ -726,25 +710,27 @@ given Parser {
         self.advance();
         let name = self.expect_identifier("trait declaration") or return;
         if not self.is_upper_first(name) then {
-            return .Error(self.parser_error_without_span(self.invalid_type_name_error(name)));
+            return .Error(self.parser_error_at_current(self.invalid_type_name_error(name)));
         };
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(self.parser_error("parse trait type parameter error"));
-        };
+        let type_params = self.parse_type_parameters() or return;
 
         let mutable parents = List[TypeNode].new();
         let has_lbrace = when self.current().kind in { .LBrace() then true, _ then false };
         if not has_lbrace then {
-            let parent = self.parse_type() or else {
-                return .Error(self.parser_error("parse trait parent type error"));
+            // A trait writes its parent list WITHOUT a colon: `trait Child Parent`.
+            // `trait Child: Parent` lands here on the `:`.
+            if not self.is_type_start() then {
+                return .Error(self.parser_error("Expected type identifier, got: \(token_kind_description(self.current()))"));
             };
+            // `or return` propagates the inner parse diagnostic. A wrapper
+            // message like "parse trait parent type error" would replace the
+            // specific one and lose what actually went wrong.
+            let parent = self.parse_type() or return;
             parents.push(parent);
 
             while self.current().kind is .KwAnd() then {
                 self.advance();
-                let next_parent = self.parse_type() or else {
-                    return .Error(self.parser_error("parse trait parent type error"));
-                };
+                let next_parent = self.parse_type() or return;
                 parents.push(next_parent);
             };
         };
@@ -762,29 +748,13 @@ given Parser {
     module_private parse_given_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(self.parser_error("parse given type parameter error"));
-        };
-        let mutable target_type = self.parse_type() or else {
-            return .Error(self.parser_error("parse given target type error"));
-        };
-
-        if self.current().kind is .KwNot() then {
-            self.advance();
-            let trait_name = self.expect_identifier("given not trait declaration") or return;
-            if not self.is_upper_first(trait_name) then {
-                return .Error(self.parser_error_without_span(self.invalid_type_name_error(trait_name)));
-            };
-            let base = Decl.GivenNotTraitDecl(target_type, type_params, trait_name, self.span_from_start(start));
-            return self.wrap_decl(access, is_foreign, is_intrinsic, base);
-        };
+        let type_params = self.parse_type_parameters() or return;
+        let mutable target_type = self.parse_type() or return;
 
         let mutable trait_type = Option[TypeNode].None();
         if self.current().kind is .KwAs() then {
             self.advance();
-            let mutable parsed_trait_type = self.parse_type() or else {
-                return .Error(self.parser_error("parse given trait type error"));
-            };
+            let mutable parsed_trait_type = self.parse_type() or return;
             trait_type = .Some(parsed_trait_type);
         };
 
@@ -802,12 +772,12 @@ given Parser {
         let flags = self.parse_decl_flags();
 
         when flags.invalid_access_message in {
-            .Some(message) then { return .Error(self.parser_error_without_span(message.to_string()));},
+            .Some(message) then { return .Error(self.parser_error_at_current(message.to_string()));},
             .None() then {},
         };
 
         if flags.is_foreign and flags.is_intrinsic then {
-            return .Error(self.parser_error_without_span("foreign and intrinsic cannot be used together"));
+            return .Error(self.parser_error_at_current("foreign and intrinsic cannot be used together"));
         };
 
         when self.current().kind in {
@@ -835,11 +805,7 @@ given Parser {
             },
             _ then {
                 let t = self.current();
-                let mutable message = StringBuilder.new();
-                message.push_string("Unexpected top-level token '");
-                message.push_string(token_text(t));
-                message.push_byte('\'');
-                return .Error(self.parser_error_at(message.to_string(), t));
+                return .Error(self.parser_error_at("Unexpected token: \(token_kind_description(t))", t));
             },
         };
     };
@@ -896,7 +862,7 @@ given Parser {
                         let mutable message = StringBuilder.new();
                         message.push_string("Invalid interpolation expression: ");
                         message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-                        return .Error(self.parser_error_without_span(message.to_string()));
+                        return .Error(self.parser_error_at_current(message.to_string()));
                     };
                     ast_parts.push(InterpolatedStringPart.Expression(expr));
                     has_expression = true;
@@ -925,11 +891,11 @@ given Parser {
             let mutable message = StringBuilder.new();
             message.push_string("parse failed: ");
             message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message);
-            return .Error(self.parser_error_without_span(message.to_string()));
+            return .Error(self.parser_error_at_current(message.to_string()));
         };
 
         if not nested.is_eof() then {
-            return .Error(self.parser_error_without_span("trailing tokens in interpolation expression"));
+            return .Error(self.parser_error_at_current("trailing tokens in interpolation expression"));
         };
 
         return .Ok(expr);
