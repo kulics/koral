@@ -136,11 +136,11 @@ extension TypeChecker {
       }
       return (.booleanLiteral(value: val), [])
 
-    case .stringLiteral(let value, _):
+    case .stringLiteral(let value, let span):
       if isStringType(subjectType) {
         return (.stringLiteral(value: value), [])
       }
-      throw SemanticError.typeMismatch(expected: "String", got: subjectType.description)
+      throw SemanticError(.typeMismatch(expected: "String", got: subjectType.description), span: span)
 
     case .runeLiteral(let value, let span):
       if isRuneType(subjectType) {

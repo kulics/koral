@@ -136,6 +136,20 @@ given TypeChecker {
         };
     };
 
+    /// A string literal pattern only matches std's `String`.
+    ///
+    /// The subject's DECLARATION identity decides, never its spelling -- a user
+    /// type is not a string pattern however it is named. Without this check the
+    /// pattern was lowered unconditionally and monomorphization then emitted C
+    /// for a `String`-shaped access against the user's layout.
+    module_private lower_string_literal_pattern(self, value String, subject_type Type, span SourceSpan) TypedPattern = {
+        let matched_type = self.pattern_match_subject_type(subject_type);
+        if not self.is_string_type(matched_type) then {
+            self.push_diagnostic_at_span("Type mismatch: expected String, got \(self.display_type_name(matched_type))", span);
+        };
+        return TypedPattern.StringLiteral(value);
+    };
+
     module_private lower_rune_literal_pattern(self, value String, subject_type Type, span SourceSpan) TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         let rune_count = value.to_runes().count();
@@ -190,7 +204,7 @@ given TypeChecker {
             .BoolLiteral(value, _) then TypedPattern.BoolLiteral(value),
             .IntegerLiteral(value, _) then TypedPattern.IntegerLiteral(value),
             .NegativeIntegerLiteral(value, _) then TypedPattern.NegativeIntegerLiteral(value),
-            .StringLiteral(value, _) then TypedPattern.StringLiteral(value),
+            .StringLiteral(value, span) then self.lower_string_literal_pattern(value, subject_type, span),
             .RuneLiteral(value, span) then self.lower_rune_literal_pattern(value, subject_type, span),
             .ComparisonPattern(op, value, _) then TypedPattern.ComparisonPattern(op, value),
             .AndPattern(left, right, _) then {
@@ -426,7 +440,7 @@ given TypeChecker {
                     self.storage.file_path,
                     "Pattern cannot mix positional and labeled arguments"
                 
-                )
+                , unknown_span())
             );
             return;
         };
@@ -451,7 +465,7 @@ given TypeChecker {
                                 self.storage.file_path,
                                 "Unknown constructor label '\(label)' for pattern"
                             
-                            )
+                            , unknown_span())
                         );
                         return;
                     };
@@ -462,7 +476,7 @@ given TypeChecker {
                                 self.storage.file_path,
                                 "Duplicate constructor label '\(label)'"
                             
-                            )
+                            , unknown_span())
                         );
                         return;
                     };
@@ -480,7 +494,7 @@ given TypeChecker {
                         self.storage.file_path,
                         "Missing constructor field '\(spec.name)' in pattern"
                     
-                    )
+                    , unknown_span())
                 );
                 return;
             };
@@ -738,7 +752,7 @@ given TypeChecker {
                                             self.storage.file_path,
                                             "Cannot access \(access_label) field '\(field.name)' of type '\(type_name)' in destructuring pattern"
                                         
-                                        )
+                                        , unknown_span())
                                     );
                                     return false;
                                 },

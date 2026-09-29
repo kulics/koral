@@ -2429,8 +2429,9 @@ private final class MIRFunctionBuilder {
   }
 
   private func isStringPatternType(_ type: Type) -> Bool {
-    guard case .structure = type else { return false }
-    return true
+    // The subject's declaration identity decides, never its spelling: a user
+    // type is not a string pattern however it is named.
+    return context.isStdNominalType(type, context.stdStringDefId)
   }
 
   private func isRunePatternType(_ type: Type) -> Bool {
@@ -2452,6 +2453,9 @@ private final class MIRFunctionBuilder {
   }
 
   private func stringEqualsMethodSymbol(for type: Type) -> Symbol? {
+    // Find `equals` as a member of the receiver TYPE. Looking the type up by
+    // name instead let an unrelated declaration of the same spelling win, and
+    // needed a hardcoded `"String"` fallback to work at all.
     for node in program.globalNodes {
       guard case .givenDeclaration(let receiverType, _, let methods) = node,
             receiverType == type else {
@@ -2465,37 +2469,6 @@ private final class MIRFunctionBuilder {
           return method.identifier
         }
       }
-    }
-
-    var lookupTypeNames: [String] = {
-      switch type {
-      case .structure(let defId), .enum(let defId):
-        let qualified = context.getQualifiedName(defId)
-        let plain = context.getName(defId)
-        return [qualified, plain].compactMap { $0 }
-      default:
-        return []
-      }
-    }()
-
-    if !lookupTypeNames.contains("String") {
-      lookupTypeNames.append("String")
-    }
-
-    for typeName in lookupTypeNames {
-      guard let defId = program.lookupStaticMethod(typeName: typeName, methodName: "equals") else {
-        continue
-      }
-      let methodType = context.getSymbolType(defId)
-        ?? .function(
-          parameters: [
-            Parameter(type: type, kind: passKindForParameterType(type)),
-            Parameter(type: type, kind: passKindForParameterType(type)),
-          ],
-          returns: .bool
-        )
-      let kind = context.getSymbolKind(defId) ?? .function
-      return Symbol(defId: defId, type: methodType, kind: kind)
     }
 
     return nil

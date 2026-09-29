@@ -82,7 +82,7 @@ given TypeChecker {
                         self.storage.file_path,
                         "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
  
-                    )
+                    , expr_span(callee))
                 );
                 return Option[Dict[String, Type]].None();
             };
@@ -248,7 +248,7 @@ given TypeChecker {
                         self.storage.file_path,
                         "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())"
  
-                    )
+                    , expr_span(callee))
                 );
                 return Option[Dict[String, Type]].None();
             };
@@ -557,33 +557,11 @@ given TypeChecker {
         };
     };
 
-    module_private find_call_site_prefix(self, callee Expr, args List[Expr]) Option[String] = {
-        let needle = self.call_site_lookup_text(callee, args) or else {
-            return Option[String].None();
-        };
-        let source = read_text_file(self.storage.file_path.into_path()) or else {
-            return Option[String].None();
-        };
-
-        let mutable line_no UInt = 1;
-        for line in source.lines() then {
-            if line.find(needle) is .Some(col0) then {
-                return Option[String].Some("\(self.storage.file_path):\(line_no):\(col0 + 1): error: ");
-            };
-            line_no += 1;
-        };
-
-        return Option[String].None();
-    };
-
     module_private format_call_type_mismatch_message(self, callee Expr, args List[Expr], expected_t Type, actual_t Type) String = {
         let expected_name = self.display_type_name(expected_t);
         let actual_name = self.display_type_name(actual_t);
-        let suffix = "Type mismatch: expected \(expected_name), got \(actual_name)";
-        return when self.find_call_site_prefix(callee, args) in {
-            .Some(prefix) then prefix + suffix,
-            .None() then suffix,
-        };
+        // The location is the diagnostic's span, not part of the message.
+        return "Type mismatch: expected \(expected_name), got \(actual_name)";
     };
 
     module_private function_like_type(self, t Type) Option[Type] = {
@@ -624,7 +602,7 @@ given TypeChecker {
                     self.storage.file_path,
                     "Invalid argument count for function expression: expected \(param_count), got \(args.count())"
  
-                )
+                , self.typed_expr_span(typed_callee))
             );
             return false;
         };
@@ -1112,7 +1090,7 @@ given TypeChecker {
                                 self.storage.file_path,
                                 "Positional arguments are not allowed after named arguments"
  
-                            )
+                            , unknown_span())
                         );
                         return false;
                     };
@@ -1136,7 +1114,7 @@ given TypeChecker {
                                     self.storage.file_path,
                                     "Positional argument provided for named field '\(spec.name)'"
  
-                                )
+                                , unknown_span())
                             );
                             return false;
                         };
@@ -1147,7 +1125,7 @@ given TypeChecker {
                                     self.storage.file_path,
                                     "Named argument label '\(label)' does not match parameter '\(spec.name)'"
  
-                                )
+                                , unknown_span())
                             );
                             return false;
                         };
@@ -1160,7 +1138,7 @@ given TypeChecker {
                                     self.storage.file_path,
                                     "Named parameter '\(spec.name)' must be called with label '\(spec.name):'"
  
-                                )
+                                , unknown_span())
                             );
                             return false;
                         };
