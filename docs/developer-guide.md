@@ -331,14 +331,21 @@ shared suite did not catch, so check them directly when stage2 stops compiling:
 - **Every emitted symbol name comes from fully concrete types.** A name built
   while a type is still generic ends up containing the generic parameter markers
   (`Param_K`, `Param_V` from `CompilerContext.get_layout_key`) and is never
-  defined, so C falls back to an implicit `int` declaration. Scan for them:
+  defined, so C falls back to an implicit `int` declaration.
+
+  A marker is `Param_` followed by a **bare type-parameter name**. Do not grep
+  for `_Param_` alone: a type that is genuinely called `Param` (e.g. the
+  compiler's own `Koralc.Param`) mangles to `List_Koralc_Param_d251`, which
+  matches that pattern and is completely healthy. The reliable discriminator is
+  the C symptom, not the spelling:
   ```bash
-  grep -oE '[A-Za-z0-9_]*_Param_[A-Za-z0-9_]*' bin/bootstrap-stage2/koralc.c | sort -u
+  # should print 0
+  grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' bin/bootstrap-stage2/koralc.c
   ```
-  Anything printed is a bug. This is a symptom, not a cause: it means an
-  extension method was instantiated for a type whose constraints do not hold,
-  so its body's call targets never resolved. Fix the constraint check, not the
-  name builder.
+  Any non-zero count is a dangling symbol, and that is the bug. It is a symptom,
+  not a cause: it means an extension method was instantiated for a type whose
+  constraints do not hold, so its body's call targets never resolved. Fix the
+  constraint check, not the name builder.
 - **A pattern test must not leak state into nested patterns.** `is` and `when`
   lower a pattern test with a cached subject tag/operand/comparison local; when
   recursing into enum payloads or struct fields that cache has to be cleared,
