@@ -792,7 +792,7 @@ let increment(mutable x Int) Int = { x += 1; return x };
 type Shape {
     Circle(radius Float64),            // 位置变体参数
     Line(start: Point, end: Point),    // 命名变体参数
-}
+};
 
 // 位置参数：按位置传入，绝不能带标签
 let s1 = Shape.Circle(1.0);
@@ -808,7 +808,7 @@ let s2 = Shape.Line(end: Point(1, 1), start: Point(0, 0));
 when s in {
     .Circle(r) then println(r),
     .Line(start: p, end: e) then println(p.x),
-}
+};
 
 if b is Button(w, height: _, label: l) then println(l);
 // Button 的 `width` 是位置字段，`height` / `label` 是命名字段
@@ -982,7 +982,7 @@ while i < 10 then {
 
 `for` 循环用于遍历任何实现了迭代器接口的对象（如列表、映射、集合、范围等）。
 
-每次迭代中，迭代器产出的下一个值会尝试匹配 `pattern`。匹配成功则执行 `then` 后的语句 body。`for` 是产生 `Void` 的表达式。
+每次迭代中，迭代器产出的下一个值被绑定到循环绑定上，然后执行 `then` 后的语句 body。循环绑定位置接受与 `let` 相同的形态——它是绑定，不是通用 pattern——每个元素都必须能赋给该形态。元素类型不匹配时在编译期报错，运行时不会跳过该次迭代。`for` 是产生 `Void` 的表达式。
 
 ```koral
 let nums List[Int] = [10, 20, 30];
@@ -1003,7 +1003,7 @@ let for_value = for x in nums then {
 };
 ```
 
-循环绑定位置接受与 `let` 相同的形态：单个绑定或 `Pair` 解构绑定。每个元素可使用 `_`、`mutable` 和可选类型标注。
+绑定可使用 `_`、`mutable` 和可选类型标注，也可以是 `Pair` 解构：
 
 ```koral
 let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)];
@@ -1413,7 +1413,7 @@ given[T Add[T] and Zero] Iterator[T] {
 ```koral
 given[T Any] Option[T] {
     public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
-}
+};
 ```
 
 #### `Never` 类型限制
@@ -1504,7 +1504,7 @@ let upgraded = upgrade(weak);    // Option[Node]
 
 ## 4. 模式匹配
 
-Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件和 `for` 循环里的绑定形态。
+Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件里的绑定形态。（`for` 循环改用普通的 `let` 形态绑定，见 [for 循环](#for-循环)。）
 
 ### 模式形态
 

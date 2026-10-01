@@ -795,7 +795,7 @@ the declaration decides, the call obeys:
 type Shape {
     Circle(radius Float64),            // positional case parameter
     Line(start: Point, end: Point),    // named case parameters
-}
+};
 
 // Positional parameter: passed by position, never by label
 let s1 = Shape.Circle(1.0);
@@ -813,7 +813,7 @@ not be.
 when s in {
     .Circle(r) then println(r),
     .Line(start: p, end: e) then println(p.x),
-}
+};
 
 if b is Button(w, height: _, label: l) then println(l);
 // Button declares `width` positional and `height`/`label` named
@@ -987,7 +987,7 @@ while i < 10 then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is an expression that produces `Void`.
+In each iteration, the next value produced by the iterator is bound and the body following `then` runs. The loop binding position accepts the same shapes as `let` — it is a binding, not a general pattern — and every element must be assignable to that shape. If the element type does not fit, the error is raised at compile time; the iteration is never skipped at runtime. `for` is an expression that produces `Void`.
 
 ```koral
 let nums List[Int] = [10, 20, 30];
@@ -1008,7 +1008,7 @@ let for_value = for x in nums then {
 };
 ```
 
-The loop binding position accepts the same shapes as `let`: a single binding or a `Pair` destructuring binding. Each element may use `_`, `mutable`, and an optional type annotation.
+The binding may use `_`, `mutable`, and an optional type annotation, and it may be a `Pair` destructuring:
 
 ```koral
 let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)];
@@ -1426,7 +1426,7 @@ become `Int`, so `sum` remains available and is checked again at each call site.
 ```koral
 given[T Any] Option[T] {
     public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
-}
+};
 ```
 
 #### `Never` Type Restrictions
@@ -1517,7 +1517,7 @@ let upgraded = upgrade(weak);    // Option[Node]
 
 ## 4. Pattern Matching
 
-Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions and in `for` loops.
+Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions. (`for` loops take a plain `let`-shaped binding instead — see [for Loop](#for-loop).)
 
 ### Pattern Forms
 
