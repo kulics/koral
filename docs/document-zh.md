@@ -650,7 +650,35 @@ y >>= 2;     // y = y >> 2
 15. 值合并 / 早返回传播：`or else`、`or return`
 16. 逻辑或：`or`
 
-在同一表达式中混用 `and then`、`or else` 与 `or return` 时，请用圆括号让意图明确。
+在同一表达式中混用 `and then`、`or else` 与 `or return` 时，请用圆括号让意图明确。这几个流程关键词并不处于同一优先级，不加括号的写法很少符合作者本意：
+
+- `and then` 比 `and` 结合**更紧**。
+- `or else` / `or return` 比 `or` 结合**更紧**，但比 `and` **更松**。
+
+```koral
+let opt Option[Int] = Option[Int].Some(1);
+
+// `and then` 先抓住比较，所以下面按
+//   (opt and then it == 1) and false
+// 解析，编译失败：`and` 两侧都要求 Bool，而左侧是 Option[Bool]。
+let bad = opt and then it == 1 and false;
+
+// 变换体才是 `and` 的预期作用域——显式写出来：
+let good = opt and then (it == 1 and false);   // Some(false)
+
+// 左侧同样有这个陷阱。`and then` 仍然更紧，所以
+//   ready and opt and then it > 0
+// 按 ready and (opt and then it > 0) 解析，同样失败。
+let ready Bool = true;
+let bad2 = ready and opt and then it > 0;
+
+// 先把流程结果归约回 Bool，再参与组合：
+let good2 = ready and (opt and then it > 0 or else false);   // true
+```
+
+注意 `(ready and opt)` 并不是修法：`and` 两侧都要求 `Bool`，流程结果必须先归约成 `Bool`（如 `good2`）才能参与逻辑 `and`。
+
+`or else` 则相反——它比 `or` 更紧，所以 `a or b or else c` 按 `(a or b) or else c` 分组，而不是 `a or (b or else c)`。
 
 ### 函数
 

@@ -650,7 +650,35 @@ Operator precedence from high to low:
 15. Value coalescing / early-return propagation: `or else`, `or return`
 16. Logical OR: `or`
 
-When mixing `and then`, `or else`, and `or return` in one expression, use parentheses to make intent explicit.
+When mixing `and then`, `or else`, and `or return` in one expression, use parentheses to make intent explicit. The flow keywords do not sit at one precedence level, so the unparenthesized form rarely matches what the author meant:
+
+- `and then` binds **tighter** than `and`.
+- `or else` / `or return` bind **tighter** than `or` but **looser** than `and`.
+
+```koral
+let opt Option[Int] = Option[Int].Some(1);
+
+// `and then` grabs the comparison first, so this parses as
+//   (opt and then it == 1) and false
+// and fails: `and` needs Bool on both sides, but the left is Option[Bool].
+let bad = opt and then it == 1 and false;
+
+// The transform is the intended scope of `and` — say so:
+let good = opt and then (it == 1 and false);   // Some(false)
+
+// Same trap with `and` on the left. `and then` still binds tighter, so
+//   ready and opt and then it > 0
+// parses as ready and (opt and then it > 0) and fails the same way.
+let ready Bool = true;
+let bad2 = ready and opt and then it > 0;
+
+// Reduce the flow back to a Bool before combining it:
+let good2 = ready and (opt and then it > 0 or else false);   // true
+```
+
+Note that `(ready and opt)` is not a fix: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
+
+`or else` in the other direction — it binds tighter than `or`, so `a or b or else c` groups as `(a or b) or else c`, not `a or (b or else c)`.
 
 ### Functions
 

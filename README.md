@@ -172,11 +172,16 @@ let parse_int(s String) Result[Int] =
 
 ### Lazy streams
 
+A chain is one expression — the calls are joined by the leading `.`, and the
+statement ends at the single trailing `;`. Do not put `;` between the calls;
+that would terminate the statement and leave the next line as a bare implicit
+member expression.
+
 ```koral
-let result = list.iterator();
-    .filter((x) -> x > 0);
-    .map((x) -> x * 2);
-    .take(10);
+let result = list.iterator()
+    .filter((x) -> x > 0)
+    .map((x) -> x * 2)
+    .take(10)
     .fold(0, (acc, x) -> acc + x);
 ```
 
