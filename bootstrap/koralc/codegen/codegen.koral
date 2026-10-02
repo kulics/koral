@@ -279,26 +279,26 @@ given CodeGen {
             .MutablePointerType(inner_ref) then Type.MutablePointerType(self.concretize_codegen_type(inner_ref)),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(self.concretize_codegen_type(inner_ref)),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(self.concretize_codegen_type(inner_ref)),
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable concrete_args = List[Type].new();
                 for arg_ref in args then {
                     concrete_args.push(self.concretize_codegen_type(arg_ref));
                 };
-                Type.GenericStruct(template, template_def_id, concrete_args)
+                Type.GenericStruct(template_def_id, concrete_args)
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable concrete_args = List[Type].new();
                 for arg_ref in args then {
                     concrete_args.push(self.concretize_codegen_type(arg_ref));
                 };
-                Type.GenericEnum(template, template_def_id, concrete_args)
+                Type.GenericEnum(template_def_id, concrete_args)
             },
-            .TraitObject(trait_name, trait_def_id, args) then {
+            .TraitObject(trait_def_id, args) then {
                 let mutable concrete_args = List[Type].new();
                 for arg_ref in args then {
                     concrete_args.push(self.concretize_codegen_type(arg_ref));
                 };
-                Type.TraitObject(trait_name, trait_def_id, concrete_args)
+                Type.TraitObject(trait_def_id, concrete_args)
             },
             .FunctionType(fn_params, return_type_ref) then {
                 let mutable concrete_param_types = List[Type].new();
@@ -323,7 +323,7 @@ given CodeGen {
             },
             .None() then {},
         };
-        return Type.TraitObject(trait_name, trait_def_id, trait_type_args);
+        return Type.TraitObject(trait_def_id, trait_type_args);
     };
 
     trait_name_of_trait_type(self, trait_type Type) String = {
@@ -334,14 +334,16 @@ given CodeGen {
             .MutableBorrowedReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
             .WeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
             .MutableWeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
-            .TraitObject(trait_name, _, _) then trait_name,
+            // Display only: the trait's spelling, read from its declaration.
+            // Display only: the trait's spelling, read from its declaration.
+            .TraitObject(trait_def_id, _) then self.context.get_name(trait_def_id) or else def_id_spelling(trait_def_id),
             _ then self.context.type_display_name(trait_type),
         };
     };
 
     trait_type_args_of_trait_type(self, trait_type Type) List[Type] = {
         return when trait_type in {
-            .TraitObject(_, _, type_args) then type_args,
+            .TraitObject(_, type_args) then type_args,
             _ then List[Type].new(),
         };
     };
@@ -361,15 +363,15 @@ given CodeGen {
             .MutablePointerType(inner_ref) then Type.MutablePointerType(self.apply_codegen_type_bindings(inner_ref, bindings)),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(self.apply_codegen_type_bindings(inner_ref, bindings)),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(self.apply_codegen_type_bindings(inner_ref, bindings)),
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg_ref in args then { bound_args.push(self.apply_codegen_type_bindings(arg_ref, bindings));};
-                Type.GenericStruct(template, template_def_id, bound_args)
+                Type.GenericStruct(template_def_id, bound_args)
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg_ref in args then { bound_args.push(self.apply_codegen_type_bindings(arg_ref, bindings));};
-                Type.GenericEnum(template, template_def_id, bound_args)
+                Type.GenericEnum(template_def_id, bound_args)
             },
             .FunctionType(fn_params, return_type_ref) then {
                 let mutable bound_param_types = List[Type].new();
@@ -406,7 +408,7 @@ given CodeGen {
                             let mutable type_arg_refs = List[Type].new();
                             for type_arg in type_args then { type_arg_refs.push(type_arg);};
                             let template_def_id = self.context.get_template_def_id(def_id);
-                            Type.GenericStruct(template_name, if template_def_id.is_valid() then template_def_id else def_id, type_arg_refs)
+                            Type.GenericStruct(if template_def_id.is_valid() then template_def_id else def_id, type_arg_refs)
                         },
                         .None() then concrete_base_type,
                     },
@@ -421,7 +423,7 @@ given CodeGen {
                             let mutable type_arg_refs = List[Type].new();
                             for type_arg in type_args then { type_arg_refs.push(type_arg);};
                             let template_def_id = self.context.get_template_def_id(def_id);
-                            Type.GenericEnum(template_name, if template_def_id.is_valid() then template_def_id else def_id, type_arg_refs)
+                            Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, type_arg_refs)
                         },
                         .None() then concrete_base_type,
                     },
@@ -431,12 +433,12 @@ given CodeGen {
             _ then concrete_base_type,
         };
         when target_type in {
-            .GenericStruct(_, _, target_args) then when effective_base_type in {
-                .GenericStruct(_, _, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
+            .GenericStruct(_, target_args) then when effective_base_type in {
+                .GenericStruct(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                 _ then {},
             },
-            .GenericEnum(_, _, target_args) then when effective_base_type in {
-                .GenericEnum(_, _, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
+            .GenericEnum(_, target_args) then when effective_base_type in {
+                .GenericEnum(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
                 _ then {},
             },
             _ then {},
@@ -538,27 +540,33 @@ given CodeGen {
         return self.concrete_callable_symbol(def_id, bound_result_type);
     };
 
-    lookup_trait_method_def_id(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
+    /// The `method_name` that `concrete_type` gets from the trait declared at
+    /// `trait_def_id`.
+    ///
+    /// The conformance is identified by its trait's DECLARATION. A spelling
+    /// would conflate two same-named traits from different modules, which are
+    /// different traits and supply different methods.
+    lookup_trait_method_def_id(self, concrete_type Type, trait_def_id DefId, method_name String) Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(concrete_type);
-        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type);
+        let receiver_key = self.receiver_owner(concrete_receiver_type);
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let def_id = entry.first;
             let info = entry.second;
             if info.logical_name <> method_name then { continue;};
             let owner_type = info.owner_type or else { continue;};
-            let owner_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(owner_type));
+            let owner_key = self.receiver_owner(self.concretize_codegen_type(owner_type));
             if owner_key <> receiver_key then { continue;};
-            let conformance = info.trait_conformance or else { continue;};
-            if conformance == trait_name then {
+            let conformance_def_id = info.trait_conformance_def_id or else { continue;};
+            if conformance_def_id == trait_def_id then {
                 return Option[DefId].Some(def_id);
             };
         };
 
         for global in self.program.globals then {
             when global in {
-                .Given(target_type, trait_conformance, _, methods, _) then {
-                    let conformance = trait_conformance or else { continue;};
-                    if conformance <> trait_name then {
+                .Given(target_type, _, _, methods, given_trait_def_id) then {
+                    let given_id = given_trait_def_id or else { continue;};
+                    if given_id <> trait_def_id then {
                         continue;
                     };
                     if not self.owner_types_match(target_type, concrete_receiver_type) then {
@@ -576,11 +584,17 @@ given CodeGen {
             };
         };
 
-        return when self.program.traits.get(trait_name) in {
+        // A method may be inherited from a parent trait. `ParentTraitConstraint`
+        // still carries only a spelling, so this is the one place a trait name
+        // has to be resolved -- once, here, to an identity.
+        return when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 let mutable found = Option[DefId].None();
-                for parent_trait_name in trait_info.parent_traits then {
-                    found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_trait_name.name, method_name);
+                for parent_trait in trait_info.parent_traits then {
+                    let parent_def_id = parent_trait.def_id;
+                    if parent_def_id <> def_id_invalid() then {
+                        found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_def_id, method_name);
+                    };
                     if found is .Some(_) then { break;};
                 };
                 found
@@ -589,18 +603,18 @@ given CodeGen {
         };
     };
 
-    module_private lookup_trait_method_def_id_from_given_globals(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
-        return self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_name, List[Type].new(), method_name);
+    module_private lookup_trait_method_def_id_from_given_globals(self, concrete_type Type, trait_def_id DefId, method_name String) Option[DefId] = {
+        return self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_def_id, List[Type].new(), method_name);
     };
 
     /// Look up trait method from given globals with trait type args checking
-    module_private lookup_trait_method_def_id_from_given_globals_with_args(self, concrete_type Type, trait_name String, trait_type_args List[Type], method_name String) Option[DefId] = {
+    module_private lookup_trait_method_def_id_from_given_globals_with_args(self, concrete_type Type, trait_def_id DefId, trait_type_args List[Type], method_name String) Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(concrete_type);
         for global in self.program.globals then {
             when global in {
-                .Given(target_type, trait_conformance, given_trait_type_args, methods, _) then {
-                    let conformance = trait_conformance or else { continue;};
-                    if conformance <> trait_name then {
+                .Given(target_type, _, given_trait_type_args, methods, given_trait_def_id) then {
+                    let given_id = given_trait_def_id or else { continue;};
+                    if given_id <> trait_def_id then {
                         continue;
                     };
                     // Check trait type args if provided
@@ -661,7 +675,8 @@ given CodeGen {
             .NeverType() then "Never",
             .StructureType(def_id) then self.context.get_name(def_id) or else "Struct_\(def_id.id)",
             .EnumType(def_id) then self.context.get_name(def_id) or else "Enum_\(def_id.id)",
-            .GenericStruct(name, _, args) then {
+            // A dedup key: the spelling comes from the DECLARATION.
+            .GenericStruct(template_def_id, args) then {
                 let mutable arg_keys = StringBuilder.new();
                 let mutable first = true;
                 for arg in args then {
@@ -669,9 +684,9 @@ given CodeGen {
                     arg_keys.push_string(self.type_stable_key(arg));
                     first = false;
                 };
-                return "\(name.to_string())[\(arg_keys.to_string())]";
+                return "\(def_id_spelling(template_def_id))[\(arg_keys.to_string())]";
             },
-            .GenericEnum(name, _, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable arg_keys = StringBuilder.new();
                 let mutable first = true;
                 for arg in args then {
@@ -679,11 +694,11 @@ given CodeGen {
                     arg_keys.push_string(self.type_stable_key(arg));
                     first = false;
                 };
-                return "\(name)[\(arg_keys.to_string())]";
+                return "\(def_id_spelling(template_def_id))[\(arg_keys.to_string())]";
             },
             .ReferenceType(inner) then "*\(self.type_stable_key(inner))",
             .MutableReferenceType(inner) then "mutable \(self.type_stable_key(inner))",
-            .TraitObject(name, _, args) then {
+            .TraitObject(trait_def_id, args) then {
                 let mutable arg_keys = StringBuilder.new();
                 let mutable first = true;
                 for arg in args then {
@@ -691,7 +706,7 @@ given CodeGen {
                     arg_keys.push_string(self.type_stable_key(arg));
                     first = false;
                 };
-                return "TraitObject_\(name)[\(arg_keys.to_string())]";
+                return "TraitObject_\(def_id_spelling(trait_def_id))[\(arg_keys.to_string())]";
             },
             _ then "Unknown",
         };
@@ -699,65 +714,25 @@ given CodeGen {
 
     module_private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(receiver_type);
-        let concrete_key = self.concrete_receiver_lookup_key(concrete_receiver_type);
-        let concrete_lookup_key = "\(concrete_key).\(method_name)";
-        when self.program.static_method_lookup.get(concrete_lookup_key) in {
+        let concrete_key = make_receiver_method_key_from_context(self.context, concrete_receiver_type, method_name);
+        when self.program.static_method_lookup.get(concrete_key) in {
             .Some(def_id) then { return Option[DefId].Some(def_id);},
             .None() then {},
         };
 
-        let receiver_key = self.receiver_type_lookup_name_fallback(concrete_receiver_type);
-        let receiver_lookup_key = "\(receiver_key).\(method_name)";
+        let receiver_lookup_key = make_receiver_method_key_from_context(self.context, concrete_receiver_type, method_name);
         when self.program.static_method_lookup.get(receiver_lookup_key) in {
             .Some(def_id) then { return Option[DefId].Some(def_id);},
             .None() then {},
         };
 
-        when concrete_receiver_type in {
-            .GenericStruct(template_name, _, _) then {
-                if template_name <> receiver_key then {
-                    let template_lookup_key = "\(template_name).\(method_name)";
-                    when self.program.static_method_lookup.get(template_lookup_key) in {
-                        .Some(found_def_id) then { return Option[DefId].Some(found_def_id);},
-                        .None() then {},
-                    };
-                };
-            },
-            .GenericEnum(template_name, _, _) then {
-                if template_name <> receiver_key then {
-                    let template_lookup_key = "\(template_name).\(method_name)";
-                    when self.program.static_method_lookup.get(template_lookup_key) in {
-                        .Some(found_def_id) then { return Option[DefId].Some(found_def_id);},
-                        .None() then {},
-                    };
-                };
-            },
-            .StructureType(def_id) then when self.context.get_template_name(def_id) in {
-                .Some(template_name) then {
-                    if template_name <> receiver_key then {
-                        let template_lookup_key = "\(template_name).\(method_name)";
-                        when self.program.static_method_lookup.get(template_lookup_key) in {
-                            .Some(found_def_id) then { return Option[DefId].Some(found_def_id);},
-                            .None() then {},
-                        };
-                    };
-                },
-                .None() then {},
-            },
-            .EnumType(def_id) then when self.context.get_template_name(def_id) in {
-                .Some(template_name) then {
-                    if template_name <> receiver_key then {
-                        let template_lookup_key = "\(template_name).\(method_name)";
-                        when self.program.static_method_lookup.get(template_lookup_key) in {
-                            .Some(found_def_id) then { return Option[DefId].Some(found_def_id);},
-                            .None() then {},
-                        };
-                    };
-                },
-                .None() then {},
-            },
-            _ then {},
-        };
+        // No spelling fallback. A generic instance, a monomorphized nominal and
+        // a plain nominal all key `static_method_lookup` by the same owner
+        // identity -- the declaration (or its template) -- so the lookup above
+        // already answered. These branches used to retry under `get_template_name`
+        // whenever it differed from the receiver's other name.
+        let _ = concrete_receiver_type;
+        let _ = method_name;
         return Option[DefId].None();
     };
 
@@ -765,11 +740,11 @@ given CodeGen {
         if self.program.receiver_method_dispatch.get(def_id) is .Some(_) then { return true;};
 
         let mutable concrete_receiver_type = self.concretize_codegen_type(receiver_type);
-        let concrete_receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type);
+        let concrete_receiver_key = self.receiver_owner(concrete_receiver_type);
         when self.method_owner_type(def_id) in {
             .Some(owner_type) then {
                 let mutable concrete_owner_type = self.concretize_codegen_type(owner_type);
-                if self.concrete_receiver_lookup_key(concrete_owner_type) == concrete_receiver_key then when self.context.get_function_type(def_id) in {
+                if self.receiver_owner(concrete_owner_type) == concrete_receiver_key then when self.context.get_function_type(def_id) in {
                     .Some(function_type) then {
                         if self.function_type_param_count(function_type) > 0(UInt) then { return true;};
                     },
@@ -788,7 +763,7 @@ given CodeGen {
             .MutableWeakReferenceType(inner_ref) then inner_ref,
             _ then concrete_receiver_type,
         };
-        let receiver_base_key = self.concrete_receiver_lookup_key(receiver_base_type);
+        let receiver_base_key = self.receiver_owner(receiver_base_type);
 
         return when self.context.get_function_type(def_id) in {
             .Some(function_type) then {
@@ -804,7 +779,7 @@ given CodeGen {
                     .MutableWeakReferenceType(inner_ref) then inner_ref,
                     _ then concrete_param_type,
                 };
-                self.concrete_receiver_lookup_key(param_base_type) == receiver_base_key
+                self.receiver_owner(param_base_type) == receiver_base_key
             },
             .None() then false,
         };
@@ -971,7 +946,7 @@ given CodeGen {
         };
     };
 
-    module_private owner_base_lookup_key(self, t Type) String = {
+    module_private owner_base_lookup_key(self, t Type) MethodOwner = {
         let mutable concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t));
         let base_type = when concrete_type in {
             .ReferenceType(inner_ref) then inner_ref,
@@ -982,18 +957,18 @@ given CodeGen {
             .MutableWeakReferenceType(inner_ref) then inner_ref,
             _ then concrete_type,
         };
-        return self.concrete_receiver_lookup_key(base_type);
+        return self.receiver_owner(base_type);
     };
 
     current_owner_callable_c_name_cache_key(self, owner_type Type, symbol Symbol) String = {
-        return "\(self.concrete_receiver_lookup_key(owner_type))|\(symbol.def_id.id.to_string())";
+        return "\(self.receiver_owner(owner_type).display())|\(symbol.def_id.id.to_string())";
     };
 
     module_private owner_types_match(self, lhs Type, rhs Type) Bool = {
         let left_concrete = self.concretize_codegen_type(lhs);
         let right_concrete = self.concretize_codegen_type(rhs);
-        let left_exact = self.concrete_receiver_lookup_key(left_concrete);
-        let right_exact = self.concrete_receiver_lookup_key(right_concrete);
+        let left_exact = self.receiver_owner(left_concrete);
+        let right_exact = self.receiver_owner(right_concrete);
         if left_exact == right_exact then {
             return true;
         };
@@ -1530,9 +1505,12 @@ given CodeGen {
         return Option[TypeLayoutInfo].None();
     };
 
-    concrete_receiver_lookup_key(self, t Type) String = {
+    /// Owner identity of a receiver type. Two types are "the same receiver" iff
+    /// their owners are equal; this used to return a LAYOUT KEY, so "same
+    /// receiver" meant "same C layout string".
+    receiver_owner(self, t Type) MethodOwner = {
         let mutable canonical_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t));
-        return self.concrete_layout_key_for_type(canonical_type);
+        return self.context.method_owner_of(canonical_type);
     };
 
     concrete_type_c_name_fallback(self, t Type) Option[String] = {
@@ -1559,11 +1537,11 @@ given CodeGen {
                     },
                 }
             },
-            .GenericStruct(_, _, _) then {
+            .GenericStruct(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t));
                 Option[String].Some(self.sanitize_codegen_identifier(layout_key))
             },
-            .GenericEnum(_, _, _) then {
+            .GenericEnum(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t));
                 Option[String].Some(self.sanitize_codegen_identifier(layout_key))
             },
@@ -1633,8 +1611,10 @@ given CodeGen {
                     .None() then "U_\(def_id.id)",
                 }
             },
-            .GenericStruct(template, _, _) then template,
-            .GenericEnum(template, _, _) then template,
+            // Display: the spelling comes from the declaration.
+            .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
+            // Display: the spelling comes from the declaration.
+            .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
             .IntType() then "Int",
             .Int8Type() then "Int8",
             .Int16Type() then "Int16",
@@ -1672,8 +1652,8 @@ given CodeGen {
         return when t in {
             .StructureType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
             .EnumType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
-            .GenericStruct(_, _, _) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
-            .GenericEnum(_, _, _) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
+            .GenericStruct(_, _) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
+            .GenericEnum(_, _) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
             _ then false,
         };
     };
@@ -1763,7 +1743,7 @@ given CodeGen {
     };
 
     // 仅按单态化后的 concrete layout 查找类型 DefId。
-    find_type_def_id_by_layout_or_template(self, t Type, template String) Option[DefId] = {
+    find_type_def_id_by_layout_or_template(self, t Type) Option[DefId] = {
         let layout_name = self.concrete_layout_key_for_type(t);
         if self.find_type_def_id_by_name(layout_name) is .Some(def_id) then {
             return Option[DefId].Some(def_id);
@@ -1943,7 +1923,7 @@ given CodeGen {
 
     module_private type_looks_traitlike_for_storage(self, t Type) Bool = {
         return when t in {
-            .TraitObject(_, _, _) then true,
+            .TraitObject(_, _) then true,
             .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref),
             .MutableReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref),
             .BorrowedReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref),
@@ -1953,16 +1933,18 @@ given CodeGen {
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                 .Some(mapped_type) then self.type_looks_traitlike_for_storage(mapped_type),
                 .None() then {
-                    let trait_name = self.context.get_name(def_id) or else "";
+                    // Identity: the declaration is asked directly. Going through
+                    // its spelling would round-trip an identity back through the
+                    // name table and conflate same-named traits.
                     when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Trait() then true,
-                                _ then self.program.traits.get(trait_name).is_some(),
+                                _ then self.program.trait_by_def_id(def_id).is_some(),
                             },
-                            _ then self.program.traits.get(trait_name).is_some(),
+                            _ then self.program.trait_by_def_id(def_id).is_some(),
                         },
-                        .None() then self.program.traits.get(trait_name).is_some(),
+                        .None() then self.program.trait_by_def_id(def_id).is_some(),
                     }
                 },
             },
@@ -1982,7 +1964,7 @@ given CodeGen {
             .MutableBorrowedReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref, false),
             .WeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref, true),
             .MutableWeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref, true),
-            .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+            .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
             .OpaqueType(def_id) then if self.type_looks_traitlike_for_storage(Type.OpaqueType(def_id)) then Option[String].Some("struct __koral_TraitRef") else Option[String].None(),
             _ then Option[String].None(),
         };
@@ -2008,42 +1990,42 @@ given CodeGen {
 
     module_private opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
         return when mapped_type in {
-            .TraitObject(_, _, _) then {
+            .TraitObject(_, _) then {
                 Option[String].Some("struct __koral_TraitRef")
             },
             .ReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .BorrowedReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableBorrowedReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .WeakReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitWeakRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableWeakReferenceType(inner_ref) then {
                 when inner_ref in {
-                    .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitWeakRef"),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
                     _ then Option[String].None(),
                 }
             },
@@ -2081,16 +2063,16 @@ given CodeGen {
 
     module_private generic_nominal_c_type_name(self, t Type) Option[String] = {
         return when t in {
-            .GenericStruct(template, _, _) then {
+            .GenericStruct(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(t);
-                when self.find_type_def_id_by_layout_or_template(t, template) in {
+                when self.find_type_def_id_by_layout_or_template(t) in {
                     .Some(def_id) then Option[String].Some("struct \(self.nominal_layout_c_identifier(def_id))"),
                     .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(layout_key))"),
                 }
             },
-            .GenericEnum(template, _, _) then {
+            .GenericEnum(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(t);
-                when self.find_type_def_id_by_layout_or_template(t, template) in {
+                when self.find_type_def_id_by_layout_or_template(t) in {
                     .Some(def_id) then Option[String].Some("struct \(self.nominal_layout_c_identifier(def_id))"),
                     .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(layout_key))"),
                 }
@@ -2122,7 +2104,7 @@ given CodeGen {
             .WeakReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref, true)),
             .MutableWeakReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref, true)),
             .FunctionType(_, _) then Option[String].Some("struct __koral_Closure"),
-            .TraitObject(_, _, _) then Option[String].Some("struct __koral_TraitRef"),
+            .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
             _ then Option[String].None(),
         };
     };
@@ -2163,9 +2145,9 @@ given CodeGen {
                 for entry in params then { self.cache_c_type_name(entry.param_type);};
                 self.cache_c_type_name(return_type);
             },
-            .GenericStruct(_, _, args) then for arg in args then { self.cache_c_type_name(arg);},
-            .GenericEnum(_, _, args) then for arg in args then { self.cache_c_type_name(arg);},
-            .TraitObject(_, _, args) then for arg in args then { self.cache_c_type_name(arg);},
+            .GenericStruct(_, args) then for arg in args then { self.cache_c_type_name(arg);},
+            .GenericEnum(_, args) then for arg in args then { self.cache_c_type_name(arg);},
+            .TraitObject(_, args) then for arg in args then { self.cache_c_type_name(arg);},
             _ then {},
         };
         self.c_type_name_cache.insert(key, self.compute_c_type_name_uncached(t));

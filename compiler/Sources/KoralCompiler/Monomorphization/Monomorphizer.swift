@@ -12,11 +12,16 @@ public struct MonomorphizedProgram {
     
     /// 静态方法查找表：(类型名, 方法名) -> DefId
     /// 用于 CodeGen 查找标准库函数的正确 C 标识符
-    public let staticMethodLookup: [String: DefId]
+    public let staticMethodLookup: [MethodInstanceKey: DefId]
     
     /// Trait declarations indexed by trait name.
     /// Used by CodeGen for vtable struct generation.
     public let traits: [String: TraitDeclInfo]
+
+    /// Traits indexed by DECLARATION. `traits` is keyed by spelling and is
+    /// last-wins under a shared name; every identity question ("is this a
+    /// trait?", "which trait is this?") must be answered here.
+    public let traitDeclsByDefId: [DefId: TraitDeclInfo]
 
     /// Explicit conformance witnesses collected during type checking.
     public let conformanceWitnesses: [String: ConformanceWitness]
@@ -32,8 +37,9 @@ public struct MonomorphizedProgram {
     /// Creates a new MonomorphizedProgram.
     public init(
         globalNodes: [TypedGlobalNode],
-        staticMethodLookup: [String: DefId] = [:],
+        staticMethodLookup: [MethodInstanceKey: DefId] = [:],
         traits: [String: TraitDeclInfo] = [:],
+        traitDeclsByDefId: [DefId: TraitDeclInfo]? = nil,
         conformanceWitnesses: [String: ConformanceWitness] = [:],
         vtableRequests: Set<VtableRequest> = [],
         receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo] = [:]
@@ -41,18 +47,22 @@ public struct MonomorphizedProgram {
         self.globalNodes = globalNodes
         self.staticMethodLookup = staticMethodLookup
         self.traits = traits
+        // Prefer the index the checker built at registration; deriving it from
+        // `traits` would inherit that map's last-wins loss under a shared name.
+        if let traitDeclsByDefId {
+            self.traitDeclsByDefId = traitDeclsByDefId
+        } else {
+            var byDefId: [DefId: TraitDeclInfo] = [:]
+            for info in traits.values { byDefId[info.defId] = info }
+            self.traitDeclsByDefId = byDefId
+        }
         self.conformanceWitnesses = conformanceWitnesses
         self.vtableRequests = vtableRequests
         self.receiverMethodDispatch = receiverMethodDispatch
     }
     
-    /// 查找静态方法的完整限定名
-    /// - Parameters:
-    ///   - typeName: 类型名（如 "String", "Rune"）
-    ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
-    /// - Returns: 对应的 DefId，如果未找到则返回 nil
-    public func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
-        let key = "\(typeName).\(methodName)"
+    /// 查找静态方法：按接收者的 owner 身份 + 实例化实参
+    public func lookupStaticMethod(key: MethodInstanceKey) -> DefId? {
         return staticMethodLookup[key]
     }
 }
@@ -96,8 +106,10 @@ public class Monomorphizer {
     /// Mapping from Layout Name to Template Info (Base Name + Args)
     internal var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
     
-    /// Extension methods indexed by type name (from registry)
-    internal var extensionMethods: [String: [String: ConcreteMethodEntry]] = [:]
+    /// INSTANTIATED extension methods. Keyed by the full instantiation (owner +
+    /// type arguments), so `Set[Pair[Int,Int]]` and `Set[Pair[String,Int]]` are
+    /// two entries rather than one bucket keyed by `Set`.
+    internal var extensionMethods: [MethodInstanceKey: ConcreteMethodEntry] = [:]
 
     /// Inherent given method names indexed by receiver type stableKey.
     /// Used to detect name conflicts with `given Type as Trait` methods and
@@ -123,9 +135,9 @@ public class Monomorphizer {
     /// that need vtable generation during code generation.
     internal var vtableRequests: Set<VtableRequest> = []
 
-    /// Structured extension method lookup: "typeName.methodName" -> DefId
+    /// Structured extension method lookup: instantiated method -> its DefId.
     /// Populated during instantiation so lookup stays DefId-driven.
-    internal var extensionMethodDefIds: [String: DefId] = [:]
+    internal var extensionMethodDefIds: [MethodInstanceKey: DefId] = [:]
 
     /// Mapping from original function DefId to monomorphized function DefIds.
     /// Multiple concrete implementations can originate from a single semantic
@@ -307,33 +319,29 @@ public class Monomorphizer {
     }
 
     internal func typeInstantiationCacheKey(for type: Type) -> InstantiationKey? {
+        // Keyed by the template's DECLARATION. Deriving it from the template's
+        // SPELLING gave every same-named template one key, so `Box_I_d173[Int]`
+        // and `Box_I_d184[Int]` shared a cache slot and the second returned the
+        // first's instantiation.
         switch type {
-        case .genericStruct(let templateName, _, let args):
-            guard let template = input.genericTemplates.structTemplates[templateName] else {
-                return nil
-            }
-            return .structType(templateDefId: template.defId, args: args)
-        case .genericEnum(let templateName, _, let args):
-            guard let template = input.genericTemplates.enumTemplates[templateName] else {
-                return nil
-            }
-            return .enumType(templateDefId: template.defId, args: args)
+        case .genericStruct(let templateDefId, let args):
+            guard templateDefId.isValid else { return nil }
+            return .structType(templateDefId: templateDefId, args: args)
+        case .genericEnum(let templateDefId, let args):
+            guard templateDefId.isValid else { return nil }
+            return .enumType(templateDefId: templateDefId, args: args)
         case .structure(let defId):
             guard context.isGenericInstantiation(defId) == true,
-                  let templateName = context.getTemplateName(defId),
-                  let args = context.getTypeArguments(defId),
-                  let template = input.genericTemplates.structTemplates[templateName] else {
+                  let args = context.getTypeArguments(defId) else {
                 return nil
             }
-            return .structType(templateDefId: template.defId, args: args)
+            return .structType(templateDefId: context.templateDeclaration(of: defId), args: args)
         case .`enum`(let defId):
             guard context.isGenericInstantiation(defId) == true,
-                  let templateName = context.getTemplateName(defId),
-                  let args = context.getTypeArguments(defId),
-                  let template = input.genericTemplates.enumTemplates[templateName] else {
+                  let args = context.getTypeArguments(defId) else {
                 return nil
             }
-            return .enumType(templateDefId: template.defId, args: args)
+            return .enumType(templateDefId: context.templateDeclaration(of: defId), args: args)
         default:
             return nil
         }
@@ -370,7 +378,6 @@ public class Monomorphizer {
                     continue
                 }
 
-                var methodMap = extensionMethods[typeName] ?? [:]
                 for method in methods {
                     let methodName = receiverMethodDispatch[method.identifier.defId]?.methodName
                         ?? (context.getName(method.identifier.defId) ?? "<unknown>")
@@ -384,9 +391,11 @@ public class Monomorphizer {
                         newType: functionType
                     )
 
-                    methodMap[methodName] = ConcreteMethodEntry(symbol: methodSymbol, trait: trait)
+                    // Per INSTANTIATION: `Set[Pair[Int,Int]]` and
+                    // `Set[Pair[String,Int]]` are two entries, not one bucket.
+                    let instanceKey = context.receiverMethodKey(receiverType, methodName)
+                    extensionMethods[instanceKey] = ConcreteMethodEntry(symbol: methodSymbol, trait: trait)
                 }
-                extensionMethods[typeName] = methodMap
 
                 guard trait == nil else { continue }
 
@@ -680,6 +689,7 @@ public class Monomorphizer {
             globalNodes: allNodes,
             staticMethodLookup: staticMethodLookup,
             traits: input.genericTemplates.traits,
+            traitDeclsByDefId: input.genericTemplates.traitDeclsByDefId,
             conformanceWitnesses: remappedWitnesses,
             vtableRequests: vtableRequests,
             receiverMethodDispatch: receiverMethodDispatch
@@ -738,8 +748,8 @@ public class Monomorphizer {
     /// 构建静态方法查找表
     /// - Parameter nodes: 所有全局节点
     /// - Returns: (类型名.方法名) -> DefId 的映射
-    private func buildStaticMethodLookup(from nodes: [TypedGlobalNode]) -> [String: DefId] {
-        var lookup: [String: DefId] = [:]
+    private func buildStaticMethodLookup(from nodes: [TypedGlobalNode]) -> [MethodInstanceKey: DefId] {
+        var lookup: [MethodInstanceKey: DefId] = [:]
         
         // Merge structured extension method lookup (populated during instantiation)
         for (key, defId) in extensionMethodDefIds {
@@ -765,7 +775,7 @@ public class Monomorphizer {
                 // 注册每个方法
                 for method in methods {
                     if let dispatchInfo = receiverMethodDispatch[method.identifier.defId] {
-                        let key = "\(typeName).\(dispatchInfo.methodName)"
+                        let key = context.receiverMethodKey(type, dispatchInfo.methodName)
                         if trait != nil {
                             if lookup[key] == nil {
                                 lookup[key] = method.identifier.defId
@@ -800,39 +810,39 @@ public class Monomorphizer {
         let base = baseType
 
         switch base {
-        case .genericStruct(let template, _, let args):
+        case .genericStruct(let typeDefId, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
-                    let extensions = input.genericTemplates.extensionMethods[template],
+                    let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: base)],
                     let ext = selectExtensionTemplate(
                         extensions,
                         name: name,
                         methodTypeArgCount: methodTypeArgs.count,
                         extensionTypeArgCount: resolvedArgs.count
                     ) {
-                let resolvedBase = resolveParameterizedType(.genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs))
+                let resolvedBase = resolveParameterizedType(.genericStruct(templateDefId: typeDefId, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
-                    structureName: template,
+                    structureName: Type.spelling(typeDefId),
                     genericArgs: resolvedArgs,
                     methodTypeArgs: methodTypeArgs,
                     methodInfo: ext
                 )
             }
-        case .genericEnum(let template, _, let args):
+        case .genericEnum(let typeDefId, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
                 if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
-                    let extensions = input.genericTemplates.extensionMethods[template],
+                    let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: base)],
                     let ext = selectExtensionTemplate(
                         extensions,
                         name: name,
                         methodTypeArgCount: methodTypeArgs.count,
                         extensionTypeArgCount: resolvedArgs.count
                     ) {
-                let resolvedBase = resolveParameterizedType(.genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs))
+                let resolvedBase = resolveParameterizedType(.genericEnum(templateDefId: typeDefId, args: resolvedArgs))
                 _ = try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
-                    structureName: template,
+                    structureName: Type.spelling(typeDefId),
                     genericArgs: resolvedArgs,
                     methodTypeArgs: methodTypeArgs,
                     methodInfo: ext
@@ -842,15 +852,11 @@ public class Monomorphizer {
             let typeName = context.getName(defId) ?? ""
             let simpleName = typeName.split(separator: ".").last.map(String.init) ?? typeName
             // Use stored templateName if available, otherwise fall back to full name
-            let baseName = context.getTemplateName(defId) ?? simpleName
-            var extensions = input.genericTemplates.extensionMethods[baseName]
-            if extensions == nil {
-                if let matchKey = input.genericTemplates.extensionMethods.keys.first(where: { key in
-                    simpleName.hasPrefix(key) || simpleName.contains(key)
-                }) {
-                    extensions = input.genericTemplates.extensionMethods[matchKey]
-                }
-            }
+            // Owner identity. There is no spelling sweep any more: this used to
+            // retry with `simpleName.hasPrefix(key) || simpleName.contains(key)`
+            // over every registered name, which is how two same-named types from
+            // different modules answered for each other.
+            let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: base)]
                 if let extensions,
                     let ext = selectExtensionTemplate(
                      extensions,
@@ -867,9 +873,12 @@ public class Monomorphizer {
                 }
                 if let typeArgs = resolvedTypeArgs,
                    typeArgs.count == ext.typeParams.count {
+                    // `structureName` is a MANGLE name -- one of the three places a
+                    // spelling is legitimate. The registry key is the owner identity.
+                    let structureName = context.getTemplateName(defId) ?? simpleName
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: base,
-                        structureName: baseName,
+                        structureName: structureName,
                         genericArgs: typeArgs,
                         methodTypeArgs: methodTypeArgs,
                         methodInfo: ext

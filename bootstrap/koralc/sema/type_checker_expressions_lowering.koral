@@ -322,14 +322,14 @@ given TypeChecker {
         let mutable static_sig_opt = Option[Symbol].None();
         let mutable static_bindings = Dict[String, Type].new();
         when receiver_type in {
-            .GenericStruct(template, _, type_args) then {
-                effective_type_name = template;
+            .GenericStruct(tplDefId, type_args) then {
+                effective_type_name = def_id_spelling(tplDefId);
                 for arg in type_args then {
                     receiver_type_args.push(arg);
                 };
             },
-            .GenericEnum(template, _, type_args) then {
-                effective_type_name = template;
+            .GenericEnum(tplDefId, type_args) then {
+                effective_type_name = def_id_spelling(tplDefId);
                 for arg in type_args then {
                     receiver_type_args.push(arg);
                 };
@@ -443,14 +443,16 @@ given TypeChecker {
             .StructureType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
             .EnumType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
             .OpaqueType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
-            .GenericStruct(template_name, _, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
-                .Some(template) then Symbol(template.def_id, constructed_type, SymbolKind.TypeSymbol()),
-                .None() then Symbol(self.allocate_unindexed_def_id(template_name, DefKind.TypeDef(TypeDefKind.Structure())), constructed_type, SymbolKind.TypeSymbol()),
-            },
-            .GenericEnum(template_name, _, _) then when self.storage.generic_templates.lookup_enum(template_name) in {
-                .Some(template) then Symbol(template.def_id, constructed_type, SymbolKind.TypeSymbol()),
-                .None() then Symbol(self.allocate_unindexed_def_id(template_name, DefKind.TypeDef(TypeDefKind.Enum())), constructed_type, SymbolKind.TypeSymbol()),
-            },
+            // Identity is the template's DECLARATION -- the DefId the type
+            // already carries (rustc: `Ty::Adt` keeps its `DefId`). It is never
+            // replaced by a freshly minted one: two constructions of the same
+            // type would then carry two different identities. The registry is
+            // not the source of identity either -- it maps the same DefId to the
+            // template's parameter list.
+            .GenericStruct(tplDefId, _) then Symbol(tplDefId, constructed_type, SymbolKind.TypeSymbol()),
+            .GenericEnum(tplDefId, _) then Symbol(tplDefId, constructed_type, SymbolKind.TypeSymbol()),
+            // No declaration exists for these (scalars, collections), so the
+            // DefId is a placeholder identity and its name is display-only.
             _ then Symbol(self.allocate_unindexed_def_id(self.context().type_display_name(constructed_type), DefKind.TypeDef(TypeDefKind.Structure())), constructed_type, SymbolKind.TypeSymbol()),
         };
     };
@@ -551,7 +553,9 @@ given TypeChecker {
 
         let mutable args = List[Type].new();
         args.push(element_type);
-        return Type.GenericStruct("List", self.storage.generic_templates.lookup_struct_def_id("List"), args);
+        // Std's `List` is a LANG ITEM, reached by declaration the way rustc
+        // reaches `str` -- not by a spelling lookup that a user type could win.
+        return Type.GenericStruct(self.context().std_type_def_id("List") or else def_id_invalid(), args);
     };
 
     module_private infer_dict_literal_result_type(self, typed_entries List[Pair[TypedExpr, TypedExpr]], expected Option[Type]) Type = {
@@ -582,7 +586,8 @@ given TypeChecker {
         let mutable args = List[Type].new();
         args.push(key_type);
         args.push(value_type);
-        return Type.GenericStruct("Dict", self.storage.generic_templates.lookup_struct_def_id("Dict"), args);
+        // Std's `Dict` is a LANG ITEM, reached by declaration.
+        return Type.GenericStruct(self.context().std_type_def_id("Dict") or else def_id_invalid(), args);
     };
 
     module_private lower_collection_literal_from_typed(self, typed_elems List[TypedExpr], result_type Type) TypedExpr = {
@@ -712,7 +717,8 @@ given TypeChecker {
                     let mutable element_type = range_elem.unwrap();
                     let mutable range_args = List[Type].new();
                     range_args.push(element_type);
-                    let range_type = Type.GenericEnum("Range", self.generic_template_def_id("Range"), range_args);
+                    // Std's `Range` is a LANG ITEM, reached by declaration.
+                    let range_type = Type.GenericEnum(self.context().std_type_def_id("Range") or else def_id_invalid(), range_args);
                     return self.lower_enum_constructor_expr(range_type, "Full", List[TypedExpr].new());
                 };
                 if self.extract_collection_element_type(et) is .Some(_) then {

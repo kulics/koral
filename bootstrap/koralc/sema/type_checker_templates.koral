@@ -4,7 +4,7 @@ given TypeChecker {
     // at the registration boundary; every later match compares DefIds so that
     // renaming, module suffixes, or two same-named traits cannot alias.
     module_private trait_def_id_of(self, trait_name String) Option[DefId] = {
-        return when self.storage.trait_registry.get(trait_name) in {
+        return when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(trait_info) then Option[DefId].Some(trait_info.def_id),
             .None() then Option[DefId].None(),
         };
@@ -208,7 +208,7 @@ given TypeChecker {
         member_type_params List[TypeParameter],
     ) Bool = {
         when target_type in {
-            .TraitObject(_, _, _) then { return true;},
+            .TraitObject(_, _) then { return true;},
             _ then {},
         };
         if not owner_type_params.is_empty() then {
@@ -238,12 +238,12 @@ given TypeChecker {
             },
             .Reference(inner, is_mutable) then {
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
@@ -273,12 +273,12 @@ given TypeChecker {
             .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
@@ -303,9 +303,9 @@ given TypeChecker {
                     resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
                 };
                 if self.is_enum_base_name(base) then {
-                    Type.GenericEnum(base, self.generic_template_def_id(base), resolved_args)
+                    Type.GenericEnum(self.generic_template_def_id(base), resolved_args)
                 } else {
-                    Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), resolved_args)
+                    Type.GenericStruct(self.storage.generic_templates.lookup_struct_def_id(base), resolved_args)
                 }
             },
             .FunctionType(param_types, return_type) then {
@@ -326,7 +326,7 @@ given TypeChecker {
         return current.method.name == candidate.method.name and current.type_params.count() == candidate.type_params.count() and current.method.type_params.count() == candidate.method.type_params.count() and current.conformance_trait_def_id == candidate.conformance_trait_def_id and current.conformance_target_type == candidate.conformance_target_type and current.conformance_trait_args == candidate.conformance_trait_args;
     };
 
-    module_private upsert_extension_template(self, key String, template GenericExtensionMethodTemplate) Void = {
+    module_private upsert_extension_template(self, key MethodOwner, template GenericExtensionMethodTemplate) Void = {
         when self.storage.generic_templates.extension_methods.get(key) in {
             .Some(existing) then {
                 let mutable updated = existing;
@@ -357,47 +357,26 @@ given TypeChecker {
         };
     };
 
-    // Returns the canonical extension template registry key for a type.
-    // For modifier types (ref/ptr/weakref), returns fixed short names matching Swift:
-    //   "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef"
-    // For generic types, returns the template name (e.g. "List", "Option").
-    // For concrete types, returns the type name.
-    module_private extension_template_key(self, target_type Type) String = {
-        return when target_type in {
-            .TraitObject(trait_name, _, _) then trait_name,
-            .ReferenceType(_) then "Ref",
-            .MutableReferenceType(_) then "MutRef",
-            .PointerType(_) then "Ptr",
-            .MutablePointerType(_) then "MutPtr",
-            .WeakReferenceType(_) then "WeakRef",
-            .MutableWeakReferenceType(_) then "MutWeakRef",
-            .GenericStruct(template, _, _) then template,
-            .GenericEnum(template, _, _) then template,
-            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template_name) then template_name,
-                .None() then self.context().get_name(def_id) or else "struct#\(def_id.id)",
-            },
-            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template_name) then template_name,
-                .None() then self.context().get_name(def_id) or else "enum#\(def_id.id)",
-            },
-            _ then self.context().type_display_name(target_type),
-        };
+    /// The owner identity a method registry keys `target_type` by.
+    ///
+    /// Delegates to `CompilerContext.method_owner_of`, the one place the key
+    /// shape is defined. This used to be built from the type's SPELLING, which
+    /// made two modules' `Plain` share a slot and their `given Plain { tag }`
+    /// collide, and made `String`/`Rune`/`StringBuilder` collide too.
+    module_private extension_template_key(self, target_type Type) MethodOwner = {
+        return self.context().method_owner_of(target_type);
     };
 
-    module_private extension_template_key_for_target_node(self, target_type TypeNode, resolved_target Type) String = {
-        return when target_type in {
-            .Reference(_, is_mutable) then if is_mutable then "MutRef" else "Ref",
-            .Pointer(_, is_mutable) then if is_mutable then "MutPtr" else "Ptr",
-            .WeakReference(_, is_mutable) then if is_mutable then "MutWeakRef" else "WeakRef",
-            .Generic(base, _) then base,
-            _ then self.extension_template_key(resolved_target),
-        };
+    /// Same identity, taken from the declaration syntax of a `given` target.
+    /// The node form only matters for modifiers, where the resolved type is
+    /// already the modifier and `method_owner_of` reaches the same answer.
+    module_private extension_template_key_for_target_node(self, target_type TypeNode, resolved_target Type) MethodOwner = {
+        return self.extension_template_key(resolved_target);
     };
 
     module_private register_extension_method_template(
         self,
-        type_key String,
+        type_key MethodOwner,
         owner_type_params List[TypeParameter],
         conformance_target_type Option[Type],
         conformance_trait_args List[Type],
@@ -468,7 +447,7 @@ given TypeChecker {
         owner_type_param_count UInt,
         method_name String,
         method_type_param_count UInt,
-        conformance_trait_name Option[String],
+        conformance_trait_def_id Option[DefId],
         checked_body Option[TypedExpr],
         checked_parameters Option[List[Symbol]],
         checked_return_type Type,
@@ -480,7 +459,9 @@ given TypeChecker {
                 let mutable index = 0(UInt);
                 while index < updated.count() then {
                     let current_ref = updated[index];
-                    if current_ref.method.name == method_name and current_ref.type_params.count() == owner_type_param_count and current_ref.method.type_params.count() == method_type_param_count and current_ref.conformance_trait_name == conformance_trait_name then {
+                                        // Identity: the conformance's trait DECLARATION. Two same-named traits
+                                        // from different modules are different traits, so a name cannot select it.
+                                        if current_ref.method.name == method_name and current_ref.type_params.count() == owner_type_param_count and current_ref.method.type_params.count() == method_type_param_count and current_ref.conformance_trait_def_id == conformance_trait_def_id then {
                         let new_checked_body = when checked_body in {
                             .Some(_) then checked_body,
                             .None() then current_ref.checked_body,
@@ -549,49 +530,15 @@ given TypeChecker {
             );
             let param_specs = self.function_param_specs_from_typed_params(member.params);
             let source_def_id = self.context().get_original_def_id(member.def_id) or else member.def_id;
+            // Registered ONCE, under the owner identity. An instance resolves to
+            // its template's declaration and a plain nominal to its own, so this
+            // one key already covers every spelling a lookup might use. The
+            // bare-name aliases this used to also write were pure collision
+            // surface: two modules' `Plain` landed in one slot.
             self.context().register_method_param_specs(type_key, member.name, param_specs);
             self.storage.method_table.register_with_source(type_key, member.name, method_symbol, source_def_id);
             if mark_inherent then {
                 self.storage.method_table.mark_inherent(type_key, member.name);
-            };
-            when target_type in {
-                .GenericStruct(template_name, _, _) then {
-                    self.context().register_method_param_specs(template_name, member.name, param_specs);
-                    self.storage.method_table.register_with_source(template_name, member.name, method_symbol, source_def_id);
-                    if mark_inherent then {
-                        self.storage.method_table.mark_inherent(template_name, member.name);
-                    };
-                },
-                .GenericEnum(template_name, _, _) then {
-                    self.context().register_method_param_specs(template_name, member.name, param_specs);
-                    self.storage.method_table.register_with_source(template_name, member.name, method_symbol, source_def_id);
-                    if mark_inherent then {
-                        self.storage.method_table.mark_inherent(template_name, member.name);
-                    };
-                },
-                .StructureType(def_id) then {
-                    if self.context().get_name(def_id) is .Some(name) then {
-                        self.context().register_method_param_specs(name, member.name, param_specs);
-                        if name <> type_key then {
-                            self.storage.method_table.register_with_source(name, member.name, method_symbol, source_def_id);
-                            if mark_inherent then {
-                                self.storage.method_table.mark_inherent(name, member.name);
-                            };
-                        };
-                    };
-                },
-                .EnumType(def_id) then {
-                    if self.context().get_name(def_id) is .Some(name) then {
-                        self.context().register_method_param_specs(name, member.name, param_specs);
-                        if name <> type_key then {
-                            self.storage.method_table.register_with_source(name, member.name, method_symbol, source_def_id);
-                            if mark_inherent then {
-                                self.storage.method_table.mark_inherent(name, member.name);
-                            };
-                        };
-                    };
-                },
-                _ then {},
             };
         };
     };
@@ -610,7 +557,7 @@ given TypeChecker {
         checked_return_type Option[Type],
     ) Void = {
         if self.lookup_current_file_symbol(name) is .Some(sym) then {
-            let qualified_name = qualified_trait_key(self.storage.module_path, name);
+            let qualified_name = qualified_symbol_key(self.storage.module_path, name);
             when self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) in {
                 .Some(existing) then {
                     let new_checked_body = when checked_body in {
@@ -637,6 +584,8 @@ given TypeChecker {
                     );
                     self.storage.generic_templates.function_templates.insert(name, updated);
                     self.storage.generic_templates.function_templates.insert(qualified_name, updated);
+                    // By DECLARATION as well: the name keys collide across modules.
+                    self.storage.generic_templates.function_templates_by_def_id.insert(updated.def_id.id, updated);
                 },
                 .None() then {
                     let template = GenericFunctionTemplate(
@@ -651,35 +600,39 @@ given TypeChecker {
                     );
                     self.storage.generic_templates.function_templates.insert(name, template);
                     self.storage.generic_templates.function_templates.insert(qualified_name, template);
+                    // By DECLARATION as well: the name keys collide across modules.
+                    self.storage.generic_templates.function_templates_by_def_id.insert(template.def_id.id, template);
                 },
             };
         };
     };
 
     // Resolve extension template signature for modifier types (ref/ptr) and weakref types.
-    // When the base type is a modifier type, look up extension methods
-    // registered under "Ref" / "MutRef" / "Ptr" / "MutPtr" / "WeakRef" / "MutWeakRef" keys.
-    // For mutable variants, checks the mutable key first, then falls back to the immutable key.
+    // Looked up by OWNER IDENTITY in the closed built-in space. For mutable
+    // variants, probes the mutable owner first, then falls back to the immutable one.
     module_private resolve_modifier_extension_template_signature(self, base_type Type, method_name String) Option[Symbol] = {
-        let mutable keys = List[String].new();
+        // Owner identities to probe, most specific first. A mutable modifier
+        // falls back to the immutable one, which is a real fallback between two
+        // OWNERS in the closed built-in space -- not a spelling fallback.
+        let mutable keys = List[MethodOwner].new();
         let mutable inner_type_opt = Option[Type].None();
         when base_type in {
             .ReferenceType(inner) then {
-                keys.push("Ref");
+                keys.push(MethodOwner.Builtin("Ref"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             .MutableReferenceType(inner) then {
-                keys.push("MutRef");
-                keys.push("Ref");
+                keys.push(MethodOwner.Builtin("MutRef"));
+                keys.push(MethodOwner.Builtin("Ref"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             .PointerType(inner) then {
-                keys.push("Ptr");
+                keys.push(MethodOwner.Builtin("Ptr"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             .MutablePointerType(inner) then {
-                keys.push("MutPtr");
-                keys.push("Ptr");
+                keys.push(MethodOwner.Builtin("MutPtr"));
+                keys.push(MethodOwner.Builtin("Ptr"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             _ then { return Option[Symbol].None();},
@@ -690,9 +643,9 @@ given TypeChecker {
             .None() then { return Option[Symbol].None();},
         };
 
-        for key in keys then {
+        for owner_key in keys then {
             when self.storage.generic_templates.lookup_extension_method(
-                key,
+                owner_key,
                 method_name,
                 Option[UInt].None(),
                 Option[UInt].Some(1(UInt)),
@@ -738,16 +691,16 @@ given TypeChecker {
     };
 
     module_private resolve_weakref_extension_template_signature(self, base_type Type, method_name String) Option[Symbol] = {
-        let mutable keys = List[String].new();
+        let mutable keys = List[MethodOwner].new();
         let mutable inner_type_opt = Option[Type].None();
         when base_type in {
             .WeakReferenceType(inner) then {
-                keys.push("WeakRef");
+                keys.push(MethodOwner.Builtin("WeakRef"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             .MutableWeakReferenceType(inner) then {
-                keys.push("MutWeakRef");
-                keys.push("WeakRef");
+                keys.push(MethodOwner.Builtin("MutWeakRef"));
+                keys.push(MethodOwner.Builtin("WeakRef"));
                 inner_type_opt = Option[Type].Some(inner);
             },
             _ then { return Option[Symbol].None();},
@@ -756,9 +709,9 @@ given TypeChecker {
             .Some(t) then t,
             .None() then { return Option[Symbol].None();},
         };
-        for key in keys then {
+        for owner_key in keys then {
             when self.storage.generic_templates.lookup_extension_method(
-                key,
+                owner_key,
                 method_name,
                 Option[UInt].None(),
                 Option[UInt].Some(1(UInt)),
@@ -801,14 +754,14 @@ given TypeChecker {
         let mutable template_name_opt = Option[String].None();
         let mutable extension_type_args = List[Type].new();
         when normalized_base in {
-            .GenericStruct(template_name, _, args) then {
-                template_name_opt = Option[String].Some(template_name);
+            .GenericStruct(tplDefId, args) then {
+                template_name_opt = Option[String].Some(def_id_spelling(tplDefId));
                 for arg in args then {
                     extension_type_args.push(arg);
                 };
             },
-            .GenericEnum(template_name, _, args) then {
-                template_name_opt = Option[String].Some(template_name);
+            .GenericEnum(tplDefId, args) then {
+                template_name_opt = Option[String].Some(def_id_spelling(tplDefId));
                 for arg in args then {
                     extension_type_args.push(arg);
                 };
@@ -826,12 +779,12 @@ given TypeChecker {
                             .None() then {
                                 when self.context().lookup_type(def_id) in {
                                     .Some(mapped_type) then when mapped_type in {
-                                        .GenericStruct(_, _, mapped_args) then {
+                                        .GenericStruct(_, mapped_args) then {
                                             for arg in mapped_args then {
                                                 extension_type_args.push(arg);
                                             };
                                         },
-                                        .GenericEnum(_, _, mapped_args) then {
+                                        .GenericEnum(_, mapped_args) then {
                                             for arg in mapped_args then {
                                                 extension_type_args.push(arg);
                                             };
@@ -863,12 +816,12 @@ given TypeChecker {
                             .None() then {
                                 when self.context().lookup_type(def_id) in {
                                     .Some(mapped_type) then when mapped_type in {
-                                        .GenericStruct(_, _, mapped_args) then {
+                                        .GenericStruct(_, mapped_args) then {
                                             for arg in mapped_args then {
                                                 extension_type_args.push(arg);
                                             };
                                         },
-                                        .GenericEnum(_, _, mapped_args) then {
+                                        .GenericEnum(_, mapped_args) then {
                                             for arg in mapped_args then {
                                                 extension_type_args.push(arg);
                                             };
@@ -916,12 +869,12 @@ given TypeChecker {
         };
         let method_type_args_ref = self.to_type_ref_list(method_type_args);
         let receiver_is_generic_instance = when normalized_base in {
-            .GenericStruct(_, _, _) then true,
-            .GenericEnum(_, _, _) then true,
+            .GenericStruct(_, _) then true,
+            .GenericEnum(_, _) then true,
             _ then false,
         };
         let mutable recorded = false;
-        if self.storage.generic_templates.lookup_extension_methods(template_name) is .Some(ext_templates) then {
+        if self.storage.generic_templates.lookup_extension_methods(self.extension_template_key(normalized_base)) is .Some(ext_templates) then {
             if select_extension_template(
                 ext_templates,
                 method_name,
@@ -959,7 +912,7 @@ given TypeChecker {
                 );
                 self.record_instantiation_request(InstantiationRequest(
                     InstantiationKind.ExtensionMethod(
-                        template_name,
+                        self.extension_template_key(normalized_base),
                         normalized_base,
                         request_template,
                         extension_type_args,
@@ -981,8 +934,7 @@ given TypeChecker {
                     if not self.conformance_type_key_matches(conformance.target_type, normalized_base, conformance_bindings) then {
                         continue;
                     };
-                    let trait_name = conformance.trait_name;
-                    let trait_templates = self.storage.generic_templates.lookup_extension_methods(trait_name) or else {
+                    let trait_templates = self.storage.generic_templates.lookup_extension_methods(MethodOwner.Decl(conformance.trait_def_id)) or else {
                         continue;
                     };
                     let matched_template = select_extension_template(
@@ -1028,7 +980,7 @@ given TypeChecker {
                     );
                     self.record_instantiation_request(InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
-                            trait_name,
+                            MethodOwner.Decl(conformance.trait_def_id),
                             normalized_base,
                             request_template,
                             concrete_trait_args,

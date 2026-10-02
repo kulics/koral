@@ -40,7 +40,7 @@ public type ConcreteCallableInfo(
     trait_conformance_def_id Option[DefId],
 );
 
-file_private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
+public let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
     return when t in {
         .OpaqueType(def_id) then {
             when context.lookup_type(def_id) in {
@@ -72,8 +72,10 @@ module_private let mono_type_simple_name(context CompilerContext, t Type) String
                 .None() then context.get_name(def_id) or else context.type_display_name(t),
             }
         },
-        .GenericStruct(template, _, _) then template,
-        .GenericEnum(template, _, _) then template,
+        // Display: the spelling comes from the declaration.
+        .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
+        // Display: the spelling comes from the declaration.
+        .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
         .ReferenceType(inner) then mono_type_simple_name(context, inner),
         .MutableReferenceType(inner) then mono_type_simple_name(context, inner),
         .BorrowedReferenceType(inner) then mono_type_simple_name(context, inner),
@@ -214,10 +216,11 @@ file_private let mono_concrete_layout_key_for_type(context CompilerContext, t Ty
     return context.get_layout_key(t);
 };
 
-file_private let concrete_receiver_method_lookup_key(context CompilerContext, receiver_type Type, method_name String) String = {
+/// Key of a concrete receiver-dispatched method. The receiver contributes its
+/// OWNER IDENTITY; a layout name is a mangle string and is not an identity.
+file_private let concrete_receiver_method_lookup_key(context CompilerContext, receiver_type Type, method_name String) MethodInstanceKey = {
     let normalized = mono_receiver_lookup_type(context, receiver_type);
-    let receiver_key = mono_concrete_layout_key_for_type(context, normalized);
-    return "\(receiver_key).\(method_name)";
+    return make_receiver_method_key_from_context(context, normalized, method_name);
 };
 
 file_private let push_concrete_receiver_lookup_alias(alias_list List[String], alias String) List[String] = {
@@ -298,20 +301,26 @@ public type mutable MonomorphizedProgram(
     vtable_requests List[VtableRequest],
     mutable receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mutable concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    mutable static_method_by_key Dict[String, DefId],
+    mutable static_method_by_key Dict[MethodInstanceKey, DefId],
     generic_templates GenericTemplateRegistry,
     global_scope Scope,
     import_graph ImportGraph,
     method_table MethodTable,
     trait_registry TraitRegistry,
-    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     conformance_witnesses Dict[String, ConformanceWitness],
-    mutable extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
-    mutable extension_method_def_ids Dict[String, DefId],
+    mutable extension_methods Dict[MethodInstanceKey, ConcreteMethodEntry],
+    mutable extension_method_def_ids Dict[MethodInstanceKey, DefId],
     mutable remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
 );
 
 given MonomorphizedProgram {
+    /// The trait declared at `def_id`. Identity lookup -- the spelling is never
+    /// consulted. Delegates to the registry's DefId index.
+    public trait_by_def_id(self, def_id DefId) Option[TraitDeclInfo] = {
+        return self.generic_templates.lookup_trait_by_def_id(def_id);
+    };
+
     public merge_generated_node(self, node TypedDecl) Void = {
         self.global_nodes.push(node);
     };
@@ -324,11 +333,11 @@ given MonomorphizedProgram {
         self.receiver_method_dispatch.insert(def_id, info);
     };
 
-    public merge_extension_method_map(self, key String, value Dict[String, ConcreteMethodEntry]) Void = {
+    public merge_extension_method_map(self, key MethodInstanceKey, value ConcreteMethodEntry) Void = {
         self.extension_methods.insert(key, value);
     };
 
-    public merge_extension_method_def_id(self, key String, def_id DefId) Void = {
+    public merge_extension_method_def_id(self, key MethodInstanceKey, def_id DefId) Void = {
         self.extension_method_def_ids.insert(key, def_id);
     };
 
@@ -336,7 +345,7 @@ given MonomorphizedProgram {
         self.remapped_function_def_ids.insert(key, values);
     };
 
-    public merge_static_method_lookup_entry(self, key String, def_id DefId) Void = {
+    public merge_static_method_lookup_entry(self, key MethodInstanceKey, def_id DefId) Void = {
         self.static_method_by_key.insert(key, def_id);
     };
 
@@ -363,7 +372,7 @@ public type TypeCheckerOutput(
     import_graph ImportGraph,
     method_table MethodTable,
     trait_registry TraitRegistry,
-    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     conformance_witnesses Dict[String, ConformanceWitness],
 );
 
@@ -383,8 +392,8 @@ module_private type mutable MonomorphizerStorage(
     mutable resolved_parameterized_types Dict[Type, Type],
     mutable resolving_parameterized_type_keys Set[Type],
     mutable generated_layouts Set[String],
-    mutable fuzzy_extension_methods_cache Dict[String, List[GenericExtensionMethodTemplate]],
-    mutable fuzzy_extension_methods_missing Set[String],
+    mutable fuzzy_extension_methods_cache Dict[MethodOwner, List[GenericExtensionMethodTemplate]],
+    mutable fuzzy_extension_methods_missing Set[MethodOwner],
     mutable conformance_extension_template_cache Dict[String, GenericExtensionMethodTemplate],
     mutable conformance_extension_template_missing Set[String],
     mutable trait_tool_template_cache Dict[String, GenericExtensionMethodTemplate],
@@ -405,10 +414,10 @@ module_private type mutable MonomorphizerStorage(
 
     // ── State ────────────────────────────────────────────────────────────────
     mutable layout_to_template_info Dict[String, TemplateInfo],
-    mutable extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
-    mutable extension_method_def_ids Dict[String, DefId],
+    mutable extension_methods Dict[MethodInstanceKey, ConcreteMethodEntry],
+    mutable extension_method_def_ids Dict[MethodInstanceKey, DefId],
     mutable concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    mutable concrete_callable_name_index Dict[String, List[DefId]],
+    mutable concrete_callable_name_index Dict[MethodInstanceKey, List[DefId]],
     mutable remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
     mutable receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mutable vtable_requests List[VtableRequest],
@@ -427,7 +436,7 @@ module_private type mutable MonomorphizerStorage(
     import_graph ImportGraph,
     method_table MethodTable,
     trait_registry TraitRegistry,
-    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     conformance_witnesses Dict[String, ConformanceWitness],
 
     // ── Work queue ───────────────────────────────────────────────────────────
@@ -668,10 +677,12 @@ given Monomorphizer {
     module_private register_concrete_callable_if_absent(self, info ConcreteCallableInfo) Void = {
         if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
             self.storage.concrete_callables_by_def_id.insert(info.def_id, info);
-            // Build secondary index: "layout_key(owner).method_name" -> [def_id, ...]
+            // Secondary index keyed by the owner's IDENTITY. This used to be
+            // "layout_key(owner).method_name", so two types with the same C
+            // layout shared an index bucket.
             when info.owner_type in {
                 .Some(owner_type) then {
-                    let index_key = "\(layout_key(owner_type)).\(info.logical_name)";
+                    let index_key = make_receiver_method_key_from_context(self.storage.context, owner_type, info.logical_name);
                     let mutable existing = self.storage.concrete_callable_name_index.get(index_key) or else List[DefId].new();
                     existing.push(info.def_id);
                     self.storage.concrete_callable_name_index.insert(index_key, existing);
@@ -696,7 +707,7 @@ given Monomorphizer {
         import_graph ImportGraph,
         method_table MethodTable,
         trait_registry TraitRegistry,
-        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+        conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
         conformance_witnesses Dict[String, ConformanceWitness],
     ) Monomorphizer = {
         let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context, global_scope, import_graph, method_table, trait_registry, conformance_index, conformance_witnesses);
@@ -735,8 +746,8 @@ given Monomorphizer {
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
-            Dict[String, List[GenericExtensionMethodTemplate]].new(),
-            Set[String].new(),
+            Dict[MethodOwner, List[GenericExtensionMethodTemplate]].new(),
+            Set[MethodOwner].new(),
             Dict[String, GenericExtensionMethodTemplate].new(),
             Set[String].new(),
             Dict[String, GenericExtensionMethodTemplate].new(),
@@ -755,10 +766,10 @@ given Monomorphizer {
             initial_nodes.count(),
             // state
             Dict[String, TemplateInfo].new(),
-            Dict[String, Dict[String, ConcreteMethodEntry]].new(),
-            Dict[String, DefId].new(),
+            Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+            Dict[MethodInstanceKey, DefId].new(),
             Dict[DefId, ConcreteCallableInfo].new(),
-            Dict[String, List[DefId]].new(),
+            Dict[MethodInstanceKey, List[DefId]].new(),
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
@@ -827,11 +838,7 @@ given Monomorphizer {
             },
             _ then target_type,
         };
-        let mutable type_keys = concrete_receiver_lookup_aliases(self.storage.context, resolved_type);
-        let display_name = self.storage.context.type_display_name(resolved_type);
-        if not display_name.is_empty() and not type_keys.contains(display_name) then {
-            type_keys.push(display_name);
-        };
+
 
         for m_ref in members then {
             if given_member_has_generic_parameter(m_ref) then {
@@ -846,26 +853,18 @@ given Monomorphizer {
             self.register_concrete_callable_if_absent(
                 ConcreteCallableInfo(m_ref.def_id, m_ref.name, Option[Type].Some(resolved_type), trait_conformance, trait_conformance_def_id)
             );
-            for type_key in type_keys then {
-                let key1 = "\(type_key).\(m_ref.name)";
-                if not self.storage.extension_method_def_ids.contains_key(key1) then {
-                    self.storage.extension_method_def_ids.insert(key1, m_ref.def_id);
-                };
-                let mutable method_map = self.storage.extension_methods.get(type_key) or else Dict[String, ConcreteMethodEntry].new();
-                method_map.insert(m_ref.name, ConcreteMethodEntry(method_symbol, trait_conformance));
-                self.storage.extension_methods.insert(type_key, method_map);
+            // One instantiation key: the owner identity plus this receiver's
+            // type arguments. This used to sweep the receiver's SPELLINGS and
+            // write one entry per spelling.
+            let instance_key = make_receiver_method_key_from_context(self.storage.context, resolved_type, m_ref.name);
+            if not self.storage.extension_method_def_ids.contains_key(instance_key) then {
+                self.storage.extension_method_def_ids.insert(instance_key, m_ref.def_id);
             };
+            self.storage.extension_methods.insert(instance_key, ConcreteMethodEntry(method_symbol, trait_conformance));
             if m_ref.params.count() > 0(UInt) and (m_ref.params[0(UInt)].name == "self" or m_ref.params[0(UInt)].name == "source") then {
-                // Resolve the trait's declaration identity once here; downstream
-                // matching (Drop detection, witness remap, same-named trait
-                // disambiguation) compares DefIds, never the name string.
-                let trait_conformance_def_id = when trait_conformance in {
-                    .Some(trait_name) then when self.storage.trait_registry.get(trait_name) in {
-                        .Some(trait_info) then Option[DefId].Some(trait_info.def_id),
-                        .None() then Option[DefId].None(),
-                    },
-                    .None() then Option[DefId].None(),
-                };
+                // The trait's declaration identity arrived as a parameter.
+                // Re-deriving it from the spelling would round-trip an identity
+                // back through a name table and lose same-named traits.
                 self.set_receiver_method_dispatch_if_absent(
                     m_ref.def_id,
                     ReceiverMethodDispatchInfo(
@@ -887,8 +886,10 @@ given Monomorphizer {
             .Some(name) then name,
             .None() then when mapped_type in {
                 .Some(mapped) then when mapped in {
-                    .GenericStruct(template, _, _) then template,
-                    .GenericEnum(template, _, _) then template,
+                    // Display/mangling: the spelling comes from the declaration.
+                .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
+                    // Display/mangling: the spelling comes from the declaration.
+                .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
                     _ then { return;},
                 },
                 .None() then { return;},
@@ -899,14 +900,14 @@ given Monomorphizer {
             .Some(args) then args,
             .None() then when mapped_type in {
                 .Some(mapped) then when mapped in {
-                    .GenericStruct(_, _, args) then {
+                    .GenericStruct(_, args) then {
                         let mutable unpacked = List[Type].new();
                         for arg in args then {
                             unpacked.push(arg);
                         };
                         unpacked
                     },
-                    .GenericEnum(_, _, args) then {
+                    .GenericEnum(_, args) then {
                         let mutable unpacked = List[Type].new();
                         for arg in args then {
                             unpacked.push(arg);
@@ -946,16 +947,16 @@ given Monomorphizer {
             return;
         };
 
-        when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+        when self.storage.generic_templates.lookup_extension_methods(self.storage.context.method_owner_of(base_type)) in {
             .Some(ext_templates) then {
                 for ext_template in ext_templates then {
-                    let is_drop_trait = is_std_drop_trait_def_id(self, ext_template.conformance_trait_def_id);
+                    let is_drop_trait = self.storage.context.is_std_drop_impl_def_id(ext_template.conformance_trait_def_id);
                     if ext_template.method.name <> "drop" and not is_drop_trait then {
                         continue;
                     };
                     let req = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
-                            template_name,
+                            self.storage.context.method_owner_of(base_type),
                             base_type,
                             ext_template,
                             type_args,
@@ -977,24 +978,23 @@ given Monomorphizer {
 
     file_private enqueue_forced_drop_request_for_extension_base(
         self,
-        template_name String,
         base_type Type,
         type_args List[Type],
     ) Void = {
         if has_generic_parameter(base_type) or is_placeholder_inferred_type(base_type) or args_have_generic_parameter(type_args) then {
             return;
         };
-        when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+        when self.storage.generic_templates.lookup_extension_methods(self.storage.context.method_owner_of(base_type)) in {
             .Some(ext_templates) then {
                 for ext_template in ext_templates then {
-                    let is_drop_trait = is_std_drop_trait_def_id(self, ext_template.conformance_trait_def_id);
+                    let is_drop_trait = self.storage.context.is_std_drop_impl_def_id(ext_template.conformance_trait_def_id);
                     if ext_template.method.name <> "drop" and not is_drop_trait then {
                         continue;
                     };
 
                     let req = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
-                            template_name,
+                            self.storage.context.method_owner_of(base_type),
                             base_type,
                             ext_template,
                             type_args,
@@ -1102,11 +1102,11 @@ given Monomorphizer {
                 .Function(template, args) then {
                     self.instantiate_function_impl(template, args);
                 },
-                .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                .ExtensionMethod(owner, base_type, template, type_args, method_type_args) then {
                     if template.method.name <> "drop" then {
-                        self.enqueue_forced_drop_request_for_extension_base(template_name, base_type, type_args);
+                        self.enqueue_forced_drop_request_for_extension_base(base_type, type_args);
                     };
-                    self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args);
+                    self.instantiate_extension_method_impl(base_type, owner, template, type_args, method_type_args);
                 },
                 .TraitMethod(base_type, method_name, method_type_args) then {
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args);
@@ -1161,11 +1161,11 @@ given Monomorphizer {
                     .Function(template, args) then {
                         self.instantiate_function_impl(template, args);
                     },
-                    .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                    .ExtensionMethod(owner, base_type, template, type_args, method_type_args) then {
                         if template.method.name <> "drop" then {
-                            self.enqueue_forced_drop_request_for_extension_base(template_name, base_type, type_args);
+                            self.enqueue_forced_drop_request_for_extension_base(base_type, type_args);
                         };
-                        let _ = self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args);
+                        let _ = self.instantiate_extension_method_impl(base_type, owner, template, type_args, method_type_args);
                     },
                     _ then {},
                 };
@@ -1298,8 +1298,8 @@ given Monomorphizer {
                     .Function(template, args) then {
                         self.instantiate_function_impl(template, args);
                     },
-                    .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
-                        self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args);
+                    .ExtensionMethod(owner, base_type, template, type_args, method_type_args) then {
+                        self.instantiate_extension_method_impl(base_type, owner, template, type_args, method_type_args);
                     },
                     .TraitMethod(base_type, method_name, method_type_args) then {
                         self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args);
@@ -1414,8 +1414,8 @@ given Monomorphizer {
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
-            Dict[String, List[GenericExtensionMethodTemplate]].new(),
-            Set[String].new(),
+            Dict[MethodOwner, List[GenericExtensionMethodTemplate]].new(),
+            Set[MethodOwner].new(),
             Dict[String, GenericExtensionMethodTemplate].new(),
             Set[String].new(),
             Dict[String, GenericExtensionMethodTemplate].new(),
@@ -1435,7 +1435,7 @@ given Monomorphizer {
             program.extension_methods,
             program.extension_method_def_ids,
             program.concrete_callables_by_def_id,
-            Dict[String, List[DefId]].new(),
+            Dict[MethodInstanceKey, List[DefId]].new(),
             program.remapped_function_def_ids,
             program.receiver_method_dispatch,
             List[VtableRequest].new(),
@@ -1511,13 +1511,13 @@ given Monomorphizer {
 
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
-    instantiate_extension_method_impl(self, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[Type], method_type_args List[Type]) Symbol = {
-        let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args);
+    instantiate_extension_method_impl(self, base_type Type, owner MethodOwner, template GenericExtensionMethodTemplate, type_args List[Type], method_type_args List[Type]) Symbol = {
+        let sym = instantiate_extension_method(self, base_type, owner, template, type_args, method_type_args);
         return sym;
     };
 
-    instantiate_extension_method_def_id_impl(self, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[Type], method_type_args List[Type]) DefId = {
-        return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args);
+    instantiate_extension_method_def_id_impl(self, base_type Type, owner MethodOwner, template GenericExtensionMethodTemplate, type_args List[Type], method_type_args List[Type]) DefId = {
+        return instantiate_extension_method_def_id(self, base_type, owner, template, type_args, method_type_args);
     };
 
     // Resolve a trait placeholder method call to a concrete implementation.
@@ -1552,9 +1552,9 @@ given Monomorphizer {
     // Key format: concrete receiver layout key + method name, preserving
     // ref/mutref/ptr wrappers so blanket impls do not overwrite value impls.
     // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
-    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[String, DefId] = {
+    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[MethodInstanceKey, DefId] = {
         let materialized = self.build_materialized_def_ids();
-        let mutable lookup = Dict[String, DefId].new();
+        let mutable lookup = Dict[MethodInstanceKey, DefId].new();
 
         // Step 1: Merge extension_method_def_ids (populated during instantiation).
         for entry in self.storage.extension_method_def_ids.iterator() then {
@@ -1767,7 +1767,7 @@ given Monomorphizer {
                     },
                 }
             },
-            .GenericStruct(template, _, _) then {
+            .GenericStruct(_, _) then {
                 let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t);
                 when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
@@ -1777,7 +1777,7 @@ given Monomorphizer {
                     .None() then layout_name,
                 }
             },
-            .GenericEnum(template, _, _) then {
+            .GenericEnum(_, _) then {
                 let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t);
                 when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {

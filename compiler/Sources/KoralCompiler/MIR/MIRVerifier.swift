@@ -535,14 +535,14 @@ final class MIRVerifier {
     _ type: Type
   ) -> (traitName: String, traitDefId: DefId, typeArguments: [Type])? {
     switch type {
-    case .traitObject(let traitName, let traitDefId, let typeArguments):
-      return (traitName, traitDefId, typeArguments)
+    case .traitObject(let traitDefId, let typeArguments):
+      return (Type.spelling(traitDefId), traitDefId, typeArguments)
     case .reference(let inner),
          .mutableReference(let inner),
          .borrowedReference(let inner),
          .mutableBorrowedReference(let inner):
-      if case .traitObject(let traitName, let traitDefId, let typeArguments) = inner {
-        return (traitName, traitDefId, typeArguments)
+      if case .traitObject(let traitDefId, let typeArguments) = inner {
+        return (Type.spelling(traitDefId), traitDefId, typeArguments)
       }
       return nil
     default:

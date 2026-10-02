@@ -169,7 +169,7 @@ given TypeChecker {
 
     module_private trait_name_from_type(self, trait_type Type) String = {
         return when trait_type in {
-            .TraitObject(name, _, _) then name,
+            .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             _ then self.context().type_display_name(trait_type),
         };
     };
@@ -276,12 +276,12 @@ given TypeChecker {
             },
             .Reference(inner, is_mutable) then {
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(arg, self_type, bindings));
@@ -311,12 +311,12 @@ given TypeChecker {
             .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        if self.storage.trait_registry.get(base) is .Some(_) then {
+                        if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(arg, self_type, bindings));
@@ -340,13 +340,13 @@ given TypeChecker {
                 for a in args then {
                     resolved_args.push(self.resolve_type_with_self_and_bindings(a, self_type, bindings));
                 };
-                if self.storage.trait_registry.get(base) is .Some(_) then {
+                if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                     return Type.ReferenceType(self.make_trait_object_type(base, self.to_type_ref_list_in_resolution(resolved_args)));
                 };
                 if self.is_enum_base_name(base) then {
-                    return Type.GenericEnum(base, self.generic_template_def_id(base), resolved_args);
+                    return Type.GenericEnum(self.generic_template_def_id(base), resolved_args);
                 };
-                return Type.GenericStruct(base, self.generic_template_def_id(base), resolved_args);
+                return Type.GenericStruct(self.generic_template_def_id(base), resolved_args);
             },
             .InferredSelf() then self_type,
             .FunctionType(param_types, return_type) then {
@@ -378,15 +378,16 @@ given TypeChecker {
 
     module_private resolve_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _, _) then {
-                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
+            // Identity: the trait's DECLARATION, not its spelling.
+            .TraitObject(trait_object_def_id, _) then {
+                when self.storage.trait_registry.check_object_safety_by_def_id(trait_object_def_id) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Trait '\(trait_name)' is not object-safe"
+                                    "Trait '\(def_id_spelling(trait_object_def_id))' is not object-safe"
                                 , unknown_span())
                             );
                             return Type.Unknown();
@@ -402,15 +403,16 @@ given TypeChecker {
 
     module_private resolve_mutable_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _, _) then {
-                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
+            // Identity: the trait's DECLARATION, not its spelling.
+            .TraitObject(trait_object_def_id, _) then {
+                when self.storage.trait_registry.check_object_safety_by_def_id(trait_object_def_id) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Trait '\(trait_name)' is not object-safe"
+                                    "Trait '\(def_id_spelling(trait_object_def_id))' is not object-safe"
                                 , unknown_span())
                             );
                             return Type.Unknown();
@@ -426,15 +428,16 @@ given TypeChecker {
 
     module_private resolve_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _, _) then {
-                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
+            // Identity: the trait's DECLARATION, not its spelling.
+            .TraitObject(trait_object_def_id, _) then {
+                when self.storage.trait_registry.check_object_safety_by_def_id(trait_object_def_id) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Trait '\(trait_name)' is not object-safe"
+                                    "Trait '\(def_id_spelling(trait_object_def_id))' is not object-safe"
                                 , unknown_span())
                             );
                             return Type.Unknown();
@@ -450,15 +453,16 @@ given TypeChecker {
 
     module_private resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
-            .TraitObject(trait_name, _, _) then {
-                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
+            // Identity: the trait's DECLARATION, not its spelling.
+            .TraitObject(trait_object_def_id, _) then {
+                when self.storage.trait_registry.check_object_safety_by_def_id(trait_object_def_id) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
                                     DiagnosticStage.Semantic(),
                                     self.storage.file_path,
-                                    "Trait '\(trait_name)' is not object-safe"
+                                    "Trait '\(def_id_spelling(trait_object_def_id))' is not object-safe"
                                 , unknown_span())
                             );
                             return Type.Unknown();
@@ -576,11 +580,11 @@ given TypeChecker {
         defer { self.restore_generic_constraints(owner_constraint_snapshot);};
         let mutable out = List[TypedGivenMember].with_capacity(members.count());
         let is_trait_tool_target = when target_type in {
-            .TraitObject(_, _, _) then true,
-            .ReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableReferenceType(inner) then inner is .TraitObject(_, _),
+            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _),
             _ then false,
         };
         let is_trait_tool_declaration = type_params.is_empty() and is_trait_tool_target and conformance_trait_name is .None();
@@ -596,7 +600,7 @@ given TypeChecker {
         let generic_self_trait = if use_generic_self then self.as_trait_object_type(target_type) else Option[Type].None();
         let self_constraint_snapshot = when generic_self_trait in {
             .Some(trait_object) then when trait_object in {
-                .TraitObject(trait_name, _, trait_args) then {
+                .TraitObject(trait_object_def_id, trait_args) then {
                     let previous = when self.storage.generic_param_constraints.get("Self") in {
                         .Some(existing) then {
                             let mutable copied = List[GenericConstraintBound].with_capacity(existing.count());
@@ -608,7 +612,9 @@ given TypeChecker {
                     let mutable args = List[Type].new();
                     for trait_arg in trait_args then { args.push(trait_arg);};
                     let mutable constraints = List[GenericConstraintBound].new();
-                    constraints.push(GenericConstraintBound(self.trait_def_id_of(trait_name) or else DefId(0(UInt)), trait_name, args));
+                    // The trait's DECLARATION is the identity; the spelling is
+                    // carried only for display.
+                    constraints.push(GenericConstraintBound(trait_object_def_id, def_id_spelling(trait_object_def_id), args));
                     self.storage.generic_param_constraints.insert("Self", constraints);
                     previous
                 },
@@ -712,13 +718,19 @@ given TypeChecker {
             };
             let method_name = "\(m.name)";
             let template_ret = if should_retain_template_body then ret else Type.Unknown();
+            // The conformance's trait is resolved ONCE here and its declaration
+            // is what identifies the entry being updated.
+            let member_trait_def_id = when conformance_trait_name in {
+                .Some(name) then self.trait_def_id_of(name),
+                .None() then Option[DefId].None(),
+            };
             if should_retain_template_body then {
                 self.update_extension_method_checked_template(
                     target_type,
                     declared_type_params.count(),
                     method_name,
                     m.type_params.count(),
-                    conformance_trait_name,
+                    member_trait_def_id,
                     template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                     template_ret,
@@ -750,10 +762,6 @@ given TypeChecker {
                         ConcreteExprSource(raw_body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
                     ),
                     .None() then {},
-                };
-                let member_trait_def_id = when conformance_trait_name in {
-                    .Some(name) then self.trait_def_id_of(name),
-                    .None() then Option[DefId].None(),
                 };
                 self.register_extension_method_template(
                     self.extension_template_key(target_type),
@@ -922,7 +930,7 @@ given TypeChecker {
             self.storage.generic_param_constraints.insert(owner_type_param.name, self.constraint_bounds_for_type_param(owner_type_param, owner_param_names));
         };
         // Tool block bounds, merged onto the mapped parameter.
-        when self.storage.trait_registry.get(trait_name) in {
+        when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(trait_info) then {
                 for tool_param in tool_type_params then {
                     let mutable search UInt = 0;
@@ -1200,7 +1208,7 @@ given TypeChecker {
         for owner_type_param in owner_type_params then {
             bindings.insert(owner_type_param.name, Type.GenericParameter(owner_type_param.name));
         };
-        when self.storage.trait_registry.get(trait_name) in {
+        when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(info) then {
                 let mutable index UInt = 0;
                 while index < info.type_params.count() and index < resolved_trait_args.count() then {
@@ -1210,8 +1218,10 @@ given TypeChecker {
             },
             .None() then {},
         };
-        let mutable visited = Set[String].new();
-        return self.collect_trait_method_bindings_recursive(trait_name, bindings, visited);
+        // The spelling is resolved once, here; the walk is by declaration.
+        let trait_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
+        let mutable visited = Set[UInt].new();
+        return self.collect_trait_method_bindings_recursive(trait_def_id, bindings, visited);
     };
 
     module_private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
@@ -1233,7 +1243,7 @@ given TypeChecker {
         generic_templates GenericTemplateRegistry,
         method_table MethodTable,
         trait_registry TraitRegistry,
-        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+        conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     ) TypedExpr = {
         self.storage.file_path = source.source_file;
         self.storage.module_path = source.module_path;
@@ -1282,7 +1292,7 @@ given TypeChecker {
         generic_templates GenericTemplateRegistry,
         method_table MethodTable,
         trait_registry TraitRegistry,
-        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+        conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     ) TypedExpr = {
         self.storage.file_path = source.source_file;
         self.storage.module_path = source.module_path;

@@ -384,7 +384,7 @@ extension TypeChecker {
       let valueType = typedValue.type
 
       // Verify the value is a Pair type
-      guard case .genericStruct(_, let templateDefId, let typeArgs) = valueType,
+      guard case .genericStruct(let templateDefId, let typeArgs) = valueType,
             context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(

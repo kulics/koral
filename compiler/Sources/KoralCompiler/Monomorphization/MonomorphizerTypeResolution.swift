@@ -84,11 +84,20 @@ extension Monomorphizer {
         }
 
         let preservesRefWrapperDispatch: Bool
+        // Whether the owner is one of the reference/pointer wrapper kinds.
+        // Decided from the owner's TYPE; a template owner is never one.
         switch dispatchInfo.owner {
-        case .extensionTemplate(let ownerName)?:
-            preservesRefWrapperDispatch = ["Ref", "MutRef", "WeakRef", "MutWeakRef"].contains(ownerName)
-        case .concreteType(let typeName)?:
-            preservesRefWrapperDispatch = ["Ref", "MutRef", "WeakRef", "MutWeakRef"].contains(typeName)
+        case .concreteType(let ownerType)?:
+            // Whether the owner is one of the reference/pointer wrapper kinds.
+            // Decided from the owner's TYPE via the closed built-in owner space
+            // (`MethodOwner.Builtin` -- rustc's `SimplifyType`), never from a
+            // stored spelling.
+            preservesRefWrapperDispatch = {
+                if case .builtin(let kind) = context.methodOwner(of: ownerType) {
+                    return ["Ref", "MutRef", "WeakRef", "MutWeakRef"].contains(kind)
+                }
+                return false
+            }()
         default:
             preservesRefWrapperDispatch = false
         }
@@ -109,15 +118,15 @@ extension Monomorphizer {
             // Check substitution map first
             if let substituted = substitution[name] {
                 // If the substituted type is a genericStruct, we need to instantiate it
-                if case .genericStruct(let template, _, let args) = substituted {
-                    // Check if it's a struct template
-                    if let structTemplate = input.genericTemplates.structTemplates[template] {
+                if case .genericStruct(let templateDefId, let args) = substituted {
+                    // By DECLARATION -- the substituted type carries it.
+                    if let structTemplate = input.genericTemplates.structTemplate(forDefId: templateDefId) {
                         return try instantiateStruct(template: structTemplate, args: args)
                     }
                 }
                 // If the substituted type is a genericEnum, we need to instantiate it
-                if case .genericEnum(let template, _, let args) = substituted {
-                    if let enumTemplate = input.genericTemplates.enumTemplates[template] {
+                if case .genericEnum(let templateDefId, let args) = substituted {
+                    if let enumTemplate = input.genericTemplates.enumTemplate(forDefId: templateDefId) {
                         return try instantiateEnum(template: enumTemplate, args: args)
                     }
                 }
@@ -157,7 +166,7 @@ extension Monomorphizer {
             // This handles cases like `Error ref` inside enum definitions where
             // the type checker already resolved it but the monomorphizer re-resolves from TypeNodes
             if let traitInfo = input.genericTemplates.traits[name] {
-                return .traitObject(traitName: name, traitDefId: traitInfo.defId, typeArgs: [])
+                return .traitObject(traitDefId: traitInfo.defId, typeArgs: [])
             }
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
@@ -239,7 +248,7 @@ extension Monomorphizer {
     /// - Returns: The resolved concrete type, or the original type if it can't be resolved yet
     internal func resolveParameterizedType(_ type: Type, visited: Set<UInt64> = []) -> Type {
         switch type {
-        case .genericStruct(let template, let typeDefId, let args):
+        case .genericStruct(let typeDefId, let args):
             if let cacheKey = typeInstantiationCacheKey(for: type),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -247,31 +256,32 @@ extension Monomorphizer {
 
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return resolvedArgs == args ? type : .genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericStruct(templateDefId: typeDefId, args: resolvedArgs)
             }
 
-            let resolvedType = Type.genericStruct(template: template, templateDefId: .invalid, args: resolvedArgs)
+            let resolvedType = Type.genericStruct(templateDefId: typeDefId, args: resolvedArgs)
             if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
 
-            if let structTemplate = input.genericTemplates.structTemplates[template] {
+            // By DECLARATION, never by name -- `template` is display/mangling only.
+            if let structTemplate = input.genericTemplates.structTemplate(forDefId: typeDefId) {
                 do {
                     return try instantiateStruct(template: structTemplate, args: resolvedArgs)
                 } catch {
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                    let layoutName = SemaUtils.makeLayoutName(baseName: template, args: resolvedArgs, context: context, templateDefId: typeDefId)
+                    let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(typeDefId), args: resolvedArgs, context: context, templateDefId: typeDefId)
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-                    let inheritedMutable = context.defIdMap.lookupGenericStructTemplateDefId(template).map { context.isGenericStructTemplateMutable($0) } ?? false
-                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs, templateName: template, isMutable: inheritedMutable)
+                    let inheritedMutable = typeDefId.isValid ? context.isGenericStructTemplateMutable(typeDefId) : false
+                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs, templateName: Type.spelling(typeDefId), templateDefId: typeDefId, isMutable: inheritedMutable)
                     return .structure(defId: defId)
                 }
             }
 
             return resolvedArgs == args ? type : resolvedType
             
-        case .genericEnum(let template, let typeDefId, let args):
+        case .genericEnum(let typeDefId, let args):
             if let cacheKey = typeInstantiationCacheKey(for: type),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -279,23 +289,24 @@ extension Monomorphizer {
 
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return resolvedArgs == args ? type : .genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericEnum(templateDefId: typeDefId, args: resolvedArgs)
             }
 
-            let resolvedType = Type.genericEnum(template: template, templateDefId: .invalid, args: resolvedArgs)
+            let resolvedType = Type.genericEnum(templateDefId: typeDefId, args: resolvedArgs)
             if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
                let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
 
-            if let enumTemplate = input.genericTemplates.enumTemplates[template] {
+            // By DECLARATION, never by name -- `template` is display/mangling only.
+            if let enumTemplate = input.genericTemplates.enumTemplate(forDefId: typeDefId) {
                 do {
                     return try instantiateEnum(template: enumTemplate, args: resolvedArgs)
                 } catch {
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                    let layoutName = SemaUtils.makeLayoutName(baseName: template, args: resolvedArgs, context: context, templateDefId: typeDefId)
+                    let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(typeDefId), args: resolvedArgs, context: context, templateDefId: typeDefId)
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
-                    context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs, templateDefId: typeDefId)
                     return .`enum`(defId: defId)
                 }
             }
@@ -508,7 +519,7 @@ extension Monomorphizer {
                 typeName = resolvedType.description
             }
 
-            var methodMap = extensionMethods[typeName] ?? [:]
+            var methodMap: [String: ConcreteMethodEntry] = [:]
             let newMethods = methods.map { method -> TypedMethodDeclaration in
                 let canonicalMethodBaseName = receiverMethodDispatch[method.identifier.defId]?.methodName
                     ?? (context.getName(method.identifier.defId) ?? "<unknown>")
@@ -523,7 +534,7 @@ extension Monomorphizer {
                 )
 
                 let entry = ConcreteMethodEntry(symbol: remappedIdentifier, trait: resolvedTrait)
-                methodMap[canonicalMethodBaseName] = entry
+                extensionMethods[context.receiverMethodKey(resolvedType, canonicalMethodBaseName)] = entry
                 remappedFunctionDefIds[method.identifier.defId, default: []].append((defId: remappedIdentifier.defId, type: remappedIdentifier.type))
                 if let dispatchInfo = receiverMethodDispatch[method.identifier.defId] {
                     receiverMethodDispatch[remappedIdentifier.defId] = ReceiverMethodDispatchInfo(
@@ -547,7 +558,9 @@ extension Monomorphizer {
                     returnType: resolveParameterizedType(method.returnType)
                 )
             }
-            extensionMethods[typeName] = methodMap
+            for (methodName, entry) in methodMap {
+                extensionMethods[context.receiverMethodKey(resolvedType, methodName)] = entry
+            }
             return .givenDeclaration(type: resolvedType, trait: resolvedTrait, methods: newMethods)
             
         case .globalVariable(let identifier, let value, let kind):
@@ -1323,9 +1336,9 @@ extension Monomorphizer {
                 templateName = context.getTemplateName(defId) ?? name
                 emittedTypeScopeName = context.getQualifiedName(defId) ?? name
                 isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            case .genericStruct(let name, _, _):
-                templateName = name
-                emittedTypeScopeName = name  // Generic types don't have module path yet
+            case .genericStruct(let tplDefId, _):
+                templateName = Type.spelling(tplDefId)
+                emittedTypeScopeName = Type.spelling(tplDefId)  // Generic types don't have module path yet
                 isGenericInstantiation = false
             case .`enum`(let defId):
                 let name = context.getName(defId) ?? resolvedBaseType.description
@@ -1333,9 +1346,9 @@ extension Monomorphizer {
                 templateName = context.getTemplateName(defId) ?? name
                 emittedTypeScopeName = context.getQualifiedName(defId) ?? name
                 isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            case .genericEnum(let name, _, _):
-                templateName = name
-                emittedTypeScopeName = name  // Generic types don't have module path yet
+            case .genericEnum(let tplDefId, _):
+                templateName = Type.spelling(tplDefId)
+                emittedTypeScopeName = Type.spelling(tplDefId)  // Generic types don't have module path yet
                 isGenericInstantiation = false
             default:
                 templateName = resolvedBaseType.description
@@ -1388,7 +1401,7 @@ extension Monomorphizer {
             }
             
             // Ensure the extension method is instantiated (for generic types)
-            if let extensions = input.genericTemplates.extensionMethods[templateName] {
+            if let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: resolvedBaseType)] {
                 if let ext = selectExtensionTemplate(
                     extensions,
                     name: methodName,

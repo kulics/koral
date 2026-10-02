@@ -4,7 +4,36 @@
 // A unique identifier for every global definition (type, function, variable).
 public type DefId(id UInt);
 
-public let qualified_trait_key(module_path List[String], name String) String = {
+/// The declaration tables, reachable from free functions that only need to
+/// DISPLAY a type. Mirrors Swift's `SemanticErrorContext.currentCompilerContext`
+/// and rustc's thread-local `tcx`: a `Type` carries a `DefId`, and the spelling
+/// is read from the declaration when output needs one. Never used for identity.
+///
+/// Koral has no module-level `mutable` binding, so the mutable state lives
+/// inside an immutable binding.
+public type mutable DisplayContext(mutable map Option[DefIdMap]);
+public let display_context = DisplayContext(Option[DefIdMap].None());
+
+public let set_display_context(m DefIdMap) Void = {
+    display_context.map = Option[DefIdMap].Some(m);
+};
+
+/// The spelling of a declaration -- DISPLAY only.
+public let def_id_spelling(def_id DefId) String = {
+    return when display_context.map in {
+        .Some(m) then m.get_name(def_id) or else "d\(def_id.id)",
+        .None() then "d\(def_id.id)",
+    };
+};
+
+/// The key a module-scoped symbol is stored under: `module.path.name`.
+///
+/// A top-level symbol is identified by (module, name) -- names are for display
+/// and C-mangling only. Any table that maps a name to a declaration must be
+/// keyed this way and resolved with the module being checked preferred, or two
+/// same-named declarations from different modules collapse into one entry and
+/// the wrong one answers.
+public let qualified_symbol_key(module_path List[String], name String) String = {
     if module_path.is_empty() then { return name; };
     let mutable out = StringBuilder.new();
     let mutable first = true;
@@ -251,12 +280,10 @@ public type mutable DefIdMap(
     mutable struct_type_arguments Dict[UInt, List[Type]],
     mutable struct_template_names Dict[UInt, String],
     mutable struct_template_def_ids Dict[UInt, DefId],
-    mutable generic_struct_template_def_ids Dict[String, DefId],
     mutable enum_generic_instantiation Dict[UInt, Bool],
     mutable enum_type_arguments Dict[UInt, List[Type]],
     mutable enum_template_names Dict[UInt, String],
     mutable enum_template_def_ids Dict[UInt, DefId],
-    mutable generic_enum_template_def_ids Dict[String, DefId],
 
     // 导入记录
     mutable import_records Dict[UInt, ImportRecord],
@@ -306,12 +333,10 @@ given DefIdMap {
             Dict[UInt, List[Type]].new(),
             Dict[UInt, String].new(),
             Dict[UInt, DefId].new(),
-            Dict[String, DefId].new(),
             Dict[UInt, Bool].new(),
             Dict[UInt, List[Type]].new(),
             Dict[UInt, String].new(),
             Dict[UInt, DefId].new(),
-            Dict[String, DefId].new(),
             Dict[UInt, ImportRecord].new(),
             Dict[UInt, List[StructField]].new(),
             Dict[UInt, String].new(),
@@ -641,10 +666,12 @@ given DefIdMap {
         if info.type_arguments is .Some(args) then { self.struct_type_arguments.insert(id.id, args);};
         if info.template_name is .Some(tn) then { self.struct_template_names.insert(id.id, tn);};
         if info.template_def_id.is_valid() then {
+            // Keyed by the INSTANCE's DefId -> its TEMPLATE's DefId. The old
+            // bare-name index (`template_name` -> template DefId) is gone: a
+            // global name table collapses same-named templates from different
+            // modules. Name -> declaration resolution lives at the parse
+            // boundary (`GenericTemplateRegistry`), never here.
             self.struct_template_def_ids.insert(id.id, info.template_def_id);
-            if info.template_name is .Some(tn) then {
-                self.generic_struct_template_def_ids.insert(tn, info.template_def_id);
-            };
         };
     };
 
@@ -654,10 +681,9 @@ given DefIdMap {
         if info.type_arguments is .Some(args) then { self.enum_type_arguments.insert(id.id, args);};
         if info.template_name is .Some(tn) then { self.enum_template_names.insert(id.id, tn);};
         if info.template_def_id.is_valid() then {
+            // Same as `set_struct_info`: the index is INSTANCE DefId -> TEMPLATE
+            // DefId. No bare-name table.
             self.enum_template_def_ids.insert(id.id, info.template_def_id);
-            if info.template_name is .Some(tn) then {
-                self.generic_enum_template_def_ids.insert(tn, info.template_def_id);
-            };
         };
     };
 
@@ -692,14 +718,6 @@ given DefIdMap {
             return tid;
         };
         return def_id_invalid();
-    };
-
-    public lookup_generic_struct_template_def_id(self, name String) Option[DefId] = {
-        return self.generic_struct_template_def_ids.get(name);
-    };
-
-    public lookup_generic_enum_template_def_id(self, name String) Option[DefId] = {
-        return self.generic_enum_template_def_ids.get(name);
     };
 
     // ── 导入记录 ──────────────────────────────────────────────────────────
@@ -814,14 +832,14 @@ given DefIdMap {
         return when t in {
             .StructureType(def_id) then self.has_nontrivial_nominal_drop(def_id),
             .EnumType(def_id) then self.has_nontrivial_nominal_drop(def_id),
-            .GenericStruct(_, template_def_id, _) then {
+            .GenericStruct(template_def_id, _) then {
                 let def_id = if template_def_id.is_valid() then Option[DefId].Some(template_def_id) else Option[DefId].None();
                 return when def_id in {
                     .Some(d) then self.has_nontrivial_nominal_drop(d),
                     .None() then false,
                 };
             },
-            .GenericEnum(_, template_def_id, _) then {
+            .GenericEnum(template_def_id, _) then {
                 let def_id = if template_def_id.is_valid() then Option[DefId].Some(template_def_id) else Option[DefId].None();
                 return when def_id in {
                     .Some(d) then self.has_nontrivial_nominal_drop(d),
@@ -875,12 +893,12 @@ public type Type {
 
     // Generics — `template`/`trait_name` is display-only; the DefId is the identity.
     GenericParameter(name String),
-    GenericStruct(template String, template_def_id DefId, args List[Type]),
-    GenericEnum(template String, template_def_id DefId, args List[Type]),
+    GenericStruct(template_def_id DefId, args List[Type]),
+    GenericEnum(template_def_id DefId, args List[Type]),
     ModuleType(info ModuleSymbolInfo),
 
     // Trait object
-    TraitObject(trait_name String, trait_def_id DefId, type_args List[Type]),
+    TraitObject(trait_def_id DefId, type_args List[Type]),
 
     // Type inference variable
     TypeVar(tv TypeVariable),
@@ -1037,14 +1055,14 @@ public let stable_type_key(t Type) String = {
         .MutableWeakReferenceType(inner) then "MutWeakRef(\(stable_type_key(inner)))",
         .OpaqueType(def_id) then "Opaque#" + def_id.id.to_string(),
         .GenericParameter(name) then "Param(\(name))",
-        .GenericStruct(template, template_def_id, args) then "GS(\(template))#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
-        .GenericEnum(template, template_def_id, args) then "GE(\(template))#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
+        .GenericStruct(template_def_id, args) then "GS#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
+        .GenericEnum(template_def_id, args) then "GE#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
         .ModuleType(info) then "M(\(info.module_path.join_to_string(".")))",
-        .TraitObject(trait_name, trait_def_id, type_args) then {
+        .TraitObject(trait_def_id, type_args) then {
             if type_args.is_empty() then {
-                return "TO(\(trait_name))#\(trait_def_id.id)";
+                return "TO#\(trait_def_id.id)";
             };
-            "TO(\(trait_name))#\(trait_def_id.id)[\(join_type_ref_key_list(type_args))]"
+            "TO#\(trait_def_id.id)[\(join_type_ref_key_list(type_args))]"
         },
         .TypeVar(tv) then "TV#\(tv.id)",
         .Unknown() then "Unknown",
@@ -1183,7 +1201,8 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
             out.to_string()
         },
         .GenericParameter(name) then name,
-        .GenericStruct(template, _, args) then {
+        .GenericStruct(template_def_id, args) then {
+            let template = def_id_spelling(template_def_id);
             if depth > 200(UInt) then {
                 return template + "[...]";
             };
@@ -1200,7 +1219,8 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
             out.push_byte(']');
             return out.to_string();
         },
-        .GenericEnum(template, _, args) then {
+        .GenericEnum(template_def_id, args) then {
+            let template = def_id_spelling(template_def_id);
             if depth > 200(UInt) then {
                 return template + "[...]";
             };
@@ -1220,7 +1240,7 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
         .ModuleType(info) then {
             if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
         },
-        .TraitObject(trait_name, _, _) then trait_name,
+        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
     };
@@ -1331,19 +1351,17 @@ public let stable_type_hash(t Type) UInt = {
             hash = stable_hash_combine_value(hash, 25(UInt));
             hash = stable_hash_combine_value(hash, def_id.id);
         },
-        .GenericStruct(template, template_def_id, args) then {
+        .GenericStruct(template_def_id, args) then {
             hash = stable_hash_combine_value(hash, 26(UInt));
             hash = stable_hash_combine_value(hash, if template_def_id.is_valid() then template_def_id.id else 0(UInt));
-            hash = stable_hash_combine_string(hash, template);
             hash = stable_hash_combine_value(hash, args.count());
             for arg in args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
             };
         },
-        .GenericEnum(template, template_def_id, args) then {
+        .GenericEnum(template_def_id, args) then {
             hash = stable_hash_combine_value(hash, 27(UInt));
             hash = stable_hash_combine_value(hash, if template_def_id.is_valid() then template_def_id.id else 0(UInt));
-            hash = stable_hash_combine_string(hash, template);
             hash = stable_hash_combine_value(hash, args.count());
             for arg in args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
@@ -1364,10 +1382,9 @@ public let stable_type_hash(t Type) UInt = {
             hash = stable_hash_combine_value(hash, 30(UInt));
             hash = stable_hash_combine_value(hash, tv.id);
         },
-        .TraitObject(trait_name, trait_def_id, type_args) then {
+        .TraitObject(trait_def_id, type_args) then {
             hash = stable_hash_combine_value(hash, 31(UInt));
             hash = stable_hash_combine_value(hash, if trait_def_id.is_valid() then trait_def_id.id else 0(UInt));
-            hash = stable_hash_combine_string(hash, trait_name);
             hash = stable_hash_combine_value(hash, type_args.count());
             for arg in type_args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
@@ -1376,6 +1393,101 @@ public let stable_type_hash(t Type) UInt = {
         .Unknown() then { hash = stable_hash_combine_value(hash, 34(UInt)); },
     };
     return hash;
+};
+
+// ── MethodOwner ──────────────────────────────────────────────────────────────
+
+/// Identity of the type a method or conformance registry is keyed by.
+///
+/// A method belongs to a TYPE, not to a type NAME. For anything that has a
+/// declaration -- a nominal, a generic template, a trait -- the identity is that
+/// declaration's `DefId`, and `DefId` already carries the module: two modules'
+/// `Plain` are two keys, so `mod_a`'s `given Plain { tag }` can never answer for
+/// `mod_b`'s `Plain`.
+///
+/// Built-in scalars and type modifiers (`ref`/`ptr`/`weakref`) have no
+/// declaration to identify them by. They share one closed key space instead --
+/// the same split rustc makes between `inherent_impls: FxIndexMap<LocalDefId,
+/// Vec<DefId>>` and `incoherent_impls: FxIndexMap<SimplifiedType, Vec<DefId>>`.
+///
+/// Nothing here reads a type's spelling. A name is for RESOLUTION, for display
+/// and for C mangling; once a type is resolved, only identity is compared.
+public type MethodOwner {
+    Decl(def_id DefId),
+    Builtin(name String),
+};
+
+given MethodOwner as Eq {
+    public equals(self, other MethodOwner) Bool = when self in {
+        .Decl(a) then when other in {
+            .Decl(b) then a == b,
+            .Builtin(_) then false,
+        },
+        .Builtin(a) then when other in {
+            .Decl(_) then false,
+            .Builtin(b) then a == b,
+        },
+    };
+};
+
+given MethodOwner as Hash {
+    public hash(self) UInt = when self in {
+        .Decl(d) then stable_hash_combine_value(14695981039346656037(UInt), d.id),
+        .Builtin(name) then stable_hash_combine_string(2013266111(UInt), name),
+    };
+};
+
+given MethodOwner {
+    /// Printable form, for diagnostics only. Never decides identity.
+    public display(self) String = {
+        return when self in {
+            .Decl(d) then "decl#\(d.id)",
+            .Builtin(name) then name,
+        };
+    };
+};
+
+// ── MethodInstanceKey ────────────────────────────────────────────────────────
+
+/// Key of one INSTANTIATED method: which declaration, which instantiation of it,
+/// which method, and which method-level type arguments.
+///
+/// The owner is a `MethodOwner` -- a declaration identity -- so two modules'
+/// same-named types cannot share a slot. `owner_args` is the owner's
+/// INSTANTIATION: `List[String]` and `List[Rune]` share the owner `List` and
+/// differ here, exactly as rustc's `Instance` is `(DefId, GenericArgs)` and not
+/// `DefId` alone. Method type arguments are kept as `Type`s too, so nothing is
+/// folded into a name string.
+public type MethodInstanceKey(
+    owner MethodOwner,
+    owner_args List[Type],
+    method_name String,
+    method_type_args List[Type],
+);
+
+given MethodInstanceKey as Eq {
+    public equals(self, other MethodInstanceKey) Bool = {
+        return self.owner == other.owner and self.owner_args == other.owner_args and self.method_name == other.method_name and self.method_type_args == other.method_type_args;
+    };
+};
+
+given MethodInstanceKey as Hash {
+    public hash(self) UInt = {
+        let mutable h = 14695981039346656037(UInt);
+        h = stable_hash_combine_value(h, self.owner.hash());
+        for arg in self.owner_args then {
+            h = stable_hash_combine_value(h, stable_type_hash(arg));
+        };
+        h = stable_hash_combine_string(h, self.method_name);
+        for arg in self.method_type_args then {
+            h = stable_hash_combine_value(h, stable_type_hash(arg));
+        };
+        return h;
+    };
+};
+
+public let method_instance_key(owner MethodOwner, owner_args List[Type], method_name String, method_type_args List[Type]) MethodInstanceKey = {
+    return MethodInstanceKey(owner, owner_args, method_name, method_type_args);
 };
 
 public type IndirectionFamily {
@@ -1543,21 +1655,21 @@ given Type as Eq {
             .GenericParameter(other_name) then name == other_name,
             _ then false,
         },
-        .GenericStruct(template, template_def_id, args) then when other in {
-            .GenericStruct(other_template, other_template_def_id, other_args) then {
+        .GenericStruct(template_def_id, args) then when other in {
+            .GenericStruct(other_template_def_id, other_args) then {
                 if args <> other_args then {
                     return false;
                 };
-                if template_def_id.is_valid() and other_template_def_id.is_valid() then template_def_id == other_template_def_id else template == other_template
+                template_def_id == other_template_def_id
             },
             _ then false,
         },
-        .GenericEnum(template, template_def_id, args) then when other in {
-            .GenericEnum(other_template, other_template_def_id, other_args) then {
+        .GenericEnum(template_def_id, args) then when other in {
+            .GenericEnum(other_template_def_id, other_args) then {
                 if args <> other_args then {
                     return false;
                 };
-                if template_def_id.is_valid() and other_template_def_id.is_valid() then template_def_id == other_template_def_id else template == other_template
+                template_def_id == other_template_def_id
             },
             _ then false,
         },
@@ -1565,12 +1677,12 @@ given Type as Eq {
             .ModuleType(other_info) then info == other_info,
             _ then false,
         },
-        .TraitObject(trait_name, trait_def_id, type_args) then when other in {
-            .TraitObject(other_trait_name, other_trait_def_id, other_type_args) then {
+        .TraitObject(trait_def_id, type_args) then when other in {
+            .TraitObject(other_trait_def_id, other_type_args) then {
                 if type_args <> other_type_args then {
                     return false;
                 };
-                if trait_def_id.is_valid() and other_trait_def_id.is_valid() then trait_def_id == other_trait_def_id else trait_name == other_trait_name
+                trait_def_id == other_trait_def_id
             },
             _ then false,
         },

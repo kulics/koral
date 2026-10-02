@@ -1,0 +1,83 @@
+// EXPECT: 1
+// EXPECT: 2
+// EXPECT: 20
+// EXPECT: 10
+// EXPECT: 20
+// EXPECT: 40
+// EXPECT: a-circle
+// EXPECT: b-square
+// EXPECT: a-plain
+// EXPECT: b-plain
+// EXPECT: 11
+// EXPECT: 44
+
+// Design guard: a module-level TYPE is identified by (module, name), not by
+// name. The same holds for the trait declared on it.
+//
+// `mod_a` and `mod_b` each declare `Plain`, `Box` and `Shape`. Their shapes are
+// deliberately disjoint -- `left` vs `right`, one field vs two -- so a name
+// table that collapses the two cannot pass by accident. Each module must keep
+// its own declaration: `mod_a`'s `Plain` has `left`, `mod_b`'s has `right` and
+// `extra`, and each `Box` reads back its own values.
+//
+// This guards a real regression. A top-level type was registered under the bare
+// name only, so whichever module registered last won: `mod_a`'s `make() Plain`
+// came to return `mod_b`'s `Plain`, and the generated C failed to compile with
+// "returning 'struct Alpha_Box' from a function with incompatible result type".
+// Types are now stored under (module, name) as well, and lookup prefers the
+// module being checked.
+//
+// Extension methods on same-named NON-GENERIC types are covered too, since the
+// method registry is now keyed by declaration identity. Each module declares
+// `tag` on its own `Plain`. A name-keyed table reports "Duplicate definition:
+// tag" and one module answers for both; an identity-keyed one keeps them apart.
+//
+// Same-named GENERIC types are covered too: each module declares `stamp` on its
+// own `Box`. A registry keyed by the template's SPELLING gives both modules one
+// bucket, and the two instantiations collapse into one C symbol. The registry is
+// keyed by the template's DECLARATION instead -- see
+// `docs/identity-matching-tracking.md`.
+
+using std { .. };
+using cross_module_same_name_type_test::mod_a {
+    make_plain as make_plain_a, make_box as make_box_a,
+    shape as shape_a, shape_name as shape_name_a,
+    plain_tag as plain_tag_a, box_stamp as box_stamp_a,
+};
+using cross_module_same_name_type_test::mod_b {
+    make_plain as make_plain_b, make_box as make_box_b,
+    shape as shape_b, shape_name as shape_name_b,
+    plain_tag as plain_tag_b, box_stamp as box_stamp_b,
+};
+
+let main() Int = {
+    // Same-named non-generic types keep their own fields and their own values.
+    println(make_plain_a().left.to_string());
+    println(make_plain_b().right.to_string());
+    println(make_plain_b().extra.to_string());
+
+    // Same-named generic types too: mod_b's Box has an `extra` field and reads
+    // back `v * 2`, so a collapsed layout shows up as a wrong number.
+    println(make_box_a(10).value.to_string());
+    println(make_box_b(20).value.to_string());
+    println(make_box_b(20).extra.to_string());
+
+    // Same-named traits stay distinct declarations and dispatch to their own
+    // conformance.
+    println(shape_name_a(shape_a()));
+    println(shape_name_b(shape_b()));
+
+    // Same-named extension methods stay on their own type.
+    println(plain_tag_a(make_plain_a()));
+    println(plain_tag_b(make_plain_b()));
+
+    // Same-named GENERIC types too. mod_a's `stamp` returns `value`, mod_b's
+    // returns `extra` (= `v * 2`), so a collapsed instantiation is visible as a
+    // wrong number rather than a lucky match.
+    // Same-named GENERIC types: mod_a's `stamp` returns `value`, mod_b's returns
+    // `extra` (= `v * 2`). A registry or a C mangle keyed by the template's
+    // SPELLING collapses the two instantiations into one symbol.
+    println(box_stamp_a(11).to_string());
+    println(box_stamp_b(22).to_string());
+    return 0;
+};

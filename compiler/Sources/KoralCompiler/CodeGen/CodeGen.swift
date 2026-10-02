@@ -426,11 +426,12 @@ public class CodeGen {
   
   /// 查找静态方法的完整限定名
   /// - Parameters:
-  ///   - typeName: 类型名（如 "String", "Rune"）
+  ///   - receiverType: 接收者类型（身份 + 实例化实参）
   ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
   /// - Returns: 完整的 C 标识符
-  func lookupStaticMethod(typeName: String, methodName: String) -> String {
-    if let defId = mirProgram.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+  func lookupStaticMethod(receiverType: Type, methodName: String) -> String {
+    let typeName = receiverType.description
+    if let defId = mirProgram.lookupStaticMethod(receiverType: receiverType, methodName: methodName) {
       if let cName = cIdentifierByDefId[defIdKey(defId)] {
         return cName
       }
@@ -584,13 +585,13 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericStruct(let template, let tplDefId, let args):
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+      case .genericStruct(let tplDefId, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericEnum(let template, let tplDefId, let args):
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+      case .genericEnum(let tplDefId, let args):
+        let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -613,9 +614,9 @@ public class CodeGen {
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
-      case .genericStruct(let template, let tplDefId, let args):
+      case .genericStruct(let tplDefId, let args):
         guard requiresCompleteNominalDefinition(type) else { break }
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -631,13 +632,13 @@ public class CodeGen {
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericStruct(let nestedTemplate, let nestedDefId, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
+          case .genericStruct(let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: Type.spelling(nestedDefId), args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericEnum(let nestedTemplate, let nestedDefId, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
+          case .genericEnum(let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: Type.spelling(nestedDefId), args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
@@ -645,9 +646,9 @@ public class CodeGen {
             break
           }
         }
-      case .genericEnum(let template, let tplDefId, let args):
+      case .genericEnum(let tplDefId, let args):
         guard requiresCompleteNominalDefinition(type) else { break }
-        let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
         if typeName != selfName && available.contains(typeName) {
           deps.insert(typeName)
         }
@@ -663,13 +664,13 @@ public class CodeGen {
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericStruct(let nestedTemplate, let nestedDefId, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
+          case .genericStruct(let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: Type.spelling(nestedDefId), args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
-          case .genericEnum(let nestedTemplate, let nestedDefId, let nestedArgs):
-            let argName = SemaUtils.makeLayoutName(baseName: nestedTemplate, args: nestedArgs, context: context, templateDefId: nestedDefId)
+          case .genericEnum(let nestedDefId, let nestedArgs):
+            let argName = SemaUtils.makeLayoutName(baseName: Type.spelling(nestedDefId), args: nestedArgs, context: context, templateDefId: nestedDefId)
             if argName != selfName && available.contains(argName) {
               deps.insert(argName)
             }
@@ -690,13 +691,13 @@ public class CodeGen {
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
-        case .genericStruct(let template, let tplDefId, let args):
-          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        case .genericStruct(let tplDefId, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
-        case .genericEnum(let template, let tplDefId, let args):
-          let typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        case .genericEnum(let tplDefId, let args):
+          let typeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
           if typeName != selfName && available.contains(typeName) {
             deps.insert(typeName)
           }
@@ -1154,10 +1155,10 @@ public class CodeGen {
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
     case .`enum`(let defId):
       return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-    case .genericStruct(let template, let tplDefId, let args):
-      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
-    case .genericEnum(let template, let tplDefId, let args):
-      return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+    case .genericStruct(let tplDefId, let args):
+      return SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
+    case .genericEnum(let tplDefId, let args):
+      return SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
     default:
       return cTypeName(type)
     }
@@ -1176,9 +1177,8 @@ public class CodeGen {
       if let members = context.getStructMembers(defId) {
         for member in members where needsDrop(member.type) { return true }
       }
-    case .genericStruct(let template, _, _):
-      if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template),
-         let members = context.getStructMembers(templateDefId) {
+    case .genericStruct(let templateDefId, _):
+      if templateDefId.isValid, let members = context.getStructMembers(templateDefId) {
         for member in members where needsDrop(member.type) { return true }
       }
     case .`enum`(let defId):
@@ -1187,9 +1187,8 @@ public class CodeGen {
           for param in c.parameters where needsDrop(param.type) { return true }
         }
       }
-    case .genericEnum(let template, _, _):
-      if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template),
-         let cases = context.getEnumCases(templateDefId) {
+    case .genericEnum(let templateDefId, _):
+      if templateDefId.isValid, let cases = context.getEnumCases(templateDefId) {
         for c in cases {
           for param in c.parameters where needsDrop(param.type) { return true }
         }
@@ -1469,8 +1468,8 @@ public class CodeGen {
     switch type {
     case .enum(let defId):
       return context.getEnumCases(defId)
-    case .genericEnum(let template, _, _):
-      guard let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template) else { return nil }
+    case .genericEnum(let templateDefId, _):
+      guard templateDefId.isValid else { return nil }
       return context.getEnumCases(templateDefId)
     default:
       return nil
@@ -1644,9 +1643,8 @@ public class CodeGen {
     }
 
     func isStdDropTraitDefId(_ traitDefId: DefId?) -> Bool {
-      guard let traitDefId else { return false }
-      guard let traitInfo = mirProgram.traits["Drop"], traitInfo.modulePath == ["Std"] else { return false }
-      return traitInfo.defId == traitDefId
+      guard let traitDefId, let std = context.stdDropTraitDefId else { return false }
+      return traitDefId == std
     }
 
     func dropOwnerTypeName(_ type: Type) -> String? {
@@ -1655,14 +1653,16 @@ public class CodeGen {
         return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
       case .`enum`(let defId):
         return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      case .genericStruct(let template, let tplDefId, let args), .genericEnum(let template, let tplDefId, let args):
-        return SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+      case .genericStruct(let tplDefId, let args), .genericEnum(let tplDefId, let args):
+        return SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
       default:
         return nil
       }
     }
 
     for node in mirProgram.globals {
+      if case .given(let type, let trait, _) = node, "\(type)".contains("Holder") || "\(type)".contains("Box") {
+      }
       if case .given(let type, let trait, let methods) = node,
          isStdDropTraitConformance(trait),
          dropOwnerTypeName(type) == typeName {
@@ -1677,20 +1677,20 @@ public class CodeGen {
 
       if case .function(let identifier, _, _) = node,
          let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
+         dispatch.methodName == "drop" {
+      }
+      if case .function(let identifier, _, _) = node,
+         let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
          dispatch.methodName == "drop",
         isStdDropTraitDefId(dispatch.conformanceTraitDefId),
-         case .concreteType(let ownerTypeName) = dispatch.owner {
-        let access = context.getAccess(identifier.defId) ?? .module_private
-        let sourceFile = context.getSourceFile(identifier.defId)
-        let ownerDefId = context.lookupDefId(
-          modulePath: [],
-          name: ownerTypeName,
-          sourceFile: access == .file_private ? sourceFile : nil
-        )
-        let cTypeName = ownerDefId.flatMap { defId in
-          cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)
-        } ?? sanitizeCIdentifier(ownerTypeName)
-        if cTypeName == typeName {
+         case .concreteType(let ownerType) = dispatch.owner {
+        // Both sides are C names DERIVED FROM TYPES, never from spellings: the
+        // emitted type's name and the owner type's name. It used to look the
+        // owner's SPELLING up, which cannot name one of two same-named types.
+        //
+        // The owner must be matched as the INSTANTIATION (`Holder_I_d171`), not
+        // as its template (`Holder`) -- `ownerDefId` resolves to the template.
+        if dropOwnerTypeName(ownerType) == typeName {
           return cIdentifier(for: identifier)
         }
       }

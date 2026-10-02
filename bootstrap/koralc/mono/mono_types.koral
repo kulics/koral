@@ -146,9 +146,9 @@ public let layout_key(t Type) String = {
             out.to_string()
         },
 
-        .GenericStruct(template, template_def_id, args) then {
+        .GenericStruct(template_def_id, args) then {
             let mutable out = StringBuilder.new();
-            out.push_string(template);
+            out.push_string(def_id_spelling(template_def_id));
             for a in args then {
                 out.push_string("_");
                 out.push_string(layout_key(a));
@@ -160,9 +160,9 @@ public let layout_key(t Type) String = {
             out.to_string()
         },
 
-        .GenericEnum(template, template_def_id, args) then {
+        .GenericEnum(template_def_id, args) then {
             let mutable out = StringBuilder.new();
-            out.push_string(template);
+            out.push_string(def_id_spelling(template_def_id));
             for a in args then {
                 out.push_string("_");
                 out.push_string(layout_key(a));
@@ -185,14 +185,14 @@ public let layout_key(t Type) String = {
         .OpaqueType(def_id)    then "opaque_\(def_id.id)",
 
         .GenericParameter(name) then name,
-        .TraitObject(trait_name, trait_def_id, args) then {
+        .TraitObject(trait_def_id, args) then {
             let suffix = if trait_def_id.is_valid() then "_d\(trait_def_id.id)" else "";
             if args.is_empty() then {
-                return "TO_\(trait_name)\(suffix)";
+                return "TO_\(def_id_spelling(trait_def_id))\(suffix)";
             };
             let mutable out = StringBuilder.new();
             out.push_string("TO_");
-            out.push_string(trait_name);
+            out.push_string(def_id_spelling(trait_def_id));
             for arg in args then {
                 out.push_byte('_');
                 out.push_string(layout_key(arg));
@@ -295,34 +295,36 @@ public let make_layout_name(
 // Mirrors Swift's Monomorphizer.typeInstantiationCacheKey(for:).
 // The cache identity is the template declaration DefId plus concrete type
 // arguments; layout names remain output symbols and are not identity keys.
+/// The instantiation cache key: the template's DECLARATION plus its type
+/// arguments.
+///
+/// Keyed by `DefId`, never by the template's spelling -- deriving it from the
+/// name gave every same-named template one key, so `mod_a`'s `Box[Int]` and
+/// `mod_b`'s `Box[Int]` shared a cache slot and the second returned the first's
+/// instantiation. rustc's `Instance` is `(DefId, GenericArgs)` for the same
+/// reason.
 public let type_instantiation_cache_key(mono Monomorphizer, t Type) Option[InstantiationKey] = {
     return when t in {
-        .GenericStruct(template_name, _, args) then {
-            when mono.storage.generic_templates.lookup_struct(template_name) in {
-                .Some(template) then Option[InstantiationKey].Some(InstantiationKey.StructType(template.def_id, args)),
-                .None() then Option[InstantiationKey].None(),
+        .GenericStruct(template_def_id, args) then {
+            if template_def_id.is_valid() then {
+                Option[InstantiationKey].Some(InstantiationKey.StructType(template_def_id, args))
+            } else {
+                Option[InstantiationKey].None()
             }
         },
-        .GenericEnum(template_name, _, args) then {
-            when mono.storage.generic_templates.lookup_enum(template_name) in {
-                .Some(template) then Option[InstantiationKey].Some(InstantiationKey.EnumType(template.def_id, args)),
-                .None() then Option[InstantiationKey].None(),
+        .GenericEnum(template_def_id, args) then {
+            if template_def_id.is_valid() then {
+                Option[InstantiationKey].Some(InstantiationKey.EnumType(template_def_id, args))
+            } else {
+                Option[InstantiationKey].None()
             }
         },
         .StructureType(def_id) then {
             if not mono.storage.context.is_generic_instantiation(def_id) then {
                 return Option[InstantiationKey].None();
             };
-            when mono.storage.context.get_template_name(def_id) in {
-                .Some(template_name) then when mono.storage.context.get_type_arguments(def_id) in {
-                    .Some(args) then {
-                        when mono.storage.generic_templates.lookup_struct(template_name) in {
-                            .Some(template) then Option[InstantiationKey].Some(InstantiationKey.StructType(template.def_id, args)),
-                            .None() then Option[InstantiationKey].None(),
-                        }
-                    },
-                    .None() then Option[InstantiationKey].None(),
-                },
+            when mono.storage.context.get_type_arguments(def_id) in {
+                .Some(args) then Option[InstantiationKey].Some(InstantiationKey.StructType(mono.storage.context.get_template_def_id(def_id), args)),
                 .None() then Option[InstantiationKey].None(),
             }
         },
@@ -331,12 +333,9 @@ public let type_instantiation_cache_key(mono Monomorphizer, t Type) Option[Insta
                 return Option[InstantiationKey].None();
             };
             when mono.storage.context.get_template_name(def_id) in {
-                .Some(template_name) then when mono.storage.context.get_type_arguments(def_id) in {
+                .Some(_) then when mono.storage.context.get_type_arguments(def_id) in {
                     .Some(args) then {
-                        when mono.storage.generic_templates.lookup_enum(template_name) in {
-                            .Some(template) then Option[InstantiationKey].Some(InstantiationKey.EnumType(template.def_id, args)),
-                            .None() then Option[InstantiationKey].None(),
-                        }
+                        Option[InstantiationKey].Some(InstantiationKey.EnumType(mono.storage.context.get_template_def_id(def_id), args))
                     },
                     .None() then Option[InstantiationKey].None(),
                 },
@@ -344,28 +343,6 @@ public let type_instantiation_cache_key(mono Monomorphizer, t Type) Option[Insta
             }
         },
         _ then Option[InstantiationKey].None(),
-    };
-};
-
-// Swift CodeGen.isStdDropTraitDefId: identity is the declaration DefId, not the
-// name. A user trait that happens to be called `Drop` must NOT satisfy this — the
-// `info.def_id == id` equality is what rejects it, and no name comparison can.
-public let is_std_drop_trait_def_id(mono Monomorphizer, trait_def_id Option[DefId]) Bool = {
-    return when trait_def_id in {
-        .Some(id) then {
-            let trait_name = mono.storage.context.get_name(id) or else "";
-            if trait_name <> "Drop" then { return false; };
-            when mono.storage.generic_templates.traits.get(trait_name) in {
-                .Some(info) then {
-                    if info.def_id <> id then { return false; };
-                    if info.module_path.is_empty() then { return true; };
-                    let root = info.module_path[0(UInt)];
-                    root == "Std" or root == "std"
-                },
-                .None() then false,
-            }
-        },
-        .None() then false,
     };
 };
 
@@ -383,9 +360,15 @@ public let is_std_drop_trait_def_id(mono Monomorphizer, trait_def_id Option[DefI
 //   make_extension_method_layout_name("List",  [Int],         "push",  [])       → "List_Int_push"
 //   make_extension_method_layout_name("Dict",   [String, Int], "get",   [])       → "Dict_String_Int_get"
 //   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
+//   make_extension_method_layout_name(..., "List", [Int], "push", [])        → "List_Int_push_d103"
+//
+// The owner's DECLARATION joins the name, exactly as a type's own C name does
+// (`Box_I_d184`). Two modules may each declare `Box`, so `Box_I_stamp` alone
+// names two different methods and one C definition answers for both.
 public let make_extension_method_layout_name(
     mono Monomorphizer,
     template_name String,
+    template_def_id DefId,
     type_args List[Type],
     method_name String,
     method_type_args List[Type],
@@ -402,22 +385,55 @@ public let make_extension_method_layout_name(
         out.push_string("_");
         out.push_string(instantiation_layout_key(mono, a));
     };
+    // The owner's DECLARATION joins the name, exactly as a type's own C name does
+    // (`Box_I_d184`). Two modules may each declare `Box`, so `Box_I_stamp` alone
+    // names two different methods and one C definition answers for both.
+    if template_def_id.is_valid() then {
+        out.push_string("_d\(template_def_id.id)");
+    };
     return out.to_string();
 };
 
-public let make_extension_method_lookup_key(
+/// Key of one instantiated extension method: WHICH type, WHICH method, which
+/// method type arguments.
+///
+/// The owner is a declaration identity, so two types with the same spelling --
+/// or the same C mangle name -- cannot share a slot. This used to build a
+/// `String` out of a mangle name plus a layout key, which is why a `String` and
+/// a `Rune` could answer for each other.
+public let make_extension_method_key(
     mono Monomorphizer,
-    base_name String,
+    owner MethodOwner,
+    owner_args List[Type],
     method_name String,
     method_type_args List[Type],
-) String = {
-    let mutable out = StringBuilder.new();
-    out.push_string("\(base_name).\(method_name)");
-    for a in method_type_args then {
-        out.push_string(".");
-        out.push_string(instantiation_layout_key(mono, a));
-    };
-    return out.to_string();
+) MethodInstanceKey = {
+    let _ = mono;
+    return MethodInstanceKey(owner, owner_args, method_name, method_type_args);
+};
+
+/// Same key, built from a `CompilerContext` alone -- MIR and codegen do not
+/// hold a `Monomorphizer`.
+public let make_receiver_method_key_from_context(
+    context CompilerContext,
+    receiver_type Type,
+    method_name String,
+) MethodInstanceKey = {
+    let pair = context.method_owner_and_args(receiver_type);
+    return MethodInstanceKey(pair.first, pair.second, method_name, List[Type].new());
+};
+
+/// Key of a method instantiated for a concrete receiver: the receiver's owner
+/// identity AND its instantiation arguments, so `List[String].new` and
+/// `List[Rune].new` are two entries.
+public let make_receiver_method_key(
+    mono Monomorphizer,
+    receiver_type Type,
+    method_name String,
+    method_type_args List[Type],
+) MethodInstanceKey = {
+    let pair = mono.storage.context.method_owner_and_args(receiver_type);
+    return MethodInstanceKey(pair.first, pair.second, method_name, method_type_args);
 };
 
 // ── has_generic_parameter ─────────────────────────────────────────────────────
@@ -442,19 +458,19 @@ public let has_generic_parameter(t Type) Bool = {
             };
             has_generic_parameter(return_type)
         },
-        .GenericStruct(_, _, args) then {
+        .GenericStruct(_, args) then {
             for a in args then {
                 if has_generic_parameter(a) then { return true;};
             };
             false
         },
-        .GenericEnum(_, _, args) then {
+        .GenericEnum(_, args) then {
             for a in args then {
                 if has_generic_parameter(a) then { return true;};
             };
             false
         },
-        .TraitObject(_, _, args) then {
+        .TraitObject(_, args) then {
             for a in args then {
                 if has_generic_parameter(a) then { return true;};
             };
@@ -502,7 +518,7 @@ public let instantiate_struct(mono Monomorphizer, template GenericStructTemplate
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
     //    and return a partial GenericStruct type.
     if args_have_generic_parameter(args) then {
-        return Type.GenericStruct(template.name, template.def_id, args);
+        return Type.GenericStruct(template.def_id, args);
     };
 
     // b. Generate the layout name.
@@ -599,14 +615,14 @@ public let instantiate_struct(mono Monomorphizer, template GenericStructTemplate
     // h. Force instantiate drop if this type conforms to std Drop.
     //    All other extension methods are instantiated on-demand when called,
     //    via try_bind_generic_method_call during monomorphization.
-    let template_lookup_name = mono.storage.context.get_name(template.def_id) or else template.name;
-    when mono.storage.generic_templates.lookup_extension_methods(template_lookup_name) in {
+    let template_owner = MethodOwner.Decl(template.def_id);
+    when mono.storage.generic_templates.lookup_extension_methods(template_owner) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
-                if ext_template.method.name == "drop" or is_std_drop_trait_def_id(mono, ext_template.conformance_trait_def_id) then {
+                if ext_template.method.name == "drop" or mono.storage.context.is_std_drop_impl_def_id(ext_template.conformance_trait_def_id) then {
                     let _ = mono.instantiate_extension_method_impl(
                         concrete_type,
-                        template_lookup_name,
+                        template_owner,
                         ext_template,
                         args,
                         List[Type].new(),
@@ -648,7 +664,7 @@ public let instantiate_enum(mono Monomorphizer, template GenericEnumTemplate, ar
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
     //    and return a partial GenericEnum type.
     if args_have_generic_parameter(args) then {
-        return Type.GenericEnum(template.name, template.def_id, args);
+        return Type.GenericEnum(template.def_id, args);
     };
 
     // b. Generate the layout name.
@@ -744,14 +760,14 @@ public let instantiate_enum(mono Monomorphizer, template GenericEnumTemplate, ar
 
     // h. Force instantiate drop if this enum type conforms to std Drop.
     //    All other extension methods are instantiated on-demand when called.
-    let template_lookup_name = mono.storage.context.get_name(template.def_id) or else template.name;
-    when mono.storage.generic_templates.lookup_extension_methods(template_lookup_name) in {
+    let template_owner = MethodOwner.Decl(template.def_id);
+    when mono.storage.generic_templates.lookup_extension_methods(template_owner) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
-                if ext_template.method.name == "drop" or is_std_drop_trait_def_id(mono, ext_template.conformance_trait_def_id) then {
+                if ext_template.method.name == "drop" or mono.storage.context.is_std_drop_impl_def_id(ext_template.conformance_trait_def_id) then {
                     let _ = mono.instantiate_extension_method_impl(
                         concrete_type,
-                        template_lookup_name,
+                        template_owner,
                         ext_template,
                         args,
                         List[Type].new(),

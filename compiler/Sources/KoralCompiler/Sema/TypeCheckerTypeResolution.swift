@@ -147,7 +147,7 @@ extension TypeChecker {
           "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
         ), span: currentSpan)
       }
-      return wrap(.traitObject(traitName: name, traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []), mutable)
+      return wrap(.traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []), mutable)
     }
 
     if case .generic(let base, let args) = inner, visibleTraitInfo(base) != nil {
@@ -158,7 +158,7 @@ extension TypeChecker {
         ), span: currentSpan)
       }
       let resolvedArgs = try args.map { try resolveChild($0) }
-      return wrap(.traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs), mutable)
+      return wrap(.traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs), mutable)
     }
 
     let base = try resolveChild(inner)
@@ -170,8 +170,8 @@ extension TypeChecker {
 
   /// Builds a generic struct type with the template's declaration identity.
   func genericStructType(template name: String, args: [Type]) -> Type {
+    // `name` is a SOURCE SPELLING, resolved to its declaration once here.
     .genericStruct(
-      template: name,
       templateDefId: currentScope.lookupGenericStructTemplate(name)?.defId ?? .invalid,
       args: args)
   }
@@ -179,7 +179,6 @@ extension TypeChecker {
   /// Builds a generic enum type with the template's declaration identity.
   func genericEnumType(template name: String, args: [Type]) -> Type {
     .genericEnum(
-      template: name,
       templateDefId: currentScope.lookupGenericEnumTemplate(name)?.defId ?? .invalid,
       args: args)
   }
@@ -188,13 +187,12 @@ extension TypeChecker {
   /// Used for std lang items, where a user template with the same spelling must
   /// not win.
   func genericEnumType(template name: String, templateDefId: DefId, args: [Type]) -> Type {
-    .genericEnum(template: name, templateDefId: templateDefId, args: args)
+    .genericEnum(templateDefId: templateDefId, args: args)
   }
 
   /// Builds a trait-object type with the trait's declaration identity.
   func traitObjectType(traitName name: String, typeArgs: [Type]) -> Type {
     .traitObject(
-      traitName: name,
       traitDefId: visibleTraitInfo(name)?.defId ?? .invalid,
       typeArgs: typeArgs)
   }
@@ -306,7 +304,7 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: name, traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []))
       }
       if let importError = explicitImportErrorForUnresolvedType(name) {
         throw importError
@@ -346,7 +344,7 @@ extension TypeChecker {
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref (e.g., type [T]Node(value T, next ref [T]Node))
         if resolvingGenericTypes.contains(recursionKey) {
-          return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
+          return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -360,7 +358,7 @@ extension TypeChecker {
         }
         
         // Return parameterized type instead of instantiating
-        return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
+        return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericEnumTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -384,7 +382,7 @@ extension TypeChecker {
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref
         if resolvingGenericTypes.contains(recursionKey) {
-          return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
+          return .genericEnum(templateDefId: template.defId, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -398,7 +396,7 @@ extension TypeChecker {
         }
         
         // Return parameterized type instead of instantiating
-        return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
+        return .genericEnum(templateDefId: template.defId, args: resolvedArgs)
       } else if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
         if !safe {
@@ -407,7 +405,7 @@ extension TypeChecker {
           ), span: currentSpan)
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return .reference(inner: .traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       } else {
         throw SemanticError.undefinedType(base)
       }
@@ -446,11 +444,11 @@ extension TypeChecker {
       
       if let template = currentScope.lookupGenericStructTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
-        return .genericStruct(template: base, templateDefId: template.defId, args: resolvedArgs)
+        return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
       }
       if let template = currentScope.lookupGenericEnumTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
-        return .genericEnum(template: base, templateDefId: template.defId, args: resolvedArgs)
+        return .genericEnum(templateDefId: template.defId, args: resolvedArgs)
       }
       if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
@@ -459,11 +457,11 @@ extension TypeChecker {
             "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan)
         }
-        return .reference(inner: .traitObject(traitName: base, traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       }
       
       // Conservative default to generic struct if template is unresolved (diagnosed later)
-      return .genericStruct(template: base, templateDefId: currentScope.lookupGenericStructTemplate(base)?.defId ?? .invalid, args: resolvedArgs)
+      return .genericStruct(templateDefId: currentScope.lookupGenericStructTemplate(base)?.defId ?? .invalid, args: resolvedArgs)
       
     case .functionType(let paramTypes, let returnType):
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
@@ -583,15 +581,30 @@ extension TypeChecker {
 
   /// Looks up the blanket given constraints for a type modifier + trait combination.
   /// Returns the list of trait constraints the inner type must satisfy, or nil if no blanket given exists.
-  private func findBlanketGivenConstraints(baseName: String, traitName: String) -> [String]? {
-    let cacheKey = "\(baseName):\(traitName)"
+  ///
+  /// Keyed by the trait's DECLARATION identity: `traitName` is display-only, and
+  /// two same-named traits from different modules would otherwise share one
+  /// slot (rustc: `Res::Def(DefKind::Trait, DefId)`). The returned constraint
+  /// names are still spellings because that is the boundary where they are
+  /// resolved and what the diagnostic prints.
+  private func findBlanketGivenConstraints(baseName: String, traitDefId: DefId) -> [String]? {
+    let cacheKey = "\(baseName):\(traitDefId.id)"
     return blanketGivenConstraints[cacheKey]
   }
 
   private func validateCanonicalTraitRef(_ traitRef: CanonicalTraitRef) throws -> TraitDeclInfo {
     try validateTraitName(traitRef.traitName)
 
-    guard let traitInfo = traits[traitRef.traitName] else {
+    // This is the boundary where a spelling becomes a declaration
+    // (rustc_resolve: `Res::Def(DefKind::Trait, DefId)`), so resolving the name
+    // here is correct. But when the ref already carries its declaration we use
+    // that and never re-read the name -- a spelling can be an alias or a
+    // same-named trait from another module. Either way the diagnostic prints
+    // the spelling.
+    let traitInfo = traitRef.traitDefId.isValid
+      ? traitDeclsByDefId[traitRef.traitDefId]
+      : traits[traitRef.traitName]
+    guard let traitInfo else {
       throw SemanticError(.generic("Undefined trait: \(traitRef.traitName)"), span: currentSpan)
     }
 
@@ -610,12 +623,9 @@ extension TypeChecker {
     switch type {
     case .structure(let defId):
       satisfied = context_isTypeMutable(defId)
-    case .genericStruct(let templateName, _, _):
-      if let defId = defIdMap.lookupGenericStructTemplateDefId(templateName) {
-        satisfied = context_isTypeMutable(defId)
-      } else {
-        satisfied = false
-      }
+    case .genericStruct(let templateDefId, _):
+      // The type carries the template's DECLARATION; the spelling is not read.
+      satisfied = templateDefId.isValid ? context_isTypeMutable(templateDefId) : false
     case .genericParameter:
       // Generic parameters with 'mutable' bound are checked at call sites
       return
@@ -648,8 +658,8 @@ extension TypeChecker {
       }
     }
 
-    if case .traitObject(let toTraitName, _, let toTraitArgs) = selfType {
-      let actualTrait = canonicalTraitRef(traitName: toTraitName, traitTypeArgs: toTraitArgs)
+    if case .traitObject(let tplDefId, let toTraitArgs) = selfType {
+      let actualTrait = canonicalTraitRef(traitName: Type.spelling(tplDefId), traitTypeArgs: toTraitArgs)
       if actualTrait == traitRef {
         return
       }
@@ -672,7 +682,7 @@ extension TypeChecker {
       }
       let modifierBaseName = typeModifierBaseName(selfType)
       let modifierName = modifierBaseName.lowercased()
-      if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitName: traitRef.traitName) {
+      if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitDefId: traitRef.traitDefId) {
         for constraint in constraints {
           do {
             try enforceTraitConformance(innerType, traitName: constraint)
@@ -937,24 +947,24 @@ extension TypeChecker {
         }
         return false
       }()
-      if case .traitObject(let name, _, let args) = inner {
-        traitName = name
+      if case .traitObject(let tplDefId, let args) = inner {
+        traitName = Type.spelling(tplDefId)
         traitTypeArgs = args
       } else {
         return expr
       }
     case .weakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let name, _, let args) = inner {
-        traitName = name
+      if case .traitObject(let tplDefId, let args) = inner {
+        traitName = Type.spelling(tplDefId)
         traitTypeArgs = args
       } else {
         return expr
       }
     case .mutableWeakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let name, _, let args) = inner {
-        traitName = name
+      if case .traitObject(let tplDefId, let args) = inner {
+        traitName = Type.spelling(tplDefId)
         traitTypeArgs = args
       } else {
         return expr

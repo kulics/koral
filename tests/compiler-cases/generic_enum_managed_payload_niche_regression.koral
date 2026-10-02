@@ -1,0 +1,30 @@
+// EXPECT: PASS
+
+// Regression: a generic enum whose payload is a managed nominal gets a NICHE
+// layout (no `tag` member -- the null pointer word encodes the empty case).
+// Constructing the empty case must write the null pattern, not `x.tag = 0`,
+// or the generated C fails to compile: "no member named 'tag'".
+//
+// The niche decision has to read the INSTANTIATED case list. Read from the
+// template instead and the payload field still has an unresolved generic
+// parameter, so the layout check reports "no niche" and the constructor is
+// emitted for a tag layout the struct definition never declared.
+
+type mutable NicheCell(mutable data List[Int]);
+
+// Global initializers are where this first surfaced: the empty case is
+// constructed before any function body runs.
+let top Option[NicheCell] = Option[NicheCell].None();
+
+let main() Int = {
+    let empty = Option[NicheCell].None();
+    let full = Option[NicheCell].Some(NicheCell(List[Int].new()));
+
+    if empty is .None() then {
+        println("PASS");
+        return 0;
+    };
+    let _ = full;
+    eprintln("FAIL: expected None");
+    return 1;
+};

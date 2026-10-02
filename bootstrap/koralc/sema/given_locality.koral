@@ -98,7 +98,7 @@ given GivenLocalityChecker {
     file_private resolve_type_owner(self, t Type) Option[GivenOwner] = {
         return when t in {
             .ReferenceType(inner) then {
-                if inner is .TraitObject(_, _, _) then {
+                if inner is .TraitObject(tplDefId, _) then {
                     return self.resolve_type_owner(inner);
                 };
                 Option[GivenOwner].Some(self.type_modifier_owner("Ref"))
@@ -143,19 +143,29 @@ given GivenLocalityChecker {
                 };
                 Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
-            .GenericStruct(template, _, _) then self.resolve_generic_base_owner(template),
-            .GenericEnum(template, _, _) then self.resolve_generic_base_owner(template),
-            .TraitObject(name, _, _) then self.resolve_trait_owner(name),
+            // Identity: ownership comes from the DECLARATION's module.
+            .GenericStruct(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId),
+            .GenericEnum(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId),
+            .TraitObject(trait_def_id, _) then self.resolve_owner_by_def_id(trait_def_id),
             // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
             _ then Option[GivenOwner].None(),
         };
     };
 
     file_private resolve_trait_owner(self, trait_name String) Option[GivenOwner] = {
-        if self.trait_registry.get(trait_name) is .Some(info) then {
+        if self.trait_registry.get_in_module(trait_name, self.current_module_path) is .Some(info) then {
             return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TraitOwner(), trait_name, info.module_path));
         };
         return Option[GivenOwner].None();
+    };
+
+    /// Ownership from a DECLARATION: the module comes from the DefId itself, so
+    /// no spelling is round-tripped. Two same-named types in different modules
+    /// have different owners, which is exactly what the orphan rule needs.
+    file_private resolve_owner_by_def_id(self, def_id DefId) Option[GivenOwner] = {
+        let name = self.context.get_name(def_id) or else def_id_spelling(def_id);
+        let mod_path = self.context.get_module_path(def_id) or else List[String].new();
+        return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path));
     };
 
     file_private resolve_generic_base_owner(self, base_name String) Option[GivenOwner] = {
@@ -168,7 +178,7 @@ given GivenLocalityChecker {
             return Option[GivenOwner].Some(self.type_modifier_owner(base_name));
         };
         // 查找泛型模板
-        if self.global_scope.lookup_type(base_name) is .Some(t) then {
+        if self.global_scope.lookup_type_in_module(base_name, self.current_module_path) is .Some(t) then {
             when t in {
                 .StructureType(def_id) then {
                     let mod_path = when self.context.get_module_path(def_id) in {

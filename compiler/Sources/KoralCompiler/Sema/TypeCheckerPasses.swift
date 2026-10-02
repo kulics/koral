@@ -37,7 +37,7 @@ extension TypeChecker {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return containsNeverType(inner)
-    case .genericStruct(_, _, let args), .genericEnum(_, _, let args), .traitObject(_, _, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
       return args.contains(where: containsNeverType)
     default:
       return false
@@ -94,12 +94,12 @@ extension TypeChecker {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       context.setExplicitDrop(defId)
-    case .genericStruct(let template, _, _):
-      if let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(template) {
+    case .genericStruct(let templateDefId, _):
+      if templateDefId.isValid {
         context.setExplicitDrop(templateDefId)
       }
-    case .genericEnum(let template, _, _):
-      if let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(template) {
+    case .genericEnum(let templateDefId, _):
+      if templateDefId.isValid {
         context.setExplicitDrop(templateDefId)
       }
     default:
@@ -148,7 +148,7 @@ extension TypeChecker {
         }
       }
       return firstSignatureVisibilityViolation(in: returns, requiredAccess: requiredAccess)
-    case .genericStruct(_, _, let args), .genericEnum(_, _, let args), .traitObject(_, _, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
       for arg in args {
         if let violation = firstSignatureVisibilityViolation(in: arg, requiredAccess: requiredAccess) {
           return violation
@@ -344,6 +344,7 @@ extension TypeChecker {
         extensionMethods: genericExtensionMethods,
         intrinsicExtensionMethods: genericIntrinsicExtensionMethods,
         traits: traits,
+        traitDeclsByDefId: traitDeclsByDefId,
         concreteExtensionMethods: extensionMethods,
         intrinsicGenericTypes: intrinsicGenericTypes,
         intrinsicGenericFunctions: intrinsicGenericFunctions,
@@ -854,6 +855,9 @@ extension TypeChecker {
       )
       traits[name] = traitInfo
       qualifiedTraits[qualifiedTraitKey(name, modulePath: currentModulePath)] = traitInfo
+      // By DECLARATION as well: the two name keys above both collide when two
+      // modules declare the same trait name.
+      traitDeclsByDefId[traitInfo.defId] = traitInfo
       // Track std library traits
       if isStdLib {
         stdLibTypes.insert(name)
@@ -1271,9 +1275,11 @@ extension TypeChecker {
           contextName: "given '\(baseName)'"
         )
 
-        // Initialize extension methods dictionary for this base type
-        if genericExtensionMethods[baseName] == nil {
-          genericExtensionMethods[baseName] = []
+        // Initialize extension methods dictionary for this base type.
+        // `baseName` is a SPELLING; resolve it to the declaration once here.
+        let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        if genericExtensionMethods[genericOwnerKey] == nil {
+          genericExtensionMethods[genericOwnerKey] = []
         }
 
         // Create a generic Self type for declaration-time checking.
@@ -1350,16 +1356,20 @@ extension TypeChecker {
           }
 
           // Check for duplicate method name on this type
-          let existsInGeneric = genericExtensionMethods[baseName]!.contains(where: { $0.method.name == method.name })
-          let existsInIntrinsic = (genericIntrinsicExtensionMethods[baseName] ?? []).contains(where: { $0.method.name == method.name })
+          let existsInGeneric = genericExtensionMethods[genericOwnerKey]!.contains(where: { $0.method.name == method.name })
+          let existsInIntrinsic = (genericIntrinsicExtensionMethods[genericOwnerKey] ?? []).contains(where: { $0.method.name == method.name })
           if existsInGeneric || existsInIntrinsic {
             throw SemanticError.duplicateDefinition(method.name, span: span)
           }
 
-          // Register the method template (without checked body)
-          genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
+          // Register the method template (without checked body).
+          // The declaration must carry its own DefId: two modules' `stamp` on
+          // same-named templates are two methods, and a template whose
+          // `method.defId` is invalid cannot tell them apart at instantiation.
+          let registeredMethod = registeredMethodDeclaration(method)
+          genericExtensionMethods[genericOwnerKey]!.append(GenericExtensionMethodTemplate(
             typeParams: typeParams,
-            method: method,
+            method: registeredMethod,
             conformanceTraitName: nil,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath,
@@ -1387,16 +1397,19 @@ extension TypeChecker {
           return
         }
         let typeName = typeInfo.name
+        // Registry keys are OWNER IDENTITIES. `typeName` stays for display and
+        // for the std-lib locality check, which ask about the spelling.
+        let methodOwnerKey = context.methodOwner(of: type)
 
         if enforceTypeDeclarationModuleLocality, let owner = typeInfo.owner {
           try enforceGivenOwnerLocality(owner, span: span)
         }
 
-        if extensionMethods[typeName] == nil {
-          extensionMethods[typeName] = [:]
+        if extensionMethods[methodOwnerKey] == nil {
+          extensionMethods[methodOwnerKey] = [:]
         }
-        if genericExtensionMethods[typeName] == nil {
-          genericExtensionMethods[typeName] = []
+        if genericExtensionMethods[methodOwnerKey] == nil {
+          genericExtensionMethods[methodOwnerKey] = []
         }
 
         // Pre-register method signatures (without checking bodies)
@@ -1446,24 +1459,24 @@ extension TypeChecker {
             methodSymbol,
             parameters: registeredMethod.parameters,
             declaredName: registeredMethod.name,
-            owner: .extensionTemplate(ownerName: typeName)
+            owner: .extensionTemplate(ownerDefId: context.ownerDefId(of: type) ?? .invalid)
           )
 
           if registeredMethod.typeParameters.isEmpty {
             // Check for duplicate method name on this type
-            if extensionMethods[typeName]![registeredMethod.name] != nil {
+            if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil {
               throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
             }
 
-            extensionMethods[typeName]![registeredMethod.name] = methodSymbol
+            extensionMethods[methodOwnerKey]![registeredMethod.name] = methodSymbol
           } else {
-            let existsInGeneric = genericExtensionMethods[typeName]!.contains(where: { $0.method.name == registeredMethod.name })
-            let existsInIntrinsic = (genericIntrinsicExtensionMethods[typeName] ?? []).contains(where: { $0.method.name == registeredMethod.name })
+            let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == registeredMethod.name })
+            let existsInIntrinsic = (genericIntrinsicExtensionMethods[methodOwnerKey] ?? []).contains(where: { $0.method.name == registeredMethod.name })
             if existsInGeneric || existsInIntrinsic {
               throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
             }
 
-            genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
+            genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               method: registeredMethod,
               conformanceTraitName: nil,
@@ -1480,6 +1493,8 @@ extension TypeChecker {
 
     case .givenTraitDeclaration(let typeParams, let typeNode, let traitNode, let methods, let span):
       self.currentSpan = span
+      if "\(typeNode)".contains("Holder") || "\(typeNode)".contains("Box") {
+      }
       let traitConstraint = try SemaUtils.resolveTraitConstraint(from: traitNode)
       let traitName = traitConstraint.baseName
       try validateTraitName(traitName)
@@ -1575,14 +1590,21 @@ extension TypeChecker {
       conformanceDeclOrigins[key] = span
 
       // Populate blanketGivenConstraints cache for type modifier given declarations.
-      // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:Eq"] = ["Eq"]
+      // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:<Eq's DefId>"] = ["Eq"]
+      //
+      // The key carries the trait's DECLARATION identity; `traitName` is
+      // display-only and two same-named traits from different modules would
+      // otherwise share one slot. The constraint names in the value stay
+      // spellings -- that is where they get resolved and what the diagnostic
+      // prints.
       if !typeParams.isEmpty {
         let modifierName = modifierBaseName(for: typeNode) ?? ""
         if !modifierName.isEmpty {
           let constraintNames = typeParams.flatMap { param in
             param.constraints.map { $0.baseName }
           }
-          let blanketKey = "\(modifierName):\(traitName)"
+          let traitDefId = visibleTraitInfo(traitName)?.defId ?? .invalid
+          let blanketKey = "\(modifierName):\(traitDefId.id)"
           blanketGivenConstraints[blanketKey] = constraintNames
         }
       }
@@ -1609,8 +1631,10 @@ extension TypeChecker {
             baseName = modifierBaseName(for: typeNode) ?? ""
           }
           if !baseName.isEmpty {
-            let existingGeneric = Set((genericExtensionMethods[baseName] ?? []).map { $0.method.name })
-            let existingIntrinsic = Set((genericIntrinsicExtensionMethods[baseName] ?? []).map { $0.method.name })
+            // `baseName` is a SPELLING; resolve it to the declaration once here.
+            let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+            let existingGeneric = Set((genericExtensionMethods[genericOwnerKey] ?? []).map { $0.method.name })
+            let existingIntrinsic = Set((genericIntrinsicExtensionMethods[genericOwnerKey] ?? []).map { $0.method.name })
             hasExistingMethodSignature = methods.contains {
               existingGeneric.contains($0.name) || existingIntrinsic.contains($0.name)
             }
@@ -1629,19 +1653,20 @@ extension TypeChecker {
             }
           }()
           if let typeName {
-            let existingConcrete = Set((extensionMethods[typeName] ?? [:]).keys)
+            let methodOwnerKey = context.methodOwner(of: selfType)
+            let existingConcrete = Set((extensionMethods[methodOwnerKey] ?? [:]).keys)
             hasExistingMethodSignature = preRegisteredMethods.contains { existingConcrete.contains($0.name) }
             // Track concrete extension slots by method declaration identity so one
             // declaration reaching the same type through multiple trait paths can
             // be reused without being reported as ambiguous.
             for method in preRegisteredMethods {
-              if extensionMethodTraitSources[typeName] == nil {
-                extensionMethodTraitSources[typeName] = [:]
+              if extensionMethodTraitSources[methodOwnerKey] == nil {
+                extensionMethodTraitSources[methodOwnerKey] = [:]
               }
-              if extensionMethodTraitSources[typeName]![method.name] == nil {
-                extensionMethodTraitSources[typeName]![method.name] = []
+              if extensionMethodTraitSources[methodOwnerKey]![method.name] == nil {
+                extensionMethodTraitSources[methodOwnerKey]![method.name] = []
               }
-              let existingSources = extensionMethodTraitSources[typeName]![method.name]!
+              let existingSources = extensionMethodTraitSources[methodOwnerKey]![method.name]!
               if !existingSources.contains(method.defId) {
                 // If another trait already provides this method, it's ambiguous
                 if existingConcrete.contains(method.name) && !existingSources.isEmpty {
@@ -1649,7 +1674,7 @@ extension TypeChecker {
                     "Ambiguous method '\(method.name)' for type '\(typeName)' via trait extensions"
                   ), span: span)
                 }
-                extensionMethodTraitSources[typeName]![method.name]!.append(method.defId)
+                extensionMethodTraitSources[methodOwnerKey]![method.name]!.append(method.defId)
               }
             }
           }
@@ -1686,19 +1711,20 @@ extension TypeChecker {
             op: "generic given on non-generic type", type1: "", type2: "")
         }
 
-        if genericIntrinsicExtensionMethods[baseName] == nil {
-          genericIntrinsicExtensionMethods[baseName] = []
+        let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        if genericIntrinsicExtensionMethods[genericOwnerKey] == nil {
+          genericIntrinsicExtensionMethods[genericOwnerKey] = []
         }
 
         for m in methods {
           // Check for duplicate method name on this type
-          let allExisting = (genericExtensionMethods[baseName] ?? []).map { $0.method.name }
-            + genericIntrinsicExtensionMethods[baseName]!.map { $0.method.name }
+          let allExisting = (genericExtensionMethods[genericOwnerKey] ?? []).map { $0.method.name }
+            + genericIntrinsicExtensionMethods[genericOwnerKey]!.map { $0.method.name }
           if allExisting.contains(m.name) {
             throw SemanticError.duplicateDefinition(m.name, span: span)
           }
           
-          genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
+          genericIntrinsicExtensionMethods[genericOwnerKey]!.append((typeParams: typeParams, method: m))
         }
       } else {
         // Non-generic intrinsic given - collect method signatures for forward reference support
@@ -1720,8 +1746,9 @@ extension TypeChecker {
           return
         }
         
-        if extensionMethods[typeName] == nil {
-          extensionMethods[typeName] = [:]
+        let methodOwnerKey = context.methodOwner(of: type)
+        if extensionMethods[methodOwnerKey] == nil {
+          extensionMethods[methodOwnerKey] = [:]
         }
         
         // Pre-register method signatures (without checking bodies)
@@ -1749,15 +1776,15 @@ extension TypeChecker {
             methodSymbol,
             parameters: method.parameters,
             declaredName: method.name,
-            owner: .concreteType(typeName: typeName)
+            owner: .concreteType(ownerType: type)
           )
           
           // Check for duplicate method name on this type
-          if extensionMethods[typeName]![method.name] != nil {
+          if extensionMethods[methodOwnerKey]![method.name] != nil {
             throw SemanticError.duplicateDefinition(method.name, span: span)
           }
           
-          extensionMethods[typeName]![method.name] = methodSymbol
+          extensionMethods[methodOwnerKey]![method.name] = methodSymbol
         }
       }
       
@@ -2559,7 +2586,8 @@ extension TypeChecker {
         }
         
         // Find the templates registered in Pass 2 and check their bodies
-        guard let templates = genericExtensionMethods[baseName] else {
+        let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        guard let templates = genericExtensionMethods[genericOwnerKey] else {
           return nil
         }
         
@@ -2609,7 +2637,7 @@ extension TypeChecker {
           }
           
           // Update the template with the checked body
-          genericExtensionMethods[baseName]![templateIndex] = GenericExtensionMethodTemplate(
+          genericExtensionMethods[genericOwnerKey]![templateIndex] = GenericExtensionMethodTemplate(
             typeParams: template.typeParams,
             method: template.method,
             conformanceTraitName: template.conformanceTraitName,
@@ -2633,6 +2661,7 @@ extension TypeChecker {
           op: "given extends only struct or enum", type1: type.description, type2: "")
       }
       let typeName = typeInfo.name
+      let methodOwnerKey = context.methodOwner(of: type)
 
       if let owner = typeInfo.owner {
         try enforceGivenOwnerLocality(owner, span: span)
@@ -2646,8 +2675,8 @@ extension TypeChecker {
 
       var typedMethods: [TypedMethodDeclaration] = []
 
-      if extensionMethods[typeName] == nil {
-        extensionMethods[typeName] = [:]
+      if extensionMethods[methodOwnerKey] == nil {
+        extensionMethods[methodOwnerKey] = [:]
       }
 
       // Pass 1: pre-register all method symbols so methods can call each other regardless
@@ -2723,10 +2752,10 @@ extension TypeChecker {
           methodSymbol,
           parameters: method.parameters,
           declaredName: method.name,
-          owner: .concreteType(typeName: typeName)
+          owner: .concreteType(ownerType: type)
         )
 
-        extensionMethods[typeName]![method.name] = methodSymbol
+        extensionMethods[methodOwnerKey]![method.name] = methodSymbol
         methodInfos.append(
           GivenMethodInfo(
             method: method, symbol: methodSymbol, params: params, returnType: returnType)
@@ -2756,14 +2785,14 @@ extension TypeChecker {
           ))
 
         if !info.method.typeParameters.isEmpty {
-          if genericExtensionMethods[typeName] == nil {
-            genericExtensionMethods[typeName] = []
+          if genericExtensionMethods[methodOwnerKey] == nil {
+            genericExtensionMethods[methodOwnerKey] = []
           }
 
-          if let existingIndex = genericExtensionMethods[typeName]!.firstIndex(where: {
+          if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
             $0.method.name == info.method.name && $0.typeParams.isEmpty
           }) {
-            genericExtensionMethods[typeName]![existingIndex] = GenericExtensionMethodTemplate(
+            genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
               conformanceTraitName: nil,
@@ -2775,7 +2804,7 @@ extension TypeChecker {
               checkedReturnType: info.returnType
             )
           } else {
-            genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
+            genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
               conformanceTraitName: nil,
@@ -3452,15 +3481,16 @@ extension TypeChecker {
         guard let baseName = baseNameForGenericStorage else {
           return nil
         }
-        if genericExtensionMethods[baseName] == nil {
-          genericExtensionMethods[baseName] = []
+        let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        if genericExtensionMethods[genericOwnerKey] == nil {
+          genericExtensionMethods[genericOwnerKey] = []
         }
         for (index, info) in methodInfos.enumerated() {
           let entry = typedMethodEntries[index]
-            if let existingIndex = genericExtensionMethods[baseName]!.firstIndex(where: {
+            if let existingIndex = genericExtensionMethods[genericOwnerKey]!.firstIndex(where: {
               $0.method.name == info.method.name && $0.typeParams.count == typeParams.count
             }) {
-              genericExtensionMethods[baseName]![existingIndex] = GenericExtensionMethodTemplate(
+              genericExtensionMethods[genericOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
                 typeParams: typeParams,
                 method: info.method,
                 conformanceTraitName: traitName,
@@ -3473,7 +3503,7 @@ extension TypeChecker {
                 checkedReturnType: info.returnType
               )
             } else {
-              genericExtensionMethods[baseName]!.append(
+              genericExtensionMethods[genericOwnerKey]!.append(
                 GenericExtensionMethodTemplate(
                   typeParams: typeParams,
                   method: info.method,
@@ -3508,11 +3538,12 @@ extension TypeChecker {
         )
       }
 
-      if extensionMethods[concreteTypeName] == nil {
-        extensionMethods[concreteTypeName] = [:]
+      let methodOwnerKey = context.methodOwner(of: selfType)
+      if extensionMethods[methodOwnerKey] == nil {
+        extensionMethods[methodOwnerKey] = [:]
       }
-      if genericExtensionMethods[concreteTypeName] == nil {
-        genericExtensionMethods[concreteTypeName] = []
+      if genericExtensionMethods[methodOwnerKey] == nil {
+        genericExtensionMethods[methodOwnerKey] = []
       }
       for info in methodInfos {
         if !info.method.typeParameters.isEmpty {
@@ -3522,10 +3553,10 @@ extension TypeChecker {
             continue
           }
 
-          if let existingIndex = genericExtensionMethods[concreteTypeName]!.firstIndex(where: {
+          if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
             $0.method.name == info.method.name && $0.typeParams.isEmpty
           }) {
-            genericExtensionMethods[concreteTypeName]![existingIndex] = GenericExtensionMethodTemplate(
+            genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
               method: info.method,
               conformanceTraitName: traitName,
@@ -3538,7 +3569,7 @@ extension TypeChecker {
               checkedReturnType: info.returnType
             )
           } else {
-            genericExtensionMethods[concreteTypeName]!.append(
+            genericExtensionMethods[methodOwnerKey]!.append(
               GenericExtensionMethodTemplate(
                 typeParams: [],
                 method: info.method,
@@ -3556,16 +3587,16 @@ extension TypeChecker {
           continue
         }
 
-        if let existing = extensionMethods[concreteTypeName]?[info.method.name] {
+        if let existing = extensionMethods[methodOwnerKey]?[info.method.name] {
           if existing.type == info.symbol.type {
-            extensionMethods[concreteTypeName]?[info.method.name] = info.symbol
+            extensionMethods[methodOwnerKey]?[info.method.name] = info.symbol
             continue
           }
           throw SemanticError(.generic(
             "Duplicate method '\(info.method.name)' in implementation 'given \(selfType) \(traitName)'"
           ), span: span)
         }
-        extensionMethods[concreteTypeName]?[info.method.name] = info.symbol
+        extensionMethods[methodOwnerKey]?[info.method.name] = info.symbol
       }
 
       return .givenDeclaration(
@@ -3591,17 +3622,19 @@ extension TypeChecker {
           }
         }
 
-        if genericIntrinsicExtensionMethods[baseName] == nil {
-          genericIntrinsicExtensionMethods[baseName] = []
+        let genericOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        if genericIntrinsicExtensionMethods[genericOwnerKey] == nil {
+          genericIntrinsicExtensionMethods[genericOwnerKey] = []
         }
 
         for m in methods {
-          genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
+          genericIntrinsicExtensionMethods[genericOwnerKey]!.append((typeParams: typeParams, method: m))
         }
         return nil
       }
 
       let type = try resolveTypeNode(typeNode)
+      let methodOwnerKey = context.methodOwner(of: type)
 
       let typeName: String
       let shouldEmitGiven: Bool
@@ -3678,7 +3711,7 @@ extension TypeChecker {
           methodSymbol,
           parameters: method.parameters,
           declaredName: method.name,
-          owner: .concreteType(typeName: typeName)
+          owner: .concreteType(ownerType: type)
         )
 
         if shouldEmitGiven {
@@ -3690,10 +3723,10 @@ extension TypeChecker {
               returnType: returnType
             ))
         }
-        if extensionMethods[typeName] == nil {
-          extensionMethods[typeName] = [:]
+        if extensionMethods[methodOwnerKey] == nil {
+          extensionMethods[methodOwnerKey] = [:]
         }
-        extensionMethods[typeName]![method.name] = methodSymbol
+        extensionMethods[methodOwnerKey]![method.name] = methodSymbol
       }
 
       return shouldEmitGiven ? .givenDeclaration(type: type, trait: nil, methods: typedMethods) : nil

@@ -1055,11 +1055,9 @@ given TypeChecker {
     module_private is_type_mutable_nominal(self, t Type) Bool = {
         return when t in {
             .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
-            .GenericStruct(template_name, _, _) then {
-                when self.storage.generic_templates.lookup_struct(template_name) in {
-                    .Some(template) then self.context().def_id_map.is_struct_mutable(template.def_id),
-                    .None() then false,
-                }
+            // Identity: the template's DECLARATION decides mutability.
+            .GenericStruct(template_def_id, _) then {
+                template_def_id.is_valid() and self.context().def_id_map.is_struct_mutable(template_def_id)
             },
             .EnumType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
             _ then false,
@@ -1267,7 +1265,8 @@ given TypeChecker {
                     .None() then true,
                 }
             },
-            .GenericStruct(template_name, _, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericStruct(template_def_id, _) then when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mutable found = false;

@@ -611,7 +611,8 @@ given MIRFunctionBuilder {
 
     file_private pair_field_type(self, pair_type Type, field_name String) Type = {
         return when pair_type in {
-            .GenericStruct(_, template_def_id, args) then {
+            // Identity: Std's `Pair` is a LANG ITEM, matched by declaration.
+            .GenericStruct(template_def_id, args) then {
                 if is_std_pair_def_id(self.context, template_def_id) and args.count() == 2(UInt) then {
                     return if field_name == "first" then args[0(UInt)] else args[1(UInt)];
                 };
@@ -1250,7 +1251,7 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
         let concrete_type = when target_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
-            .StructureType(_) or .EnumType(_) or .GenericStruct(_, _, _) or .GenericEnum(_, _, _) then target_type,
+            .StructureType(_) or .EnumType(_) or .GenericStruct(_, _) or .GenericEnum(_, _) then target_type,
             _ then Type.Unknown(),
         };
         let subject_value = MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow());
@@ -1621,7 +1622,9 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
                         // the TypedPattern elements, which carry correct type info
                         // from the type checker.
                         let generic_params = when matched_type in {
-                            .GenericEnum(template_name, _, _) then self.context.enum_case_params_by_template_name(template_name, case_name),
+                            // Identity: the template's DECLARATION selects the container,
+                            // then the case NAME picks a member inside it.
+                            .GenericEnum(template_def_id, _) then self.context.enum_case_params_by_raw_id(template_def_id.id, case_name),
                             _ then List[EnumCaseParam].new(),
                         };
                         let mutable idx UInt = 0;
@@ -1707,7 +1710,8 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
     /// cannot be dropped when a trait reference is written into MIR.
     file_private trait_object_ref(self, t Type) CanonicalTraitRef = {
         return when t in {
-            .TraitObject(name, def_id, args) then CanonicalTraitRef(name, def_id, self.copy_type_args(args)),
+            // The name is display-only; `def_id` is the identity.
+            .TraitObject(def_id, args) then CanonicalTraitRef(def_id_spelling(def_id), def_id, self.copy_type_args(args)),
             .ReferenceType(inner) then self.trait_object_ref(inner),
             .MutableReferenceType(inner) then self.trait_object_ref(inner),
             .BorrowedReferenceType(inner) then self.trait_object_ref(inner),
@@ -2133,8 +2137,11 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
         };
     };
 
-    file_private concrete_receiver_lookup_key(self, receiver_type Type) String = {
-        return self.concrete_layout_key_for_type(self.receiver_lookup_type(receiver_type));
+    /// Owner identity of a receiver type. Two receivers are the same receiver
+    /// iff their owners are equal; this used to return a layout key, which is a
+    /// C mangle string and not an identity.
+    file_private concrete_receiver_lookup_key(self, receiver_type Type) MethodOwner = {
+        return self.context.method_owner_of(receiver_type);
     };
 
     file_private receiver_base_lookup_key(self, receiver_type Type) String = {
@@ -2187,7 +2194,7 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
             };
         };
 
-        let direct_lookup_key = "\(self.concrete_receiver_lookup_key(effective_receiver_type)).\(method_name)";
+        let direct_lookup_key = make_receiver_method_key_from_context(self.context, effective_receiver_type, method_name);
         when self.program.static_method_by_key.get(direct_lookup_key) in {
             .Some(def_id) then {
                 when self.context.get_function_type(def_id) in {
@@ -2290,7 +2297,7 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
         if receiver_type is .Unknown() then {
             return Option[Symbol].None();
         };
-        let direct_lookup_key = "\(self.concrete_receiver_lookup_key(receiver_type)).\(method_name)";
+        let direct_lookup_key = make_receiver_method_key_from_context(self.context, receiver_type, method_name);
         when self.program.static_method_by_key.get(direct_lookup_key) in {
             .Some(def_id) then {
                 when self.context.get_function_type(def_id) in {
@@ -3711,7 +3718,8 @@ let saved_pattern_places = self.pattern_place_by_def_id.clone();
             pair_args.push(self.concretize_pair_constructor_arg_type(args[0(UInt)].expr_type));
             pair_args.push(self.concretize_pair_constructor_arg_type(args[1(UInt)].expr_type));
             let pair_def_id = self.context.get_template_def_id(identifier.def_id);
-            return Type.GenericStruct("Pair", if pair_def_id.is_valid() then pair_def_id else self.program.generic_templates.lookup_struct_def_id("Pair"), pair_args);
+            // Std's `Pair` is a LANG ITEM, reached by declaration.
+            return Type.GenericStruct(pair_def_id, pair_args);
         };
 
         return fallback;

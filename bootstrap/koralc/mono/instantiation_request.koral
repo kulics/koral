@@ -9,7 +9,7 @@ public type InstantiationKind {
     EnumType(template GenericEnumTemplate, args List[Type]),
     Function(template GenericFunctionTemplate, args List[Type]),
     ExtensionMethod(
-        template_name String,
+        owner MethodOwner,
         base_type Type,
         template GenericExtensionMethodTemplate,
         type_args List[Type],
@@ -39,7 +39,7 @@ public type InstantiationKey {
     StructType(template_def_id DefId, args List[Type]),
     EnumType(template_def_id DefId, args List[Type]),
     Function(template_def_id DefId, args List[Type]),
-    ExtensionMethod(template_name String, method_name String, type_args List[Type], method_type_args List[Type]),
+    ExtensionMethod(owner MethodOwner, method_name String, type_args List[Type], method_type_args List[Type]),
     TraitMethod(base_type Type, method_name String, method_type_args List[Type]),
 };
 
@@ -71,8 +71,8 @@ given InstantiationKey {
             "enum:\(template_def_id.id):\(type_parts_to_string(args))",
             .Function(template_def_id, args) then
             "func:\(template_def_id.id):\(type_parts_to_string(args))",
-            .ExtensionMethod(template_name, method_name, type_args, method_type_args) then
-            "ext:\(template_name):\(method_name):\(type_parts_to_string(type_args)):\(type_parts_to_string(method_type_args))",
+            .ExtensionMethod(owner, method_name, type_args, method_type_args) then
+            "ext:\(owner.display()):\(method_name):\(type_parts_to_string(type_args)):\(type_parts_to_string(method_type_args))",
             .TraitMethod(base_type, method_name, method_type_args) then
             "trait:\(stable_type_key(base_type)):\(method_name):\(type_parts_to_string(method_type_args))",
         };
@@ -105,9 +105,9 @@ given InstantiationKey as Eq {
             .Function(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
             _ then false,
         },
-        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then when other in {
-            .ExtensionMethod(other_template_name, other_method_name, other_type_args, other_method_type_args) then
-            template_name == other_template_name and method_name == other_method_name and type_args == other_type_args and method_type_args == other_method_type_args,
+        .ExtensionMethod(owner, method_name, type_args, method_type_args) then when other in {
+            .ExtensionMethod(other_owner, other_method_name, other_type_args, other_method_type_args) then
+            owner == other_owner and method_name == other_method_name and type_args == other_type_args and method_type_args == other_method_type_args,
             _ then false,
         },
         .TraitMethod(base_type, method_name, method_type_args) then when other in {
@@ -148,10 +148,10 @@ given InstantiationKey as Hash {
             };
             hash
         },
-        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then {
+        .ExtensionMethod(owner, method_name, type_args, method_type_args) then {
             let mutable hash = 14695981039346656037(UInt);
             hash = stable_hash_combine_value(hash, 3(UInt));
-            hash = stable_hash_combine_string(hash, template_name);
+            hash = stable_hash_combine_value(hash, owner.hash());
             hash = stable_hash_combine_string(hash, method_name);
             for arg in type_args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
@@ -191,9 +191,9 @@ given InstantiationRequest {
             .Function(template, args) then {
                 InstantiationKey.Function(template.def_id, args)
             },
-            .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+            .ExtensionMethod(owner, base_type, template, type_args, method_type_args) then {
                 InstantiationKey.ExtensionMethod(
-                    template_name,
+                    owner,
                     template.method.name,
                     type_args,
                     method_type_args,

@@ -88,6 +88,22 @@ public class ConstraintSolver {
     /// 求解所有约束
     /// - Returns: 类型替换
     /// - Throws: ConstraintSolverError 如果求解失败
+    /// A `TypeNode` spelling resolved ONCE to its declaration (rustc_resolve).
+    private func genericNominalType(named name: String, args: [Type]) -> Type {
+        let modulePath = context.defIdMap.currentModulePath
+        if let defId = context.defIdMap.lookupGenericStructTemplateDefIdStrict(modulePath: modulePath, name: name)
+            ?? context.defIdMap.lookupGenericStructTemplateDefId(name)
+        {
+            return .genericStruct(templateDefId: defId, args: args)
+        }
+        if let defId = context.defIdMap.lookupGenericEnumTemplateDefIdStrict(modulePath: modulePath, name: name)
+            ?? context.defIdMap.lookupGenericEnumTemplateDefId(name)
+        {
+            return .genericEnum(templateDefId: defId, args: args)
+        }
+        return .void
+    }
+
     public func solve() throws -> TypeSubstitution {
         errors.removeAll()
         
@@ -125,11 +141,10 @@ public class ConstraintSolver {
             }
             
         case .instantiate(let tv, let template, let args, let span):
-            // 创建泛型实例类型并与类型变量合一
-            let instanceType: Type
-            // 根据模板名称判断是结构体还是枚举类型
-            // 这里简化处理，实际需要查询类型注册表
-            instanceType = .genericStruct(template: template, templateDefId: .invalid, args: args)
+            // `template` is a SPELLING. RESOLVE it to its declaration once here
+            // (rustc_resolve); a type built out of the spelling alone would force
+            // every later lookup to guess a name to recover the identity.
+            let instanceType = genericNominalType(named: template, args: args)
             
             do {
                 try unifier.unify(.typeVariable(tv), instanceType, span: span)

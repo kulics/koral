@@ -98,7 +98,7 @@ given TypeSubstitution {
                 let substituted = self.apply_impl(inner);
                 if inner == substituted then t else Type.MutableWeakReferenceType(substituted)
             },
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 let mutable i = 0(UInt);
@@ -109,9 +109,9 @@ given TypeSubstitution {
                     new_args.push(substituted);
                     i += 1(UInt);
                 };
-                if changed then Type.GenericStruct(template, template_def_id, new_args) else t
+                if changed then Type.GenericStruct(template_def_id, new_args) else t
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 let mutable i = 0(UInt);
@@ -122,7 +122,7 @@ given TypeSubstitution {
                     new_args.push(substituted);
                     i += 1(UInt);
                 };
-                if changed then Type.GenericEnum(template, template_def_id, new_args) else t
+                if changed then Type.GenericEnum(template_def_id, new_args) else t
             },
             _ then t,
         };
@@ -282,7 +282,7 @@ given ConstraintSolver {
                 // 使用注册的 enum 类型名称集合判断是 struct 还是 enum。
                 let is_enum = self.enum_type_names.contains(template);
                 let template_def_id = self.template_def_ids.get(template) or else def_id_invalid();
-                let mutable instance_type = if is_enum then Type.GenericEnum(template, template_def_id, self.types_to_refs(args)) else Type.GenericStruct(template, template_def_id, self.types_to_refs(args));
+                let mutable instance_type = if is_enum then Type.GenericEnum(template_def_id, self.types_to_refs(args)) else Type.GenericStruct(template_def_id, self.types_to_refs(args));
                 let result = self.unifier.unify(Type.TypeVar(tv), instance_type, span);
                 when result in {
                     .Error(e) then {
@@ -370,13 +370,13 @@ given ConstraintSolver {
             .PointerType(inner) then self.type_contains_tv(inner),
             .WeakReferenceType(inner) then self.type_contains_tv(inner),
             .MutableWeakReferenceType(inner) then self.type_contains_tv(inner),
-            .GenericStruct(_, _, args) then {
+            .GenericStruct(_, args) then {
                 for a in args then {
                     if self.type_contains_tv(a) then { return true;};
                 };
                 false
             },
-            .GenericEnum(_, _, args) then {
+            .GenericEnum(_, args) then {
                 for a in args then {
                     if self.type_contains_tv(a) then { return true;};
                 };

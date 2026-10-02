@@ -53,11 +53,11 @@ public struct TypeSubstitution {
             let newRet = apply(ret, context: context)
             return .function(parameters: newParams, returns: newRet)
             
-        case .genericStruct(let template, let defId, let args):
-            return .genericStruct(template: template, templateDefId: defId, args: args.map { apply($0, context: context) })
+        case .genericStruct(let defId, let args):
+            return .genericStruct(templateDefId: defId, args: args.map { apply($0, context: context) })
             
-        case .genericEnum(let template, let defId, let args):
-            return .genericEnum(template: template, templateDefId: defId, args: args.map { apply($0, context: context) })
+        case .genericEnum(let defId, let args):
+            return .genericEnum(templateDefId: defId, args: args.map { apply($0, context: context) })
             
         case .reference(let inner):
             return .reference(inner: apply(inner, context: context))
@@ -76,9 +76,9 @@ public struct TypeSubstitution {
         case .mutableWeakReference(let inner):
             return .mutableWeakReference(inner: apply(inner, context: context))
             
-        case .traitObject(let traitName, let defId, let typeArgs):
+        case .traitObject(let defId, let typeArgs):
             if typeArgs.isEmpty { return type }
-            return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { apply($0, context: context) })
+            return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { apply($0, context: context) })
             
         case .structure(let defId):
             guard let members = context.getStructMembers(defId) else {

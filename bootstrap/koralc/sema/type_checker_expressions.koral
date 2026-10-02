@@ -57,7 +57,7 @@ given TypeChecker {
                     );
                 };
             },
-            .GenericStruct(_, _, _) then {},
+            .GenericStruct(_, _) then {},
             _ then {
                 self.storage.diagnostics.push(
                     make_diagnostic(
@@ -216,7 +216,7 @@ given TypeChecker {
     /// every later comparison uses.
     module_private is_std_drop_trait(self, trait_name String) Bool = {
         if trait_name <> "Drop" then { return false;};
-        return when self.storage.trait_registry.get(trait_name) in {
+        return when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false;};
                 let root = info.module_path[0(UInt)];
@@ -340,7 +340,7 @@ given TypeChecker {
                             // Shape bounds name no trait, so there is no trait
                             // declaration to check visibility for.
                             let trait_name = bound_trait_name(constraint) or else { continue;};
-                            when self.storage.trait_registry.get(trait_name) in {
+                            when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
                                 .Some(info) then {
                                     if self.make_visibility_checker() is .Some(checker) then {
                                         when checker.check_symbol(info.module_path, trait_name, false) in {
@@ -386,7 +386,7 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -395,7 +395,7 @@ given TypeChecker {
                     },
                     .ReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -404,7 +404,7 @@ given TypeChecker {
                     },
                     .MutableBorrowedReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -413,7 +413,7 @@ given TypeChecker {
                     },
                     .BorrowedReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -422,7 +422,7 @@ given TypeChecker {
                     },
                     .WeakReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -431,7 +431,7 @@ given TypeChecker {
                     },
                     .MutableWeakReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -614,7 +614,7 @@ given TypeChecker {
                                 );
                             };
                         },
-                        .GenericStruct(_, _, _) then {},
+                        .GenericStruct(_, _) then {},
                         _ then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
@@ -696,8 +696,14 @@ given TypeChecker {
                 },
                 .None() then Type.Unknown(),
             },
-            .GenericStruct(template, _, args) then {
-                let mutable raw_field_type = when self.storage.generic_templates.lookup_struct(template) in {
+            .GenericStruct(tplDefId, args) then {
+                // Identity is the carried `tplDefId`. The template registry is
+                // keyed by declaration, so look the declaration up directly --
+                // a DefId -> spelling -> name-keyed round trip collapses two
+                // same-named templates from different modules into one entry
+                // (rustc: `Ty::Adt` carries its `DefId`; the name never leaves
+                // rustc_resolve).
+                let mutable raw_field_type = when self.storage.generic_templates.struct_by_def_id(tplDefId) in {
                     .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                         .Some(fields) then {
                             let mutable found = Type.Unknown();
@@ -714,7 +720,7 @@ given TypeChecker {
                                             make_diagnostic(
                                                 DiagnosticStage.Semantic(),
                                                 self.storage.file_path,
-                                                "Cannot access \(access_label) field '\(member)' of type '\(template)'"
+                                                "Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(tplDefId))'"
  
                                             , expr_span(base))
                                         );
@@ -732,7 +738,7 @@ given TypeChecker {
                                         make_diagnostic(
                                             DiagnosticStage.Semantic(),
                                             self.storage.file_path,
-                                            "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(template, self.storage.generic_templates.lookup_struct_def_id(template), args)))'"
+                                            "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(tplDefId, args)))'"
  
                                         , expr_span(base))
                                     );
@@ -744,7 +750,7 @@ given TypeChecker {
                     },
                     .None() then Type.Unknown(),
                 };
-                when self.storage.generic_templates.lookup_struct(template) in {
+                when self.storage.generic_templates.struct_by_def_id(tplDefId) in {
                     .Some(struct_template) then {
                         let mutable bindings = Dict[String, Type].new();
                         let mutable i UInt = 0;
@@ -761,7 +767,7 @@ given TypeChecker {
                     .None() then raw_field_type,
                 }
             },
-            .GenericEnum(_, _, _) then Type.Unknown(),
+            .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
         };
         if inaccessible_method_member then {
@@ -996,30 +1002,20 @@ given TypeChecker {
             _ then base_type,
         };
 
-        let type_key = self.context().type_display_name(normalized);
-        let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_);
-        let template_hit = when normalized in {
-            .GenericStruct(template, _, _) then self.lookup_method_signature(template, method_name) is .Some(_),
-            .GenericEnum(template, _, _) then self.lookup_method_signature(template, method_name) is .Some(_),
-            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
-                .None() then false,
-            },
-            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
-                .None() then false,
-            },
-            _ then false,
-        };
-        let direct_method_exists = direct_type_hit or template_hit;
+        // One identity key answers this. It used to be two lookups -- the type's
+        // DISPLAY name plus a template-name ladder -- because the table was
+        // keyed by spelling and an instance had two spellings.
+        let direct_method_exists = self.lookup_method_signature(self.extension_template_key(normalized), method_name) is .Some(_);
 
         return when normalized in {
-            .TraitObject(trait_name, _, _) then Option[String].Some(trait_name),
+            .TraitObject(trait_object_def_id, _) then Option[String].Some(def_id_spelling(trait_object_def_id)),
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for constraint in constraints then {
                         let cn = constraint.trait_name;
-                        if self.lookup_method_signature(cn, method_name) is .Some(_) then {
+                        // `cn` is a spelling; resolve it to the trait's declaration
+                        // once, then compare by identity.
+                        if self.lookup_trait_method_signature(cn, method_name) is .Some(_) then {
                             return Option[String].Some(cn);
                         };
                         when self.storage.trait_registry.flatten_methods(cn) in {
@@ -1073,7 +1069,7 @@ given TypeChecker {
                         },
                         .Error(e) then self.report_trait_flatten_failure(trait_name, method_name, e),
                     };
-                    if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
+                    if self.lookup_trait_method_signature(trait_name, method_name) is .Some(_) then {
                         return Option[String].Some(trait_name);
                     };
                 };
@@ -1094,7 +1090,7 @@ given TypeChecker {
             _ then actual_type,
         };
         return when normalized in {
-            .TraitObject(_, _, _) then self.same_expr_type(normalized, expected_trait_type),
+            .TraitObject(_, _) then self.same_expr_type(normalized, expected_trait_type),
             .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
                 .Some(constraints) then {
                     let mutable matched = false;
@@ -1116,19 +1112,19 @@ given TypeChecker {
     module_private trait_object_concrete_type(self, source_type Type) Type = {
         return when source_type in {
             .ReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then inner,
             },
             .MutableReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then inner,
             },
             .BorrowedReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then inner,
             },
             .MutableBorrowedReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then inner,
             },
             _ then source_type,
@@ -1137,32 +1133,32 @@ given TypeChecker {
 
     module_private wrap_trait_object_conversion(self, expr TypedExpr, trait_type Type, result_type Type) TypedExpr = {
         let already_trait_object = when expr.expr_type in {
-            .TraitObject(_, _, _) then true,
-            .ReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .WeakReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableWeakReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableReferenceType(inner) then inner is .TraitObject(_, _),
+            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _),
+            .WeakReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableWeakReferenceType(inner) then inner is .TraitObject(_, _),
             _ then false,
         };
         if already_trait_object then { return expr;};
         let converted_result_type = result_type;
         let erased_trait_type = when trait_type in {
             .ReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then trait_type,
             },
             .MutableReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then trait_type,
             },
             .BorrowedReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then trait_type,
             },
             .MutableBorrowedReferenceType(inner) then when inner in {
-                .TraitObject(_, _, _) then inner,
+                .TraitObject(_, _) then inner,
                 _ then trait_type,
             },
             _ then trait_type,
@@ -1248,7 +1244,7 @@ given TypeChecker {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1265,7 +1261,7 @@ given TypeChecker {
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1301,7 +1297,7 @@ given TypeChecker {
                     let expected_inner = inner;
                     let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner);
                     when expected_inner in {
-                        .TraitObject(_, _, _) then {
+                        .TraitObject(_, _) then {
                             if self.can_convert_to_trait_object(expr.expr_type, expected_inner) then {
                                 let source_ref = when expr.expr_type in {
                                     .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then expr,
@@ -1351,7 +1347,7 @@ given TypeChecker {
                         .ReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1367,7 +1363,7 @@ given TypeChecker {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1387,7 +1383,7 @@ given TypeChecker {
                         .BorrowedReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1403,7 +1399,7 @@ given TypeChecker {
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1554,7 +1550,7 @@ given TypeChecker {
                         .ReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1574,7 +1570,7 @@ given TypeChecker {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1594,7 +1590,7 @@ given TypeChecker {
                         .BorrowedReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1614,7 +1610,7 @@ given TypeChecker {
                         .MutableBorrowedReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref;
                             when expected_inner in {
-                                .TraitObject(_, _, _) then {
+                                .TraitObject(_, _) then {
                                     if self.can_convert_to_trait_object(actual_inner, expected_inner) then {
                                         adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type);
                                         return adapted;
@@ -1718,10 +1714,10 @@ given TypeChecker {
                         _ then {},
                     };
                 },
-                .TraitObject(trait_name, trait_def_id, trait_args) then {
-                    let expected_trait_type = Type.TraitObject(trait_name, trait_def_id, trait_args);
+                .TraitObject(trait_def_id, trait_args) then {
+                    let expected_trait_type = Type.TraitObject(trait_def_id, trait_args);
                     when expr.expr_type in {
-                        .TraitObject(_, _, _) then {
+                        .TraitObject(_, _) then {
                             if self.same_expr_type(expr.expr_type, expected_trait_type) then {
                                 return expr;
                             };

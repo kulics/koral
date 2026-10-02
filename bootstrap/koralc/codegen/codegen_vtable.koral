@@ -129,11 +129,11 @@ given CodeGen {
         return layout_key(self.unwrap_vtable_receiver_value_type(concrete_type)) <> layout_key(self.unwrap_vtable_receiver_value_type(actual_self_type));
     };
 
-    module_private trait_member_type_bindings(self, trait_name String, concrete_type Type, trait_type_args List[Type]) Dict[String, Type] = {
+    module_private trait_member_type_bindings(self, trait_def_id DefId, concrete_type Type, trait_type_args List[Type]) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         bindings.insert("Self", concrete_type);
 
-        when self.trait_info(trait_name, self.type_module_path(concrete_type)) in {
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(info) then {
                 let mutable idx UInt = 0;
                 while idx < info.type_params.count() and idx < trait_type_args.count() then {
@@ -180,8 +180,8 @@ given CodeGen {
                                 .Trait() then self.trait_object_type_from_name(name),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
-                                .Structure() then Type.GenericStruct(name, def_id, List[Type].new()),
-                                .Enum() then Type.GenericEnum(name, def_id, List[Type].new()),
+                                .Structure() then Type.GenericStruct(def_id, List[Type].new()),
+                                .Enum() then Type.GenericEnum(def_id, List[Type].new()),
                                 _ then Type.Unknown(),
                             },
                             _ then Type.Unknown(),
@@ -225,18 +225,18 @@ given CodeGen {
                     .Some(def_id) then when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
-                                .Enum() then Type.GenericEnum(base, def_id, resolved_args),
-                                _ then Type.GenericStruct(base, def_id, resolved_args),
+                                .Enum() then Type.GenericEnum(def_id, resolved_args),
+                                _ then Type.GenericStruct(def_id, resolved_args),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
-                                .Enum() then Type.GenericEnum(base, def_id, resolved_args),
-                                _ then Type.GenericStruct(base, def_id, resolved_args),
+                                .Enum() then Type.GenericEnum(def_id, resolved_args),
+                                _ then Type.GenericStruct(def_id, resolved_args),
                             },
-                            _ then Type.GenericStruct(base, def_id, resolved_args),
+                            _ then Type.GenericStruct(def_id, resolved_args),
                         },
-                        .None() then Type.GenericStruct(base, def_id, resolved_args),
+                        .None() then Type.GenericStruct(def_id, resolved_args),
                     },
-                    .None() then Type.GenericStruct(base, self.context.lookup_def_id(List[String].new(), base, Option[String].None()) or else def_id_invalid(), resolved_args),
+                    .None() then Type.GenericStruct(self.context.lookup_def_id(List[String].new(), base, Option[String].None()) or else def_id_invalid(), resolved_args),
                 }
             },
             .InferredSelf() then {
@@ -253,42 +253,6 @@ given CodeGen {
                 make_function_type(resolved_params, self.resolve_type_node_for_vtable(return_type, bindings))
             },
         };
-    };
-
-    module_private resolve_trait_member_for_vtable(self, member TraitMember, trait_name String, concrete_type Type, trait_type_args List[Type]) MIRTraitVTableMethod = {
-        let bindings = self.trait_member_type_bindings(trait_name, concrete_type, trait_type_args);
-        let mutable bound_params = List[MIRTraitVTableParameter].new();
-        let mutable self_by_value = false;
-        let mutable param_index UInt = 0;
-        for param in member.params then {
-            let mutable bound_type = self.resolve_type_node_for_vtable(param.type_name, bindings);
-            let is_self = param.name == "self";
-            if param_index == 0 and is_self then {
-                self_by_value = when bound_type in {
-                    .ReferenceType(_) then false,
-                    .MutableReferenceType(_) then false,
-                    .BorrowedReferenceType(_) then false,
-                    .MutableBorrowedReferenceType(_) then false,
-                    .WeakReferenceType(_) then false,
-                    .MutableWeakReferenceType(_) then false,
-                    .PointerType(_) then false,
-                    .MutablePointerType(_) then false,
-                    _ then true,
-                };
-            };
-            bound_params.push(MIRTraitVTableParameter(param.name, Option[Type].Some(bound_type), is_self));
-            param_index += 1;
-        };
-        let mutable bound_return_type = self.resolve_type_node_for_vtable(member.return_type, bindings);
-        return MIRTraitVTableMethod(member.name, Option[Type].Some(bound_return_type), bound_params, self_by_value);
-    };
-
-    module_private resolve_trait_members_for_vtable(self, members List[TraitMember], trait_name String, concrete_type Type, trait_type_args List[Type]) List[MIRTraitVTableMethod] = {
-        let mutable bound_members = List[MIRTraitVTableMethod].new();
-        for member in members then {
-            bound_members.push(self.resolve_trait_member_for_vtable(member, trait_name, concrete_type, trait_type_args));
-        };
-        return bound_members;
     };
 
     normalize_vtable_receiver_type(self, t Type) Type = {
@@ -397,26 +361,26 @@ given CodeGen {
         };
         // Try with trait_type_args first if provided
         if not trait_type_args.is_empty() then {
-            when self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_name, trait_type_args, method_name) in {
+            when self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_def_id, trait_type_args, method_name) in {
                 .Some(def_id) then { return Option[DefId].Some(def_id);},
                 .None() then {},
             };
         };
 
         // Fallback to lookup without trait_type_args
-        when self.lookup_trait_method_def_id_from_given_globals(concrete_type, trait_name, method_name) in {
+        when self.lookup_trait_method_def_id_from_given_globals(concrete_type, trait_def_id, method_name) in {
             .Some(def_id) then { return Option[DefId].Some(def_id);},
             .None() then {},
         };
-        when self.lookup_trait_method_def_id(concrete_type, trait_name, method_name) in {
+        when self.lookup_trait_method_def_id(concrete_type, trait_def_id, method_name) in {
             .Some(def_id) then { return Option[DefId].Some(def_id);},
             .None() then {},
         };
 
-        when self.trait_info(trait_name, self.type_module_path(concrete_type)) in {
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 for parent_constraint in trait_info.parent_traits then {
-                    let parent_def_id = self.trait_def_id_by_name(parent_constraint.name, trait_info.module_path);
+                    let parent_def_id = parent_constraint.def_id;
                     when self.resolve_method_def_id(concrete_type, parent_constraint.name, parent_def_id, method_name, trait_type_args) in {
                         .Some(def_id) then {
                             return Option[DefId].Some(def_id);
@@ -445,7 +409,7 @@ given CodeGen {
     };
 
     module_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
-        return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
+        return when self.program.traits.get(qualified_symbol_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
         };
@@ -455,12 +419,7 @@ given CodeGen {
     /// the trait declared in `preferred_module_path`. Used only where the caller
     /// holds a name and nothing else (parent-trait walks); anything that already
     /// carries the identity must pass it through instead of re-resolving.
-    module_private trait_def_id_by_name(self, trait_name String, preferred_module_path List[String]) DefId = {
-        return when self.trait_info(trait_name, preferred_module_path) in {
-            .Some(info) then info.def_id,
-            .None() then def_id_invalid(),
-        };
-    };
+
 
     module_private require_bound_method_symbol(
         self,
@@ -511,7 +470,7 @@ given CodeGen {
         member MIRTraitVTableMethod,
     ) Option[Symbol] = {
         let mutable normalized_concrete_type = self.normalize_vtable_receiver_type(concrete_type);
-        let receiver_key = self.concrete_receiver_lookup_key(normalized_concrete_type);
+        let receiver_key = self.receiver_owner(normalized_concrete_type);
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let candidate_def_id = entry.first;
             let concrete = entry.second;
@@ -519,7 +478,7 @@ given CodeGen {
                 continue;
             };
             let owner_type = concrete.owner_type or else { continue;};
-            if self.concrete_receiver_lookup_key(owner_type) <> receiver_key then {
+            if self.receiver_owner(owner_type) <> receiver_key then {
                 continue;
             };
             let candidate_trait_name = concrete.trait_conformance or else { continue;};
@@ -663,8 +622,8 @@ given CodeGen {
 
         let is_void_return = self.type_is_void_or_never(self.vtable_method_return_type(member));
         let dynamic_trait_self_wrapper = when wrapper_self_type in {
-            .ReferenceType(inner_ref) then inner_ref is .TraitObject(_, _, _),
-            .MutableReferenceType(inner_ref) then inner_ref is .TraitObject(_, _, _),
+            .ReferenceType(inner_ref) then inner_ref is .TraitObject(_, _),
+            .MutableReferenceType(inner_ref) then inner_ref is .TraitObject(_, _),
             _ then false,
         };
 
@@ -767,39 +726,6 @@ given CodeGen {
 
     // ── 获取 trait 的有序方法列表 ─────────────────────────────────────────────
 
-    /// 获取 trait 的有序方法列表（父 trait 方法在前，自身方法在后）
-    ///
-    /// Requirements: 10.2
-    get_ordered_raw_trait_members(self, trait_name String) List[TraitMember] = {
-        let mutable result = List[TraitMember].new();
-        let mutable seen_names = Set[String].new();
-
-        when self.program.traits.get(trait_name) in {
-            .Some(trait_info) then {
-                // 先收集父 trait 的方法
-                for parent_name in trait_info.parent_traits then {
-                    let parent_members = self.get_ordered_raw_trait_members(parent_name.name);
-                    for m in parent_members then {
-                        if not seen_names.contains(m.name) then {
-                            seen_names.insert(m.name);
-                            result.push(m);
-                        };
-                    };
-                };
-                // 再收集自身方法
-                for m in trait_info.raw_members then {
-                    if not seen_names.contains(m.name) then {
-                        seen_names.insert(m.name);
-                        result.push(m);
-                    };
-                };
-            },
-            .None() then {},
-        };
-
-        return result;
-    };
-
     module_private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) List[Type] = {
         let _ = self;
         let _ = trait_name;
@@ -875,8 +801,8 @@ given CodeGen {
         let mutable resolved_members = List[MIRTraitVTableMethod].new();
         let mutable visited_traits = Set[String].new();
         let mutable seen_methods = Set[String].new();
-        let bindings = self.trait_member_type_bindings(trait_name, concrete_type, effective_trait_type_args);
-        self.collect_instantiated_trait_members_for_vtable(trait_name, concrete_type, bindings, visited_traits, seen_methods, resolved_members);
+        let bindings = self.trait_member_type_bindings(trait_def_id, concrete_type, effective_trait_type_args);
+        self.collect_instantiated_trait_members_for_vtable(trait_def_id, concrete_type, bindings, visited_traits, seen_methods, resolved_members);
         resolved_members = self.overlay_concrete_trait_member_signatures(resolved_members, trait_name, trait_def_id, concrete_type);
         let mutable receiver_members = List[MIRTraitVTableMethod].new();
         for member in resolved_members then {
@@ -928,22 +854,26 @@ given CodeGen {
 
     module_private collect_instantiated_trait_members_for_vtable(
         self,
-        trait_name String,
+        trait_def_id DefId,
         concrete_type Type,
         bindings Dict[String, Type],
         visited_traits Set[String],
         seen_methods Set[String],
         resolved_members List[MIRTraitVTableMethod],
     ) Void = {
-        let visit_key = self.trait_vtable_binding_visit_key(trait_name, bindings);
+        let visit_key = self.trait_vtable_binding_visit_key(trait_def_id, bindings);
         if visited_traits.contains(visit_key) then { return;};
         visited_traits.insert(visit_key);
 
-        when self.program.traits.get(trait_name) in {
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 for parent in trait_info.parent_traits then {
+                    // `ParentTraitConstraint` still carries only a spelling, so
+                    // the parent's name is resolved once here to an identity.
+                    let parent_def_id = parent.def_id;
+                    if parent_def_id == def_id_invalid() then { continue;};
                     let parent_bindings = self.parent_trait_bindings_for_vtable(parent, concrete_type, bindings);
-                    self.collect_instantiated_trait_members_for_vtable(parent.name, concrete_type, parent_bindings, visited_traits, seen_methods, resolved_members);
+                    self.collect_instantiated_trait_members_for_vtable(parent_def_id, concrete_type, parent_bindings, visited_traits, seen_methods, resolved_members);
                 };
                 for member in trait_info.raw_members then {
                     if not seen_methods.contains(member.name) then {
@@ -956,10 +886,13 @@ given CodeGen {
         };
     };
 
-    module_private trait_vtable_binding_visit_key(self, trait_name String, bindings Dict[String, Type]) String = {
+    module_private trait_vtable_binding_visit_key(self, trait_def_id DefId, bindings Dict[String, Type]) String = {
         let mutable key = StringBuilder.new();
-        key.push_string(trait_name);
-        when self.program.traits.get(trait_name) in {
+        // Keyed by DECLARATION: two same-named traits from different modules are
+        // different traits and must not share a visit slot.
+        key.push_string(def_id_spelling(trait_def_id));
+        key.push_string("#\(trait_def_id.id)");
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 for type_param in trait_info.type_params then {
                     key.push_string("<");
@@ -982,7 +915,8 @@ given CodeGen {
         };
         result.insert("Self", concrete_type);
 
-        when self.program.traits.get(parent.name) in {
+        // Identity: the parent constraint carries the declaration it names.
+        when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
                 let mutable idx UInt = 0;
                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
@@ -1034,7 +968,8 @@ given CodeGen {
     /// the declaration identity cannot be dropped on the way down.
     module_private trait_target_ref(self, t Type) Option[CanonicalTraitRef] = {
         return when t in {
-            .TraitObject(trait_name, trait_def_id, args) then Option[CanonicalTraitRef].Some(CanonicalTraitRef(trait_name, trait_def_id, args)),
+            // The name is display-only; `trait_def_id` is the identity.
+            .TraitObject(trait_def_id, args) then Option[CanonicalTraitRef].Some(CanonicalTraitRef(def_id_spelling(trait_def_id), trait_def_id, args)),
             .ReferenceType(inner) then self.trait_target_ref(inner),
             .MutableReferenceType(inner) then self.trait_target_ref(inner),
             .BorrowedReferenceType(inner) then self.trait_target_ref(inner),
@@ -1046,15 +981,15 @@ given CodeGen {
     module_private trait_conversion_source_concrete_type(self, t Type) Option[Type] = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
-            .MutableReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _, _) then Option[Type].None() else Option[Type].Some(inner),
+            .ReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(inner),
+            .MutableReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(inner),
+            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(inner),
+            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None() else Option[Type].Some(inner),
             .StructureType(_) then Option[Type].Some(t),
             .EnumType(_) then Option[Type].Some(t),
             .OpaqueType(_) then Option[Type].Some(t),
-            .GenericStruct(_, _, _) then Option[Type].Some(t),
-            .GenericEnum(_, _, _) then Option[Type].Some(t),
+            .GenericStruct(_, _) then Option[Type].Some(t),
+            .GenericEnum(_, _) then Option[Type].Some(t),
             _ then Option[Type].None(),
         };
     };
@@ -1153,7 +1088,7 @@ given CodeGen {
     module_private enum_case_parameter_type(self, enum_type Type, case_name String, index UInt) Option[Type] = {
         let def_id = when enum_type in {
             .EnumType(id) then id,
-            .GenericEnum(template, _, _) then self.find_type_def_id_by_layout_or_template(enum_type, template) or else DefId(0(UInt)),
+            .GenericEnum(_, _) then self.find_type_def_id_by_layout_or_template(enum_type) or else DefId(0(UInt)),
             _ then DefId(0(UInt)),
         };
         when self.context.get_enum_cases(def_id) in {
@@ -1172,7 +1107,7 @@ given CodeGen {
     module_private struct_field_type(self, struct_type Type, index UInt) Option[Type] = {
         let def_id = when struct_type in {
             .StructureType(id) then id,
-            .GenericStruct(template, _, _) then self.find_type_def_id_by_layout_or_template(struct_type, template) or else DefId(0(UInt)),
+            .GenericStruct(_, _) then self.find_type_def_id_by_layout_or_template(struct_type) or else DefId(0(UInt)),
             _ then DefId(0(UInt)),
         };
         when self.context.get_struct_fields(def_id) in {
@@ -1587,11 +1522,11 @@ given CodeGen {
     public generate_trait_object_conversion_from_ref_value(self, ref_value String, trait_name String, trait_type_args List[Type], concrete_type Type, retain_source Bool) String = {
         let normalized_concrete_type = concrete_type;
         let trait_object_like_source = when normalized_concrete_type in {
-            .TraitObject(_, _, _) then true,
-            .ReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
-            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableReferenceType(inner) then inner is .TraitObject(_, _),
+            .BorrowedReferenceType(inner) then inner is .TraitObject(_, _),
+            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _),
             _ then false,
         };
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {

@@ -9,6 +9,10 @@ module_private type mutable ScopeStorage(
     mutable type_entries Dict[String, Type],
     mutable generic_params Set[String],
     parent Option[Scope],
+    // Ambient for NAME RESOLUTION (never identity): what this module imports and
+    // from which file. See `GenericTemplateRegistry.candidate_keys`.
+    mutable import_graph Option[ImportGraph],
+    mutable source_file Option[String],
 );
 
 public type mutable Scope(module_private mutable storage ScopeStorage);
@@ -21,7 +25,9 @@ given Scope {
             List[Symbol].new(),
             Dict[String, Type].new(),
             Set[String].new(),
-            Option[Scope].None()
+            Option[Scope].None(),
+            Option[ImportGraph].None(),
+            Option[String].None()
         );
         return Scope(s);
     };
@@ -33,25 +39,15 @@ given Scope {
             List[Symbol].new(),
             Dict[String, Type].new(),
             Set[String].new(),
-            Option[Scope].Some(parent)
+            Option[Scope].Some(parent),
+            Option[ImportGraph].None(),
+            Option[String].None()
         );
         return Scope(s);
     };
 
     // Create a child scope with generic parameters and optional Self binding.
     // Mirrors Swift's pattern: withNewScope { defineGenericParameter(...); defineType("Self", ...) }
-    public new_generic_child(parent Scope, generic_param_names List[String], self_type Option[Type]) Scope = {
-        let child = Scope.new_child(parent);
-        for name in generic_param_names then {
-            child.define_generic_param(name);
-        };
-        when self_type in {
-            .Some(t) then child.define_type("Self", t),
-            .None() then {},
-        };
-        return child;
-    };
-
     // storage ref 模式：self 值传递，mutations 通过 storage ref 自动传播
     public define(self, context CompilerContext, symbol Symbol) Void = {
         let name = context.symbol_name(symbol);
@@ -60,6 +56,102 @@ given Scope {
 
     public define_type(self, name String, t Type) Void = {
         self.storage.type_entries.insert(name, t);
+    };
+
+    /// Register a MODULE-SCOPED type under both its bare name and a
+    /// module-qualified one. Use plain `define_type` for LOCAL bindings.
+    public define_scoped_type(self, module_path List[String], name String, t Type) Void = {
+        self.define_type(name, t);
+        self.define_type(qualified_symbol_key(module_path, name), t);
+    };
+
+    /// The type `name` denotes in `module_path` through its IMPORTS.
+    ///
+    /// 2. a symbol import (`using m { x }`; `using m { x as y }` spells `y` and
+    ///    declares `x`), 3. a batch/module import (`using m { .. }`) which
+    ///    creates no symbol edge and keeps the same spelling.
+    file_private imported_type_entry(self, current Scope, name String, module_path List[String]) Option[Type] = {
+        let graph = when current.storage.import_graph in {
+            .Some(g) then g,
+            .None() then { return Option[Type].None(); },
+        };
+        let mutable targets = List[Pair[List[String], String]].new();
+        when graph.symbol_import_candidates(name) in {
+            .Some(candidates) then {
+                for edge in candidates then {
+                    if edge.symbol == name
+                        and string_list_eq(edge.module, module_path)
+                        and source_file_matches(edge.source_file, current.storage.source_file) then {
+                        targets.push(Pair[List[String], String](edge.target, edge.original_symbol));
+                    };
+                };
+            },
+            .None() then {},
+        };
+        for edge in graph.edges then {
+            if string_list_eq(edge.source, module_path)
+                and source_file_matches(edge.source_file, current.storage.source_file) then {
+                targets.push(Pair[List[String], String](edge.target, name));
+            };
+        };
+        for pair in targets then {
+            let qualified = qualified_symbol_key(pair.first, pair.second);
+            when current.storage.type_entries.get(qualified) in {
+                .Some(t) then { return Option[Type].Some(t); },
+                .None() then {},
+            };
+        };
+        return Option[Type].None();
+    };
+
+    /// Install the ambient import context used by `lookup_type_in_module`.
+    public set_import_context(self, import_graph Option[ImportGraph], source_file Option[String]) Void = {
+        self.storage.import_graph = import_graph;
+        self.storage.source_file = source_file;
+    };
+
+    /// The type registered for `name`, preferring the one declared in
+    /// `module_path`. Walks the chain so an inner binding still shadows.
+    public lookup_type_in_module(self, name String, module_path List[String]) Option[Type] = {
+        let qualified = qualified_symbol_key(module_path, name);
+        let mutable current_opt = Option[Scope].Some(self);
+        let mutable traversed UInt = 0;
+        while current_opt is .Some(_) then {
+            let current = when current_opt in {
+                .Some(scope) then scope,
+                .None() then self,
+            };
+            if current.storage.generic_params.contains(name) then {
+                when current.storage.type_entries.get(name) in {
+                    .Some(t) then { return Option[Type].Some(t); },
+                    .None() then {},
+                };
+            };
+            when current.storage.type_entries.get(qualified) in {
+                .Some(t) then { return Option[Type].Some(t); },
+                .None() then {},
+            };
+            // What this module IMPORTS under this spelling wins over the
+            // unqualified entry below: that one is last-wins across modules and
+            // so cannot answer "which `Box`?". See
+            // `GenericTemplateRegistry.candidate_keys` for the full order.
+            when self.imported_type_entry(current, name, module_path) in {
+                .Some(t) then { return Option[Type].Some(t); },
+                .None() then {},
+            };
+            when current.storage.type_entries.get(name) in {
+                .Some(t) then {
+                    return Option[Type].Some(t);
+                },
+                .None() then {},
+            };
+            traversed += 1;
+            if traversed > 4096(UInt) then {
+                return Option[Type].None();
+            };
+            current_opt = current.storage.parent;
+        };
+        return Option[Type].None();
     };
 
     public lookup(self, name String) Option[Symbol] = {

@@ -267,6 +267,9 @@ public class UnifiedScope {
     if let defId = bindingInCurrentModule(name) {
       return defId
     }
+    if let defId = bindingViaImport(name, sourceFile: sourceFile) {
+      return defId
+    }
     if let defId = names[name] {
       return defId
     }
@@ -285,6 +288,71 @@ public class UnifiedScope {
       return nil
     }
     return names[map.symbolKey(modulePath: map.currentModulePath, name: name)]
+  }
+
+  /// `bindingViaImport` for TYPE names: the unqualified `typeNames[name]` is
+  /// last-wins across modules, so a spelling this module imports must be
+  /// resolved through the import before it is consulted.
+  private func typeViaImport(_ name: String, sourceFile: String?) -> DefId? {
+    guard let map = defIdMap, let graph = map.currentImportGraph, !map.currentModulePath.isEmpty else {
+      return nil
+    }
+    if let (target, original) = graph.resolveAliasedSymbol(
+      alias: name,
+      inModule: map.currentModulePath,
+      inSourceFile: sourceFile
+    ), let defId = typeNames[map.symbolKey(modulePath: target, name: original)] {
+      return defId
+    }
+    for edge in graph.edges
+    where edge.source == map.currentModulePath
+      && (edge.sourceFile == nil || edge.sourceFile == sourceFile) {
+      if let defId = typeNames[map.symbolKey(modulePath: edge.target, name: name)] {
+        return defId
+      }
+    }
+    return nil
+  }
+
+  /// The binding `name` denotes in the module currently being checked, through
+  /// ITS IMPORTS.
+  ///
+  /// Consulted after `bindingInCurrentModule` and before the unqualified
+  /// `names[name]`, and that order is the point. The unqualified entry is
+  /// last-wins across modules, so it cannot answer "which `Box`?" -- it answers
+  /// "whichever module registered it last". A spelling that this module imports
+  /// means what the import says.
+  ///
+  /// (rustc_resolve builds one resolution per module from that module's
+  /// imports; there is no global name table to fall back on.)
+  private func bindingViaImport(_ name: String, sourceFile: String?) -> DefId? {
+    guard let map = defIdMap, let graph = map.currentImportGraph, !map.currentModulePath.isEmpty else {
+      return nil
+    }
+    for e in graph.symbolImports {
+    }
+    // An import edge is scoped to the file the `using` appears in, so the file
+    // is part of the match -- same rule `ImportGraph.getImportKind` applies.
+    func visible(edgeSourceFile: String?) -> Bool {
+      edgeSourceFile == nil || edgeSourceFile == sourceFile
+    }
+    // A symbol import binds the spelling used HERE to the name used THERE:
+    // `using m { x }` both are `x`; `using m { x as y }` spells `y`, declares `x`.
+    if let (target, original) = graph.resolveAliasedSymbol(
+      alias: name,
+      inModule: map.currentModulePath,
+      inSourceFile: sourceFile
+    ), let defId = names[map.symbolKey(modulePath: target, name: original)] {
+      return defId
+    }
+    // A batch/module import (`using m { .. }`, `using m;`) creates no symbol
+    // edge, so the spelling is the same in the imported module.
+    for edge in graph.edges where edge.source == map.currentModulePath && visible(edgeSourceFile: edge.sourceFile) {
+      if let defId = names[map.symbolKey(modulePath: edge.target, name: name)] {
+        return defId
+      }
+    }
+    return nil
   }
 
   /// Records a module-scoped binding under both its bare and qualified keys.
@@ -359,7 +427,7 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = bindingInCurrentModule(name) ?? names[name],
+    if let defId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile) ?? names[name],
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
@@ -421,21 +489,11 @@ public class UnifiedScope {
     return parent?.isMutable(name, sourceFile: sourceFile) ?? false
   }
 
-  public func hasTypeDefinition(_ name: String) -> Bool {
-    return typeNames[name] != nil ||
-      defIdMap?.lookupGenericStructTemplateDefId(name) != nil ||
-      defIdMap?.lookupGenericEnumTemplateDefId(name) != nil
-  }
-
   public func hasFunctionDefinition(_ name: String) -> Bool {
     return names[name] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
   }
 
   public func defineType(_ name: String, type: Type, line: Int? = nil) throws {
-    if typeNames[name] != nil {
-      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
-      throw SemanticError.duplicateDefinition(name, span: span)
-    }
     guard let map = defIdMap else {
       return
     }
@@ -453,8 +511,49 @@ public class UnifiedScope {
         span: .unknown
       )
     }
+    // A top-level type is (module, name).
+    let modulePath = map.getModulePath(defId) ?? []
+    if typeNames[typeKey(name, modulePath: modulePath)] != nil {
+      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+      throw SemanticError.duplicateDefinition(name, span: span)
+    }
     map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
+    defineScopedType(name, defId, modulePath: modulePath)
+  }
+
+  private func typeKey(_ name: String, modulePath: [String]) -> String {
+    guard let map = defIdMap, !modulePath.isEmpty else {
+      return name
+    }
+    return map.symbolKey(modulePath: modulePath, name: name)
+  }
+
+  private func defineScopedType(_ name: String, _ defId: DefId, modulePath: [String]) {
     typeNames[name] = defId
+    if !modulePath.isEmpty {
+      typeNames[typeKey(name, modulePath: modulePath)] = defId
+    }
+  }
+
+  private func typeInCurrentModule(_ name: String) -> DefId? {
+    guard let map = defIdMap, !map.currentModulePath.isEmpty else {
+      return nil
+    }
+    return typeNames[map.symbolKey(modulePath: map.currentModulePath, name: name)]
+  }
+
+  /// Whether the module being checked already declares this type name.
+  /// Every caller is a duplicate-definition check.
+  public func hasTypeDefinition(_ name: String) -> Bool {
+    guard let map = defIdMap else {
+      return typeNames[name] != nil
+    }
+    let declaredLocally: Bool = map.currentModulePath.isEmpty
+      ? typeNames[name] != nil
+      : typeNames[map.symbolKey(modulePath: map.currentModulePath, name: name)] != nil
+    return declaredLocally ||
+      defIdMap?.lookupGenericStructTemplateDefId(name) != nil ||
+      defIdMap?.lookupGenericEnumTemplateDefId(name) != nil
   }
 
   public func overwriteType(_ name: String, type: Type) {
@@ -476,7 +575,7 @@ public class UnifiedScope {
       )
     }
     map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
-    typeNames[name] = defId
+    defineScopedType(name, defId, modulePath: map.getModulePath(defId) ?? [])
   }
 
   public func definePrivateType(_ name: String, sourceFile: String, type: Type) throws {
@@ -558,6 +657,17 @@ public class UnifiedScope {
       if let defId = privateTypeNames[key], let map = defIdMap {
         return map.getSymbolType(defId)
       }
+    }
+
+    if let defId = typeInCurrentModule(name), let map = defIdMap {
+      return map.getSymbolType(defId)
+    }
+
+    // Whatever this module IMPORTS under this spelling wins over the unqualified
+    // `typeNames[name]`, which is last-wins across modules and so cannot answer
+    // "which `Box`?". See `bindingViaImport` for the full rationale.
+    if let defId = typeViaImport(name, sourceFile: sourceFile), let map = defIdMap {
+      return map.getSymbolType(defId)
     }
 
     if let defId = typeNames[name], let map = defIdMap {
@@ -662,6 +772,17 @@ public class UnifiedScope {
     map.registerGenericFunctionTemplate(name: name, defId: template.defId, info: info)
   }
 
+  /// Resolve a generic template from a SOURCE SPELLING.
+  ///
+  /// This is the one place a name decides something: it is called from
+  /// `resolveTypeNode` on a `TypeNode`, i.e. while reading a path written by the
+  /// user. Afterwards the `Type` carries the template's `DefId` and nothing
+  /// re-reads the name.
+  ///
+  /// Equivalent to rustc's path resolution in `rustc_resolve`, which turns a
+  /// `Res::Def(DefKind::Struct, DefId)` and hands the `DefId` on; the name never
+  /// reaches type checking. Lookup prefers the module being checked and then
+  /// falls back to the bare name for cross-module references (`List` from Std).
   public func lookupGenericStructTemplate(_ name: String) -> GenericStructTemplate? {
     guard let map = defIdMap,
           let defId = map.lookupGenericStructTemplateDefId(name),
@@ -671,6 +792,28 @@ public class UnifiedScope {
     return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters, isMutable: info.isMutable)
   }
 
+  /// The generic struct template with this DECLARATION identity.
+  ///
+  /// Unlike `lookupGenericStructTemplate(_:)` no name is read: the caller has
+  /// already resolved one and is now asking about the declaration itself.
+  public func genericStructTemplate(defId: DefId) -> GenericStructTemplate? {
+    guard let map = defIdMap, let info = map.getGenericStructTemplateInfo(defId) else {
+      return parent?.genericStructTemplate(defId: defId)
+    }
+    return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters, isMutable: info.isMutable)
+  }
+
+  /// The generic enum template with this DECLARATION identity. See
+  /// `genericStructTemplate(defId:)`.
+  public func genericEnumTemplate(defId: DefId) -> GenericEnumTemplate? {
+    guard let map = defIdMap, let info = map.getGenericEnumTemplateInfo(defId) else {
+      return parent?.genericEnumTemplate(defId: defId)
+    }
+    return GenericEnumTemplate(defId: defId, typeParameters: info.typeParameters, cases: info.cases)
+  }
+
+  /// Resolve a generic enum template from a SOURCE SPELLING. See
+  /// `lookupGenericStructTemplate`.
   public func lookupGenericEnumTemplate(_ name: String) -> GenericEnumTemplate? {
     guard let map = defIdMap,
           let defId = map.lookupGenericEnumTemplateDefId(name),

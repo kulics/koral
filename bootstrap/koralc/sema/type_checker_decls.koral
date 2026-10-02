@@ -47,18 +47,13 @@ given TypeChecker {
         when target_type in {
             .StructureType(def_id) then self.context().set_explicit_drop(def_id),
             .EnumType(def_id) then self.context().set_explicit_drop(def_id),
-            .GenericStruct(template_name, _, _) then {
-                when self.storage.generic_templates.lookup_struct(template_name) in {
-                    .Some(template) then self.context().set_explicit_drop(template.def_id),
-                    .None() then {},
-                };
-            },
-            .GenericEnum(template_name, _, _) then {
-                when self.storage.generic_templates.lookup_enum(template_name) in {
-                    .Some(template) then self.context().set_explicit_drop(template.def_id),
-                    .None() then {},
-                };
-            },
+            // Identity is the carried template DefId. Going
+            // DefId -> spelling -> name-keyed lookup -> `template.def_id` is a
+            // round trip that can only lose: two same-named templates in
+            // different modules collapse to one entry. The DefId we need is
+            // already in hand (rustc: `Ty::Adt` carries its `DefId`).
+            .GenericStruct(tplDefId, _) then self.context().set_explicit_drop(tplDefId),
+            .GenericEnum(tplDefId, _) then self.context().set_explicit_drop(tplDefId),
             _ then {},
         };
     };
@@ -431,7 +426,7 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)", unknown_span()));
                     resolved_target = Type.Unknown();
                 };
-                self.storage.global_scope.define_type(name, resolved_target);
+                self.storage.global_scope.define_scoped_type(self.storage.module_path, name, resolved_target);
                 TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
@@ -518,7 +513,7 @@ given TypeChecker {
                         continue;
                     };
                     seen_parent_keys.push(parent_key);
-                    parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes));
+                    parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes, self.trait_def_id_of(pname) or else def_id_invalid()));
                 };
                 let typed_members = self.check_trait_members(members, type_params);
                 let trait_def_id = self.lookup_current_file_def_id(name) or else def_id_invalid();
@@ -600,7 +595,7 @@ given TypeChecker {
                             for parent in info.parent_traits then {
                                 if parent.type_arg_nodes.is_empty() then {
                                     // Simple parent trait (no generic args)
-                                    if not self.has_direct_explicit_trait_conformance(resolved_target, parent.name, List[Type].new()) then {
+                                    if not self.has_direct_explicit_trait_conformance(resolved_target, parent.def_id, parent.name, List[Type].new()) then {
                                         self.storage.diagnostics.push(make_diagnostic(
                                             DiagnosticStage.Semantic(),
                                             self.storage.file_path,
@@ -626,7 +621,7 @@ given TypeChecker {
                                     for arg_node in parent.type_arg_nodes then {
                                         resolved_parent_args.push(self.resolve_type_with_bindings(arg_node, parent_bindings));
                                     };
-                                    if not self.has_direct_explicit_trait_conformance(resolved_target, parent.name, resolved_parent_args) then {
+                                    if not self.has_direct_explicit_trait_conformance(resolved_target, parent.def_id, parent.name, resolved_parent_args) then {
                                         // Build display key for error message
                                         let mutable parent_display = StringBuilder.new();
                                         parent_display.push_string("[");
@@ -717,7 +712,7 @@ given TypeChecker {
                     // Resolve the trait's declaration identity once at the boundary (Swift does the
                     // same via `visibleTraitInfo(name)?.defId`); everything downstream matches on
                     // this DefId rather than re-deriving identity from the name string.
-                    let conformance_trait_def_id = when self.storage.trait_registry.get(trait_name) in {
+                    let conformance_trait_def_id = when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
                         .Some(trait_info) then Option[DefId].Some(trait_info.def_id),
                         .None() then Option[DefId].None(),
                     };
@@ -826,7 +821,7 @@ given TypeChecker {
         // members to the trait itself. That shape is validated on its own path,
         // so it is not subject to the nominal-target rule below.
         let is_trait_entity = self.storage.trait_registry.get_in_module(base_name, self.storage.module_path) is .Some(_)
-            or self.storage.trait_registry.get(base_name) is .Some(_);
+            or self.storage.trait_registry.get_in_module(base_name, self.storage.module_path) is .Some(_);
         let is_type_constructor = self.storage.generic_templates.lookup_struct_def_id(base_name).is_valid()
             or self.storage.generic_templates.lookup_enum_def_id(base_name).is_valid();
         let is_type_modifier = base_name == "Ref" or base_name == "Ptr" or base_name == "WeakRef";

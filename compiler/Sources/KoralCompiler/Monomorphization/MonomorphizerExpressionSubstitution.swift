@@ -783,8 +783,9 @@ extension Monomorphizer {
                 // Trigger instantiation of the concrete type if needed
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !context.containsGenericParameter(substitutedType) {
                     // Find the template and instantiate
-                    let baseName = context.getTemplateName(defId) ?? layoutName
-                    if let template = input.genericTemplates.structTemplates[baseName] {
+                    // By DECLARATION -- the instance links to its template.
+                    if let template = input.genericTemplates.structTemplate(
+                        forDefId: context.templateDeclaration(of: defId)) {
                         let typeArgsReconstructed: [Type] = context.getTypeArguments(defId)
                             ?? template.typeParameters.compactMap { param in
                                 substitution[param.name]
@@ -805,8 +806,9 @@ extension Monomorphizer {
                 newName = layoutName
                 // Similar logic for enums
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !context.containsGenericParameter(substitutedType) {
-                    let baseName = context.getTemplateName(defId) ?? layoutName
-                    if let template = input.genericTemplates.enumTemplates[baseName] {
+                    // By DECLARATION -- the instance links to its template.
+                    if let template = input.genericTemplates.enumTemplate(
+                        forDefId: context.templateDeclaration(of: defId)) {
                         let typeArgsReconstructed: [Type] = context.getTypeArguments(defId)
                             ?? template.typeParameters.compactMap { param in
                                 substitution[param.name]

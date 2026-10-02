@@ -215,17 +215,11 @@ public final class CompilerContext: @unchecked Sendable {
         if defIdMap.hasExplicitDrop(defId) {
             return true
         }
-        if let templateName = defIdMap.getTemplateName(defId) {
-            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(templateName),
-               defIdMap.hasExplicitDrop(templateDefId) {
-                return true
-            }
-            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(templateName),
-               defIdMap.hasExplicitDrop(templateDefId) {
-                return true
-            }
-        }
-        return false
+        // The instance's own link to its template. `getTemplateName` is
+        // display/mangling only; deriving the DECLARATION from it is how two
+        // same-named templates from different modules got conflated.
+        let templateDefId = templateDeclaration(of: defId)
+        return templateDefId != defId && defIdMap.hasExplicitDrop(templateDefId)
     }
 
     public enum NominalLayoutKind {
@@ -251,23 +245,23 @@ public final class CompilerContext: @unchecked Sendable {
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
             return requiresManagedNominalLayout(for: defId)
 
-        case .genericStruct(let template, let tplDefId, let args):
-            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
-               (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
+        case .genericStruct(let tplDefId, let args):
+            // The type carries the template's DECLARATION; the spelling is not read.
+            if tplDefId.isValid,
+               (isGenericStructTemplateMutable(tplDefId) || defIdMap.hasExplicitDrop(tplDefId)) {
                 return true
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
+            let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return requiresManagedNominalLayout(for: defId)
             }
             return false
 
-        case .genericEnum(let template, let tplDefId, let args):
-            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
-               defIdMap.hasExplicitDrop(templateDefId) {
+        case .genericEnum(let tplDefId, let args):
+            if tplDefId.isValid, defIdMap.hasExplicitDrop(tplDefId) {
                 return true
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
+            let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return requiresManagedNominalLayout(for: defId)
             }
@@ -339,22 +333,22 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
             return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
-        case .genericStruct(let template, let tplDefId, let args):
-            if let templateDefId = defIdMap.lookupGenericStructTemplateDefId(template),
-               (isGenericStructTemplateMutable(templateDefId) || defIdMap.hasExplicitDrop(templateDefId)) {
+        case .genericStruct(let tplDefId, let args):
+            // The type carries the template's DECLARATION; the spelling is not read.
+            if tplDefId.isValid,
+               (isGenericStructTemplateMutable(tplDefId) || defIdMap.hasExplicitDrop(tplDefId)) {
                 return []
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
+            let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
             }
             return []
-        case .genericEnum(let template, let tplDefId, let args):
-            if let templateDefId = defIdMap.lookupGenericEnumTemplateDefId(template),
-               defIdMap.hasExplicitDrop(templateDefId) {
+        case .genericEnum(let tplDefId, let args):
+            if tplDefId.isValid, defIdMap.hasExplicitDrop(tplDefId) {
                 return []
             }
-            let layoutName = SemaUtils.makeLayoutName(baseName: template, args: args, context: self, templateDefId: tplDefId)
+            let layoutName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
             }
@@ -370,6 +364,13 @@ public final class CompilerContext: @unchecked Sendable {
         return defIdMap.getTemplateName(defId)
     }
 
+    /// Identity of the generic template a monomorphized nominal came from.
+    /// Prefer this over `getTemplateName` whenever the question is "is this
+    /// the same declaration?" -- a name cannot answer that.
+    public func getTemplateDefId(_ defId: DefId) -> DefId? {
+        return defIdMap.getTemplateDefId(defId)
+    }
+
     // MARK: - Unified Updates
 
     public func setDefIdMap(_ map: DefIdMap) {
@@ -382,14 +383,15 @@ public final class CompilerContext: @unchecked Sendable {
         isGenericInstantiation: Bool,
         typeArguments: [Type]?,
         templateName: String? = nil,
+        templateDefId: DefId? = nil,
         isMutable: Bool = false
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
-        // The template's identity is resolved here, once, at the point the
-        // instance is registered. Later questions ("is this std's List?") compare
-        // the stored identity and never the spelling.
-        let resolvedTemplateDefId = defIdMap.getTemplateDefId(defId)
-            ?? resolvedTemplateName.flatMap { defIdMap.lookupGenericStructTemplateDefId($0) }
+        // The template's DECLARATION, carried in from the call site. There is no
+        // name fallback here: deriving it from `templateName` is how `mod_a`'s
+        // `Box` instance came to be linked to `mod_b`'s template. rustc stores
+        // the `AdtDef` on the instance; it never re-derives it from a path.
+        let resolvedTemplateDefId = templateDefId ?? defIdMap.getTemplateDefId(defId)
         let inheritedTemplateMutability: Bool
         if let resolvedTemplateDefId {
             inheritedTemplateMutability = isGenericStructTemplateMutable(resolvedTemplateDefId)
@@ -413,11 +415,12 @@ public final class CompilerContext: @unchecked Sendable {
         cases: [EnumCase],
         isGenericInstantiation: Bool,
         typeArguments: [Type]?,
-        templateName: String? = nil
+        templateName: String? = nil,
+        templateDefId: DefId? = nil
     ) {
         let resolvedTemplateName = templateName ?? defIdMap.getTemplateName(defId)
-        let resolvedTemplateDefId = defIdMap.getTemplateDefId(defId)
-            ?? resolvedTemplateName.flatMap { defIdMap.lookupGenericEnumTemplateDefId($0) }
+        // See `updateStructInfo`: the declaration is carried in, never re-derived.
+        let resolvedTemplateDefId = templateDefId ?? defIdMap.getTemplateDefId(defId)
         defIdMap.addEnumInfo(
             defId: defId,
             cases: cases,
@@ -442,8 +445,29 @@ public final class CompilerContext: @unchecked Sendable {
     /// spelling is a different type and never inherits the built-in behaviour.
     /// This is the same lang-item pattern as `stdDropTraitDefId` /
     /// `stdOptionEnumDefId`.
+    /// The template's DECLARATION for a nominal DefId: an instance points at its
+    /// template, a template at itself.
+    ///
+    /// Never derived from a spelling -- rustc's `Ty::Adt` holds `&AdtDef`, and an
+    /// instance's `AdtDef` is its ADT.
+    public func templateDeclaration(of defId: DefId) -> DefId {
+        if let template = defIdMap.getTemplateDefId(defId), template.isValid {
+            return template
+        }
+        return defId
+    }
+
+    // Std's `String` / `Rune` are LANG ITEMS: reached by an explicit
+    // (module, name) that is unique by construction, the way rustc resolves
+    // `str` through `rustc_hir::LangItem::Str` rather than through a path.
     public var stdStringDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "String") }
     public var stdRuneDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "Rune") }
+    /// std's `Drop` is a LANG ITEM the same way: reached by the unique
+    /// `(module, name)` pair, so a user trait also spelled `Drop` cannot alias
+    /// it. Every question of the form "is this the protocol the compiler
+    /// implements drop glue for?" compares against this declaration, never
+    /// against the spelling (rustc: `rustc_hir::LangItem::Drop`).
+    public var stdDropTraitDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "Drop") }
     public var stdPairTemplateDefId: DefId? {
         defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Pair")
     }
@@ -478,9 +502,9 @@ public final class CompilerContext: @unchecked Sendable {
             return isStdNominal(defId, stdDefId)
         case .`enum`(let defId):
             return isStdNominal(defId, stdDefId)
-        case .genericStruct(_, let templateDefId, _):
+        case .genericStruct(let templateDefId, _):
             return isStdNominal(templateDefId, stdDefId)
-        case .genericEnum(_, let templateDefId, _):
+        case .genericEnum(let templateDefId, _):
             return isStdNominal(templateDefId, stdDefId)
         default:
             return false
@@ -571,20 +595,20 @@ public final class CompilerContext: @unchecked Sendable {
             return defIdMap.getName(defId) ?? "<unknown>"
         case .genericParameter(let name):
             return name
-        case .genericStruct(let template, let tplDefId, let args):
+        case .genericStruct(let tplDefId, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
-            return "\(template)[\(argsStr)]"
-        case .genericEnum(let template, let tplDefId, let args):
+            return "\(Type.spelling(tplDefId))[\(argsStr)]"
+        case .genericEnum(let tplDefId, let args):
             let argsStr = args.map { getDebugName($0) }.joined(separator: ", ")
-            return "\(template)[\(argsStr)]"
+            return "\(Type.spelling(tplDefId))[\(argsStr)]"
         case .module(let info):
             return "module \(info.modulePath.joined(separator: "."))"
         case .typeVariable(let tv):
             return "?\(tv.id)"
-        case .traitObject(let traitName, _, let typeArgs):
-            if typeArgs.isEmpty { return traitName }
+        case .traitObject(let tplDefId, let typeArgs):
+            if typeArgs.isEmpty { return Type.spelling(tplDefId) }
             let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
-            return "[\(argsStr)]\(traitName)"
+            return "[\(argsStr)]\(Type.spelling(tplDefId))"
         }
     }
 
@@ -637,15 +661,15 @@ public final class CompilerContext: @unchecked Sendable {
             return freeTypeVariables(in: inner)
         case .genericParameter:
             return []
-        case .genericStruct(_, _, let args):
+        case .genericStruct(_, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
-        case .genericEnum(_, _, let args):
+        case .genericEnum(_, let args):
             return args.flatMap { freeTypeVariables(in: $0) }
         case .module:
             return []
         case .opaque:
             return []
-        case .traitObject(_, _, let typeArgs):
+        case .traitObject(_, let typeArgs):
             return typeArgs.flatMap { freeTypeVariables(in: $0) }
         }
     }
@@ -688,21 +712,21 @@ public final class CompilerContext: @unchecked Sendable {
             return layoutKey(for: defId)
         case .genericParameter(let name):
             return "Param_\(name)"
-        case .genericStruct(let template, let tplDefId, let args):
+        case .genericStruct(let tplDefId, let args):
             return SemaUtils.makeLayoutName(
-                baseName: template, args: args, context: self, templateDefId: tplDefId)
-        case .genericEnum(let template, let tplDefId, let args):
+                baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
+        case .genericEnum(let tplDefId, let args):
             return SemaUtils.makeLayoutName(
-                baseName: template, args: args, context: self, templateDefId: tplDefId)
+                baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
         case .module(let info):
             return "M_\(info.modulePath.joined(separator: "_"))"
         case .typeVariable(let tv):
             return "TV_\(tv.id)"
-        case .traitObject(let traitName, let traitDefId, let typeArgs):
+        case .traitObject(let traitDefId, let typeArgs):
             let suffix = traitDefId.isValid ? "_d\(traitDefId.id)" : ""
-            if typeArgs.isEmpty { return "TO_\(traitName)\(suffix)" }
+            if typeArgs.isEmpty { return "TO_\(Type.spelling(traitDefId))\(suffix)" }
             let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
-            return "TO_\(traitName)_\(argsKeys)\(suffix)"
+            return "TO_\(Type.spelling(traitDefId))_\(argsKeys)\(suffix)"
         }
     }
 
@@ -784,15 +808,15 @@ public final class CompilerContext: @unchecked Sendable {
             return containsGenericParameterInternal(inner, visited: &visited)
         case .genericParameter:
             return true
-        case .genericStruct(_, _, let args):
+        case .genericStruct(_, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
-        case .genericEnum(_, _, let args):
+        case .genericEnum(_, let args):
             return args.contains { containsGenericParameterInternal($0, visited: &visited) }
         case .module:
             return false
         case .typeVariable:
             return true
-        case .traitObject(_, _, let typeArgs):
+        case .traitObject(_, let typeArgs):
             return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
         }
     }

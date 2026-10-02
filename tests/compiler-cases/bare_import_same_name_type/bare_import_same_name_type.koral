@@ -1,0 +1,34 @@
+// EXPECT: 1
+// EXPECT: 2
+
+// Design guard: a spelling resolves through THIS module's IMPORTS, not through
+// a global name table.
+//
+// `mod_a` and `mod_b` each declare a generic `Box`. `mod_a`'s is imported here
+// by BARE name (no alias) and must be the one `Box` denotes below -- so `.value`
+// exists and `.extra` does not. The reverse import gives mod_b's `Box`, whose
+// `.extra` exists and `.more` makes `Box(v)` a one-argument call there.
+//
+// Before this, both compilers answered with whichever module registered the
+// name LAST: they reported "'Box' is defined in module '...ModB'. Import it
+// explicitly" for a `Box` that WAS imported, and bootstrap additionally
+// type-checked `Box(v)` against mod_b's two-field shape ("Missing positional
+// argument 'more'").
+//
+// A name that is declared somewhere but imported nowhere still has to produce
+// that "Import it explicitly" diagnostic -- see
+// generic_template_requires_import_error_test. Only the resolution order
+// changed.
+
+using std { .. };
+using bare_import_same_name_type::mod_a { Box, make_a };
+using bare_import_same_name_type::mod_b { make_b };
+
+let main() Int = {
+    let a Box[Int] = make_a(1);
+    println(a.value.to_string());
+
+    let b = make_b(2);
+    println(b.extra.to_string());
+    return 0;
+};

@@ -43,7 +43,7 @@ extension Monomorphizer {
             structureName: String,
             innerType: Type
         ) throws -> Symbol? {
-            guard let methods = input.genericTemplates.extensionMethods[structureName],
+            guard let methods = input.genericTemplates.extensionMethods[.builtin(structureName)],
                   let ext = selectExtensionTemplate(
                     methods,
                     name: name,
@@ -239,7 +239,7 @@ extension Monomorphizer {
         }()
 
         guard let typeName,
-              let entry = extensionMethods[typeName]?[dispatchInfo.methodName],
+              let entry = extensionMethods[context.receiverMethodKey(resolvedSelfType, dispatchInfo.methodName)],
               let trait = entry.trait,
               trait.traitDefId == traitDefId else {
             return nil
@@ -448,9 +448,9 @@ extension Monomorphizer {
             let name = context.getName(defId) ?? ""
             // Use stored templateName if available, otherwise fall back to full name
             structureName = context.getTemplateName(defId) ?? name
-        case .genericStruct(let templateName, _, _):
+        case .genericStruct(_, _):
             structureName = templateName
-        case .genericEnum(let templateName, _, _):
+        case .genericEnum(_, _):
             structureName = templateName
         case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
@@ -469,7 +469,7 @@ extension Monomorphizer {
         // the final version with checkedBody set.
           let resolvedTemplate: GenericExtensionMethodTemplate
         if template.checkedBody == nil,
-              let extensions = input.genericTemplates.extensionMethods[templateName],
+               let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: baseType)],
            let latest = extensions.first(where: {
                $0.method.name == template.method.name &&
                $0.typeParams.count == template.typeParams.count &&
@@ -520,19 +520,17 @@ extension Monomorphizer {
             receiverMethodDispatch[generatedSymbol.defId] = ReceiverMethodDispatchInfo(
                 methodDefId: generatedSymbol.defId,
                 methodName: methodBaseName,
-                owner: .concreteType(typeName: concreteLookupTypeName),
+                owner: .concreteType(ownerType: baseType),
                 conformanceTraitName: conformanceTraitName,
                 conformanceTraitDefId: conformanceTraitDefId
             )
         }
 
-        let lookupKey = "\(concreteLookupTypeName).\(methodBaseName)"
+        // One key. The old second "alias" key existed only because the key was a
+        // mangle string and a type could have two of those (`structureName` vs
+        // `concreteLookupTypeName`).
+        let lookupKey = context.receiverMethodKey(baseType, methodBaseName)
         extensionMethodDefIds[lookupKey] = generatedSymbol.defId
-
-        if structureName != concreteLookupTypeName {
-            let templateKey = "\(structureName).\(methodBaseName)"
-            extensionMethodDefIds[templateKey] = generatedSymbol.defId
-        }
     }
     
     /// Instantiates an extension method from a method entry.
@@ -546,12 +544,12 @@ extension Monomorphizer {
         let typeParams = methodInfo.typeParams
         let methodTypeParams = methodInfo.method.typeParameters
         let method = methodInfo.method
-        
+
         if typeParams.count != genericArgs.count {
             throw SemanticError.typeMismatch(
                 expected: "\(typeParams.count) args", got: "\(genericArgs.count)")
         }
-        
+
         if methodTypeParams.count != methodTypeArgs.count {
             throw SemanticError.typeMismatch(
                 expected: "\(methodTypeParams.count) method type args", got: "\(methodTypeArgs.count)")
@@ -565,7 +563,7 @@ extension Monomorphizer {
             switch baseType {
             case .structure(let defId), .`enum`(let defId):
                 return context.getTypeArguments(defId)?.count ?? 0
-            case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
+            case .genericStruct(_, let args), .genericEnum(_, let args):
                 return args.count
             case .pointer:
                 return 1
@@ -576,22 +574,35 @@ extension Monomorphizer {
         let requiresSelfDisambiguation = receiverGenericArgCount > genericArgs.count
         let mangledName: String
         let methodBaseName = method.name
+        // The owner's declaration identity joins the mangle, exactly as a type's
+        // own C name does (`Box_I_d184` -- see SemaUtils.makeLayoutName). Two
+        // modules may each declare `Box`, so `Box_I_stamp` alone names two
+        // different methods and one C definition answers for both.
+        let ownerSuffix: String
+        switch context.methodOwner(of: baseType) {
+        case .decl(let ownerDefId):
+            ownerSuffix = ownerDefId.isValid ? "_d\(ownerDefId.id)" : ""
+        case .builtin:
+            ownerSuffix = ""
+        }
         if genericArgs.isEmpty {
             if methodTypeArgs.isEmpty {
-                mangledName = "\(structureName)_\(methodBaseName)"
+                mangledName = "\(structureName)_\(methodBaseName)\(ownerSuffix)"
             } else {
-                mangledName = "\(structureName)_\(methodBaseName)_\(methodArgLayoutKeys)"
+                mangledName = "\(structureName)_\(methodBaseName)_\(methodArgLayoutKeys)\(ownerSuffix)"
             }
         } else if methodTypeArgs.isEmpty {
-            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)"
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)\(ownerSuffix)"
         } else {
-            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)_\(methodArgLayoutKeys)"
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)_\(methodArgLayoutKeys)\(ownerSuffix)"
         }
         let disambiguatedMangledName: String
         if requiresSelfDisambiguation {
             disambiguatedMangledName = "\(mangledName)_self_\(receiverLayoutKey)"
         } else {
             disambiguatedMangledName = mangledName
+        }
+        if methodBaseName == "stamp" {
         }
         let key = "ext:\(disambiguatedMangledName)"
         
@@ -745,19 +756,17 @@ extension Monomorphizer {
         methodTypeArgCount: Int? = nil,
         extensionTypeArgCount: Int? = nil
     ) -> GenericExtensionMethodTemplate? {
-        for candidateName in extensionLookupTypeNames(for: baseType) {
-            guard let extensions = input.genericTemplates.extensionMethods[candidateName],
-                  let selected = selectExtensionTemplate(
-                    extensions,
-                    name: methodName,
-                    methodTypeArgCount: methodTypeArgCount,
-                    extensionTypeArgCount: extensionTypeArgCount
-                  ) else {
-                continue
-            }
-            return selected
+        guard let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: baseType)],
+            let selected = selectExtensionTemplate(
+                extensions,
+                name: methodName,
+                methodTypeArgCount: methodTypeArgCount,
+                extensionTypeArgCount: extensionTypeArgCount
+            )
+        else {
+            return nil
         }
-        return nil
+        return selected
     }
     
     // MARK: - Intrinsic Extension Method Instantiation
@@ -915,12 +924,12 @@ extension Monomorphizer {
             }
             return nil
 
-        case .genericStruct(let template, _, let args):
+        case .genericStruct(let tplDefId, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
             }
-                if let extensions = input.genericTemplates.extensionMethods[template],
+                 if let extensions = input.genericTemplates.extensionMethods[ownerOfGenericTemplate(Type.spelling(tplDefId))],
                     let ext = selectExtensionTemplate(
                         extensions,
                         name: name,
@@ -937,7 +946,7 @@ extension Monomorphizer {
                 )
                 return try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
-                    structureName: template,
+                    structureName: Type.spelling(tplDefId),
                     genericArgs: resolvedArgs,
                     methodTypeArgs: resolvedMethodTypeArgs,
                     methodInfo: ext
@@ -962,12 +971,12 @@ extension Monomorphizer {
             }
             return nil
 
-        case .genericEnum(let template, _, let args):
+        case .genericEnum(let tplDefId, let args):
             let resolvedArgs = args.map { resolveParameterizedType($0) }
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
             }
-                if let extensions = input.genericTemplates.extensionMethods[template],
+                 if let extensions = input.genericTemplates.extensionMethods[ownerOfGenericTemplate(Type.spelling(tplDefId))],
                     let ext = selectExtensionTemplate(
                         extensions,
                         name: name,
@@ -984,7 +993,7 @@ extension Monomorphizer {
                 )
                 return try instantiateExtensionMethodFromEntry(
                     baseType: resolvedBase,
-                    structureName: template,
+                    structureName: Type.spelling(tplDefId),
                     genericArgs: resolvedArgs,
                     methodTypeArgs: resolvedMethodTypeArgs,
                     methodInfo: ext
@@ -1013,8 +1022,9 @@ extension Monomorphizer {
             let typeName = context.getName(defId) ?? ""
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let methods = extensionMethods[typeName],
-               let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+             if let entry = methodLookupCandidates(name).compactMap({
+               extensionMethods[context.receiverMethodKey(selfType, $0)]
+             }).first {
                      if let ext = selectExtensionTemplateForBase(
                           baseType: selfType,
                           methodName: name,
@@ -1145,8 +1155,9 @@ extension Monomorphizer {
             let typeName = context.getName(defId) ?? ""
             let isGen = context.isGenericInstantiation(defId) ?? false
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let methods = extensionMethods[typeName],
-               let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+             if let entry = methodLookupCandidates(name).compactMap({
+               extensionMethods[context.receiverMethodKey(selfType, $0)]
+             }).first {
                      if let ext = selectExtensionTemplateForBase(
                           baseType: selfType,
                           methodName: name,
@@ -1275,7 +1286,7 @@ extension Monomorphizer {
             
         case .pointer(let element):
             // Check intrinsic extension methods first
-                if let extensions = input.genericTemplates.intrinsicExtensionMethods["Ptr"],
+                 if let extensions = input.genericTemplates.intrinsicExtensionMethods[.builtin("Ptr")],
                     let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateIntrinsicExtensionMethod(
@@ -1287,7 +1298,7 @@ extension Monomorphizer {
             }
             
             // Then check regular extension methods
-                if let extensions = input.genericTemplates.extensionMethods["Ptr"],
+                 if let extensions = input.genericTemplates.extensionMethods[.builtin("Ptr")],
                     let ext = selectExtensionTemplate(
                         extensions,
                         name: name,
@@ -1312,7 +1323,7 @@ extension Monomorphizer {
             return nil
 
         case .mutablePointer(let element):
-            if let extensions = input.genericTemplates.intrinsicExtensionMethods["MutPtr"],
+             if let extensions = input.genericTemplates.intrinsicExtensionMethods[.builtin("MutPtr")],
                let ext = extensions.first(where: { $0.method.name == name }) {
                 return try instantiateIntrinsicExtensionMethod(
                     baseType: selfType,
@@ -1321,7 +1332,7 @@ extension Monomorphizer {
                     methodInfo: ext
                 )
             }
-            if let extensions = input.genericTemplates.extensionMethods["MutPtr"],
+             if let extensions = input.genericTemplates.extensionMethods[.builtin("MutPtr")],
                let ext = selectExtensionTemplate(
                     extensions,
                     name: name,
@@ -1342,7 +1353,7 @@ extension Monomorphizer {
                     methodInfo: ext
                 )
             }
-            if let extensions = input.genericTemplates.extensionMethods["Ptr"],
+             if let extensions = input.genericTemplates.extensionMethods[.builtin("Ptr")],
                let ext = selectExtensionTemplate(
                     extensions,
                     name: name,
@@ -1370,10 +1381,11 @@ extension Monomorphizer {
              .float32, .float64,
              .bool:
             let typeName = selfType.description
-                if let methods = extensionMethods[typeName],
-                    let entry = methodLookupCandidates(name).compactMap({ methods[$0] }).first {
+                 if let entry = methodLookupCandidates(name).compactMap({
+                    extensionMethods[context.receiverMethodKey(selfType, $0)]
+                 }).first {
                      if !methodTypeArgs.isEmpty,
-                         let extensions = input.genericTemplates.extensionMethods[typeName],
+                          let extensions = input.genericTemplates.extensionMethods[context.methodOwner(of: selfType)],
                          let ext = selectExtensionTemplate(
                           extensions,
                           name: name,
@@ -1398,7 +1410,7 @@ extension Monomorphizer {
                 return finalizeDirectMethodCandidate(entry.symbol, expectedMethodType: expectedMethodType)
             }
             // Check intrinsic extension methods for primitive types
-                if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],
+                 if let extensions = input.genericTemplates.intrinsicExtensionMethods[context.methodOwner(of: selfType)],
                     let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateIntrinsicExtensionMethod(
@@ -1417,10 +1429,10 @@ extension Monomorphizer {
 
     private func normalizeTypeArgument(_ type: Type) -> Type {
         switch type {
-        case .genericStruct(let template, _, let args):
-            return .genericStruct(template: template, templateDefId: .invalid, args: args.map { normalizeTypeArgument($0) })
-        case .genericEnum(let template, _, let args):
-            return .genericEnum(template: template, templateDefId: .invalid, args: args.map { normalizeTypeArgument($0) })
+        case .genericStruct(let tplDefId, let args):
+            return .genericStruct(templateDefId: tplDefId, args: args.map { normalizeTypeArgument($0) })
+        case .genericEnum(let tplDefId, let args):
+            return .genericEnum(templateDefId: tplDefId, args: args.map { normalizeTypeArgument($0) })
         case .reference(let inner):
             return .reference(inner: normalizeTypeArgument(inner))
         case .mutableReference(let inner):
@@ -1450,44 +1462,54 @@ extension Monomorphizer {
         }
     }
 
-    private func extensionLookupTypeNames(for baseType: Type) -> [String] {
+    /// Types whose methods answer for `baseType`.
+    ///
+    /// A mutable modifier also yields the immutable one (a `ref T` method is
+    /// callable on a `mut ref T`). Otherwise there is exactly one type -- this
+    /// used to return the receiver's SPELLINGS, so a nominal contributed both
+    /// `concreteName` and `templateName` and a modifier its own name plus the
+    /// immutable one.
+    private func extensionLookupTypes(for baseType: Type) -> [Type] {
         let resolvedBaseType = resolveParameterizedType(baseType)
         switch resolvedBaseType {
-        case .reference:
-            return ["Ref"]
-        case .mutableReference:
-            return ["MutRef", "Ref"]
-        case .borrowedReference:
-            return ["Ref"]
-        case .mutableBorrowedReference:
-            return ["MutRef", "Ref"]
-        case .weakReference:
-            return ["WeakRef"]
-        case .mutableWeakReference:
-            return ["MutWeakRef", "WeakRef"]
-        case .structure(let defId):
-            let concreteName = context.getName(defId) ?? ""
-            if let templateName = context.getTemplateName(defId), templateName != concreteName {
-                return [concreteName, templateName]
-            }
-            return [concreteName]
-        case .genericStruct(let templateName, _, _):
-            return [templateName]
-        case .genericEnum(let templateName, _, _):
-            return [templateName]
-        case .`enum`(let defId):
-            let concreteName = context.getName(defId) ?? ""
-            if let templateName = context.getTemplateName(defId), templateName != concreteName {
-                return [concreteName, templateName]
-            }
-            return [concreteName]
-        case .pointer:
-            return ["Ptr"]
-        case .mutablePointer:
-            return ["MutPtr", "Ptr"]
+        case .reference(let inner):
+            return [.reference(inner: inner)]
+        case .mutableReference(let inner):
+            return [.mutableReference(inner: inner), .reference(inner: inner)]
+        case .borrowedReference(let inner):
+            return [.reference(inner: inner)]
+        case .mutableBorrowedReference(let inner):
+            return [.mutableReference(inner: inner), .reference(inner: inner)]
+        case .weakReference(let inner):
+            return [.weakReference(inner: inner)]
+        case .mutableWeakReference(let inner):
+            return [.mutableWeakReference(inner: inner), .weakReference(inner: inner)]
+        case .pointer(let inner):
+            return [.pointer(element: inner)]
+        case .mutablePointer(let inner):
+            return [.mutablePointer(element: inner), .pointer(element: inner)]
         default:
-            return [resolvedBaseType.description]
+            return [resolvedBaseType]
         }
+    }
+
+    /// Owner identity of a generic `given` target known by its spelling.
+    /// RESOLUTION happens here, once; the identity then comes from the template's
+    /// declaration.
+    /// Owner identity of a generic `given` target known only by its SPELLING.
+    ///
+    /// RESOLUTION, not identity: this runs where the only thing in hand is the
+    /// name written in `given [T] List`. The identity is the template's
+    /// declaration, resolved once here (rustc_resolve). A call site that already
+    /// has a `Type` must use `context.methodOwner(of:)` and never this.
+    private func ownerOfGenericTemplate(_ name: String) -> MethodOwner {
+        if let t = input.genericTemplates.structTemplates[name] {
+            return .decl(t.defId)
+        }
+        if let t = input.genericTemplates.enumTemplates[name] {
+            return .decl(t.defId)
+        }
+        return .builtin(name)
     }
 
     private func extensionStructureName(for baseType: Type) -> String {
@@ -1508,10 +1530,10 @@ extension Monomorphizer {
         case .structure(let defId):
             let name = context.getName(defId) ?? ""
             return context.getTemplateName(defId) ?? name
-        case .genericStruct(let templateName, _, _):
-            return templateName
-        case .genericEnum(let templateName, _, _):
-            return templateName
+        case .genericStruct(let tplDefId, _):
+            return Type.spelling(tplDefId)
+        case .genericEnum(let tplDefId, _):
+            return Type.spelling(tplDefId)
         case .`enum`(let defId):
             let name = context.getName(defId) ?? ""
             return context.getTemplateName(defId) ?? name
@@ -1565,14 +1587,15 @@ extension Monomorphizer {
                 }
             }
             return typeMatchesExpectedPattern(actual: actualReturn, expected: expectedReturn)
-        case .genericStruct(let expectedTemplate, _, let expectedArgs):
+        // Identity: the template's DECLARATION, never its spelling.
+        case .genericStruct(let expectedDefId, let expectedArgs):
             let actualArgs: [Type]
             switch actual {
-            case .genericStruct(let actualTemplate, _, let args):
-                guard actualTemplate == expectedTemplate else { return false }
+            case .genericStruct(let actualDefId, let args):
+                guard actualDefId == expectedDefId else { return false }
                 actualArgs = args
             case .structure(let defId):
-                guard context.getTemplateName(defId) == expectedTemplate,
+                guard context.templateDeclaration(of: defId) == expectedDefId,
                       let args = context.getTypeArguments(defId) else {
                     return false
                 }
@@ -1587,14 +1610,14 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericEnum(let expectedTemplate, _, let expectedArgs):
+        case .genericEnum(let expectedDefId, let expectedArgs):
             let actualArgs: [Type]
             switch actual {
-            case .genericEnum(let actualTemplate, _, let args):
-                guard actualTemplate == expectedTemplate else { return false }
+            case .genericEnum(let actualDefId, let args):
+                guard actualDefId == expectedDefId else { return false }
                 actualArgs = args
             case .`enum`(let defId):
-                guard context.getTemplateName(defId) == expectedTemplate,
+                guard context.templateDeclaration(of: defId) == expectedDefId,
                       let args = context.getTypeArguments(defId) else {
                     return false
                 }
@@ -1619,7 +1642,7 @@ extension Monomorphizer {
         methodName: String,
         expectedMethodType: Type? = nil
     ) -> Symbol? {
-        let lookupTypeNames = extensionLookupTypeNames(for: baseType)
+        let lookupTypes = extensionLookupTypes(for: baseType)
         var candidates: [DefId] = []
         var seenCandidateIds: Set<DefId> = []
 
@@ -1636,8 +1659,11 @@ extension Monomorphizer {
             candidates.append(defId)
         }
 
-        for typeName in lookupTypeNames {
-            let key = "\(typeName).\(methodName)"
+        // The receiver's OWNER IDENTITY. `lookupTypeNames` used to be a sweep over
+        // the receiver's spellings, so one method occupied up to N slots and two
+        // same-named types could share them.
+        for lookupType in lookupTypes {
+            let key = context.receiverMethodKey(lookupType, methodName)
             if let direct = extensionMethodDefIds[key] {
                 appendCandidate(direct)
             }
@@ -1716,14 +1742,15 @@ extension Monomorphizer {
         case .pointer(let pInner):
             guard case .pointer(let aInner) = actual else { return false }
             return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-        case .genericStruct(let pTemplate, _, let pArgs):
+        // Identity: the template's DECLARATION, not its spelling.
+        case .genericStruct(let pDefId, let pArgs):
             let aArgs: [Type]
             switch actual {
-            case .genericStruct(let aTemplate, _, let args):
-                guard pTemplate == aTemplate else { return false }
+            case .genericStruct(let aDefId, let args):
+                guard aDefId == pDefId else { return false }
                 aArgs = args
             case .structure(let defId):
-                guard context.getTemplateName(defId) == pTemplate,
+                guard context.templateDeclaration(of: defId) == pDefId,
                       let args = context.getTypeArguments(defId) else {
                     return false
                 }
@@ -1738,14 +1765,14 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .genericEnum(let pTemplate, _, let pArgs):
+        case .genericEnum(let pDefId, let pArgs):
             let aArgs: [Type]
             switch actual {
-            case .genericEnum(let aTemplate, _, let args):
-                guard pTemplate == aTemplate else { return false }
+            case .genericEnum(let aDefId, let args):
+                guard aDefId == pDefId else { return false }
                 aArgs = args
             case .`enum`(let defId):
-                guard context.getTemplateName(defId) == pTemplate,
+                guard context.templateDeclaration(of: defId) == pDefId,
                       let args = context.getTypeArguments(defId) else {
                     return false
                 }
@@ -1937,8 +1964,8 @@ extension Monomorphizer {
         }
 
         let methodInfo: GenericExtensionMethodTemplate? = {
-            for candidateName in extensionLookupTypeNames(for: resolvedBaseType) {
-                guard let methods = input.genericTemplates.extensionMethods[candidateName] else {
+            for candidateName in extensionLookupTypes(for: resolvedBaseType) {
+                 guard let methods = input.genericTemplates.extensionMethods[context.methodOwner(of: resolvedBaseType)] else {
                     continue
                 }
                 guard let selected = selectExtensionTemplate(
@@ -2013,8 +2040,13 @@ extension Monomorphizer {
         let nameCandidates = methodLookupCandidates(name)
         var matches: [Symbol] = []
 
-        for (traitName, methods) in input.genericTemplates.extensionMethods {
-            guard input.genericTemplates.traits[traitName] != nil else {
+        for (owner, methods) in input.genericTemplates.extensionMethods {
+            // "Is this a trait?" is a test of the DECLARATION, answered from the
+            // DefId index. Scanning the spelling-keyed `traits` both costs O(n)
+            // and cannot see whatever lost the name race.
+            guard case .decl(let ownerDefId) = owner,
+                input.genericTemplates.isTraitDefId(ownerDefId)
+            else {
                 continue
             }
             for methodInfo in methods where nameCandidates.contains(methodInfo.method.name) {
@@ -2144,12 +2176,12 @@ extension Monomorphizer {
     /// the trait arguments. The spelling is returned for display only.
     internal func extractTraitObjectType(_ type: Type) -> (traitName: String, traitDefId: DefId, typeArgs: [Type])? {
         switch type {
-        case .traitObject(let traitName, let traitDefId, let typeArgs):
-            return (traitName, traitDefId, typeArgs)
+        case .traitObject(let traitDefId, let typeArgs):
+            return (Type.spelling(traitDefId), traitDefId, typeArgs)
         case .reference(let inner), .mutableReference(let inner),
              .borrowedReference(let inner), .mutableBorrowedReference(let inner):
-            if case .traitObject(let traitName, let traitDefId, let typeArgs) = inner {
-                return (traitName, traitDefId, typeArgs)
+            if case .traitObject(let traitDefId, let typeArgs) = inner {
+                return (Type.spelling(traitDefId), traitDefId, typeArgs)
             }
             return nil
         default:

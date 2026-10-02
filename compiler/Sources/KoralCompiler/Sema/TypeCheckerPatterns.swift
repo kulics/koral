@@ -194,13 +194,13 @@ extension TypeChecker {
         cases = context.getEnumCases(defId) ?? []
         enumDefId = defId
         
-      case .genericEnum(let templateName, _, let typeArgs):
+      case .genericEnum(let tplDefId, let typeArgs):
         // Look up the enum template and substitute type parameters
-        guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
-          throw SemanticError.undefinedType(templateName)
+        guard let template = currentScope.genericEnumTemplate(defId: tplDefId) else {
+          throw SemanticError.undefinedType(Type.spelling(tplDefId))
         }
         
-        typeName = templateName
+        typeName = Type.spelling(tplDefId)
         enumDefId = template.defId
         
         // Create substitution map
@@ -355,24 +355,30 @@ extension TypeChecker {
       // Get struct member info based on subject type
       let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
       let structDefId: DefId?
+      // The pattern's name is resolved ONCE, here, and everything below
+      // compares the declaration it denotes. A non-generic nominal lives in the
+      // type table and a generic one in the template table, so the one lookup
+      // consults whichever answers. `typeName` survives only to print.
+      let patternDefId = currentScope.lookupType(typeName).flatMap { nominalDefId(for: $0) }
+        ?? currentScope.lookupGenericStructTemplate(typeName)?.defId
       
       switch subjectType {
       case .structure(let defId):
-        guard let name = context.getName(defId), name == typeName else {
+        guard patternDefId == defId else {
           throw SemanticError(.typeMismatch(
             expected: typeName, got: subjectType.description), span: span)
         }
         members = context.getStructMembers(defId) ?? []
         structDefId = defId
         
-      case .genericStruct(let templateName, _, let typeArgs):
-        guard templateName == typeName else {
+      case .genericStruct(let tplDefId, let typeArgs):
+        guard patternDefId == tplDefId else {
           throw SemanticError(.typeMismatch(
             expected: typeName, got: subjectType.description), span: span)
         }
-        // Look up the generic struct template and substitute type parameters
-        guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
-          throw SemanticError.undefinedType(templateName)
+        // The subject's own DECLARATION is the template; no name is re-read.
+        guard let template = currentScope.genericStructTemplate(defId: tplDefId) else {
+          throw SemanticError.undefinedType(typeName)
         }
         
         // Create substitution map

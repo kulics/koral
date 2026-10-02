@@ -416,6 +416,7 @@ public class DefIdMap {
     private var genericEnumTemplates: [String: DefId] = [:]
     private var genericFunctionTemplates: [String: DefId] = [:]
 
+
     /// 泛型模板详细信息
     private var genericStructTemplateInfo: [UInt64: GenericStructTemplateInfo] = [:]
     private var genericEnumTemplateInfo: [UInt64: GenericEnumTemplateInfo] = [:]
@@ -954,6 +955,84 @@ public class DefIdMap {
     /// same-named generic templates from different modules distinct identity.
     public var currentModulePath: [String] = []
 
+    /// Source file currently being processed. Import edges are scoped to the
+    /// file their `using` appears in, so matching one needs the file too --
+    /// the same rule `ImportGraph.getImportKind` applies.
+    public var currentSourceFile: String? = nil
+
+    /// The import graph of the whole compilation.
+    ///
+    /// SHARED ambient, installed once by the driver when the merged graph is
+    /// ready -- the same class of ambient as
+    /// `SemanticErrorContext.currentCompilerContext`. It cannot hang off a
+    /// single `DefIdMap` instance: several passes build their own
+    /// `CompilerContext` (and so their own `DefIdMap`) and all of them have to
+    /// answer "which `Box`?" with the same answer.
+    ///
+    /// Used for exactly that question. When the module being checked does not
+    /// declare a name, the name means whatever that module IMPORTS -- not
+    /// whichever module happened to register it last.
+    ///
+    /// (rustc_resolve builds one resolution per module from its imports; there
+    /// is no global name table to fall back on.)
+    public nonisolated(unsafe) static var sharedImportGraph: ImportGraph? = nil
+
+    /// Per-instance override; falls back to `sharedImportGraph`.
+    public var currentImportGraph: ImportGraph? {
+        get { Self.sharedImportGraph }
+        set { Self.sharedImportGraph = newValue }
+    }
+
+    /// The declaration `spelling` denotes in the module currently being checked,
+    /// through its IMPORTS. `table` is the spelling-keyed index for one kind of
+    /// template.
+    ///
+    /// Order matters and is the whole fix:
+    ///   1. the module's own declaration (its qualified key),
+    ///   2. a symbol import (`using m { Box }`, or `using m { Box as B }` -- in
+    ///      which case `spelling` is the alias and the edge names the original),
+    ///   3. a batch/module import (`using m { .. }`, `using m;`) bringing the
+    ///      same spelling in from the imported module.
+    ///
+    /// The unqualified global index is NOT consulted here. It is last-wins
+    /// across modules, so it cannot answer "which `Box`?" -- see
+    /// `unimportedTemplateDefId`, which reads it only to name the module in the
+    /// "Import it explicitly" diagnostic.
+    private func importedTemplateDefId(_ spelling: String, table: [String: DefId]) -> DefId? {
+        if let graph = currentImportGraph {
+            // 2. The spelling is an import binding: `symbol` is how THIS module
+            //    spells it, `originalSymbol` is what the target module calls it.
+            if let (target, original) = graph.resolveAliasedSymbol(
+                alias: spelling,
+                inModule: currentModulePath,
+                inSourceFile: currentSourceFile
+            ), let defId = table[makeKey(modulePath: target, name: original, sourceFile: nil)] {
+                return defId
+            }
+            // 3. A batch/module import does not create a symbol edge, so the
+            //    spelling is the same in the imported module.
+            for edge in graph.edges
+            where edge.source == currentModulePath
+                && (edge.sourceFile == nil || edge.sourceFile == currentSourceFile) {
+                if let defId = table[makeKey(modulePath: edge.target, name: spelling, sourceFile: nil)] {
+                    return defId
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The declaration a spelling denotes when the module being checked imports
+    /// nothing of that name.
+    ///
+    /// Only the "is declared somewhere, but not here" answer is wanted, purely so
+    /// the caller can produce `... is defined in module 'M'. Import it explicitly`.
+    /// This is NOT how a name is resolved to a declaration -- that is
+    /// `importedTemplateDefId` above -- and it must never win over it.
+    private func unimportedTemplateDefId(_ spelling: String, table: [String: DefId]) -> DefId? {
+        return table[spelling]
+    }
+
     public func registerGenericStructTemplate(name: String, defId: DefId, info: GenericStructTemplateInfo) {
         genericStructTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
         genericStructTemplates[name] = defId
@@ -991,14 +1070,21 @@ public class DefIdMap {
     }
 
     public func lookupGenericStructTemplateDefId(_ name: String) -> DefId? {
+        // 1. declared in the module being checked
         let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
-        let hit = genericStructTemplates[qualified] ?? genericStructTemplates[name]
-        return hit
+        if let defId = genericStructTemplates[qualified] { return defId }
+        // 2./3. whatever this module imports under this spelling
+        if let defId = importedTemplateDefId(name, table: genericStructTemplates) { return defId }
+        // 4. declared somewhere but not imported here -- only so the caller can
+        //    name the module in "Import it explicitly".
+        return unimportedTemplateDefId(name, table: genericStructTemplates)
     }
 
     public func lookupGenericEnumTemplateDefId(_ name: String) -> DefId? {
         let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
-        return genericEnumTemplates[qualified] ?? genericEnumTemplates[name]
+        if let defId = genericEnumTemplates[qualified] { return defId }
+        if let defId = importedTemplateDefId(name, table: genericEnumTemplates) { return defId }
+        return unimportedTemplateDefId(name, table: genericEnumTemplates)
     }
 
     /// The generic enum template named `name` declared in a SPECIFIC module.
@@ -1014,6 +1100,28 @@ public class DefIdMap {
     public func lookupGenericStructTemplateDefId(modulePath: [String], name: String) -> DefId? {
         return genericStructTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
     }
+    /// The generic struct template named `name` in THIS module, with NO bare-name
+    /// fallback.
+    ///
+    /// The bare-name fallback is fine for RESOLUTION (a spelling that names
+    /// something in the current module should find it) but not for IDENTITY: two
+    /// modules' `Box` would land on whichever registered last, and their
+    /// `given[T Any] Box[T]` extensions would share one owner.
+    public func lookupGenericStructTemplateDefIdStrict(modulePath: [String], name: String) -> DefId? {
+        if modulePath.isEmpty {
+            return genericStructTemplates[name]
+        }
+        return genericStructTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
+    }
+
+    /// Same, for generic enum templates.
+    public func lookupGenericEnumTemplateDefIdStrict(modulePath: [String], name: String) -> DefId? {
+        if modulePath.isEmpty {
+            return genericEnumTemplates[name]
+        }
+        return genericEnumTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
+    }
+
 
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
         return genericFunctionTemplates[name]

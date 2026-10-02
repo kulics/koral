@@ -828,6 +828,11 @@ public class Driver {
     extraLinkedLibraries: [String]
   ) throws {
     let fileManager = FileManager.default
+    // Shared ambient for name resolution: a spelling resolves through the
+    // importing module's imports, not through a global name table. Installed
+    // here so every pass sees it regardless of which `DefIdMap` instance it
+    // holds -- see `DefIdMap.sharedImportGraph`.
+    DefIdMap.sharedImportGraph = importGraph
     let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
     let phasePrefix = mode.rawValue
     let totalStart = DispatchTime.now()

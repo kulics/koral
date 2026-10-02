@@ -32,12 +32,12 @@ public let substitute_types_in_expression(
     };
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
-            .TraitObject(original_trait_name, original_trait_def_id, original_type_args) then {
+            .TraitObject(original_trait_def_id, original_type_args) then {
                 let mutable substituted_type_args = List[Type].new();
                 for original_type_arg in original_type_args then {
                     substituted_type_args.push(mono.substitute_type_impl(original_type_arg, substitution));
                 };
-                Type.TraitObject(original_trait_name, original_trait_def_id, substituted_type_args)
+                Type.TraitObject(original_trait_def_id, substituted_type_args)
             },
             _ then mono.substitute_type_impl(expr.expr_type, substitution),
         },
@@ -150,8 +150,8 @@ file_private let recover_unknown_expr_type(
             _ then fallback,
         },
         .GenericInstantiation(base_type, type_args) then when resolve_parameterized_type(mono, base_type) in {
-            .GenericStruct(template_name, template_def_id, _) then Type.GenericStruct(template_name, template_def_id, box_each_type(type_args)),
-            .GenericEnum(template_name, template_def_id, _) then Type.GenericEnum(template_name, template_def_id, box_each_type(type_args)),
+            .GenericStruct(template_def_id, _) then Type.GenericStruct(template_def_id, box_each_type(type_args)),
+            .GenericEnum(template_def_id, _) then Type.GenericEnum(template_def_id, box_each_type(type_args)),
             resolved_base then resolved_base,
         },
         _ then fallback,
@@ -170,8 +170,8 @@ file_private let recover_type_construction_type(
     when resolved_identifier_type in {
         .StructureType(_) then { return resolved_identifier_type;},
         .EnumType(_) then { return resolved_identifier_type;},
-        .GenericStruct(_, _, _) then { return resolved_identifier_type;},
-        .GenericEnum(_, _, _) then { return resolved_identifier_type;},
+        .GenericStruct(_, _) then { return resolved_identifier_type;},
+        .GenericEnum(_, _) then { return resolved_identifier_type;},
         _ then {},
     };
 
@@ -187,13 +187,15 @@ file_private let recover_type_construction_type(
         };
 
         if not template_name.is_empty() then {
-            when mono.storage.generic_templates.lookup_struct(template_name) in {
+            // By DECLARATION -- the instance links to its template.
+            let template_def_id = mono.storage.context.get_template_def_id(identifier.def_id);
+            when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(template) then {
                     return resolve_parameterized_type(mono, mono.instantiate_struct_impl(template, boxed_args));
                 },
                 .None() then {},
             };
-            when mono.storage.generic_templates.lookup_enum(template_name) in {
+            when mono.storage.generic_templates.enum_by_def_id(template_def_id) in {
                 .Some(template) then {
                     return resolve_parameterized_type(mono, mono.instantiate_enum_impl(template, boxed_args));
                 },
@@ -231,7 +233,7 @@ file_private let infer_type_construction_type_from_args(
             .Some(template) then template.def_id,
             .None() then def_id_invalid(),
         };
-        return Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct("Pair", pair_def_id, pair_args)));
+        return Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(pair_def_id, pair_args)));
     };
 
     let template_opt = when mono.storage.generic_templates.resolve_struct_name(template_name) in {
@@ -261,7 +263,7 @@ file_private let infer_type_construction_type_from_args(
             for type_param in template.type_parameters then {
                 inferred_args.push(bindings.get(type_param.name) or else Type.GenericParameter(type_param.name));
             };
-            Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(template.name, template.def_id, inferred_args)))
+            Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(template.def_id, inferred_args)))
         },
         .None() then Option[Type].None(),
     };
@@ -321,9 +323,12 @@ file_private let infer_type_bindings_from_constructor_pattern(
             },
             _ then {},
         },
-        .GenericStruct(pattern_name, _, pattern_args) then when normalized_concrete in {
-            .GenericStruct(concrete_name, _, concrete_args) then {
-                if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
+        .GenericStruct(tplDefId, pattern_args) then when normalized_concrete in {
+            .GenericStruct(actual_def_id, concrete_args) then {
+                // Compare DECLARATIONS. The inner arm rebinds the pattern's
+                // `tplDefId`, so `tplDefId == tplDefId` compared one binding to
+                // itself and let any two templates match.
+                if tplDefId == actual_def_id and pattern_args.count() == concrete_args.count() then {
                     let mutable i UInt = 0;
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(mono, (pattern_args[i]), (concrete_args[i]), bindings);
@@ -333,9 +338,10 @@ file_private let infer_type_bindings_from_constructor_pattern(
             },
             _ then {},
         },
-        .GenericEnum(pattern_name, _, pattern_args) then when normalized_concrete in {
-            .GenericEnum(concrete_name, _, concrete_args) then {
-                if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericEnum(pattern_def_id, pattern_args) then when normalized_concrete in {
+            .GenericEnum(concrete_def_id, concrete_args) then {
+                if pattern_def_id == concrete_def_id and pattern_args.count() == concrete_args.count() then {
                     let mutable i UInt = 0;
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(mono, (pattern_args[i]), (concrete_args[i]), bindings);
@@ -380,8 +386,8 @@ file_private let synthetic_args_from_expected_method_type(
                     .ReferenceType(lhs) then when resolved_receiver_type in {
                         .StructureType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .EnumType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericStruct(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericEnum(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .BorrowedReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
@@ -391,8 +397,8 @@ file_private let synthetic_args_from_expected_method_type(
                     .MutableReferenceType(lhs) then when resolved_receiver_type in {
                         .StructureType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .EnumType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericStruct(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericEnum(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .MutableBorrowedReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         _ then false,
@@ -400,8 +406,8 @@ file_private let synthetic_args_from_expected_method_type(
                     .BorrowedReferenceType(lhs) then when resolved_receiver_type in {
                         .StructureType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .EnumType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericStruct(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericEnum(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .BorrowedReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
@@ -411,8 +417,8 @@ file_private let synthetic_args_from_expected_method_type(
                     .MutableBorrowedReferenceType(lhs) then when resolved_receiver_type in {
                         .StructureType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .EnumType(_) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericStruct(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
+                        .GenericEnum(_, _) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolved_receiver_type),
                         .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         .MutableBorrowedReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs)) == layout_key(resolve_parameterized_type(mono, rhs)),
                         _ then false,
@@ -550,21 +556,21 @@ file_private let substitution_trait_object_type(
     t Type,
 ) Option[Type] = {
     return when t in {
-        .TraitObject(trait_name, trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, type_args)),
+        .TraitObject(trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, type_args)),
         .ReferenceType(inner) then when inner in {
-            .TraitObject(trait_name, trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, type_args)),
+            .TraitObject(trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, type_args)),
             _ then Option[Type].None(),
         },
         .MutableReferenceType(inner) then when inner in {
-            .TraitObject(trait_name, trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, type_args)),
+            .TraitObject(trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, type_args)),
             _ then Option[Type].None(),
         },
         .BorrowedReferenceType(inner) then when inner in {
-            .TraitObject(trait_name, trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, type_args)),
+            .TraitObject(trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, type_args)),
             _ then Option[Type].None(),
         },
         .MutableBorrowedReferenceType(inner) then when inner in {
-            .TraitObject(trait_name, trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, type_args)),
+            .TraitObject(trait_def_id, type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, type_args)),
             _ then Option[Type].None(),
         },
         _ then Option[Type].None(),
@@ -819,7 +825,7 @@ file_private let recover_member_field_type(
         .MutablePointerType(inner) then {
             return recover_member_field_type(mono, inner, member_name, fallback);
         },
-        .GenericStruct(template_name, template_def_id, args) then {
+        .GenericStruct(template_def_id, args) then {
             if is_std_pair_def_id(mono.storage.context, template_def_id) and args.count() == 2(UInt) then {
                 when member_name in {
                     "first" then {
@@ -831,7 +837,7 @@ file_private let recover_member_field_type(
                     _ then {},
                 };
             };
-            when mono.storage.generic_templates.lookup_struct(template_name) in {
+            when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(template) then {
                     let mutable subst = Dict[String, Type].new();
                     let mutable i UInt = 0;
@@ -907,12 +913,12 @@ file_private let substitute_expr_kind(
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
             let new_target = when target_type in {
-                .TraitObject(original_trait_name, original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(mono.substitute_type_impl(original_type_arg, substitution));
                     };
-                    Type.TraitObject(original_trait_name, original_trait_def_id, substituted_type_args)
+                    Type.TraitObject(original_trait_def_id, substituted_type_args)
                 },
                 _ then mono.substitute_type_impl(target_type, substitution),
             };
@@ -925,18 +931,18 @@ file_private let substitute_expr_kind(
             let mutable resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type);
             let mutable new_trait_type = resolved_substituted_trait_type;
             when trait_type in {
-                .TraitObject(original_trait_name, original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(mono.substitute_type_impl(original_type_arg, substitution));
                     };
-                    new_trait_type = Type.TraitObject(original_trait_name, original_trait_def_id, substituted_type_args);
+                    new_trait_type = Type.TraitObject(original_trait_def_id, substituted_type_args);
                 },
                 _ then {},
             };
             let mutable new_concrete_type = resolve_parameterized_type(mono, mono.substitute_type_impl(concrete_type, substitution));
             when new_trait_type in {
-                .TraitObject(trait_name, trait_def_id, _) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name, trait_def_id),
+                .TraitObject(trait_def_id, _) then collect_concrete_vtable_request(mono, new_concrete_type, def_id_spelling(trait_def_id), trait_def_id),
                 _ then {},
             };
             TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type)
@@ -1235,18 +1241,18 @@ file_private let substitute_expr_kind(
                 .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                     when substitution_trait_object_type(base.expr_type) in {
                         .Some(trait_object_type) then when trait_object_type in {
-                            .TraitObject(trait_name, _, _) then {
+                            .TraitObject(_, _) then {
                                 let method_name = substitution_semantic_method_name(mono, method);
                                 let method_index = substitution_vtable_method_index(mono, trait_object_type, method_name);
                                 if method_index >= 0 then {
                                     let receiver = when base.expr_kind in {
                                         .DerefExpr(inner) then when resolve_parameterized_type(mono, typed_expr_type(inner)) in {
                                             .ReferenceType(ref_inner) then when resolve_parameterized_type(mono, ref_inner) in {
-                                                .TraitObject(_, _, _) then inner,
+                                                .TraitObject(_, _) then inner,
                                                 _ then base,
                                             },
                                             .MutableReferenceType(ref_inner) then when resolve_parameterized_type(mono, ref_inner) in {
-                                                .TraitObject(_, _, _) then inner,
+                                                .TraitObject(_, _) then inner,
                                                 _ then base,
                                             },
                                             _ then base,
@@ -1494,13 +1500,13 @@ file_private let substitute_expr_kind(
                 };
             };
             let trait_object_type_opt = when resolve_parameterized_type(mono, new_base.expr_type) in {
-                .TraitObject(trait_name, trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, trait_type_args)),
+                .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, trait_type_args)),
                 .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-                    .TraitObject(trait_name, trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, trait_type_args)),
+                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, trait_type_args)),
                     _ then Option[Type].None(),
                 },
                 .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-                    .TraitObject(trait_name, trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_def_id, trait_type_args)),
+                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_def_id, trait_type_args)),
                     _ then Option[Type].None(),
                 },
                 _ then Option[Type].None(),
@@ -1591,12 +1597,12 @@ file_private let substitute_expr_kind(
             let new_base = substitute_types_in_expression(mono, base, substitution);
             let mutable new_trait_type = mono.substitute_type_impl(trait_type, substitution);
             when trait_type in {
-                .TraitObject(original_trait_name, original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(mono.substitute_type_impl(original_type_arg, substitution));
                     };
-                    new_trait_type = Type.TraitObject(original_trait_name, original_trait_def_id, substituted_type_args);
+                    new_trait_type = Type.TraitObject(original_trait_def_id, substituted_type_args);
                 },
                 _ then {},
             };
@@ -1693,12 +1699,12 @@ file_private let substitute_expr_kind(
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution);
             let mutable new_trait_type = mono.substitute_type_impl(trait_type, substitution);
             when trait_type in {
-                .TraitObject(original_trait_name, original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(mono.substitute_type_impl(original_type_arg, substitution));
                     };
-                    new_trait_type = Type.TraitObject(original_trait_name, original_trait_def_id, substituted_type_args);
+                    new_trait_type = Type.TraitObject(original_trait_def_id, substituted_type_args);
                 },
                 _ then {},
             };
@@ -1821,12 +1827,17 @@ file_private let remapped_function_def_id_for_type(
                     .Some(source_owner) then when mono.receiver_method_dispatch_info(candidate.first) in {
                         .Some(candidate_info) then when candidate_info.owner in {
                             .Some(candidate_owner) then when source_owner in {
-                                .ConcreteType(source_name) then when candidate_owner in {
-                                    .ConcreteType(candidate_name) then candidate_name == source_name,
+                                .ConcreteType(source_type) then when candidate_owner in {
+                                    // By TYPE identity -- `Type` compares by
+                                    // declaration, not by spelling.
+                                    .ConcreteType(candidate_type) then candidate_type == source_type,
                                     _ then false,
                                 },
-                                .ExtensionTemplate(source_name) then when candidate_owner in {
-                                    .ExtensionTemplate(candidate_name) then candidate_name == source_name,
+                                .ExtensionTemplate(source_def_id) then when candidate_owner in {
+                                    // By DECLARATION. This used to compare the
+                                    // owners' SPELLINGS, which cannot name one
+                                    // of two same-named types.
+                                    .ExtensionTemplate(candidate_def_id) then candidate_def_id == source_def_id,
                                     _ then false,
                                 },
                             },
@@ -1949,6 +1960,11 @@ file_private let remapped_function_def_id_for_type(
     return symbol.def_id;
 };
 
+// Bind GenericParameter -> concrete Type by structurally matching a template
+// parameter TypeNode against an actual call-site type.
+//
+// The TypeNode is turned into a SHAPE first (see `resolve_type_node_identity`),
+// so the matcher below compares DECLARATION DefIds and never sees a name.
 file_private let bind_generic_function_type_node(
     mono Monomorphizer,
     expected_node TypeNode,
@@ -1956,71 +1972,110 @@ file_private let bind_generic_function_type_node(
     type_params List[TypeParameterDecl],
     bindings Dict[String, Type],
 ) Void = {
-    when expected_node in {
-        .Identifier(name) then {
-            if is_type_parameter_name(name, type_params) then {
-                when bindings.get(name) in {
-                    .Some(existing) then {
-                        if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
-                            bindings.insert(name, actual);
-                        };
-                    },
-                    .None() then {
+    bind_generic_function_type_from_shape(
+        mono,
+        resolve_type_node_identity(mono, expected_node, type_params),
+        actual,
+        type_params,
+        bindings
+    );
+};
+
+file_private let bind_generic_function_type_from_shape(
+    mono Monomorphizer,
+    pattern Type,
+    actual Type,
+    type_params List[TypeParameterDecl],
+    bindings Dict[String, Type],
+) Void = {
+    when pattern in {
+        .GenericParameter(name) then {
+            when bindings.get(name) in {
+                .Some(existing) then {
+                    if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
                         bindings.insert(name, actual);
-                    },
-                };
+                    };
+                },
+                .None() then {
+                    bindings.insert(name, actual);
+                },
             };
         },
-        .Reference(inner, _) then when actual in {
-            .ReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
-            .MutableReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
+        // A declared reference accepts either mutability of the same referent.
+        .ReferenceType(inner) then when actual in {
+            .ReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
             _ then {},
         },
-        .BorrowedReference(inner, _) then when actual in {
-            .BorrowedReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
-            .MutableBorrowedReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
+        .MutableReferenceType(inner) then when actual in {
+            .ReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
             _ then {},
         },
-        .Pointer(inner, _) then when actual in {
-            .PointerType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
-            .MutablePointerType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
+        .BorrowedReferenceType(inner) then when actual in {
+            .BorrowedReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableBorrowedReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
             _ then {},
         },
-        .WeakReference(inner, _) then when actual in {
-            .WeakReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
-            .MutableWeakReferenceType(act_inner) then bind_generic_function_type_node(mono, inner, act_inner, type_params, bindings),
+        .MutableBorrowedReferenceType(inner) then when actual in {
+            .BorrowedReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableBorrowedReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
             _ then {},
         },
-        .Generic(base, args) then when actual in {
-            .GenericStruct(act_base, _, act_args) then {
-                if base == act_base then {
+        .PointerType(inner) then when actual in {
+            .PointerType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutablePointerType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            _ then {},
+        },
+        .MutablePointerType(inner) then when actual in {
+            .PointerType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutablePointerType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            _ then {},
+        },
+        .WeakReferenceType(inner) then when actual in {
+            .WeakReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableWeakReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            _ then {},
+        },
+        .MutableWeakReferenceType(inner) then when actual in {
+            .WeakReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            .MutableWeakReferenceType(act_inner) then bind_generic_function_type_from_shape(mono, inner, act_inner, type_params, bindings),
+            _ then {},
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericStruct(pattern_def_id, pattern_args) then when actual in {
+            .GenericStruct(actual_def_id, actual_args) then {
+                if pattern_def_id == actual_def_id then {
                     let mutable i UInt = 0;
-                    while i < args.count() and i < act_args.count() then {
-                        bind_generic_function_type_node(mono, (args[i]), (act_args[i]), type_params, bindings);
+                    while i < pattern_args.count() and i < actual_args.count() then {
+                        bind_generic_function_type_from_shape(mono, (pattern_args[i]), (actual_args[i]), type_params, bindings);
                         i += 1;
                     };
                 };
             },
-            .GenericEnum(act_base, _, act_args) then {
-                if base == act_base then {
+            _ then {},
+        },
+        .GenericEnum(pattern_def_id, pattern_args) then when actual in {
+            .GenericEnum(actual_def_id, actual_args) then {
+                if pattern_def_id == actual_def_id then {
                     let mutable i UInt = 0;
-                    while i < args.count() and i < act_args.count() then {
-                        bind_generic_function_type_node(mono, (args[i]), (act_args[i]), type_params, bindings);
+                    while i < pattern_args.count() and i < actual_args.count() then {
+                        bind_generic_function_type_from_shape(mono, (pattern_args[i]), (actual_args[i]), type_params, bindings);
                         i += 1;
                     };
                 };
             },
             _ then {},
         },
-        .FunctionType(param_nodes, ret_node) then when actual in {
+        .FunctionType(pattern_params, pattern_return) then when actual in {
             .FunctionType(fn_params, ret_type) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable i UInt = 0;
-                while i < param_nodes.count() and i < param_types.count() then {
-                    bind_generic_function_type_node(mono, (param_nodes[i]), (param_types[i]), type_params, bindings);
+                while i < pattern_params.count() and i < param_types.count() then {
+                    bind_generic_function_type_from_shape(mono, (pattern_params[i]).param_type, (param_types[i]), type_params, bindings);
                     i += 1;
                 };
-                bind_generic_function_type_node(mono, ret_node, ret_type, type_params, bindings);
+                bind_generic_function_type_from_shape(mono, pattern_return, ret_type, type_params, bindings);
             },
             _ then {},
         },
@@ -2133,11 +2188,11 @@ file_private let static_method_receiver_aliases(mono Monomorphizer, t Type) List
                 aliases = push_static_method_receiver_alias(aliases, alias);
             };
         },
-        .GenericStruct(template, _, _) then {
-            aliases = push_static_method_receiver_alias(aliases, template);
+        .GenericStruct(tplDefId, _) then {
+            aliases = push_static_method_receiver_alias(aliases, def_id_spelling(tplDefId));
         },
-        .GenericEnum(template, _, _) then {
-            aliases = push_static_method_receiver_alias(aliases, template);
+        .GenericEnum(tplDefId, _) then {
+            aliases = push_static_method_receiver_alias(aliases, def_id_spelling(tplDefId));
         },
         .StructureType(def_id) then {
             when mono.storage.context.get_name(def_id) in {
@@ -2195,9 +2250,10 @@ file_private let bind_static_method_symbol(
     receiver_type Type,
     method Symbol,
 ) Symbol = {
-    let receiver_aliases = static_method_receiver_aliases(mono, receiver_type);
-    for receiver_key in receiver_aliases then {
-        let lookup_key = "\(receiver_key).\(mono.storage.context.symbol_name(method))";
+    let mutable receiver_owners = List[MethodOwner].new();
+    collect_receiver_owners(mono, receiver_type, receiver_owners);
+    for receiver_owner in receiver_owners then {
+        let lookup_key = make_receiver_method_key(mono, receiver_type, mono.storage.context.symbol_name(method), List[Type].new());
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
                 let mutable bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
@@ -2213,9 +2269,10 @@ file_private let bind_static_method_symbol(
     let method_name = mono.storage.context.symbol_name(method);
     instantiate_trait_placeholder_method(mono, receiver_type, method_name, List[Type].new());
 
-    let instantiated_aliases = static_method_receiver_aliases(mono, receiver_type);
-    for receiver_key in instantiated_aliases then {
-        let lookup_key = "\(receiver_key).\(method_name)";
+    let mutable instantiated_owners = List[MethodOwner].new();
+    collect_receiver_owners(mono, receiver_type, instantiated_owners);
+    for receiver_owner in instantiated_owners then {
+        let lookup_key = make_receiver_method_key(mono, receiver_type, method_name, List[Type].new());
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
                 let mutable bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
@@ -2356,22 +2413,20 @@ file_private let lookup_direct_receiver_method_symbol(
     expected_opt Option[Type],
 ) Option[Symbol] = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
-    for receiver_alias in static_method_receiver_aliases(mono, resolved_receiver_type) then {
-        when mono.storage.extension_methods.get(receiver_alias) in {
-            .Some(method_map) then {
-                when method_map.get(method_name) in {
-                    .Some(entry) then {
-                        when finalize_direct_method_candidate(mono, entry.symbol, expected_opt) in {
-                            .Some(candidate) then { return Option[Symbol].Some(candidate); },
-                            .None() then {},
-                        };
-                    },
+    let mutable resolved_receiver_instantiations = List[Pair[MethodOwner, List[Type]]].new();
+    collect_receiver_instantiations(mono, resolved_receiver_type, resolved_receiver_instantiations);
+    for instantiation in resolved_receiver_instantiations then {
+        let instance_key = make_extension_method_key(mono, instantiation.first, instantiation.second, method_name, List[Type].new());
+        when mono.storage.extension_methods.get(instance_key) in {
+            .Some(entry) then {
+                when finalize_direct_method_candidate(mono, entry.symbol, expected_opt) in {
+                    .Some(candidate) then { return Option[Symbol].Some(candidate); },
                     .None() then {},
                 };
             },
             .None() then {},
         };
-        let lookup_key = "\(receiver_alias).\(method_name)";
+        let lookup_key = make_receiver_method_key(mono, resolved_receiver_type, method_name, List[Type].new());
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
                 let symbol_type = mono.storage.context.get_function_type(def_id) or else method.symbol_type;
@@ -2626,10 +2681,9 @@ file_private let lookup_exact_receiver_method_symbol(
         _ then false,
     };
     let method_name = semantic_receiver_method_name(mono, method);
-    let direct_lookup_key = "\(layout_key(resolved_receiver_type)).\(method_name)";
     if strict_wrapper_dispatch then {
-        for receiver_alias in strict_wrapper_receiver_aliases(resolved_receiver_type) then {
-            let alias_lookup_key = "\(receiver_alias).\(method_name)";
+        for receiver_owner in strict_wrapper_receiver_owners(resolved_receiver_type) then {
+            let alias_lookup_key = make_receiver_method_key(mono, resolved_receiver_type, method_name, List[Type].new());
             when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
                 .Some(def_id) then {
                     if nested_ref_like_receiver and method.def_id.id > 0 and def_id.id == method.def_id.id then {
@@ -2717,8 +2771,8 @@ file_private let lookup_exact_receiver_method_symbol(
     };
 
     if receiver_uses_strict_wrapper_dispatch(mono, resolved_receiver_type) then {
-        for receiver_alias in strict_wrapper_receiver_aliases(resolved_receiver_type) then {
-            let alias_lookup_key = "\(receiver_alias).\(method_name)";
+        for receiver_owner in strict_wrapper_receiver_owners(resolved_receiver_type) then {
+            let alias_lookup_key = make_receiver_method_key(mono, resolved_receiver_type, method_name, List[Type].new());
             when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
                 .Some(def_id) then {
                     if nested_ref_like_receiver and method.def_id.id > 0 and def_id.id == method.def_id.id then {
@@ -2768,8 +2822,10 @@ file_private let lookup_exact_receiver_method_symbol(
         return Option[Symbol].None();
     };
 
-    for receiver_alias in static_method_receiver_aliases(mono, resolved_receiver_type) then {
-        let alias_lookup_key = "\(receiver_alias).\(method_name)";
+    let mutable final_receiver_instantiations = List[Pair[MethodOwner, List[Type]]].new();
+    collect_receiver_instantiations(mono, resolved_receiver_type, final_receiver_instantiations);
+    for instantiation in final_receiver_instantiations then {
+        let alias_lookup_key = make_extension_method_key(mono, instantiation.first, instantiation.second, method_name, List[Type].new());
         when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
             .Some(def_id) then {
                 let candidate_type = mono.storage.context.get_function_type(def_id) or else Type.Unknown();
@@ -2798,31 +2854,31 @@ let bind_receiver_method_symbol(
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     let strict_wrapper_dispatch = receiver_uses_strict_wrapper_dispatch(mono, resolved_receiver_type);
     when resolved_receiver_type in {
-        .TraitObject(_, _, _) then {
+        .TraitObject(_, _) then {
             return method;
         },
         .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         .BorrowedReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         .MutableBorrowedReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         .WeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _, _) then { return method;},
+            .TraitObject(_, _) then { return method;},
             _ then {},
         },
         _ then {},
@@ -3128,28 +3184,36 @@ file_private let substitution_ordered_trait_method_names_helper(
     mono Monomorphizer,
     trait_name String,
     module_path List[String],
-    visited Set[String],
+    visited Set[UInt],
     ordered List[String],
     seen Set[String],
 ) Void = {
-    let visit_key = qualified_trait_key(module_path, trait_name);
-    if visited.contains(visit_key) then {
+    let info = mono.storage.generic_templates.lookup_trait_in_module(trait_name, module_path) or else { return;};
+    substitution_ordered_trait_method_names_helper_from_def(mono, info.def_id, visited, ordered, seen);
+};
+
+/// Walk the trait DECLARATION and its parents. Two same-named traits from
+/// different modules are different declarations and must not share a visit slot.
+file_private let substitution_ordered_trait_method_names_helper_from_def(
+    mono Monomorphizer,
+    trait_def_id DefId,
+    visited Set[UInt],
+    ordered List[String],
+    seen Set[String],
+) Void = {
+    if visited.contains(trait_def_id.id) then {
         return;
     };
-    visited.insert(visit_key);
-    when mono.storage.generic_templates.lookup_trait_in_module(trait_name, module_path) in {
-        .Some(info) then {
-            for parent in info.parent_traits then {
-                substitution_ordered_trait_method_names_helper(mono, parent.name, info.module_path, visited, ordered, seen);
-            };
-            for member in info.raw_members then {
-                if not seen.contains(member.name) then {
-                    seen.insert(member.name);
-                    ordered.push(member.name);
-                };
-            };
-        },
-        .None() then {},
+    visited.insert(trait_def_id.id);
+    let info = mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) or else { return;};
+    for parent in info.parent_traits then {
+        substitution_ordered_trait_method_names_helper_from_def(mono, parent.def_id, visited, ordered, seen);
+    };
+    for member in info.raw_members then {
+        if not seen.contains(member.name) then {
+            seen.insert(member.name);
+            ordered.push(member.name);
+        };
     };
 };
 
@@ -3158,22 +3222,32 @@ file_private let substitution_vtable_method_index(
     trait_type Type,
     method_name String,
 ) Int = {
+    // Display/resolution handle: the spelling comes from the declaration.
     let trait_name = when trait_type in {
-        .TraitObject(name, _, _) then name,
+        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         _ then "",
     };
     let trait_info = when trait_type in {
-        .TraitObject(_, trait_def_id, _) then mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id),
+        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id),
         _ then Option[TraitDeclInfo].None(),
     };
-    let mutable visited = Set[String].new();
+    let mutable visited = Set[UInt].new();
     let mutable ordered = List[String].new();
     let mutable seen = Set[String].new();
     let module_path = when trait_info in {
         .Some(info) then info.module_path,
         .None() then List[String].new(),
     };
-    substitution_ordered_trait_method_names_helper(mono, trait_name, module_path, visited, ordered, seen);
+    // The type already carries the trait's DECLARATION; no name is re-read.
+    let entry_def_id = when trait_type in {
+        .TraitObject(trait_def_id, _) then trait_def_id,
+        _ then def_id_invalid(),
+    };
+    if entry_def_id.is_valid() then {
+        substitution_ordered_trait_method_names_helper_from_def(mono, entry_def_id, visited, ordered, seen);
+    } else {
+        substitution_ordered_trait_method_names_helper(mono, trait_name, module_path, visited, ordered, seen);
+    };
     let mutable idx UInt = 0;
     while idx < ordered.count() then {
         if ordered[idx] == method_name then {

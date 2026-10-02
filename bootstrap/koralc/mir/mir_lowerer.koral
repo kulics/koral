@@ -26,16 +26,16 @@ file_private let empty_monomorphized_program() MonomorphizedProgram = {
         List[VtableRequest].new(),
         Dict[DefId, ReceiverMethodDispatchInfo].new(),
         Dict[DefId, ConcreteCallableInfo].new(),
-        Dict[String, DefId].new(),
+        Dict[MethodInstanceKey, DefId].new(),
         GenericTemplateRegistry.new(),
         Scope.new_root(),
         ImportGraph.new(),
         MethodTable.new(),
         TraitRegistry.new(),
-        Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
         Dict[String, ConformanceWitness].new(),
-        Dict[String, Dict[String, ConcreteMethodEntry]].new(),
-        Dict[String, DefId].new(),
+        Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+        Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
     );
 };
@@ -53,10 +53,10 @@ file_private let make_builder_program_view(program MonomorphizedProgram) Monomor
         ImportGraph.new(),
         MethodTable.new(),
         TraitRegistry.new(),
-        Dict[String, List[GenericTraitConformanceTemplate]].new(),
+        Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
         program.conformance_witnesses,
-        Dict[String, Dict[String, ConcreteMethodEntry]].new(),
-        Dict[String, DefId].new(),
+        Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+        Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
     );
 };
@@ -129,6 +129,7 @@ public let lower_monomorphized_program_releasing_source(mutable program Monomorp
         prepared.metadata_program.context,
         prepared.metadata_program.static_method_lookup,
         prepared.metadata_program.traits,
+        trait_decl_index(prepared.metadata_program.traits),
         prepared.metadata_program.receiver_method_dispatch,
         prepared.metadata_program.concrete_callables_by_def_id,
         prepared.metadata_program.conformance_witnesses,
@@ -270,6 +271,7 @@ given MIRLowerer {
             self.context,
             self.program.static_method_by_key,
             self.program.traits,
+            trait_decl_index(self.program.traits),
             self.program.receiver_method_dispatch,
             self.program.concrete_callables_by_def_id,
             self.program.conformance_witnesses,
@@ -497,6 +499,7 @@ given MIRLowerer {
             program.context,
             program.static_method_lookup,
             program.traits,
+            trait_decl_index(program.traits),
             program.receiver_method_dispatch,
             program.concrete_callables_by_def_id,
             program.conformance_witnesses,
@@ -623,7 +626,7 @@ given MIRLowerer {
         };
         let bindings = self.trait_member_type_bindings(request);
         let preferred_module_path = self.type_module_path(request.concrete_type);
-        self.collect_instantiated_trait_members(request.trait_name, preferred_module_path, request.concrete_type, bindings, visited_traits, seen_methods, ordered_members);
+        self.collect_instantiated_trait_members(request.trait_def_id, request.concrete_type, bindings, visited_traits, seen_methods, ordered_members);
         for member in ordered_members then {
             methods.push(self.make_trait_vtable_method(member));
         };
@@ -677,32 +680,35 @@ given MIRLowerer {
         };
     };
 
-    module_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
-        return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
-            .Some(info) then Option[TraitDeclInfo].Some(info),
-            .None() then self.program.traits.get(trait_name),
-        };
-    };
+
+    /// Resolves a trait spelling to the declaration identity it names, preferring
+    /// the trait declared in `preferred_module_path`. Used only where the caller
+    /// holds a name and nothing else (parent-trait walks); anything that already
+    /// carries the identity must pass it through instead of re-resolving.
+
 
     module_private collect_instantiated_trait_members(
         self,
-        trait_name String,
-        preferred_module_path List[String],
+        trait_def_id DefId,
         concrete_type Type,
         bindings Dict[String, Type],
         visited_traits Set[String],
         seen_methods Set[String],
         ordered_members List[TypedTraitMember],
     ) Void = {
-        let visit_key = self.trait_binding_visit_key(trait_name, preferred_module_path, bindings);
+        let visit_key = self.trait_binding_visit_key(trait_def_id, bindings);
         if visited_traits.contains(visit_key) then { return;};
         visited_traits.insert(visit_key);
 
-        when self.trait_info(trait_name, preferred_module_path) in {
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 for parent in trait_info.parent_traits then {
+                    // `ParentTraitConstraint` still carries only a spelling, so
+                    // the parent's name is resolved once here to an identity.
+                    let parent_def_id = parent.def_id;
+                    if parent_def_id == def_id_invalid() then { continue;};
                     let parent_bindings = self.parent_trait_bindings(parent, trait_info.module_path, concrete_type, bindings);
-                    self.collect_instantiated_trait_members(parent.name, trait_info.module_path, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members);
+                    self.collect_instantiated_trait_members(parent_def_id, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members);
                 };
                 for member in trait_info.members then {
                     if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
@@ -715,12 +721,15 @@ given MIRLowerer {
         };
     };
 
-    module_private trait_binding_visit_key(self, trait_name String, preferred_module_path List[String], bindings Dict[String, Type]) String = {
+    module_private trait_binding_visit_key(self, trait_def_id DefId, bindings Dict[String, Type]) String = {
         let mutable key = StringBuilder.new();
 
-        key.push_string(qualified_trait_key(preferred_module_path, trait_name));
+        // Keyed by DECLARATION: two same-named traits from different modules are
+        // different traits and must not share a visit slot.
+        key.push_string(def_id_spelling(trait_def_id));
+        key.push_string("#\(trait_def_id.id)");
 
-        when self.trait_info(trait_name, preferred_module_path) in {
+        when self.program.trait_by_def_id(trait_def_id) in {
             .Some(trait_info) then {
                 for type_param in trait_info.type_params then {
                     key.push_string("<");
@@ -743,7 +752,8 @@ given MIRLowerer {
         };
         result.insert("Self", concrete_type);
 
-        when self.trait_info(parent.name, preferred_module_path) in {
+        // Identity: the parent constraint carries the declaration it names.
+        when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
                 let mutable idx UInt = 0;
                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
@@ -804,9 +814,9 @@ given MIRLowerer {
                 let struct_def_id = self.program.generic_templates.lookup_struct_def_id(base);
                 let enum_def_id = self.program.generic_templates.lookup_enum_def_id(base);
                 if struct_def_id.is_valid() then {
-                    Type.GenericStruct(base, struct_def_id, resolved_args)
+                    Type.GenericStruct(struct_def_id, resolved_args)
                 } else {
-                    Type.GenericEnum(base, enum_def_id, resolved_args)
+                    Type.GenericEnum(enum_def_id, resolved_args)
                 }
             },
             .InferredSelf() then bindings.get("Self") or else Type.Unknown(),
@@ -830,8 +840,7 @@ given MIRLowerer {
     module_private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         bindings.insert("Self", request.concrete_type);
-        let preferred_module_path = self.type_module_path(request.concrete_type);
-        when self.trait_info(request.trait_name, preferred_module_path) in {
+        when self.program.trait_by_def_id(request.trait_def_id) in {
             .Some(trait_info) then {
                 let mutable index UInt = 0;
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
@@ -864,20 +873,20 @@ given MIRLowerer {
                 };
                 make_function_type(bound_params, self.apply_type_bindings(return_type, bindings))
             },
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                Type.GenericStruct(template, template_def_id, bound_args)
+                Type.GenericStruct(template_def_id, bound_args)
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                Type.GenericEnum(template, template_def_id, bound_args)
+                Type.GenericEnum(template_def_id, bound_args)
             },
-            .TraitObject(trait_name, trait_def_id, args) then {
+            .TraitObject(trait_def_id, args) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
-                Type.TraitObject(trait_name, trait_def_id, bound_args)
+                Type.TraitObject(trait_def_id, bound_args)
             },
             _ then t,
         };

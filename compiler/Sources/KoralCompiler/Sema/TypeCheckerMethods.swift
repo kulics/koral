@@ -8,7 +8,7 @@ extension TypeChecker {
     switch selfType {
     case .reference(let inner):
       // New: look up Ref generic extension methods first
-      if let extensions = genericExtensionMethods["Ref"],
+      if let extensions = genericExtensionMethods[.builtin("Ref")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -22,7 +22,7 @@ extension TypeChecker {
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
     case .borrowedReference(let inner):
-      if let extensions = genericExtensionMethods["Ref"],
+      if let extensions = genericExtensionMethods[.builtin("Ref")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -35,7 +35,7 @@ extension TypeChecker {
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
     case .mutableReference(let inner):
-      if let extensions = genericExtensionMethods["MutRef"],
+      if let extensions = genericExtensionMethods[.builtin("MutRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -45,7 +45,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericExtensionMethods["Ref"],
+      if let extensions = genericExtensionMethods[.builtin("Ref")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -58,7 +58,7 @@ extension TypeChecker {
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
     case .mutableBorrowedReference(let inner):
-      if let extensions = genericExtensionMethods["MutRef"],
+      if let extensions = genericExtensionMethods[.builtin("MutRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -68,7 +68,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericExtensionMethods["Ref"],
+      if let extensions = genericExtensionMethods[.builtin("Ref")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -81,7 +81,7 @@ extension TypeChecker {
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
     case .weakReference(let inner):
-      if let extensions = genericExtensionMethods["WeakRef"],
+      if let extensions = genericExtensionMethods[.builtin("WeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -91,7 +91,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericIntrinsicExtensionMethods["WeakRef"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("WeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -109,10 +109,10 @@ extension TypeChecker {
     switch selfType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
+      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
         return sym
       }
-      if let extensions = genericExtensionMethods[typeName],
+      if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -124,7 +124,7 @@ extension TypeChecker {
       }
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
-         let extensions = genericExtensionMethods[templateName],
+         let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -138,10 +138,10 @@ extension TypeChecker {
 
     case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
+      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
         return sym
       }
-      if let extensions = genericExtensionMethods[typeName],
+      if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -153,7 +153,7 @@ extension TypeChecker {
       }
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
-         let extensions = genericExtensionMethods[templateName],
+         let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -165,26 +165,26 @@ extension TypeChecker {
       }
       return nil
 
-    case .genericStruct(let templateName, _, let args):
-      if let extensions = genericExtensionMethods[templateName],
+    case .genericStruct(let tplDefId, let args):
+      if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
-          templateName: templateName,
+          templateName: Type.spelling(tplDefId),
           typeArgs: args,
           methodInfo: ext
         )
       }
       return nil
 
-    case .genericEnum(let templateName, _, let args):
-      if let extensions = genericExtensionMethods[templateName],
+    case .genericEnum(let tplDefId, let args):
+      if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
-          templateName: templateName,
+          templateName: Type.spelling(tplDefId),
           typeArgs: args,
           methodInfo: ext
         )
@@ -192,7 +192,7 @@ extension TypeChecker {
       return nil
 
     case .pointer(let element):
-      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("Ptr")],
         let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -203,7 +203,7 @@ extension TypeChecker {
         )
       }
 
-      if let extensions = genericExtensionMethods["Ptr"],
+      if let extensions = genericExtensionMethods[.builtin("Ptr")],
         let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -215,7 +215,7 @@ extension TypeChecker {
       }
       return nil
     case .mutableWeakReference(let inner):
-      if let extensions = genericIntrinsicExtensionMethods["MutWeakRef"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("MutWeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -225,7 +225,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericIntrinsicExtensionMethods["WeakRef"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("WeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -235,7 +235,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericExtensionMethods["MutWeakRef"],
+      if let extensions = genericExtensionMethods[.builtin("MutWeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -245,7 +245,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericExtensionMethods["WeakRef"],
+      if let extensions = genericExtensionMethods[.builtin("WeakRef")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -258,7 +258,7 @@ extension TypeChecker {
       return nil
 
     case .mutablePointer(let element):
-      if let extensions = genericIntrinsicExtensionMethods["MutPtr"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("MutPtr")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -268,7 +268,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("Ptr")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
@@ -279,7 +279,7 @@ extension TypeChecker {
         )
       }
 
-      if let extensions = genericExtensionMethods["MutPtr"],
+      if let extensions = genericExtensionMethods[.builtin("MutPtr")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -289,7 +289,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      if let extensions = genericExtensionMethods["Ptr"],
+      if let extensions = genericExtensionMethods[.builtin("Ptr")],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -306,10 +306,10 @@ extension TypeChecker {
       .float32, .float64,
       .bool:
       let typeName = selfType.description
-      if let methods = extensionMethods[typeName], let sym = methods[name] {
+      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
         return sym
       }
-      if let extensions = genericExtensionMethods[typeName],
+      if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
@@ -369,9 +369,12 @@ extension TypeChecker {
       guard case .mutablePointer(let aInner) = actual else { return false }
       return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
 
-    case .genericStruct(let pTemplate, _, let pArgs):
-      guard case .genericStruct(let aTemplate, _, let aArgs) = actual,
-            pTemplate == aTemplate,
+    case .genericStruct(let pDefId, let pArgs):
+      // Compare DECLARATIONS. The pattern arm used to discard its DefId with
+      // `_`, so the guard compared the actual's DefId to itself and accepted
+      // any two templates.
+      guard case .genericStruct(let aDefId, let aArgs) = actual,
+            pDefId == aDefId,
             pArgs.count == aArgs.count else { return false }
       for (pArg, aArg) in zip(pArgs, aArgs) {
         guard unifyGenericTypePattern(pattern: pArg, actual: aArg, typeParamNames: typeParamNames, inferred: &inferred) else {
@@ -380,9 +383,9 @@ extension TypeChecker {
       }
       return true
 
-    case .genericEnum(let pTemplate, _, let pArgs):
-      guard case .genericEnum(let aTemplate, _, let aArgs) = actual,
-            pTemplate == aTemplate,
+    case .genericEnum(let pDefId, let pArgs):
+      guard case .genericEnum(let aDefId, let aArgs) = actual,
+            pDefId == aDefId,
             pArgs.count == aArgs.count else { return false }
       for (pArg, aArg) in zip(pArgs, aArgs) {
         guard unifyGenericTypePattern(pattern: pArg, actual: aArg, typeParamNames: typeParamNames, inferred: &inferred) else {
@@ -485,16 +488,22 @@ extension TypeChecker {
     }
 
     var traitMatchedSymbols: [Symbol] = []
-    for (traitName, templates) in genericExtensionMethods {
-      guard traits[traitName] != nil else {
+    // The bucket key is an OWNER IDENTITY; "is this a trait?" is answered from the
+    // trait's declaration, and the trait's spelling is only used afterwards as a
+    // display/re-resolution handle.
+    for (owner, templates) in genericExtensionMethods {
+      guard case .decl(let ownerDefId) = owner,
+        let traitInfo = traits.values.first(where: { $0.defId == ownerDefId })
+      else {
         continue
       }
+      let traitName = traitInfo.name
       guard let methodTemplate = templates.first(where: { $0.method.name == name }) else {
         continue
       }
 
       let inferredTraitArgs: [Type]? = try {
-        if let traitInfo = traits[traitName], traitInfo.typeParameters.isEmpty {
+        if traitInfo.typeParameters.isEmpty {
           return []
         }
         return try inferTraitTypeArgsForReceiver(selfType, traitName: traitName)
@@ -517,9 +526,9 @@ extension TypeChecker {
       receiverMethodDispatchByDefId[resolved.defId] = ReceiverMethodDispatchInfo(
         methodDefId: resolved.defId,
         methodName: name,
-        owner: .extensionTemplate(ownerName: traitName),
+        owner: .extensionTemplate(ownerDefId: traitInfo.defId),
         conformanceTraitName: traitName,
-        conformanceTraitDefId: traits[traitName]?.defId
+        conformanceTraitDefId: traitInfo.defId
       )
       traitMatchedSymbols.append(resolved)
     }
@@ -656,7 +665,8 @@ extension TypeChecker {
       methodSymbol,
       parameters: method.parameters,
       declaredName: method.name,
-      owner: .extensionTemplate(ownerName: templateName),
+      owner: (context.ownerDefId(of: baseType).map { ReceiverMethodOwner.extensionTemplate(ownerDefId: $0) }
+        ?? .concreteType(ownerType: baseType)),
       conformanceTraitName: methodInfo.conformanceTraitName,
       conformanceTraitDefId: methodInfo.conformanceTraitDefId
     )
@@ -719,7 +729,8 @@ extension TypeChecker {
       methodSymbol,
       parameters: method.parameters,
       declaredName: method.name,
-      owner: .extensionTemplate(ownerName: templateName)
+      owner: (context.ownerDefId(of: baseType).map { ReceiverMethodOwner.extensionTemplate(ownerDefId: $0) }
+        ?? .concreteType(ownerType: baseType))
     )
     return methodSymbol
   }
@@ -764,11 +775,11 @@ extension TypeChecker {
     let typeArgs: [Type]
     
     switch baseType {
-    case .genericStruct(let name, _, let args):
-      templateName = name
+    case .genericStruct(let tplDefId, let args):
+      templateName = Type.spelling(tplDefId)
       typeArgs = args
-    case .genericEnum(let name, _, let args):
-      templateName = name
+    case .genericEnum(let tplDefId, let args):
+      templateName = Type.spelling(tplDefId)
       typeArgs = args
     case .structure(let defId):
       // Non-generic struct - extract base name
@@ -830,7 +841,7 @@ extension TypeChecker {
     }
 
     // Look up the method in generic extension methods
-    guard let extensions = genericExtensionMethods[templateName] else {
+    guard let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] else {
       throw SemanticError(.generic("No extension methods found for type \(templateName)"), span: currentSpan)
     }
     
@@ -1075,7 +1086,7 @@ extension TypeChecker {
         }
       }
       return nil
-    case .genericStruct(_, let templateDefId, let args):
+    case .genericStruct(let templateDefId, let args):
       if context.isStdNominal(templateDefId, context.stdListTemplateDefId), args.count == 1 {
         return .list(element: args[0])
       }

@@ -45,7 +45,7 @@ extension ExhaustivenessChecker {
         switch subjectType {
         case .`enum`:
             return .fullSpace(for: subjectType, context: context)
-        case .genericEnum(let templateName, _, _):
+        case .genericEnum(let tplDefId, _):
             guard let resolved = resolvedEnumCases else {
                 return nil
             }
@@ -53,7 +53,7 @@ extension ExhaustivenessChecker {
             for enumCase in resolved {
                 cases[enumCase.name] = enumCase.parameters.map { PatternSpace.fullSpace(for: $0.type, context: context) }
             }
-            return .enumCases(typeName: templateName, cases: cases)
+            return .enumCases(typeName: Type.spelling(tplDefId), cases: cases)
         case .bool:
             return .fullSpace(for: .bool, context: context)
         default:
@@ -400,8 +400,8 @@ extension ExhaustivenessChecker {
                     switch subjectType {
                     case .`enum`(let defId):
                         return context.getName(defId) ?? subjectType.description
-                    case .genericEnum(let templateName, _, _):
-                        return templateName
+                    case .genericEnum(let tplDefId, _):
+                        return Type.spelling(tplDefId)
                     case .bool:
                         return "Bool"
                     default:
@@ -426,10 +426,10 @@ extension ExhaustivenessChecker {
             let cases = context.getEnumCases(defId) ?? []
             try checkEnumExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
             
-        case .genericEnum(let templateName, _, _):
+        case .genericEnum(let tplDefId, _):
             // Use resolved cases if available
             if let resolved = resolvedEnumCases {
-                try checkEnumExhaustiveness(typeName: templateName, cases: resolved, hasCatchall: hasCatchall)
+                try checkEnumExhaustiveness(typeName: Type.spelling(tplDefId), cases: resolved, hasCatchall: hasCatchall)
             } else if hasCatchall {
                 // If we have a catchall, it's exhaustive
                 return

@@ -107,7 +107,8 @@ given TypeChecker {
                 },
                 .None() then List[Type].new(),
             },
-            .GenericStruct(template_name, _, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericStruct(template_def_id, args) then when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
                         let mutable bindings = Dict[String, Type].new();
@@ -135,15 +136,19 @@ given TypeChecker {
     };
 
     module_private constructor_matches_expected_type(self, constructor_type Type, expected_type Type) Bool = {
+        // Identity: compare DECLARATIONS. An instance points at its template, so
+        // a nominal and a generic match when they share one template. Nothing
+        // here reads a spelling -- two same-named types from different modules
+        // would otherwise look identical.
         return when constructor_type in {
             .StructureType(def_id) then when expected_type in {
                 .StructureType(expected_def_id) then def_id.id == expected_def_id.id,
-                .GenericStruct(template_name, _, _) then self.context().def_id_name_equals(def_id, template_name),
+                .GenericStruct(expected_def_id, _) then self.context().template_declaration(def_id) == expected_def_id,
                 _ then false,
             },
-            .GenericStruct(template_name, _, _) then when expected_type in {
-                .GenericStruct(expected_template, _, _) then template_name == expected_template,
-                .StructureType(expected_def_id) then self.context().def_id_name_equals(expected_def_id, template_name),
+            .GenericStruct(template_def_id, _) then when expected_type in {
+                .GenericStruct(expected_def_id, _) then template_def_id == expected_def_id,
+                .StructureType(expected_def_id) then self.context().template_declaration(expected_def_id) == template_def_id,
                 _ then false,
             },
             _ then false,
@@ -168,15 +173,15 @@ given TypeChecker {
                     .StructureType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base;
                         let template_def_id = self.context().get_template_def_id(def_id);
-                        Type.GenericStruct(template_name, if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
+                        Type.GenericStruct(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
                     },
                     .EnumType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base;
                         let template_def_id = self.context().get_template_def_id(def_id);
-                        Type.GenericEnum(template_name, if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
+                        Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
                     },
-                    .GenericStruct(template_name, template_def_id, _) then Type.GenericStruct(template_name, template_def_id, resolved_args),
-                    .GenericEnum(template_name, template_def_id, _) then Type.GenericEnum(template_name, template_def_id, resolved_args),
+                    .GenericStruct(template_def_id, _) then Type.GenericStruct(template_def_id, resolved_args),
+                    .GenericEnum(template_def_id, _) then Type.GenericEnum(template_def_id, resolved_args),
                     _ then resolved_base,
                 }
             },
@@ -340,7 +345,7 @@ given TypeChecker {
                                         // whose visibility can be checked.
                                         when bound_trait_name(constraint) in {
                                             .Some(trait_name) then {
-                                                when self.storage.trait_registry.get(trait_name) in {
+                                                when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
                                                     .Some(info) then {
                                                         if self.make_visibility_checker() is .Some(checker) then {
                                                             when checker.check_symbol(info.module_path, trait_name, false) in {
@@ -671,8 +676,9 @@ given TypeChecker {
         return when owner_type in {
             .StructureType(def_id) then self.context().get_name(def_id),
             .EnumType(def_id) then self.context().get_name(def_id),
-            .GenericStruct(template_name, _, _) then Option[String].Some(template_name),
-            .GenericEnum(template_name, _, _) then Option[String].Some(template_name),
+            // Display only: the spelling is read from the declaration.
+            .GenericStruct(template_def_id, _) then Option[String].Some(def_id_spelling(template_def_id)),
+            .GenericEnum(template_def_id, _) then Option[String].Some(def_id_spelling(template_def_id)),
             .GenericParameter(name) then Option[String].Some(name),
             .ReferenceType(inner) then self.owner_type_name_for_type(inner),
             .MutableReferenceType(inner) then self.owner_type_name_for_type(inner),
@@ -686,7 +692,8 @@ given TypeChecker {
 
     module_private trait_name_for_type(self, trait_type Type) String = {
         return when trait_type in {
-            .TraitObject(trait_name, _, _) then trait_name,
+            // Display only: the spelling is read from the declaration.
+            .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             _ then self.context().type_display_name(trait_type),
         };
     };
@@ -715,8 +722,10 @@ given TypeChecker {
                 },
                 .None() then List[FunctionParamSpec].new(),
             },
-            .GenericStruct(template_name, template_def_id, _) then {
-                let resolved_def_id = if template_def_id.is_valid() then template_def_id else self.storage.generic_templates.lookup_struct_def_id(template_name);
+            // Identity: the template's DECLARATION. There is no spelling
+            // fallback -- the type carries the declaration.
+            .GenericStruct(template_def_id, _) then {
+                let resolved_def_id = template_def_id;
                 let fields = self.context().get_struct_fields(resolved_def_id) or else List[StructField].new();
                 let mutable specs = List[FunctionParamSpec].new();
                 for field in fields then {
@@ -743,7 +752,7 @@ given TypeChecker {
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(def_id(UInt), case_name),
-            .GenericEnum(_, template_def_id, _) then when self.context().get_kind(template_def_id) in {
+            .GenericEnum(template_def_id, _) then when self.context().get_kind(template_def_id) in {
                 .Some(_) then self.context().enum_case_param_specs_by_raw_id(template_def_id.id, case_name),
                 .None() then List[FunctionParamSpec].new(),
             },
@@ -763,7 +772,8 @@ given TypeChecker {
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_has_case_by_raw_id(def_id(UInt), member_name),
-            .GenericEnum(template_name, _, _) then when self.storage.generic_templates.lookup_enum(template_name) in {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericEnum(template_def_id, _) then when self.storage.generic_templates.enum_by_def_id(template_def_id) in {
                 .Some(enum_template) then self.context().enum_has_case_by_raw_id(enum_template.def_id.id, member_name),
                 .None() then false,
             },
@@ -776,12 +786,18 @@ given TypeChecker {
         if not bound_specs.is_empty() then {
             return bound_specs;
         };
-        when self.context().get_method_param_specs(type_name, method_name) in {
-            .Some(specs) then { return specs; },
+        // `type_name` is a spelling; resolve it to the declaration once here.
+        when self.method_owner_for_name(type_name) in {
+            .Some(owner) then {
+                when self.context().get_method_param_specs(owner, method_name) in {
+                    .Some(specs) then { return specs; },
+                    .None() then {},
+                };
+                if self.lookup_method_signature(owner, method_name) is .Some(method) then {
+                    return self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new();
+                };
+            },
             .None() then {},
-        };
-        if self.lookup_method_signature(type_name, method_name) is .Some(method) then {
-            return self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new();
         };
         return when self.try_resolve_named_type_without_diag(type_name) in {
             .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
@@ -805,7 +821,7 @@ given TypeChecker {
             },
             .Error(_) then {},
         };
-        return when self.lookup_method_signature(trait_name, method_name) in {
+        return when self.lookup_trait_method_signature(trait_name, method_name) in {
             .Some(sig) then self.drop_receiver_param_specs(sig),
             .None() then List[FunctionParamSpec].new(),
         };
@@ -851,8 +867,10 @@ given TypeChecker {
             },
             .None() then {},
         };
-        let owner_name = self.owner_type_name_for_type(base_type) or else "";
-        let owner_specs = self.context().get_method_param_specs(owner_name, method_name);
+        // Owner IDENTITY of the receiver -- `owner_type_name_for_type` returned a
+        // spelling and two same-named types shared one param-spec bucket.
+        let receiver_owner = self.extension_template_key(base_type);
+        let owner_specs = self.context().get_method_param_specs(receiver_owner, method_name);
         let expected_count = when owner_specs in {
             .Some(specs) then self.declared_call_param_count(specs),
             .None() then {

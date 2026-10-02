@@ -22,6 +22,9 @@ public struct InferenceResult {
 public class BidirectionalInference {
     /// 约束求解器
     private let solver: ConstraintSolver
+
+    /// The declaration tables, used only to RESOLVE a spelling to its DefId.
+    private let context: CompilerContext
     
     /// 类型环境（变量名到类型的映射）
     private var typeEnvironment: [String: Type] = [:]
@@ -31,17 +34,50 @@ public class BidirectionalInference {
     
     /// 初始化双向推断器
     public init() {
-        self.solver = ConstraintSolver(context: CompilerContext())
+        let context = CompilerContext()
+        self.context = context
+        self.solver = ConstraintSolver(context: context)
     }
 
     /// 使用指定上下文初始化
     public init(context: CompilerContext) {
+        self.context = context
         self.solver = ConstraintSolver(context: context)
     }
-    
+
     /// 使用现有求解器初始化
     public init(solver: ConstraintSolver) {
+        self.context = CompilerContext()
         self.solver = solver
+    }
+
+    /// Std's `String` / `Rune`, reached as LANG ITEMS by declaration -- the way
+    /// rustc reaches `str` (`rustc_hir::LangItem::Str`), not by fabricating a
+    /// type out of a spelling.
+    private func stdNominalType(named name: String) -> Type {
+        guard let defId = (name == "Rune" ? context.stdRuneDefId : context.stdStringDefId) else {
+            return .void
+        }
+        return .structure(defId: defId)
+    }
+
+    /// A `TypeNode` spelling resolved ONCE to its declaration (rustc_resolve).
+    /// Afterwards the `Type` carries the DefId and nothing re-reads the name.
+    private func genericNominalType(named name: String, args: [Type]) -> Type {
+        let modulePath = context.defIdMap.currentModulePath
+        if let defId = context.defIdMap.lookupGenericStructTemplateDefIdStrict(modulePath: modulePath, name: name)
+            ?? context.defIdMap.lookupGenericStructTemplateDefId(name)
+        {
+            return .genericStruct(templateDefId: defId, args: args)
+        }
+        if let defId = context.defIdMap.lookupGenericEnumTemplateDefIdStrict(modulePath: modulePath, name: name)
+            ?? context.defIdMap.lookupGenericEnumTemplateDefId(name)
+        {
+            return .genericEnum(templateDefId: defId, args: args)
+        }
+        // The spelling names no declaration. Inference cannot name a type here;
+        // `.void` is a non-identity stand-in, never used as a registry key.
+        return .void
     }
     
     // MARK: - Type Variable Management
@@ -139,14 +175,17 @@ public class BidirectionalInference {
             
         // 字符串字面量
         case .stringLiteral:
-            return lookupType(name: "String") ?? .genericStruct(template: "String", templateDefId: .invalid, args: [])
+            // A string literal's type is a LANG ITEM -- Std's `String`, reached
+            // by declaration the way rustc reaches `str` (rustc_hir::LangItem).
+            // Never fabricated out of the spelling.
+            return lookupType(name: "String") ?? stdNominalType(named: "String")
 
         // Rune 字面量
         case .runeLiteral:
-            return lookupType(name: "Rune") ?? .genericStruct(template: "Rune", templateDefId: .invalid, args: [])
+            return lookupType(name: "Rune") ?? stdNominalType(named: "Rune")
 
         case .interpolatedString:
-            return lookupType(name: "String") ?? .genericStruct(template: "String", templateDefId: .invalid, args: [])
+            return lookupType(name: "String") ?? stdNominalType(named: "String")
             
         // 变量引用
         case .identifier(let name):
@@ -450,7 +489,7 @@ public class BidirectionalInference {
         case .pairVariableDeclaration(let first, let second, let value, _):
             let valueType = synthesize(value, span: span)
             // Extract Pair type args for binding types
-            if case .genericStruct(_, _, let typeArgs) = valueType, typeArgs.count == 2 {
+            if case .genericStruct(_, let typeArgs) = valueType, typeArgs.count == 2 {
                 if !first.isDiscard { extendEnvironment(name: first.name, type: typeArgs[0]) }
                 if !second.isDiscard { extendEnvironment(name: second.name, type: typeArgs[1]) }
             }
@@ -482,7 +521,9 @@ public class BidirectionalInference {
             )
         case .generic(let base, let args):
             let argTypes = args.map { resolveTypeNode($0) }
-            return .genericStruct(template: base, templateDefId: .invalid, args: argTypes)
+            // RESOLUTION: a TypeNode spelling is matched to its declaration once,
+            // here (rustc_resolve). The `Type` then carries the DefId.
+            return genericNominalType(named: base, args: argTypes)
         case .reference(let inner, let mutable):
             return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
         case .pointer(let inner, let mutable):

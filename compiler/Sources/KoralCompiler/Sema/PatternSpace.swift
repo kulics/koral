@@ -321,8 +321,9 @@ extension PatternSpace {
             }
             return result
             
-        case .genericEnum(let templateName, _, _):
-            guard let defId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName) else {
+        case .genericEnum(let templateDefId, _):
+            // The type carries the template's DECLARATION; the spelling is not read.
+            guard templateDefId.isValid, let defId = Optional(templateDefId) else {
                 return nil
             }
             var result: [String: [PatternSpace]] = [:]

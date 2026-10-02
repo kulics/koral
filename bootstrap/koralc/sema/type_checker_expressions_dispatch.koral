@@ -2,7 +2,7 @@
 given TypeChecker {
     module_private dispatches_via_trait_object(self, receiver_type Type) Bool = {
         return when receiver_type in {
-            .TraitObject(_, _, _) then true,
+            .TraitObject(_, _) then true,
             .ReferenceType(inner) then self.dispatches_via_trait_object(inner),
             .MutableReferenceType(inner) then self.dispatches_via_trait_object(inner),
             .BorrowedReferenceType(inner) then self.dispatches_via_trait_object(inner),
@@ -13,7 +13,7 @@ given TypeChecker {
 
     module_private trait_object_dispatch_type(self, receiver_type Type) Option[Type] = {
         return when receiver_type in {
-            .TraitObject(_, _, _) then Option[Type].Some(receiver_type),
+            .TraitObject(_, _) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_dispatch_type(inner),
             .MutableReferenceType(inner) then self.trait_object_dispatch_type(inner),
             .BorrowedReferenceType(inner) then self.trait_object_dispatch_type(inner),
@@ -36,8 +36,8 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when normalized in {
-            .TraitObject(existing_trait_name, existing_trait_def_id, existing_args) then {
-                if existing_trait_def_id == requested_trait_id then Type.TraitObject(existing_trait_name, existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
+            .TraitObject(existing_trait_def_id, existing_args) then {
+                if existing_trait_def_id == requested_trait_id then Type.TraitObject(existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
             },
             _ then self.canonical_trait_object_type(trait_name),
         };
@@ -50,7 +50,7 @@ given TypeChecker {
                 let mutable supports_or_else = false;
                 let mutable is_result = false;
                 when typed_op.expr_type in {
-                    .GenericEnum(_, _, _) then {
+                    .GenericEnum(_, _) then {
                         if self.is_std_flow_enum(typed_op.expr_type, "Result") or self.is_std_flow_enum(typed_op.expr_type, "Option") then {
                             supports_or_else = true;
                         };
@@ -164,7 +164,7 @@ given TypeChecker {
                     let mutable is_result = false;
                     let mutable is_option = false;
                     when typed_op.expr_type in {
-                        .GenericEnum(_, _, _) then {
+                        .GenericEnum(_, _) then {
                             if self.is_std_flow_enum(typed_op.expr_type, "Result") then { is_result = true;};
                             if self.is_std_flow_enum(typed_op.expr_type, "Option") then { is_option = true;};
                         },
@@ -483,9 +483,9 @@ given TypeChecker {
     module_private resolve_implicit_static_receiver_type(self, expected Option[Type], member_name String) Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
-                .GenericStruct(template_name, _, type_args) then {
-                    let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(template_name, self.type_ref_list_to_value_list(type_args));
-                    if self.resolve_static_method_signature_for_receiver(template_name, declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
+                .GenericStruct(tplDefId, type_args) then {
+                    let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(def_id_spelling(tplDefId), self.type_ref_list_to_value_list(type_args));
+                    if self.resolve_static_method_signature_for_receiver(def_id_spelling(tplDefId), declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
                 },
                 .StructureType(def_id) then {
                     let receiver_info = self.implicit_static_receiver_info_for_def_id(def_id);
@@ -494,19 +494,6 @@ given TypeChecker {
                     let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(type_name, receiver_type_args);
                     if self.resolve_static_method_signature_for_receiver(type_name, declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
                 },
-                .IntType() then if self.lookup_method_signature("Int", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Int8Type() then if self.lookup_method_signature("Int8", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Int16Type() then if self.lookup_method_signature("Int16", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Int32Type() then if self.lookup_method_signature("Int32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Int64Type() then if self.lookup_method_signature("Int64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .UIntType() then if self.lookup_method_signature("UInt", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .UInt8Type() then if self.lookup_method_signature("UInt8", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .UInt16Type() then if self.lookup_method_signature("UInt16", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .UInt32Type() then if self.lookup_method_signature("UInt32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .UInt64Type() then if self.lookup_method_signature("UInt64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Float32Type() then if self.lookup_method_signature("Float32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .Float64Type() then if self.lookup_method_signature("Float64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .BoolType() then if self.lookup_method_signature("Bool", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
                 .EnumType(def_id) then {
                     let receiver_info = self.implicit_static_receiver_info_for_def_id(def_id);
                     let type_name = receiver_info.first;
@@ -514,14 +501,18 @@ given TypeChecker {
                     let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(type_name, receiver_type_args);
                     if self.resolve_static_method_signature_for_receiver(type_name, declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
                 },
-                .GenericEnum(template_name, _, type_args) then {
-                    let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(template_name, self.type_ref_list_to_value_list(type_args));
-                    if self.resolve_static_method_signature_for_receiver(template_name, declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
+                // The spelling is read from the DECLARATION for the static
+                // receiver lookup; identity comes from `tplDefId`.
+                .GenericEnum(tplDefId, type_args) then {
+                    let receiver_spelling = def_id_spelling(tplDefId);
+                    let mutable declared_receiver_type = self.resolve_static_declared_receiver_type(receiver_spelling, self.type_ref_list_to_value_list(type_args));
+                    if self.resolve_static_method_signature_for_receiver(receiver_spelling, declared_receiver_type, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
                 },
-                _ then {
-                    let implicit_type_name = if self.is_string_type(et) then "String" else if self.is_rune_type(et) then "Rune" else "";
-                    if implicit_type_name.is_empty() then Option[Type].None() else if self.lookup_method_signature(implicit_type_name, member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None()
-                },
+                // Everything else -- built-in scalars, `String`, `Rune` -- has no
+                // static receiver to declare; its methods live on the owner
+                // identity directly. This used to be one branch per scalar plus a
+                // `is_string_type`/`is_rune_type` spelling test.
+                _ then if self.lookup_method_signature(self.extension_template_key(et), member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
             },
             .None() then Option[Type].None(),
         };
@@ -539,11 +530,13 @@ given TypeChecker {
     module_private implicit_static_receiver_info_for_def_id(self, def_id DefId) Pair[String, List[Type]] = {
         return when self.context().lookup_type(def_id) in {
             .Some(mapped_type) then when mapped_type in {
-                .GenericStruct(template_name, _, type_args) then {
-                    Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args))
+                // The spelling is read from the DECLARATION; the callers use it
+                // only to resolve a static receiver, never as an identity.
+                .GenericStruct(template_def_id, type_args) then {
+                    Pair[String, List[Type]](def_id_spelling(template_def_id), self.type_ref_list_to_value_list(type_args))
                 },
-                .GenericEnum(template_name, _, type_args) then {
-                    Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args))
+                .GenericEnum(template_def_id, type_args) then {
+                    Pair[String, List[Type]](def_id_spelling(template_def_id), self.type_ref_list_to_value_list(type_args))
                 },
                 _ then {
                     let type_name = when self.context().get_template_name(def_id) in {
@@ -574,7 +567,8 @@ given TypeChecker {
     module_private implicit_static_receiver_type_name(self, receiver_opt Option[Type]) String = {
         return when receiver_opt in {
             .Some(receiver_type) then when receiver_type in {
-                .GenericStruct(template_name, _, _) then template_name,
+                // Display only: the spelling is read from the declaration.
+                .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
                 .StructureType(def_id) then self.context().get_name(def_id) or else "",
                 .IntType() then "Int",
                 .Int8Type() then "Int8",
@@ -683,7 +677,7 @@ given TypeChecker {
                                     );
                                 };
                             },
-                            .GenericEnum(_, _, _) then {
+                            .GenericEnum(_, _) then {
                                 if not self.is_upper_first_char(member_name) then {
                                     self.storage.diagnostics.push(
                                         make_diagnostic(
@@ -720,8 +714,8 @@ given TypeChecker {
         return when t in {
             .StructureType(_) then true,
             .EnumType(_) then true,
-            .GenericStruct(_, _, _) then true,
-            .GenericEnum(_, _, _) then true,
+            .GenericStruct(_, _) then true,
+            .GenericEnum(_, _) then true,
             _ then false,
         };
     };
@@ -1010,11 +1004,13 @@ given TypeChecker {
         return when canonical in {
             .StructureType(def_id) then Option[Pair[String, List[Type]]].Some(self.implicit_static_receiver_info_for_def_id(def_id)),
             .EnumType(def_id) then Option[Pair[String, List[Type]]].Some(self.implicit_static_receiver_info_for_def_id(def_id)),
-            .GenericStruct(template_name, _, type_args) then {
-                Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args)))
+            // The spelling is read from the DECLARATION; callers use it only to
+            // resolve a static receiver, never as an identity.
+            .GenericStruct(template_def_id, type_args) then {
+                Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](def_id_spelling(template_def_id), self.type_ref_list_to_value_list(type_args)))
             },
-            .GenericEnum(template_name, _, type_args) then {
-                Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args)))
+            .GenericEnum(template_def_id, type_args) then {
+                Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](def_id_spelling(template_def_id), self.type_ref_list_to_value_list(type_args)))
             },
             .IntType() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int", List[Type].new())),
             .Int8Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int8", List[Type].new())),
@@ -1161,7 +1157,7 @@ given TypeChecker {
                                                 );
                                             };
                                         },
-                                        .GenericStruct(_, _, _) then {},
+                                        .GenericStruct(_, _) then {},
                                         _ then {
                                             self.storage.diagnostics.push(
                                                 make_diagnostic(
@@ -1355,11 +1351,11 @@ given TypeChecker {
                                 let trait_receiver = when typed_base.expr_kind in {
                                     .DerefExpr(inner) then when inner.expr_type in {
                                         .ReferenceType(inner_ref) then when inner_ref in {
-                                            .TraitObject(_, _, _) then inner,
+                                            .TraitObject(_, _) then inner,
                                             _ then typed_base,
                                         },
                                         .MutableReferenceType(inner_ref) then when inner_ref in {
-                                            .TraitObject(_, _, _) then inner,
+                                            .TraitObject(_, _) then inner,
                                             _ then typed_base,
                                         },
                                         _ then typed_base,
@@ -1389,7 +1385,7 @@ given TypeChecker {
                 };
                 let should_use_static_dispatch = when typed_base.expr_type in {
                     .GenericParameter(_) then false,
-                    .TraitObject(_, _, _) then false,
+                    .TraitObject(_, _) then false,
                     _ then not expected_self_needs_receiver_dispatch and not self.is_unresolved_expr_type(typed_base.expr_type),
                 };
                 let trait_dispatch_requires_object = typed_base.expr_type is .GenericParameter(_) or self.dispatches_via_trait_object(typed_base.expr_type);
@@ -1611,19 +1607,19 @@ given TypeChecker {
                             let linked_def_id = self.context().get_template_def_id(def_id);
                             if linked_def_id.is_valid() then linked_def_id else def_id
                         },
-                        .GenericStruct(_, def_id, _) or .GenericEnum(_, def_id, _) then def_id,
+                        .GenericStruct(tpl_def_id, _) or .GenericEnum(tpl_def_id, _) then tpl_def_id,
                         _ then def_id_invalid(),
                     };
-                    let generic_type = if is_enum then Type.GenericEnum(base, template_def_id, type_refs_u) else Type.GenericStruct(base, template_def_id, type_refs_s);
+                    let generic_type = if is_enum then Type.GenericEnum(template_def_id, type_refs_u) else Type.GenericStruct(template_def_id, type_refs_s);
                     return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type);
                 };
 
                 if self.lookup_current_file_symbol(base) is .Some(_) or self.storage.global_scope.lookup(base) is .Some(_) then {
                     self.push_expr_diagnostic(expr, "Invalid operation use type as value between types \(base) and ");
-                    make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), List[Type].new()), resolved_args), Type.Unknown())
+                    make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(self.storage.generic_templates.lookup_struct_def_id(base), List[Type].new()), resolved_args), Type.Unknown())
                 } else {
                     self.push_expr_diagnostic(expr, "Undefined type: \(base)");
-                    make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, self.storage.generic_templates.lookup_struct_def_id(base), List[Type].new()), resolved_args), Type.Unknown())
+                    make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(self.storage.generic_templates.lookup_struct_def_id(base), List[Type].new()), resolved_args), Type.Unknown())
                 }
             },
             .StaticMethodCall(type_name, type_args, method_name, args, _) then
@@ -1964,7 +1960,7 @@ given TypeChecker {
                 when inner_expected in {
                     .Some(expected_inner) then {
                         let suppress_trait_object_mismatch = when expected_inner in {
-                            .TraitObject(_, _, _) then self.can_convert_to_trait_object(typed_inner.expr_type, expected_inner),
+                            .TraitObject(_, _) then self.can_convert_to_trait_object(typed_inner.expr_type, expected_inner),
                             _ then false,
                         };
                         if not suppress_trait_object_mismatch and not self.same_expr_type(typed_inner.expr_type, expected_inner) and not self.contains_generic_parameter(expected_inner) and not self.is_unresolved_expr_type(typed_inner.expr_type) and not self.is_unresolved_expr_type(expected_inner) then {
@@ -2067,7 +2063,7 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -2076,7 +2072,7 @@ given TypeChecker {
                     },
                     .ReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -2085,7 +2081,7 @@ given TypeChecker {
                     },
                     .WeakReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -2094,7 +2090,7 @@ given TypeChecker {
                     },
                     .MutableWeakReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -2103,7 +2099,7 @@ given TypeChecker {
                     },
                     .BorrowedReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },
@@ -2112,7 +2108,7 @@ given TypeChecker {
                     },
                     .MutableBorrowedReferenceType(inner_ref) then {
                         when inner_ref in {
-                            .TraitObject(_, _, _) then {
+                            .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use * on a trait object *: concrete type is unknown at compile time");
                                 Type.Unknown()
                             },

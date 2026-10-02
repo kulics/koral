@@ -23,7 +23,7 @@ public type mutable CompilerContext(
     mutable concrete_given_member_bodies Dict[UInt, TypedExpr],
     mutable concrete_given_member_sources Dict[UInt, ConcreteExprSource],
     mutable parsed_default_values Dict[String, String],
-    mutable method_param_specs Dict[String, Dict[String, List[FunctionParamSpec]]],
+    mutable method_param_specs Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]],
 );
 
 public type ConcreteExprSource(
@@ -43,7 +43,7 @@ given CompilerContext {
             Dict[UInt, TypedExpr].new(),
             Dict[UInt, ConcreteExprSource].new(),
             Dict[String, String].new(),
-            Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
+            Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]].new(),
         );
     };
 
@@ -56,18 +56,18 @@ given CompilerContext {
             Dict[UInt, TypedExpr].new(),
             Dict[UInt, ConcreteExprSource].new(),
             Dict[String, String].new(),
-            Dict[String, Dict[String, List[FunctionParamSpec]]].new(),
+            Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]].new(),
         );
     };
 
-    public register_method_param_specs(self, owner_name String, method_name String, specs List[FunctionParamSpec]) Void = {
-        let mutable methods = self.method_param_specs.get(owner_name) or else Dict[String, List[FunctionParamSpec]].new();
+    public register_method_param_specs(self, owner MethodOwner, method_name String, specs List[FunctionParamSpec]) Void = {
+        let mutable methods = self.method_param_specs.get(owner) or else Dict[String, List[FunctionParamSpec]].new();
         methods.insert(method_name, specs);
-        self.method_param_specs.insert(owner_name, methods);
+        self.method_param_specs.insert(owner, methods);
     };
 
-    public get_method_param_specs(self, owner_name String, method_name String) Option[List[FunctionParamSpec]] = {
-        return when self.method_param_specs.get(owner_name) in {
+    public get_method_param_specs(self, owner MethodOwner, method_name String) Option[List[FunctionParamSpec]] = {
+        return when self.method_param_specs.get(owner) in {
             .Some(methods) then methods.get(method_name),
             .None() then Option[List[FunctionParamSpec]].None(),
         };
@@ -382,15 +382,6 @@ given CompilerContext {
         return List[EnumCaseParam].new();
     };
 
-    public enum_case_params_by_template_name(self, template_name String, case_name String) List[EnumCaseParam] = {
-        for entry in self.def_id_map.enum_template_names.iterator() then {
-            if entry.second == template_name then {
-                return self.enum_case_params_by_raw_id(entry.first, case_name);
-            };
-        };
-        return List[EnumCaseParam].new();
-    };
-
     public enum_has_case_by_raw_id(self, raw_id UInt, case_name String) Bool = {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
@@ -541,8 +532,13 @@ given CompilerContext {
             .StructureType(def_id) then self.requires_managed_nominal_layout_def(def_id),
             .EnumType(def_id) then self.requires_managed_nominal_layout_def(def_id),
             .OpaqueType(def_id) then self.requires_managed_nominal_layout_def(def_id),
-            .GenericStruct(template, template_def_id, _) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+            .GenericStruct(template_def_id, _) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
                     return true;
                 };
@@ -551,8 +547,13 @@ given CompilerContext {
                     .None() then false,
                 }
             },
-            .GenericEnum(template, template_def_id, _) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+            .GenericEnum(template_def_id, _) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
                     return true;
                 };
@@ -625,21 +626,31 @@ given CompilerContext {
         };
 
         return when t in {
-            .GenericStruct(template, template_def_id, args) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+            .GenericStruct(template_def_id, args) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
                     return Option[DefId].Some(resolved_template_def_id);
                 };
-                let resolved_type = Type.GenericStruct(template, resolved_template_def_id, args);
+                let resolved_type = Type.GenericStruct(resolved_template_def_id, args);
                 let layout_name = self.get_layout_key(resolved_type);
                 self.lookup_def_id(List[String].new(), layout_name, Option[String].None())
             },
-            .GenericEnum(template, template_def_id, args) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+            .GenericEnum(template_def_id, args) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if args.is_empty() and resolved_template_def_id.is_valid() and not self.is_generic_instantiation(resolved_template_def_id) then {
                     return Option[DefId].Some(resolved_template_def_id);
                 };
-                let resolved_type = Type.GenericEnum(template, resolved_template_def_id, args);
+                let resolved_type = Type.GenericEnum(resolved_template_def_id, args);
                 let layout_name = self.get_layout_key(resolved_type);
                 self.lookup_def_id(List[String].new(), layout_name, Option[String].None())
             },
@@ -665,8 +676,13 @@ given CompilerContext {
                     result.push(def_id);
                 };
             },
-            .GenericStruct(template, template_def_id, type_args) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_struct_template_def_id(template) or else def_id_invalid();
+            .GenericStruct(template_def_id, type_args) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if resolved_template_def_id.is_valid() and (self.is_struct_mutable(resolved_template_def_id) or self.has_explicit_drop(resolved_template_def_id)) then {
                     return result;
                 };
@@ -684,8 +700,13 @@ given CompilerContext {
                     },
                 };
             },
-            .GenericEnum(template, template_def_id, type_args) then {
-                let resolved_template_def_id = if template_def_id.is_valid() then template_def_id else self.def_id_map.lookup_generic_enum_template_def_id(template) or else def_id_invalid();
+            .GenericEnum(template_def_id, type_args) then {
+                // Identity is the carried `template_def_id` and nothing else.
+                // An invalid one is an error state, not a cue to re-resolve by
+                // spelling: the type has already lost its identity and no name
+                // lookup can recover it. (rustc_resolve resolves ONCE --
+                // `Res::Def(.., DefId)` -- and never re-derives it from a path.)
+                let resolved_template_def_id = template_def_id;
                 if resolved_template_def_id.is_valid() and self.has_explicit_drop(resolved_template_def_id) then {
                     return result;
                 };
@@ -739,14 +760,14 @@ given CompilerContext {
         };
         return when self.def_id_map.lookup_type(def_id) in {
             .Some(mapped) then when mapped in {
-                .GenericStruct(_, _, args) then {
+                .GenericStruct(_, args) then {
                     let mutable unpacked = List[Type].new();
                     for arg in args then {
                         unpacked.push(arg);
                     };
                     Option[List[Type]].Some(unpacked)
                 },
-                .GenericEnum(_, _, args) then {
+                .GenericEnum(tplDefId, args) then {
                     let mutable unpacked = List[Type].new();
                     for arg in args then {
                         unpacked.push(arg);
@@ -766,8 +787,8 @@ given CompilerContext {
         };
         return when self.def_id_map.lookup_type(def_id) in {
             .Some(mapped) then when mapped in {
-                .GenericStruct(template, _, _) then Option[String].Some(template),
-                .GenericEnum(template, _, _) then Option[String].Some(template),
+                .GenericStruct(tplDefId, _) then Option[String].Some(def_id_spelling(tplDefId)),
+                .GenericEnum(tplDefId, _) then Option[String].Some(def_id_spelling(tplDefId)),
                 _ then Option[String].None(),
             },
             .None() then Option[String].None(),
@@ -776,6 +797,112 @@ given CompilerContext {
 
     public get_template_def_id(self, def_id DefId) DefId = {
         return self.def_id_map.get_template_def_id(def_id);
+    };
+
+    /// The declaration a method registry keys `t` by.
+    ///
+    /// A monomorphized instance resolves to its TEMPLATE's declaration, because
+    /// methods are declared on the template and not on each instantiation:
+    /// `List[Int]` and `List[String]` share std's `List`.
+    ///
+    /// Built-in scalars and type modifiers have no declaration, so they are
+    /// keyed by a fixed name in the closed `Builtin` space. This is the ONLY
+    /// place a name decides a key, and only for types that have no declaration
+    /// to decide it instead -- the same closed set rustc puts in
+    /// `incoherent_impls`.
+    ///
+    /// Source: `rustc_middle::ty::TyKind::Adt(&AdtDef, GenericArgs)` -- a type
+    /// carries its DEFINITION, never a path. The no-declaration closed set is
+    /// `rustc_middle::ty::fast_reject::SimplifyType`, used by
+    /// `incoherent_impls: FxIndexMap<SimplifiedType, Vec<DefId>>`.
+    public method_owner_of(self, t Type) MethodOwner = {
+        return when t in {
+            .TraitObject(trait_def_id, _) then self.method_owner_decl(trait_def_id),
+            .StructureType(def_id) then self.method_owner_decl(def_id),
+            .EnumType(def_id) then self.method_owner_decl(def_id),
+            .OpaqueType(def_id) then self.method_owner_decl(def_id),
+            .GenericStruct(template_def_id, _) then self.method_owner_decl(template_def_id),
+            .GenericEnum(template_def_id, _) then self.method_owner_decl(template_def_id),
+
+            .ReferenceType(_) then MethodOwner.Builtin("Ref"),
+            .MutableReferenceType(_) then MethodOwner.Builtin("MutRef"),
+            .BorrowedReferenceType(_) then MethodOwner.Builtin("Ref"),
+            .MutableBorrowedReferenceType(_) then MethodOwner.Builtin("MutRef"),
+            .PointerType(_) then MethodOwner.Builtin("Ptr"),
+            .MutablePointerType(_) then MethodOwner.Builtin("MutPtr"),
+            .WeakReferenceType(_) then MethodOwner.Builtin("WeakRef"),
+            .MutableWeakReferenceType(_) then MethodOwner.Builtin("MutWeakRef"),
+
+            .IntType() then MethodOwner.Builtin("Int"),
+            .Int8Type() then MethodOwner.Builtin("Int8"),
+            .Int16Type() then MethodOwner.Builtin("Int16"),
+            .Int32Type() then MethodOwner.Builtin("Int32"),
+            .Int64Type() then MethodOwner.Builtin("Int64"),
+            .UIntType() then MethodOwner.Builtin("UInt"),
+            .UInt8Type() then MethodOwner.Builtin("UInt8"),
+            .UInt16Type() then MethodOwner.Builtin("UInt16"),
+            .UInt32Type() then MethodOwner.Builtin("UInt32"),
+            .UInt64Type() then MethodOwner.Builtin("UInt64"),
+            .Float32Type() then MethodOwner.Builtin("Float32"),
+            .Float64Type() then MethodOwner.Builtin("Float64"),
+            .BoolType() then MethodOwner.Builtin("Bool"),
+            .VoidType() then MethodOwner.Builtin("Void"),
+            .NeverType() then MethodOwner.Builtin("Never"),
+
+            .FunctionType(_, _) then MethodOwner.Builtin("Function"),
+            .GenericParameter(name) then MethodOwner.Builtin("TypeParam.\(name)"),
+            .ModuleType(_) then MethodOwner.Builtin("Module"),
+            .TypeVar(_) then MethodOwner.Builtin("TypeVar"),
+            .Unknown() then MethodOwner.Builtin("Unknown"),
+        };
+    };
+
+    /// `def_id`, or its template when the declaration is a monomorphized
+    /// instance. A declaration with no template is its own owner.
+    /// The template's DECLARATION for a nominal DefId: an instance points at its
+    /// template, a template at itself.
+    ///
+    /// Never derived from a spelling -- rustc's `Ty::Adt` holds `&AdtDef`, and an
+    /// instance's `AdtDef` is its ADT.
+    public template_declaration(self, def_id DefId) DefId = {
+        let template_id = self.get_template_def_id(def_id);
+        return if template_id.is_valid() then template_id else def_id;
+    };
+
+    public method_owner_decl(self, def_id DefId) MethodOwner = {
+        let template_id = self.get_template_def_id(def_id);
+        return MethodOwner.Decl(if template_id.is_valid() then template_id else def_id);
+    };
+    /// The (owner, type arguments) pair identifying a type's INSTANTIATION.
+    ///
+    /// `List[String]` and `List[Rune]` share the owner `List` and differ in the
+    /// arguments -- the `GenericArgs` half of rustc's `Instance { def, args }`.
+    /// Both spellings of an instantiation (`StructureType` of a monomorphized
+    /// instance and `GenericStruct` of the template) land on the same pair.
+    public method_owner_and_args(self, t Type) Pair[MethodOwner, List[Type]] = {
+        return when t in {
+            .GenericStruct(template_def_id, args) then Pair[MethodOwner, List[Type]](self.method_owner_decl(template_def_id), args),
+            .GenericEnum(template_def_id, args) then Pair[MethodOwner, List[Type]](self.method_owner_decl(template_def_id), args),
+            .StructureType(def_id) then Pair[MethodOwner, List[Type]](self.method_owner_decl(def_id), self.get_type_arguments(def_id) or else List[Type].new()),
+            .EnumType(def_id) then Pair[MethodOwner, List[Type]](self.method_owner_decl(def_id), self.get_type_arguments(def_id) or else List[Type].new()),
+            .OpaqueType(def_id) then Pair[MethodOwner, List[Type]](self.method_owner_decl(def_id), self.get_type_arguments(def_id) or else List[Type].new()),
+            .TraitObject(trait_def_id, type_args) then Pair[MethodOwner, List[Type]](self.method_owner_decl(trait_def_id), type_args),
+            .ReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("Ref"), self.single_type_list(inner)),
+            .MutableReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("MutRef"), self.single_type_list(inner)),
+            .BorrowedReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("Ref"), self.single_type_list(inner)),
+            .MutableBorrowedReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("MutRef"), self.single_type_list(inner)),
+            .PointerType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("Ptr"), self.single_type_list(inner)),
+            .MutablePointerType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("MutPtr"), self.single_type_list(inner)),
+            .WeakReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("WeakRef"), self.single_type_list(inner)),
+            .MutableWeakReferenceType(inner) then Pair[MethodOwner, List[Type]](MethodOwner.Builtin("MutWeakRef"), self.single_type_list(inner)),
+            _ then Pair[MethodOwner, List[Type]](self.method_owner_of(t), List[Type].new()),
+        };
+    };
+
+    file_private single_type_list(self, t Type) List[Type] = {
+        let mutable out = List[Type].new();
+        out.push(t);
+        return out;
     };
 
     // ── 类型定义更新 ──────────────────────────────────────────────────────
@@ -1003,35 +1130,36 @@ given CompilerContext {
                 if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
             },
             .GenericParameter(name) then name,
-            .GenericStruct(template, _, args) then {
+            // Display only: the spelling is read from the declaration.
+            .GenericStruct(template_def_id, args) then {
                 let mutable arg_parts = List[String].new();
                 for a in args then {
                     arg_parts.push(self.get_debug_name(a));
                 };
                 let args_str = join_strings(arg_parts, ", ");
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_byte('[');
                 out.push_string(args_str);
                 out.push_byte(']');
                 out.to_string()
             },
-            .GenericEnum(template, _, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable arg_parts = List[String].new();
                 for a in args then {
                     arg_parts.push(self.get_debug_name(a));
                 };
                 let args_str = join_strings(arg_parts, ", ");
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_byte('[');
                 out.push_string(args_str);
                 out.push_byte(']');
                 out.to_string()
             },
-            .TraitObject(name, _, args) then {
+            .TraitObject(trait_def_id, args) then {
                 if args.is_empty() then {
-                    name
+                    def_id_spelling(trait_def_id)
                 } else {
                     let mutable arg_parts = List[String].new();
                     for a in args then {
@@ -1042,7 +1170,7 @@ given CompilerContext {
                     out.push_byte('[');
                     out.push_string(args_str);
                     out.push_byte(']');
-                    out.push_string(name);
+                    out.push_string(def_id_spelling(trait_def_id));
                     out.to_string()
                 }
             },
@@ -1070,13 +1198,13 @@ given CompilerContext {
             .MutablePointerType(inner) then self.contains_type_variable(inner),
             .WeakReferenceType(inner) then self.contains_type_variable(inner),
             .MutableWeakReferenceType(inner) then self.contains_type_variable(inner),
-            .GenericStruct(_, _, args) then {
+            .GenericStruct(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(a) then { return true;};
                 };
                 false
             },
-            .GenericEnum(_, _, args) then {
+            .GenericEnum(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(a) then { return true;};
                 };
@@ -1129,7 +1257,7 @@ given CompilerContext {
             .EnumType(def_id) then self.layout_key_for_def_id(def_id),
             .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
             .GenericParameter(name) then "Param_\(name)",
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
                     return self.layout_key_for_def_id(template_def_id);
                 };
@@ -1139,7 +1267,9 @@ given CompilerContext {
                 };
                 let arg_key_suffix = join_strings(arg_keys, "_");
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                // C mangling: the spelling comes from the DECLARATION. Names are
+                // legitimate here (output), but they must still come from identity.
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_byte('_');
                 out.push_string(arg_key_suffix);
                 if template_def_id.is_valid() then {
@@ -1148,7 +1278,7 @@ given CompilerContext {
                 };
                 out.to_string()
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(template_def_id) then {
                     return self.layout_key_for_def_id(template_def_id);
                 };
@@ -1158,7 +1288,8 @@ given CompilerContext {
                 };
                 let arg_key_suffix = join_strings(arg_keys, "_");
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                // C mangling: the spelling comes from the DECLARATION.
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_byte('_');
                 out.push_string(arg_key_suffix);
                 if template_def_id.is_valid() then {
@@ -1167,16 +1298,16 @@ given CompilerContext {
                 };
                 out.to_string()
             },
-            .TraitObject(name, trait_def_id, args) then {
+            .TraitObject(trait_def_id, args) then {
                 let suffix = if trait_def_id.is_valid() then "_d\(trait_def_id.id)" else "";
                 if args.is_empty() then {
-                    return "TO_\(name)\(suffix)";
+                    return "TO_\(def_id_spelling(trait_def_id))\(suffix)";
                 };
                 let mutable arg_keys = List[String].new();
                 for arg in args then {
                     arg_keys.push(self.get_layout_key(arg));
                 };
-                "TO_\(name)_\(join_strings(arg_keys, "_"))\(suffix)"
+                "TO_\(def_id_spelling(trait_def_id))_\(join_strings(arg_keys, "_"))\(suffix)"
             },
             .ModuleType(info) then "M_\(join_strings(info.module_path, "_"))",
             .TypeVar(tv) then "TV_\(tv.id)",

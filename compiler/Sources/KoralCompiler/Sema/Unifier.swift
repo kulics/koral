@@ -103,11 +103,12 @@ public class Unifier {
             try unify(ret1, ret2, span: span)
             
         // 泛型结构体
-        case (.genericStruct(let template1, _, let args1), .genericStruct(let template2, _, let args2)):
-            if template1 != template2 {
+        // Identity: the template's DECLARATION, not its spelling.
+        case (.genericStruct(let d1, let args1), .genericStruct(let d2, let args2)):
+            if d1 != d2 {
                 throw UnificationError.templateMismatch(
-                    expected: template1,
-                    got: template2,
+                    expected: Type.spelling(d1),
+                    got: Type.spelling(d2),
                     span: span
                 )
             }
@@ -125,11 +126,11 @@ public class Unifier {
             }
             
         // 泛型枚举类型
-        case (.genericEnum(let template1, _, let args1), .genericEnum(let template2, _, let args2)):
-            if template1 != template2 {
+        case (.genericEnum(let d1, let args1), .genericEnum(let d2, let args2)):
+            if d1 != d2 {
                 throw UnificationError.templateMismatch(
-                    expected: template1,
-                    got: template2,
+                    expected: Type.spelling(d1),
+                    got: Type.spelling(d2),
                     span: span
                 )
             }
@@ -276,7 +277,7 @@ public class Unifier {
             }
             return occurs(tv, in: ret, visited: &visited)
             
-        case .genericStruct(_, _, let args):
+        case .genericStruct(_, let args):
             for arg in args {
                 if occurs(tv, in: arg, visited: &visited) {
                     return true
@@ -284,7 +285,7 @@ public class Unifier {
             }
             return false
             
-        case .genericEnum(_, _, let args):
+        case .genericEnum(_, let args):
             for arg in args {
                 if occurs(tv, in: arg, visited: &visited) {
                     return true
@@ -328,7 +329,7 @@ public class Unifier {
             }
             return false
 
-        case .traitObject(_, _, let typeArgs):
+        case .traitObject(_, let typeArgs):
             for typeArg in typeArgs {
                 if occurs(tv, in: typeArg, visited: &visited) {
                     return true
@@ -360,11 +361,11 @@ public class Unifier {
             let resolvedRet = resolve(ret)
             return .function(parameters: resolvedParams, returns: resolvedRet)
             
-        case .genericStruct(let template, let defId, let args):
-            return .genericStruct(template: template, templateDefId: defId, args: args.map { resolve($0) })
+        case .genericStruct(let defId, let args):
+            return .genericStruct(templateDefId: defId, args: args.map { resolve($0) })
             
-        case .genericEnum(let template, let defId, let args):
-            return .genericEnum(template: template, templateDefId: defId, args: args.map { resolve($0) })
+        case .genericEnum(let defId, let args):
+            return .genericEnum(templateDefId: defId, args: args.map { resolve($0) })
             
         case .reference(let inner):
             return .reference(inner: resolve(inner))

@@ -8,8 +8,17 @@
 /// For example, `[Self]Add` is ParentTraitConstraint("Add", [TypeNode for Self]).
 /// A simple parent like `Ord` is ParentTraitConstraint("Ord", []).
 public type ParentTraitConstraint(
+    // Display only. Identity is `def_id`.
     name String,
     type_arg_nodes List[TypeNode],
+    // Declaration identity of the parent trait. Name matching cannot tell two
+    // same-named traits apart, so anything that asks "is this the trait X" must
+    // compare this DefId.
+    //
+    // Filled when the constraint is built, and back-filled by
+    // `TypeChecker.link_parent_trait_def_ids` for parents declared later in the
+    // file -- resolving during construction would depend on declaration order.
+    def_id DefId,
 );
 
 // ── TraitInfo ─────────────────────────────────────────────────────────────────
@@ -50,7 +59,7 @@ given TraitRegistry {
 
     public register(self, info TraitInfo) Void = {
         self.traits.insert(info.name, info);
-        self.traits.insert(qualified_trait_key(info.module_path, info.name), info);
+        self.traits.insert(qualified_symbol_key(info.module_path, info.name), info);
         self.traits_by_def_id.insert(info.def_id.id, info);
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
         self.object_safety_cache = Dict[String, Bool].new();
@@ -65,7 +74,7 @@ given TraitRegistry {
     };
 
     public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
-        let qualified = qualified_trait_key(module_path, name);
+        let qualified = qualified_symbol_key(module_path, name);
         return when self.traits.get(qualified) in {
             .Some(info) then Option[TraitInfo].Some(info),
             .None() then self.traits.get(name),
@@ -73,33 +82,41 @@ given TraitRegistry {
     };
 
     public validate_inheritance_graph(self, trait_name String) Result[Void] = {
-        let mutable visited = List[String].new();
-        let mutable stack = List[String].new();
-        return self.validate_inheritance_graph_internal(trait_name, visited, stack);
+        // The walk is keyed by DECLARATION, not by spelling: two same-named
+        // traits from different modules are different nodes and must not share
+        // a visited slot. The spellings are kept alongside only to print the
+        // cycle.
+        let mutable visited = List[UInt].new();
+        let mutable stack = List[UInt].new();
+        let mutable stack_names = List[String].new();
+        return self.validate_inheritance_graph_internal(trait_name, visited, stack, stack_names);
     };
 
-    file_private validate_inheritance_graph_internal(self, trait_name String, visited List[String], stack List[String]) Result[Void] = {
-        if stack.contains(trait_name) then {
+    file_private validate_inheritance_graph_internal(self, trait_name String, visited List[UInt], stack List[UInt], stack_names List[String]) Result[Void] = {
+        let info = self.traits.get(trait_name) or else {
+            return Result[Void].Ok({});
+        };
+        if stack.contains(info.def_id.id) then {
             let mutable cycle = StringBuilder.new();
-            cycle.push_string(stack.join_to_string(" -> "));
+            cycle.push_string(stack_names.join_to_string(" -> "));
             if not cycle.is_empty() then {
                 cycle.push_string(" -> ");
             };
             cycle.push_string(trait_name);
             return Result[Void].Error("Cyclic trait inheritance: " + cycle.to_string());
         };
-        if visited.contains(trait_name) then {
+        if visited.contains(info.def_id.id) then {
             return Result[Void].Ok({});
         };
-        let info = self.traits.get(trait_name) or else {
-            return Result[Void].Ok({});
-        };
-        stack.push(trait_name);
+        stack.push(info.def_id.id);
+        stack_names.push(trait_name);
         for parent in info.parent_traits then {
-            let _ = self.validate_inheritance_graph_internal(parent.name, visited, stack) or return;
+            let parent_info = self.traits_by_def_id.get(parent.def_id.id) or else { continue;};
+            let _ = self.validate_inheritance_graph_internal(parent_info.name, visited, stack, stack_names) or return;
         };
         let _ = stack.pop();
-        visited.push(trait_name);
+        let _ = stack_names.pop();
+        visited.push(info.def_id.id);
         return Result[Void].Ok({});
     };
 
@@ -109,46 +126,60 @@ given TraitRegistry {
         return self.flatten_methods_in_module(trait_name, List[String].new());
     };
 
+    /// The spelling is resolved to a declaration here, once; the walk is by
+    /// declaration from here on.
     public flatten_methods_in_module(self, trait_name String, module_path List[String]) Result[Dict[String, TypedTraitMember]] = {
-        let cache_key = qualified_trait_key(module_path, trait_name);
-        // 检查缓存
-        if self.flattened_cache.get(cache_key) is .Some(cached) then {
-            return Result[Dict[String, TypedTraitMember]].Ok(cached);
-        };
-        when self.get_in_module(trait_name, module_path) in {
+        return when self.get_in_module(trait_name, module_path) in {
             .None() then {
                 let mutable message = StringBuilder.new();
                 message.push_string("Trait '");
                 message.push_string(trait_name);
                 message.push_string("' not found");
-                return Result[Dict[String, TypedTraitMember]].Error(message.to_string());
+                Result[Dict[String, TypedTraitMember]].Error(message.to_string())
             },
-            .Some(info) then {
-                let mutable result = Dict[String, TypedTraitMember].new();
-
-                // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
-                for parent_name in info.parent_traits then {
-                    when self.flatten_methods_in_module(parent_name.name, info.module_path) in {
-                        .Ok(parent_methods) then {
-                            for entry in parent_methods then {
-                                result.insert(entry.first, entry.second);
-                            };
-                        },
-                        .Error(e) then {
-                            return Result[Dict[String, TypedTraitMember]].Error(e);
-                        },
-                    };
-                };
-
-                // 再收集当前 Trait 的方法（覆盖父 Trait 同名方法）
-                for m in info.methods then {
-                    result.insert(m.name, m);
-                };
-
-                self.flattened_cache.insert(cache_key, result);
-                return Result[Dict[String, TypedTraitMember]].Ok(result);
-            },
+            .Some(info) then self.flatten_methods_for_def(info.def_id),
         };
+    };
+
+    /// Flatten the trait DECLARATION and its parents.
+    ///
+    /// The cache is keyed on the declaration: two same-named traits from
+    /// different modules are different traits and must not share one flattened
+    /// method set.
+    public flatten_methods_for_def(self, trait_def_id DefId) Result[Dict[String, TypedTraitMember]] = {
+        let cache_key = "d\(trait_def_id.id)";
+        if self.flattened_cache.get(cache_key) is .Some(cached) then {
+            return Result[Dict[String, TypedTraitMember]].Ok(cached);
+        };
+        let info = self.traits_by_def_id.get(trait_def_id.id) or else {
+            // A parent that no declaration binds is reported elsewhere; here it
+            // simply contributes no methods.
+            return Result[Dict[String, TypedTraitMember]].Ok(Dict[String, TypedTraitMember].new());
+        };
+        let mutable result = Dict[String, TypedTraitMember].new();
+
+        // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
+        for parent in info.parent_traits then {
+            if not parent.def_id.is_valid() then { continue;};
+            when self.flatten_methods_for_def(parent.def_id) in {
+                .Ok(parent_methods) then {
+                    for entry in parent_methods then {
+                        result.insert(entry.first, entry.second);
+                    };
+                },
+                .Error(e) then {
+                    return Result[Dict[String, TypedTraitMember]].Error(e);
+                },
+            };
+        };
+
+        // 再收集当前 Trait 的方法（覆盖父 Trait 同名方法）
+        for m in info.methods then {
+            result.insert(m.name, m);
+        };
+
+        self.flattened_cache.insert(cache_key, result);
+        return Result[Dict[String, TypedTraitMember]].Ok(result);
     };
 
     // 检查 Trait 是否对象安全
@@ -157,8 +188,20 @@ given TraitRegistry {
         return self.check_object_safety_in_module(trait_name, List[String].new());
     };
 
+    /// Object safety of a trait identified by DECLARATION.
+    ///
+    /// The `DefId` selects the trait; the name is used only afterwards to pick a
+    /// member inside that one container -- the same as rustc's `associated_items`,
+    /// where a name selects within an already-identified impl/trait.
+    public check_object_safety_by_def_id(self, trait_def_id DefId) Result[Bool] = {
+        return when self.traits_by_def_id.get(trait_def_id.id) in {
+            .Some(info) then self.check_object_safety_in_module(info.name, info.module_path),
+            .None() then Result[Bool].Error("Trait 'd\(trait_def_id.id)' not found"),
+        };
+    };
+
     public check_object_safety_in_module(self, trait_name String, module_path List[String]) Result[Bool] = {
-        let cache_key = qualified_trait_key(module_path, trait_name);
+        let cache_key = qualified_symbol_key(module_path, trait_name);
         if self.object_safety_cache.get(cache_key) is .Some(cached) then {
             return Result[Bool].Ok(cached);
         };
@@ -215,7 +258,7 @@ given TraitRegistry {
             .PointerType(inner) then self.type_uses_self(inner),
             .WeakReferenceType(inner) then self.type_uses_self(inner),
             .MutableWeakReferenceType(inner) then self.type_uses_self(inner),
-            .GenericStruct(_, _, args) then {
+            .GenericStruct(_, args) then {
                 for arg in args then {
                     if self.type_uses_self(arg) then {
                         return true;
@@ -223,7 +266,7 @@ given TraitRegistry {
                 };
                 false
             },
-            .GenericEnum(_, _, args) then {
+            .GenericEnum(_, args) then {
                 for arg in args then {
                     if self.type_uses_self(arg) then {
                         return true;
@@ -231,7 +274,7 @@ given TraitRegistry {
                 };
                 false
             },
-            .TraitObject(_, _, args) then {
+            .TraitObject(_, args) then {
                 for arg in args then {
                     if self.type_uses_self(arg) then {
                         return true;
@@ -272,8 +315,8 @@ given TraitRegistry {
             return false;
         };
         for parent in info.parent_traits then {
-            // A parent is written by name in the child's module; resolve it there.
-            when self.get_in_module(parent.name, info.module_path) in {
+            // Identity: the parent constraint carries the declaration it names.
+            when self.traits_by_def_id.get(parent.def_id.id) in {
                 .Some(parent_info) then {
                     if self.has_inheritance_internal(parent_info.def_id, target_id, visited) then {
                         return true;
@@ -440,49 +483,4 @@ given TraitChecker {
         return Result[Void].Ok({});
     };
 
-    // 检查父 Trait 是否已被实现
-    public check_parent_traits_satisfied(
-        self,
-        target_type Type,
-        trait_name String,
-        all_given_traits List[String],
-        span SourceSpan,
-    ) Result[Void] = {
-        return self.check_parent_traits_satisfied_in_module(target_type, trait_name, all_given_traits, span, List[String].new());
-    };
-
-    public check_parent_traits_satisfied_in_module(
-        self,
-        target_type Type,
-        trait_name String,
-        all_given_traits List[String],
-        span SourceSpan,
-        module_path List[String],
-    ) Result[Void] = {
-        when self.registry.get_in_module(trait_name, module_path) in {
-            .None() then { return Result[Void].Error("Undefined trait: " + trait_name);},
-            .Some(info) then {
-                for parent in info.parent_traits then {
-                    let mutable found = false;
-                    for given_trait in all_given_traits then {
-                        if given_trait == parent.name then {
-                            found = true;
-                        };
-                    };
-                    if not found then {
-                        let mutable message = StringBuilder.new();
-                        message.push_string("Type '");
-                        message.push_string(type_to_string(target_type));
-                        message.push_string("' implements '");
-                        message.push_string(trait_name);
-                        message.push_string("' but not parent trait '");
-                        message.push_string(parent.name);
-                        message.push_byte('\'');
-                        return Result[Void].Error(message.to_string());
-                    };
-                };
-                return Result[Void].Ok({});
-            },
-        };
-    };
 };

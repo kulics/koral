@@ -20,11 +20,10 @@ final class MIRLowerer {
   /// declaration's identity. A user trait also named `Drop` is a different
   /// declaration and must not receive the compiler's drop calling convention.
   private func isStdDropTraitConformance(_ conformance: TypedTraitConformance?) -> Bool {
-    guard let conformance,
-          let stdDrop = program.traits["Drop"], stdDrop.modulePath == ["Std"] else {
+    guard let conformance, let stdDrop = context.stdDropTraitDefId else {
       return false
     }
-    return conformance.traitDefId == stdDrop.defId
+    return conformance.traitDefId == stdDrop
   }
 
   func lower() -> MIRProgram {
@@ -109,6 +108,7 @@ final class MIRLowerer {
       context: context,
       staticMethodLookup: program.staticMethodLookup,
       traits: program.traits,
+      traitDeclsByDefId: program.traitDeclsByDefId,
       conformanceWitnesses: program.conformanceWitnesses,
       receiverMethodDispatch: program.receiverMethodDispatch
     )
@@ -216,8 +216,14 @@ final class MIRLowerer {
     ordered: inout [InstantiatedTraitMethod]
   ) {
     let visitKey = "\(traitRef.cacheKey)|self=\(context.getDebugName(concreteType))"
+    // The ref already carries its declaration, so look that up rather than
+    // re-resolving the spelling (an alias, or a same-named trait from another
+    // module). The name path remains only for a ref that never got one.
+    let traitInfo = traitRef.traitDefId.isValid
+      ? program.traitDeclsByDefId[traitRef.traitDefId]
+      : program.traits[traitRef.traitName]
     guard visitedTraits.insert(visitKey).inserted,
-          let traitInfo = program.traits[traitRef.traitName] else {
+          let traitInfo else {
       return
     }
 
@@ -379,11 +385,11 @@ final class MIRLowerer {
       switch node {
       case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
         if nominalSymbol(identifier, matches: name) {
-          return .genericStruct(template: name, templateDefId: .invalid, args: args)
+          return .genericStruct(templateDefId: context.templateDeclaration(of: identifier.defId), args: args)
         }
       case .globalEnumDeclaration(let identifier, _):
         if nominalSymbol(identifier, matches: name) {
-          return .genericEnum(template: name, templateDefId: .invalid, args: args)
+          return .genericEnum(templateDefId: context.templateDeclaration(of: identifier.defId), args: args)
         }
       default:
         continue
@@ -394,9 +400,9 @@ final class MIRLowerer {
        let kind = context.getKind(defId) {
       switch kind {
       case .type(.structure), .genericTemplate(.structure):
-        return .genericStruct(template: name, templateDefId: .invalid, args: args)
+        return .genericStruct(templateDefId: context.templateDeclaration(of: defId), args: args)
       case .type(.`enum`), .genericTemplate(.`enum`):
-        return .genericEnum(template: name, templateDefId: .invalid, args: args)
+        return .genericEnum(templateDefId: context.templateDeclaration(of: defId), args: args)
       default:
         break
       }
@@ -503,7 +509,7 @@ private func traitObjectTypeArguments(from receiverType: Type) -> [Type] {
   switch receiverType {
   case .reference(let inner), .mutableReference(let inner):
     return traitObjectTypeArguments(from: inner)
-  case .traitObject(_, _, let typeArgs):
+  case .traitObject(_, let typeArgs):
     return typeArgs
   default:
     return []
@@ -1812,12 +1818,12 @@ private final class MIRFunctionBuilder {
         case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
           let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
           if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
-            return .genericStruct(template: base, templateDefId: .invalid, args: resolvedArgs)
+            return .genericStruct(templateDefId: context.templateDeclaration(of: identifier.defId), args: resolvedArgs)
           }
         case .globalEnumDeclaration(let identifier, _):
           let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
           if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
-            return .genericEnum(template: base, templateDefId: .invalid, args: resolvedArgs)
+            return .genericEnum(templateDefId: context.templateDeclaration(of: identifier.defId), args: resolvedArgs)
           }
         default:
           continue
@@ -1827,9 +1833,9 @@ private final class MIRFunctionBuilder {
          let kind = context.getKind(defId) {
         switch kind {
         case .type(.structure), .genericTemplate(.structure):
-          return .genericStruct(template: base, templateDefId: .invalid, args: resolvedArgs)
+          return .genericStruct(templateDefId: context.templateDeclaration(of: defId), args: resolvedArgs)
         case .type(.`enum`), .genericTemplate(.`enum`):
-          return .genericEnum(template: base, templateDefId: .invalid, args: resolvedArgs)
+          return .genericEnum(templateDefId: context.templateDeclaration(of: defId), args: resolvedArgs)
         default:
           break
         }
@@ -1856,11 +1862,11 @@ private final class MIRFunctionBuilder {
     case .identifier(let name):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
       guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
-      return .traitObject(traitName: name, traitDefId: program.traits[name]?.defId ?? .invalid, typeArgs: [])
+      return .traitObject(traitDefId: program.traits[name]?.defId ?? .invalid, typeArgs: [])
     case .generic(let base, let args):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedArgs.count == args.count else { return nil }
-      return .traitObject(traitName: base, traitDefId: program.traits[base]?.defId ?? .invalid, typeArgs: resolvedArgs)
+      return .traitObject(traitDefId: program.traits[base]?.defId ?? .invalid, typeArgs: resolvedArgs)
     default:
       return nil
     }
@@ -1907,12 +1913,13 @@ private final class MIRFunctionBuilder {
         }
       }
       return nil
-    case .genericStruct(let templateName, _, let args):
+    case .genericStruct(let tplDefId, let args):
       if let members = programStructMembers(matching: resolvedType) {
         return members
       }
-      guard let defId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
-            let info = context.defIdMap.getGenericStructTemplateInfo(defId) else {
+      // The type carries the template's DECLARATION; there is no name lookup.
+      guard tplDefId.isValid,
+            let info = context.defIdMap.getGenericStructTemplateInfo(tplDefId) else {
         return nil
       }
       var substitution: [String: Type] = [:]
@@ -1951,12 +1958,12 @@ private final class MIRFunctionBuilder {
         return cases
       }
       return nil
-    case .genericEnum(let templateName, _, let args):
+    case .genericEnum(let tplDefId, let args):
       if let cases = programEnumCases(matching: resolvedType) {
         return cases
       }
-      guard let defId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName),
-            let info = context.defIdMap.getGenericEnumTemplateInfo(defId) else {
+      guard tplDefId.isValid,
+            let info = context.defIdMap.getGenericEnumTemplateInfo(tplDefId) else {
         return nil
       }
       var substitution: [String: Type] = [:]
@@ -2035,8 +2042,14 @@ private final class MIRFunctionBuilder {
     for defId: DefId
   ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
     guard let templateName = context.getTemplateName(defId),
-          let args = context.getTypeArguments(defId),
-          let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
+          let args = context.getTypeArguments(defId) else {
+      return nil
+    }
+    // Prefer the instance's own link to its template; re-deriving it from the
+    // template's spelling picks whichever module registered last.
+    // The instance's own link to its template. `templateName` is display only.
+    let templateDefId = context.templateDeclaration(of: defId)
+    guard templateDefId.isValid,
           let info = context.defIdMap.getGenericStructTemplateInfo(templateDefId) else {
       return nil
     }
@@ -2057,8 +2070,11 @@ private final class MIRFunctionBuilder {
 
   private func instantiatedEnumCases(for defId: DefId) -> [EnumCase]? {
     guard let templateName = context.getTemplateName(defId),
-          let args = context.getTypeArguments(defId),
-          let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName),
+          let args = context.getTypeArguments(defId) else {
+      return nil
+    }
+    let templateDefId = context.templateDeclaration(of: defId)
+    guard templateDefId.isValid,
           let info = context.defIdMap.getGenericEnumTemplateInfo(templateDefId) else {
       return nil
     }
@@ -2401,16 +2417,16 @@ private final class MIRFunctionBuilder {
     subjectType: Type,
     targetType: Type
   ) -> (traitName: String, traitDefId: DefId, traitTypeArguments: [Type], concreteType: Type)? {
-    guard case .traitObject(let traitName, let traitDefId, let traitTypeArguments) = subjectType else {
+    guard case .traitObject(let traitDefId, let traitTypeArguments) = subjectType else {
       return nil
     }
 
     switch targetType {
     case .reference(let concreteType), .mutableReference(let concreteType):
-      return (traitName, traitDefId, traitTypeArguments, concreteType)
+      return (Type.spelling(traitDefId), traitDefId, traitTypeArguments, concreteType)
     // New syntax: bare concrete type (no * prefix)
     case .structure, .enum, .genericStruct, .genericEnum:
-      return (traitName, traitDefId, traitTypeArguments, targetType)
+      return (Type.spelling(traitDefId), traitDefId, traitTypeArguments, targetType)
     default:
       return nil
     }

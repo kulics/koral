@@ -183,7 +183,7 @@ extension TypeChecker {
     )
   }
 
-  /// Call-site parameter labels for a method, resolved by owner type name and
+  /// Call-site parameter labels for a method, resolved by owner IDENTITY and
   /// method name (method `DefId`s are shared across same-named methods).
   func methodCallParamMeta(
     ownerTypeName: String?,
@@ -208,8 +208,8 @@ extension TypeChecker {
       switch current {
       case .structure(let defId), .enum(let defId):
         return context.getName(defId)
-      case .genericStruct(let name, _, _), .genericEnum(let name, _, _):
-        return name
+      case .genericStruct(let tplDefId, _), .genericEnum(let tplDefId, _):
+        return Type.spelling(tplDefId)
       case .reference(let inner), .mutableReference(let inner),
            .borrowedReference(let inner), .mutableBorrowedReference(let inner),
            .weakReference(let inner), .mutableWeakReference(let inner):
@@ -308,8 +308,8 @@ extension TypeChecker {
     switch type {
     case .structure(let defId), .enum(let defId):
       return context.getName(defId) ?? type.description
-    case .genericStruct(let templateName, _, _), .genericEnum(let templateName, _, _):
-      return templateName
+    case .genericStruct(let tplDefId, _), .genericEnum(let tplDefId, _):
+      return Type.spelling(tplDefId)
     default:
       return type.description
     }
@@ -317,24 +317,24 @@ extension TypeChecker {
 
   func buildDefaultValueExpression(for type: Type) throws -> TypedExpressionNode {
     switch type {
-    case .genericStruct(let templateName, _, let args):
-      guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
-        throw SemanticError.undefinedType(templateName)
+    case .genericStruct(let tplDefId, let args):
+      guard let template = currentScope.genericStructTemplate(defId: tplDefId) else {
+        throw SemanticError.undefinedType(Type.spelling(tplDefId))
       }
       return try inferGenericStructStaticMethodCall(
         template: template,
-        typeName: templateName,
+        typeName: Type.spelling(tplDefId),
         resolvedTypeArgs: args,
         methodName: "default",
         callArgs: []
       )
-    case .genericEnum(let templateName, _, let args):
-      guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
-        throw SemanticError.undefinedType(templateName)
+    case .genericEnum(let tplDefId, let args):
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId) else {
+        throw SemanticError.undefinedType(Type.spelling(tplDefId))
       }
       return try inferGenericEnumStaticMethodCall(
         template: template,
-        typeName: templateName,
+        typeName: Type.spelling(tplDefId),
         resolvedTypeArgs: args,
         methodName: "default",
         callArgs: []
@@ -357,8 +357,8 @@ extension TypeChecker {
         return nil
       }
       return enumCase.parameters.map { $0.name }
-    case .genericEnum(let templateName, _, _):
-      guard let template = currentScope.lookupGenericEnumTemplate(templateName),
+    case .genericEnum(let tplDefId, _):
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId),
             let enumCase = template.cases.first(where: { $0.name == caseName }) else {
         return nil
       }
@@ -375,8 +375,8 @@ extension TypeChecker {
         return nil
       }
       return enumCase.parameters.map { $0.named }
-    case .genericEnum(let templateName, _, _):
-      guard let template = currentScope.lookupGenericEnumTemplate(templateName),
+    case .genericEnum(let tplDefId, _):
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId),
             let enumCase = template.cases.first(where: { $0.name == caseName }) else {
         return nil
       }

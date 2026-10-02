@@ -75,9 +75,10 @@ extension TypeChecker {
     switch type {
     case .structure(let defId):
       satisfied = context.isTypeMutable(defId)
-    case .genericStruct(let templateName, _, _):
-      if let defId = context.defIdMap.lookupGenericStructTemplateDefId(templateName) {
-        satisfied = context.isTypeMutable(defId) || context.isGenericStructTemplateMutable(defId)
+    case .genericStruct(let templateDefId, _):
+      if templateDefId.isValid {
+        satisfied =
+          context.isTypeMutable(templateDefId) || context.isGenericStructTemplateMutable(templateDefId)
       } else {
         satisfied = false
       }
@@ -270,10 +271,12 @@ extension TypeChecker {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       return defId
-    case .genericStruct(let template, _, _):
-      return currentScope.lookupGenericStructTemplate(template)?.defId
-    case .genericEnum(let template, _, _):
-      return currentScope.lookupGenericEnumTemplate(template)?.defId
+    // The type already carries its template's DECLARATION; re-reading the name
+    // would only round-trip an identity back through a table.
+    case .genericStruct(let tplDefId, _):
+      return tplDefId
+    case .genericEnum(let tplDefId, _):
+      return tplDefId
     default:
       return nil
     }
@@ -316,12 +319,12 @@ extension TypeChecker {
         parameters: parameters.map { Parameter(type: canonicalizedTypeForComparison($0.type), kind: $0.kind) },
         returns: canonicalizedTypeForComparison(returns)
       )
-    case .genericStruct(let template, let defId, let args):
-      return .genericStruct(template: template, templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
-    case .genericEnum(let template, let defId, let args):
-      return .genericEnum(template: template, templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
-    case .traitObject(let traitName, let defId, let typeArgs):
-      return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
+    case .genericStruct(let defId, let args):
+      return .genericStruct(templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
+    case .genericEnum(let defId, let args):
+      return .genericEnum(templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
+    case .traitObject(let defId, let typeArgs):
+      return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
     default:
       return type
     }
@@ -329,15 +332,16 @@ extension TypeChecker {
 
   func nominalInstantiationMatchesGeneric(_ nominal: Type, genericCandidate: Type) -> Bool {
     switch (canonicalizedTypeForComparison(nominal), canonicalizedTypeForComparison(genericCandidate)) {
-    case (.structure(let defId), .genericStruct(let templateName, _, let typeArgs)):
-      guard context.getTemplateName(defId) == templateName,
+    case (.structure(let defId), .genericStruct(let tplDefId, let typeArgs)):
+      // Identity: the template the nominal was instantiated from.
+      guard context.getTemplateDefId(defId) == tplDefId,
             let actualArgs = context.getTypeArguments(defId),
             actualArgs.count == typeArgs.count else {
         return false
       }
       return zip(actualArgs, typeArgs).allSatisfy { typesEquivalentForComparison($0, $1) }
-    case (.`enum`(let defId), .genericEnum(let templateName, _, let typeArgs)):
-      guard context.getTemplateName(defId) == templateName,
+    case (.`enum`(let defId), .genericEnum(let tplDefId, let typeArgs)):
+      guard context.getTemplateDefId(defId) == tplDefId,
             let actualArgs = context.getTypeArguments(defId),
             actualArgs.count == typeArgs.count else {
         return false
@@ -2348,8 +2352,8 @@ extension TypeChecker {
 
   private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind {
     switch type {
-    case .genericStruct(let template, let defId, let args):
-      switch template {
+    case .genericStruct(let defId, let args):
+      switch Type.spelling(defId) {
       case "List":
         guard args.count == 1 else {
           throw SemanticError(.generic("[T]List requires exactly one type argument"), span: span)
@@ -2372,8 +2376,8 @@ extension TypeChecker {
         )
       }
 
-    case .genericEnum(let template, let defId, let args):
-      switch template {
+    case .genericEnum(let defId, let args):
+      switch Type.spelling(defId) {
       case "Range":
         guard args.count == 1 else {
           throw SemanticError(.generic("[T]Range requires exactly one type argument"), span: span)
@@ -2565,10 +2569,10 @@ extension TypeChecker {
 
   private func staticTypeCallParts(for type: Type) throws -> (name: String, args: [TypeNode]) {
     switch type {
-    case .genericStruct(let template, let defId, let args):
-      return (template, try args.map { try toTypeNode($0) })
-    case .genericEnum(let template, let defId, let args):
-      return (template, try args.map { try toTypeNode($0) })
+    case .genericStruct(let defId, let args):
+      return (Type.spelling(defId), try args.map { try toTypeNode($0) })
+    case .genericEnum(let defId, let args):
+      return (Type.spelling(defId), try args.map { try toTypeNode($0) })
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
         throw SemanticError(.generic("Unable to resolve type name for static call"), span: currentSpan)
@@ -2605,10 +2609,10 @@ extension TypeChecker {
     case .weakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: false)
     case .mutableWeakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: true)
     case .genericParameter(let name): return .identifier(name)
-    case .genericStruct(let template, let defId, let args):
-      return .generic(base: template, args: try args.map { try toTypeNode($0) })
-    case .genericEnum(let template, let defId, let args):
-      return .generic(base: template, args: try args.map { try toTypeNode($0) })
+    case .genericStruct(let defId, let args):
+      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) })
+    case .genericEnum(let defId, let args):
+      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) })
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
         throw SemanticError(.generic("Unable to resolve type node name"), span: currentSpan)
@@ -2721,9 +2725,9 @@ extension TypeChecker {
     case .`enum`(let defId):
       cases = context.getEnumCases(defId)
       
-    case .genericEnum(let templateName, _, let typeArgs):
+    case .genericEnum(let tplDefId, let typeArgs):
       // Look up the enum template and substitute type parameters
-      guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId) else {
         return nil
       }
       
@@ -2791,7 +2795,7 @@ extension TypeChecker {
     switch expectedType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
-      guard let methods = extensionMethods[typeName],
+      guard let methods = extensionMethods[context.methodOwner(of: expectedType)],
             let methodSym = methods[memberName] else {
         return nil
       }
@@ -2839,7 +2843,7 @@ extension TypeChecker {
       
     case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
-      guard let methods = extensionMethods[typeName],
+      guard let methods = extensionMethods[context.methodOwner(of: expectedType)],
             let methodSym = methods[memberName] else {
         return nil
       }
@@ -2885,8 +2889,8 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .genericStruct(let templateName, _, let typeArgs):
-      guard let extensions = genericExtensionMethods[templateName],
+    case .genericStruct(let tplDefId, let typeArgs):
+      guard let extensions = genericExtensionMethods[context.methodOwner(of: expectedType)],
             let ext = extensions.first(where: { $0.method.name == memberName }) else {
         return nil
       }
@@ -2898,7 +2902,7 @@ extension TypeChecker {
       // Resolve the method with type arguments
       let methodSym = try resolveGenericExtensionMethod(
         baseType: expectedType,
-        templateName: templateName,
+        templateName: Type.spelling(tplDefId),
         typeArgs: typeArgs,
         methodInfo: ext
       )
@@ -2941,8 +2945,8 @@ extension TypeChecker {
         type: returnType
       )
       
-    case .genericEnum(let templateName, _, let typeArgs):
-      guard let extensions = genericExtensionMethods[templateName],
+    case .genericEnum(let tplDefId, let typeArgs):
+      guard let extensions = genericExtensionMethods[context.methodOwner(of: expectedType)],
             let ext = extensions.first(where: { $0.method.name == memberName }) else {
         return nil
       }
@@ -2954,7 +2958,7 @@ extension TypeChecker {
       // Resolve the method with type arguments
       let methodSym = try resolveGenericExtensionMethod(
         baseType: expectedType,
-        templateName: templateName,
+        templateName: Type.spelling(tplDefId),
         typeArgs: typeArgs,
         methodInfo: ext
       )
@@ -3093,7 +3097,12 @@ extension TypeChecker {
 
     // `given[T] Trait[T] { ... }` tool methods register as generic extension
     // templates on the trait rather than as trait tool blocks.
-    if let ext = genericExtensionMethods[traitName]?.first(where: { $0.method.name == methodName }) {
+    // The trait's spelling resolves to its declaration once here; the bucket is
+    // keyed by that declaration.
+    let traitOwner: MethodOwner =
+      traits[traitName].map { MethodOwner.decl($0.defId) } ?? methodOwnerForName(traitName)
+        ?? .builtin(traitName)
+    if let ext = genericExtensionMethods[traitOwner]?.first(where: { $0.method.name == methodName }) {
       let functionType = try substitute(
         expectedFunctionTypeForToolMethod(ext.method, selfType: selfType),
         typeParams: ext.method.typeParameters
@@ -3396,7 +3405,7 @@ extension TypeChecker {
         let baseType = genericStructType(template: baseName, args: resolvedArgs)
         
         // Look up static method on generic struct
-        if let extensions = genericExtensionMethods[baseName] {
+        if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
           if let ext = extensions.first(where: { $0.method.name == memberName }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
@@ -3508,7 +3517,7 @@ extension TypeChecker {
         }
         
         // Look up static method on generic enum
-        if let extensions = genericExtensionMethods[baseName] {
+        if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
           if let ext = extensions.first(where: { $0.method.name == memberName }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
@@ -3588,8 +3597,8 @@ extension TypeChecker {
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
-      case .genericEnum(let templateName, _, let typeArgs):
-        if let template = currentScope.lookupGenericEnumTemplate(templateName),
+      case .genericEnum(let tplDefId, let typeArgs):
+        if let template = currentScope.genericEnumTemplate(defId: tplDefId),
            let c = template.cases.first(where: { $0.name == memberName }) {
           var substitution: [String: Type] = [:]
           for (index, param) in template.typeParameters.enumerated() {
@@ -3637,8 +3646,8 @@ extension TypeChecker {
       let memberName = path[0]
 
       if let expectedType = expectedType,
-         case .genericEnum(let expectedTemplateName, _, let expectedTypeArgs) = expectedType,
-         expectedTemplateName == baseName {
+         case .genericEnum(let tplDefId, let expectedTypeArgs) = expectedType,
+         tplDefId == template.defId {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: expectedTypeArgs)
         
         if !expectedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
@@ -3701,8 +3710,8 @@ extension TypeChecker {
         var enumName: String? = nil
         if case .`enum`(let defId) = returnType {
           enumName = context.getName(defId)
-        } else if case .genericEnum(let templateName, _, _) = returnType {
-          enumName = templateName
+        } else if case .genericEnum(let tplDefId, _) = returnType {
+          enumName = Type.spelling(tplDefId)
         }
         
         if let uName = enumName {
@@ -4588,7 +4597,7 @@ extension TypeChecker {
       // parameters are filled from their declared defaults.
       let argumentCount = params.count - 1
       let paramMeta = methodCallParamMeta(
-        ownerTypeName: ownerTypeName(for: base.type),
+        ownerTypeName: methodLabelKey(base.type),
         methodName: methodName,
         fallbackDefId: method.defId,
         argumentCount: argumentCount
@@ -4615,20 +4624,20 @@ extension TypeChecker {
       // The base type is a trait object (or reference to one) — handle before auto-ref/deref.
       switch base.type {
       case .reference(let inner), .mutableReference(let inner):
-        if case .traitObject(let traitName, _, _) = inner {
+        if case .traitObject(let tplDefId, _) = inner {
           return try inferTraitObjectMethodCall(
             base: base,
-            traitName: traitName,
+            traitName: Type.spelling(tplDefId),
             methodName: methodName,
             params: params,
             returns: returns,
             arguments: arguments
           )
         }
-      case .traitObject(let traitName, _, _):
+      case .traitObject(let tplDefId, _):
         return try inferTraitObjectMethodCall(
           base: base,
-          traitName: traitName,
+          traitName: Type.spelling(tplDefId),
           methodName: methodName,
           params: params,
           returns: returns,
@@ -4994,14 +5003,14 @@ extension TypeChecker {
     if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       let type = canonicalizedTypeForStaticMemberLookup(rawType)
       switch type {
-      case .genericStruct(let templateName, _, let typeArgs):
+      case .genericStruct(let tplDefId, let typeArgs):
         let argNodes = try typeArgs.map { try toTypeNode($0) }
-        if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
+        if let result = try inferGenericInstantiationMemberPath(baseName: Type.spelling(tplDefId), args: argNodes, path: path) {
           return result
         }
-      case .genericEnum(let templateName, _, let typeArgs):
+      case .genericEnum(let tplDefId, let typeArgs):
         let argNodes = try typeArgs.map { try toTypeNode($0) }
-        if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
+        if let result = try inferGenericInstantiationMemberPath(baseName: Type.spelling(tplDefId), args: argNodes, path: path) {
           return result
         }
       default:
@@ -5035,8 +5044,8 @@ extension TypeChecker {
       
       // Try to infer type arguments from currentFunctionReturnType
       if let returnType = currentFunctionReturnType,
-         case .genericEnum(let templateName, _, let typeArgs) = returnType,
-         templateName == name {
+         case .genericEnum(let tplDefId, let typeArgs) = returnType,
+         tplDefId == template.defId {
         // We have a matching return type context, use its type arguments
         
         // Validate generic constraints
@@ -5130,25 +5139,32 @@ extension TypeChecker {
         }
       }
       
-      // Handle genericStruct types - look up member from template
-      if !foundMember, case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
-        if let template = currentScope.lookupGenericStructTemplate(templateName) {
+      // Handle genericStruct types - look up member from template.
+      // The template's DECLARATION comes from the type's own `templateDefId`;
+      // re-deriving it from the spelling picks whichever module registered last
+      // when two modules declare the same name.
+      if !foundMember,
+        case .genericStruct(let tplDefId, let typeArgs) = typeToLookup
+      {
+        if tplDefId.isValid, let templateDefId = Optional(tplDefId),
+          let info = context.defIdMap.getGenericStructTemplateInfo(templateDefId)
+        {
           // Create type substitution map
           var substitution: [String: Type] = [:]
-          for (i, param) in template.typeParameters.enumerated() {
+          for (i, param) in info.typeParameters.enumerated() {
             if i < typeArgs.count {
               substitution[param.name] = typeArgs[i]
             }
           }
-          
+
           // Look up member in template and substitute types
-          if let param = template.parameters.first(where: { $0.name == memberName }) {
+          if let param = info.parameters.first(where: { $0.name == memberName }) {
             // Check field visibility
-            if !isFieldAccessibleForMemberAccess(fieldAccess: param.access, defId: template.defId) {
+            if !isFieldAccessibleForMemberAccess(fieldAccess: param.access, defId: templateDefId) {
               let fieldAccess = param.access
               let accessLabel = fieldAccess.description
               throw SemanticError(.generic(
-                "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
+                "Cannot access \(accessLabel) field '\(memberName)' of type '\(Type.spelling(tplDefId))'"
               ), span: currentSpan)
             }
             let memberType = try withNewScope {
@@ -5158,7 +5174,8 @@ extension TypeChecker {
               return try resolveTypeNode(param.type)
             }
             let sym = makeLocalSymbol(
-              name: param.name, type: memberType, kind: .variable(param.mutable ? .MutableValue : .Value))
+              name: param.name, type: memberType,
+              kind: .variable(param.mutable ? .MutableValue : .Value))
             typedPath.append(sym)
             currentType = memberType
             foundMember = true
@@ -5361,7 +5378,7 @@ extension TypeChecker {
 
       if path.count == 1 {
         let memberName = path[0]
-        if let extensions = genericExtensionMethods[baseName] {
+        if let extensions = genericExtensionMethods[context.methodOwner(of: type)] {
           if let ext = extensions.first(where: { $0.method.name == memberName }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
@@ -5442,7 +5459,7 @@ extension TypeChecker {
 
       if case .structure(let defId) = type {
         let name = context.getName(defId) ?? ""
-        if let methods = extensionMethods[name], let sym = methods[memberName] {
+        if let methods = extensionMethods[context.methodOwner(of: type)], let sym = methods[memberName] {
           methodSymbol = sym
         }
       }
@@ -5479,7 +5496,7 @@ extension TypeChecker {
         type: methodSym.type
       )
     }
-    if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
+    if let methods = extensionMethods[context.methodOwner(of: typeToLookup)], let methodSym = methods[memberName] {
       guard isReceiverStyleMethod(methodSym) else {
         return nil
       }
@@ -5491,7 +5508,7 @@ extension TypeChecker {
     }
 
     if case .pointer(let element) = typeToLookup {
-      if let extensions = genericIntrinsicExtensionMethods["Ptr"] {
+      if let extensions = genericIntrinsicExtensionMethods[.builtin("Ptr")] {
         for ext in extensions {
           if ext.method.name == memberName {
             guard ext.method.parameters.first?.name == "self" else {
@@ -5508,7 +5525,7 @@ extension TypeChecker {
         }
       }
 
-      if let extensions = genericExtensionMethods["Ptr"] {
+      if let extensions = genericExtensionMethods[.builtin("Ptr")] {
         for ext in extensions {
           if ext.method.name == memberName {
             guard ext.method.parameters.first?.name == "self" else {
@@ -5527,8 +5544,8 @@ extension TypeChecker {
     }
     
     // Handle genericStruct types
-    if case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
-      if let extensions = genericExtensionMethods[templateName] {
+    if case .genericStruct(let tplDefId, let typeArgs) = typeToLookup {
+      if let extensions = genericExtensionMethods[context.methodOwner(of: typeToLookup)] {
         for ext in extensions {
           if ext.method.name == memberName {
             guard ext.method.parameters.first?.name == "self" else {
@@ -5536,7 +5553,7 @@ extension TypeChecker {
             }
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
-              templateName: templateName,
+              templateName: Type.spelling(tplDefId),
               typeArgs: typeArgs,
               methodInfo: ext
             )
@@ -5547,8 +5564,8 @@ extension TypeChecker {
     }
     
     // Handle genericEnum types
-    if case .genericEnum(let templateName, _, let typeArgs) = typeToLookup {
-      if let extensions = genericExtensionMethods[templateName] {
+    if case .genericEnum(let tplDefId, let typeArgs) = typeToLookup {
+      if let extensions = genericExtensionMethods[context.methodOwner(of: typeToLookup)] {
         for ext in extensions {
           if ext.method.name == memberName {
             guard ext.method.parameters.first?.name == "self" else {
@@ -5556,7 +5573,7 @@ extension TypeChecker {
             }
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
-              templateName: templateName,
+              templateName: Type.spelling(tplDefId),
               typeArgs: typeArgs,
               methodInfo: ext
             )
@@ -5643,16 +5660,16 @@ extension TypeChecker {
 
     // Trait object method lookup: when the type is a trait object, look up the method
     // in the trait's method signatures and return a methodReference with Self replaced
-    if case .traitObject(let traitName, _, let traitTypeArgs) = typeToLookup {
-      let methods = try flattenedTraitMethods(traitName)
+    if case .traitObject(let tplDefId, let traitTypeArgs) = typeToLookup {
+      let methods = try flattenedTraitMethods(Type.spelling(tplDefId))
       if let sig = methods[memberName] {
         // Only instance methods (with self parameter)
         if sig.parameters.first?.name != "self" {
           return nil
         }
 
-        let traitInfo = visibleTraitInfo(traitName)
-        let traitObjType: Type = traitObjectType(traitName: traitName, typeArgs: traitTypeArgs)
+        let traitInfo = visibleTraitInfo(Type.spelling(tplDefId))
+        let traitObjType: Type = traitObjectType(traitName: Type.spelling(tplDefId), typeArgs: traitTypeArgs)
 
         // Resolve the method type with Self replaced by the trait object type
         let expectedType = try expectedFunctionTypeForTraitMethod(
@@ -5711,30 +5728,30 @@ extension TypeChecker {
     if let rawType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       let canonicalType = canonicalizedTypeForStaticMemberLookup(rawType)
       switch canonicalType {
-      case .genericStruct(let templateName, _, let aliasArgs):
+      case .genericStruct(let tplDefId, let aliasArgs):
         if !resolvedTypeArgs.isEmpty {
           throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
         }
-        guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
-          throw SemanticError.undefinedType(templateName)
+        guard let template = currentScope.genericStructTemplate(defId: tplDefId) else {
+          throw SemanticError.undefinedType(Type.spelling(tplDefId))
         }
         return try inferGenericStructStaticMethodCall(
           template: template,
-          typeName: templateName,
+          typeName: Type.spelling(tplDefId),
           resolvedTypeArgs: aliasArgs,
           methodName: methodName,
           callArgs: callArgs
         )
-      case .genericEnum(let templateName, _, let aliasArgs):
+      case .genericEnum(let tplDefId, let aliasArgs):
         if !resolvedTypeArgs.isEmpty {
           throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
         }
-        guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
-          throw SemanticError.undefinedType(templateName)
+        guard let template = currentScope.genericEnumTemplate(defId: tplDefId) else {
+          throw SemanticError.undefinedType(Type.spelling(tplDefId))
         }
         return try inferGenericEnumStaticMethodCall(
           template: template,
-          typeName: templateName,
+          typeName: Type.spelling(tplDefId),
           resolvedTypeArgs: aliasArgs,
           methodName: methodName,
           callArgs: callArgs
@@ -5819,7 +5836,7 @@ extension TypeChecker {
 
     let baseType = genericStructType(template: typeName, args: effectiveTypeArgs)
 
-    if let extensions = genericExtensionMethods[typeName] {
+    if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
@@ -5909,7 +5926,7 @@ extension TypeChecker {
     
     let baseType = genericEnumType(template: typeName, args: effectiveTypeArgs)
     
-    if let extensions = genericExtensionMethods[typeName] {
+    if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
@@ -5968,7 +5985,9 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> [Type]? {
-    guard let extensions = genericExtensionMethods[templateName],
+    // Only the template's SPELLING is in scope here; resolve it once.
+    let templateOwner = methodOwnerForName(templateName) ?? .builtin(templateName)
+    guard let extensions = genericExtensionMethods[templateOwner],
           let ext = extensions.first(where: { $0.method.name == methodName }) else {
       return nil
     }
@@ -6135,7 +6154,7 @@ extension TypeChecker {
       lookupTypeName = type.description
     }
 
-    if let methods = extensionMethods[lookupTypeName], let methodSym = methods[methodName] {
+    if let methods = extensionMethods[context.methodOwner(of: type)], let methodSym = methods[methodName] {
       try ensureMethodAccessibleForMemberAccess(methodSym, memberName: methodName)
       if context.containsGenericParameter(methodSym.type) {
         return try inferStaticGenericMethodCallOnConcreteType(
@@ -6151,7 +6170,7 @@ extension TypeChecker {
       }
 
       let staticMeta = methodCallParamMeta(
-        ownerTypeName: lookupTypeName,
+        ownerTypeName: methodLabelKey(type),
         methodName: methodName,
         fallbackDefId: methodSym.defId,
         argumentCount: params.count
@@ -6188,7 +6207,7 @@ extension TypeChecker {
       )
     }
 
-    if let genericMethods = genericExtensionMethods[lookupTypeName],
+    if let genericMethods = genericExtensionMethods[context.methodOwner(of: type)],
        genericMethods.contains(where: { $0.method.name == methodName }) {
       return try inferStaticGenericMethodCallOnConcreteType(
         baseType: type,
@@ -6323,7 +6342,7 @@ extension TypeChecker {
     }
 
     let paramMeta = methodCallParamMeta(
-      ownerTypeName: ownerTypeName(for: baseType),
+      ownerTypeName: methodLabelKey(baseType),
       methodName: methodName,
       fallbackDefId: methodResult.methodSymbol.defId,
       argumentCount: params.count
@@ -6382,10 +6401,10 @@ extension TypeChecker {
   ) throws -> [Type] {
     let templateName: String
     switch baseType {
-    case .genericStruct(let name, _, _):
-      templateName = name
-    case .genericEnum(let name, _, _):
-      templateName = name
+    case .genericStruct(let tplDefId, _):
+      templateName = Type.spelling(tplDefId)
+    case .genericEnum(let tplDefId, _):
+      templateName = Type.spelling(tplDefId)
     case .structure(let defId):
       templateName = context.getName(defId) ?? ""
     case .`enum`(let defId):
@@ -6397,7 +6416,7 @@ extension TypeChecker {
     let methodTypeParamNames: [String]
     let unresolvedFunctionType: Type
 
-    if let extensions = genericExtensionMethods[templateName],
+    if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)],
        let methodInfo = extensions.first(where: { $0.method.name == methodName }) {
       let methodTypeParams = methodInfo.method.typeParameters
       if methodTypeParams.isEmpty {
@@ -6437,7 +6456,7 @@ extension TypeChecker {
         let returns = try resolveTypeNode(methodInfo.method.returnType)
         return Type.function(parameters: params, returns: returns)
       }
-    } else if let methods = extensionMethods[templateName],
+    } else if let methods = extensionMethods[context.methodOwner(of: baseType)],
               let methodSym = methods[methodName] {
       methodTypeParamNames = extractGenericParameterNames(from: methodSym.type)
       if methodTypeParamNames.isEmpty {
@@ -7147,8 +7166,8 @@ extension TypeChecker {
           if case .structure(let defId) = identifier.type {
             return context.isTypeMutable(defId)
           }
-          if case .genericStruct(let templateName, _, _) = identifier.type {
-            return currentScope.lookupGenericStructTemplate(templateName)?.isMutable == true
+          if case .genericStruct(let tplDefId, _) = identifier.type {
+            return currentScope.genericStructTemplate(defId: tplDefId)?.isMutable == true
           }
           return false
         case .memberPath(let source, let members):
@@ -7253,9 +7272,9 @@ extension TypeChecker {
         }
         
         // Handle genericStruct types - look up member from template
-        if case .genericStruct(let templateName, _, let typeArgs) = typeToLookup {
-          guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
-            throw SemanticError.undefinedType(templateName)
+        if case .genericStruct(let tplDefId, let typeArgs) = typeToLookup {
+          guard let template = currentScope.genericStructTemplate(defId: tplDefId) else {
+            throw SemanticError.undefinedType(Type.spelling(tplDefId))
           }
           
           // Create type substitution map
@@ -7276,7 +7295,7 @@ extension TypeChecker {
           if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
             let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
-              "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
+              "Cannot access \(accessLabel) field '\(memberName)' of type '\(Type.spelling(tplDefId))'"
             ), span: currentSpan)
           }
           
@@ -7650,7 +7669,7 @@ extension TypeChecker {
     // Extract expected element type from expectedType (e.g. [UInt]Range -> UInt)
     let expectedElementType: Type?
     if let expected = expectedType,
-       case .genericEnum(_, let templateDefId, let args) = expected,
+       case .genericEnum(let templateDefId, let args) = expected,
        context.isStdNominal(templateDefId, context.stdRangeTemplateDefId),
        args.count == 1 {
       expectedElementType = args[0]
@@ -8008,7 +8027,7 @@ extension TypeChecker {
     case .binding(let binding):
       return try typeCheckForBindingElement(binding, expectedType: elementType)
     case .pair(let first, let second, let span):
-      guard case .genericStruct(_, let templateDefId, let typeArgs) = elementType,
+      guard case .genericStruct(let templateDefId, let typeArgs) = elementType,
             context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
             typeArgs.count == 2 else {
         throw SemanticError(.typeMismatch(expected: "Pair", got: elementType.description), span: span)
@@ -8355,7 +8374,6 @@ extension TypeChecker {
   /// is std's trait -- identified by declaration, not spelling.
   private var resultErrorType: Type {
     .reference(inner: .traitObject(
-      traitName: "Error",
       traitDefId: stdErrorTraitDefId ?? .invalid,
       typeArgs: []))
   }

@@ -100,6 +100,10 @@ public func sanitizeCIdentifier(_ name: String) -> String {
 /// 使用文件路径的哈希值生成短标识符
 /// - Parameter sourceFile: 源文件路径
 /// - Returns: 文件标识符字符串（如 "f1234"）
+///
+/// NAME-ONLY, and that is correct here: this is C output. A name is one of the
+/// three places a spelling is legitimate (resolution, display, mangling) -- see
+/// `docs/identity-matching-tracking.md`. Nothing decides identity from it.
 public func generateFileIdentifier(_ sourceFile: String) -> String {
     var hash: UInt32 = 0
     for char in sourceFile.utf8 {
@@ -108,7 +112,8 @@ public func generateFileIdentifier(_ sourceFile: String) -> String {
     return "f\(hash % 10000)"
 }
 
-/// 生成 C 标识符
+/// 生成 C 标识符 -- NAME-ONLY, and correct for the same reason as
+/// `generateFileIdentifier`: this produces C output, not an identity.
 /// - Parameters:
 ///   - modulePath: 模块路径
 ///   - name: 符号名称

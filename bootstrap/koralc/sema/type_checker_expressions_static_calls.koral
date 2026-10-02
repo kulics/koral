@@ -1,17 +1,16 @@
 using std::os { env };
 
 given TypeChecker {
-    module_private generic_struct_template_def_id(self, template_name String, template_def_id DefId) DefId = {
-        if template_def_id.is_valid() then {
-            return template_def_id;
-        };
-        return self.storage.generic_templates.lookup_struct_def_id(template_name);
-    };
-
-    module_private generic_struct_type_parameter_names(self, template_name String, template_def_id DefId) List[String] = {
-        let resolved_def_id = self.generic_struct_template_def_id(template_name, template_def_id);
+    /// The type-parameter names of a generic struct TEMPLATE.
+    ///
+    /// Identity is the carried `template_def_id`, and the template declaration is
+    /// reached through it (`struct_by_def_id`) -- never through its spelling.
+    /// Two sources, both keyed by that same DefId: the recorded `type_arguments`
+    /// when the declaration carried them, otherwise the template's own parameter
+    /// list. (rustc: `tcx.generics_of(def_id)` -- keyed by the DefId.)
+    module_private generic_struct_type_parameter_names(self, template_def_id DefId) List[String] = {
         let mutable names = List[String].new();
-        when self.context().get_type_arguments(resolved_def_id) in {
+        when self.context().get_type_arguments(template_def_id) in {
             .Some(type_args) then {
                 for arg in type_args then {
                     when arg in {
@@ -23,7 +22,7 @@ given TypeChecker {
             },
             .None() then {},
         };
-        when self.storage.generic_templates.lookup_struct(template_name) in {
+        when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
             .Some(template) then {
                 for parameter in template.type_parameters then {
                     names.push(parameter.name);
@@ -56,10 +55,11 @@ given TypeChecker {
                 },
                 .None() then List[Type].new(),
             },
-            .GenericStruct(template_name, template_def_id, args) then {
-                let resolved_def_id = self.generic_struct_template_def_id(template_name, template_def_id);
-                let fields = self.context().get_struct_fields(resolved_def_id) or else List[StructField].new();
-                let parameter_names = self.generic_struct_type_parameter_names(template_name, template_def_id);
+            .GenericStruct(template_def_id, args) then {
+                // Same as the `.StructureType` branch above: the carried DefId
+                // is the field table's key.
+                let fields = self.context().get_struct_fields(template_def_id) or else List[StructField].new();
+                let parameter_names = self.generic_struct_type_parameter_names(template_def_id);
                 let mutable bindings = Dict[String, Type].new();
                 let mutable index UInt = 0;
                 let param_count = parameter_names.count();
@@ -104,9 +104,10 @@ given TypeChecker {
                 },
                 .None() then List[String].new(),
             },
-            .GenericStruct(template_name, template_def_id, _) then {
-                let resolved_def_id = self.generic_struct_template_def_id(template_name, template_def_id);
-                let fields = self.context().get_struct_fields(resolved_def_id) or else List[StructField].new();
+            .GenericStruct(template_def_id, _) then {
+                // Same as the `.StructureType` branch above: the carried DefId
+                // is the field table's key.
+                let fields = self.context().get_struct_fields(template_def_id) or else List[StructField].new();
                 let mutable names = List[String].new();
                 for field in fields then {
                     names.push(field.name);
@@ -187,19 +188,21 @@ given TypeChecker {
             .WeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), false),
             .MutableWeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), true),
             .GenericParameter(name) then TypeNode.Identifier(name),
-            .GenericStruct(template, _, type_args) then {
+            .GenericStruct(tplDefId, type_args) then {
                 let mutable arg_nodes = List[TypeNode].new();
                 for arg in type_args then {
                     arg_nodes.push(self.type_node_for_type(arg));
                 };
-                TypeNode.Generic(template, arg_nodes)
+                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes)
             },
-            .GenericEnum(template, _, type_args) then {
+            .GenericEnum(tplDefId, type_args) then {
                 let mutable arg_nodes = List[TypeNode].new();
                 for arg in type_args then {
                     arg_nodes.push(self.type_node_for_type(arg));
                 };
-                TypeNode.Generic(template, arg_nodes)
+                // A TypeNode is syntax and carries a spelling; read it from the
+                // declaration. This is display/serialization, not identity.
+                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes)
             },
             _ then TypeNode.Identifier(self.context().type_display_name(t)),
         };
@@ -431,7 +434,7 @@ given TypeChecker {
 
     module_private dispatches_via_trait_object_for_static_call(self, receiver_type Type) Bool = {
         return when receiver_type in {
-            .TraitObject(_, _, _) then true,
+            .TraitObject(_, _) then true,
             .ReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(inner),
             .MutableReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(inner),
             _ then false,
@@ -440,7 +443,7 @@ given TypeChecker {
 
     module_private trait_object_type_for_static_call(self, receiver_type Type) Option[Type] = {
         return when receiver_type in {
-            .TraitObject(_, _, _) then Option[Type].Some(receiver_type),
+            .TraitObject(_, _) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_type_for_static_call(inner),
             .MutableReferenceType(inner) then self.trait_object_type_for_static_call(inner),
             _ then Option[Type].None(),
@@ -649,8 +652,8 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when normalized in {
-            .TraitObject(existing_trait_name, existing_trait_def_id, existing_args) then {
-                if existing_trait_def_id == requested_trait_id then Type.TraitObject(existing_trait_name, existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
+            .TraitObject(existing_trait_def_id, existing_args) then {
+                if existing_trait_def_id == requested_trait_id then Type.TraitObject(existing_trait_def_id, existing_args) else self.canonical_trait_object_type(trait_name)
             },
             _ then self.canonical_trait_object_type(trait_name),
         };
@@ -660,11 +663,11 @@ given TypeChecker {
         return when base.expr_kind in {
             .DerefExpr(inner) then when inner.expr_type in {
                 .ReferenceType(inner_ref) then when inner_ref in {
-                    .TraitObject(_, _, _) then inner,
+                    .TraitObject(_, _) then inner,
                     _ then base,
                 },
                 .MutableReferenceType(inner_ref) then when inner_ref in {
-                    .TraitObject(_, _, _) then inner,
+                    .TraitObject(_, _) then inner,
                     _ then base,
                 },
                 _ then base,
@@ -746,13 +749,14 @@ given TypeChecker {
         let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) in {
             .Some(t) then when t in {
                 .EnumType(def_id) then {
+                    let template_def_id = self.context().get_template_def_id(def_id);
                     if not receiver_type_arg_refs.is_empty() then {
-                        let template_def_id = self.context().get_template_def_id(def_id);
-                        Option[Type].Some(Type.GenericEnum(effective_type_name, if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs))
+                        Option[Type].Some(Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs))
                     } else when expected in {
                         .Some(et) then when et in {
-                            .GenericEnum(expected_template, _, _) then {
-                                if expected_template == effective_type_name then Option[Type].Some(et) else Option[Type].Some(t)
+                            // Identity: compare declarations, never spellings.
+                            .GenericEnum(expected_def_id, _) then {
+                                if expected_def_id == template_def_id then Option[Type].Some(et) else Option[Type].Some(t)
                             },
                             .EnumType(expected_def_id) then {
                                 if expected_def_id.id == def_id.id then Option[Type].Some(et) else Option[Type].Some(t)
@@ -762,13 +766,14 @@ given TypeChecker {
                         .None() then Option[Type].Some(t),
                     }
                 },
-                .GenericEnum(template_name, template_def_id, existing_args) then {
+                .GenericEnum(template_def_id, existing_args) then {
                     if not receiver_type_arg_refs.is_empty() then {
-                        Option[Type].Some(Type.GenericEnum(template_name, template_def_id, receiver_type_arg_refs))
+                        Option[Type].Some(Type.GenericEnum(template_def_id, receiver_type_arg_refs))
                     } else when expected in {
                         .Some(et) then when et in {
-                            .GenericEnum(expected_template, _, _) then {
-                                if expected_template == template_name then Option[Type].Some(et) else Option[Type].Some(t)
+                            // Identity: compare declarations, never spellings.
+                            .GenericEnum(expected_def_id, _) then {
+                                if expected_def_id == template_def_id then Option[Type].Some(et) else Option[Type].Some(t)
                             },
                             _ then Option[Type].Some(t),
                         },
@@ -977,11 +982,11 @@ given TypeChecker {
                         .Some(t) then when t in {
                             .StructureType(def_id) then {
                                 let template_def_id = self.context().get_template_def_id(def_id);
-                                Type.GenericStruct(effective_type_name, if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs)
+                                Type.GenericStruct(if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs)
                             },
                             .EnumType(def_id) then {
                                 let template_def_id = self.context().get_template_def_id(def_id);
-                                Type.GenericEnum(effective_type_name, if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs)
+                                Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs)
                             },
                             _ then resolved_ret_type,
                         },
@@ -1068,7 +1073,8 @@ given TypeChecker {
                 .WeakReferenceType(inner_ref) then {
                     let mutable opt_args = List[Type].new();
                     opt_args.push(inner_ref);
-                    let mutable result_type = Type.GenericEnum("Option", self.generic_template_def_id("Option"), opt_args);
+                    // Std's `Option` is a LANG ITEM, reached by declaration.
+                    let mutable result_type = Type.GenericEnum(self.context().std_type_def_id("Option") or else def_id_invalid(), opt_args);
                     Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(inner, result_type)), result_type))
                 },
                 _ then {
@@ -1161,17 +1167,17 @@ given TypeChecker {
         };
 
         let constructor_type_probe = self.resolved_constructor_type_or_unknown(callee, scope);
-        let probe_is_constructor_type = constructor_type_probe is .StructureType(_) or constructor_type_probe is .GenericStruct(_, _, _);
+        let probe_is_constructor_type = constructor_type_probe is .StructureType(_) or constructor_type_probe is .GenericStruct(_, _);
         let constructor_plan_type = when expected in {
             .Some(expected_t) then when expected_t in {
                 .StructureType(_) then if probe_is_constructor_type then expected_t else constructor_type_probe,
-                .GenericStruct(_, _, _) then if probe_is_constructor_type then expected_t else constructor_type_probe,
+                .GenericStruct(_, _) then if probe_is_constructor_type then expected_t else constructor_type_probe,
                 _ then constructor_type_probe,
             },
             .None() then constructor_type_probe,
         };
         let mutable constructor_already_normalized = false;
-        if constructor_plan_type is .StructureType(_) or constructor_plan_type is .GenericStruct(_, _, _) then {
+        if constructor_plan_type is .StructureType(_) or constructor_plan_type is .GenericStruct(_, _) then {
             let constructor_param_specs = self.struct_constructor_param_specs(constructor_plan_type);
             let constructor_field_types = self.type_construction_arg_types(constructor_plan_type);
             call_args = self.normalize_constructor_call_args(call_args, constructor_param_specs, constructor_field_types, self.context().type_display_name(constructor_plan_type), "") or else {
@@ -1233,9 +1239,9 @@ given TypeChecker {
                                         .EnumType(def_id) then {
                                             let template_name = self.context().get_template_name(def_id) or else base_name;
                                             let template_def_id = self.context().get_template_def_id(def_id);
-                                            Type.GenericEnum(template_name, if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
+                                            Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
                                         },
-                                        .GenericEnum(template_name, template_def_id, _) then Type.GenericEnum(template_name, template_def_id, resolved_args),
+                                        .GenericEnum(template_def_id, _) then Type.GenericEnum(template_def_id, resolved_args),
                                         _ then Type.Unknown(),
                                     };
                                     if not (enum_type is .Unknown()) then {
@@ -1617,10 +1623,10 @@ given TypeChecker {
                         _ then false,
                     };
                     let expected_is_trait_object_ref = when expected_t in {
-                        .ReferenceType(inner) then inner is .TraitObject(_, _, _),
-                        .MutableReferenceType(inner) then inner is .TraitObject(_, _, _),
-                        .BorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
-                        .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _, _),
+                        .ReferenceType(inner) then inner is .TraitObject(_, _),
+                        .MutableReferenceType(inner) then inner is .TraitObject(_, _),
+                        .BorrowedReferenceType(inner) then inner is .TraitObject(_, _),
+                        .MutableBorrowedReferenceType(inner) then inner is .TraitObject(_, _),
                         _ then false,
                     };
                     if self.same_expr_type(typed_arg.expr_type, expected_t) then typed_arg else if expected_requires_ref_like and not actual_is_ref_like and not expected_is_trait_object_ref then typed_arg else self.adapt_expr_to_expected_type_at(typed_arg, Option[Type].Some(expected_t), Option[SourceSpan].Some(expr_span(a)))
@@ -1652,11 +1658,11 @@ given TypeChecker {
                                     let trait_receiver = when base.expr_kind in {
                                         .DerefExpr(inner) then when inner.expr_type in {
                                             .ReferenceType(inner_ref) then when inner_ref in {
-                                                .TraitObject(_, _, _) then inner,
+                                                .TraitObject(_, _) then inner,
                                                 _ then base,
                                             },
                                             .MutableReferenceType(inner_ref) then when inner_ref in {
-                                                .TraitObject(_, _, _) then inner,
+                                                .TraitObject(_, _) then inner,
                                                 _ then base,
                                             },
                                             _ then base,
@@ -1790,11 +1796,10 @@ given TypeChecker {
         let mutable generic_struct_constructor_return_type = Option[Type].None();
         generic_struct_constructor_return_type = when constructor_plan_type in {
             .StructureType(def_id) then self.infer_generic_struct_constructor_return_type_for_def_id(
-                self.context().get_name(def_id) or else "",
                 def_id,
                 typed_args,
             ),
-            .GenericStruct(_, _, _) then Option[Type].Some(constructor_plan_type),
+            .GenericStruct(_, _) then Option[Type].Some(constructor_plan_type),
             _ then self.infer_generic_struct_constructor_return_type(callee, typed_args),
         };
         let mutable has_direct_generic_instantiation_return_type = false;
@@ -1853,7 +1858,7 @@ given TypeChecker {
         };
         when typed_callee.expr_kind in {
             .GenericInstantiation(base_type, type_args) then {
-                if ret_type is .GenericStruct(_, _, _) or ret_type is .StructureType(_) or ret_type is .GenericEnum(_, _, _) or ret_type is .EnumType(_) then {
+                if ret_type is .GenericStruct(_, _) or ret_type is .StructureType(_) or ret_type is .GenericEnum(_, _) or ret_type is .EnumType(_) then {
                     let identifier = self.type_construction_symbol_for_type(base_type, ret_type);
                     let param_specs = self.struct_constructor_param_specs(ret_type);
                     let field_types = self.type_construction_arg_types(ret_type);
@@ -1866,7 +1871,7 @@ given TypeChecker {
             },
             .Variable(sym) then {
                 if sym.kind is .TypeSymbol() then {
-                    if ret_type is .StructureType(_) or ret_type is .GenericStruct(_, _, _) or ret_type is .EnumType(_) or ret_type is .GenericEnum(_, _, _) then {
+                    if ret_type is .StructureType(_) or ret_type is .GenericStruct(_, _) or ret_type is .EnumType(_) or ret_type is .GenericEnum(_, _) then {
                         let identifier = Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol());
                         let param_specs = self.struct_constructor_param_specs(ret_type);
                         let field_types = self.type_construction_arg_types(ret_type);
@@ -1888,8 +1893,9 @@ given TypeChecker {
                             .StructureType(def_id) then {
                                 self.ensure_struct_construction_access(self.context().symbol_name(sym), def_id);
                             },
-                            .GenericStruct(template_name, _, _) then {
-                                when self.storage.generic_templates.lookup_struct(template_name) in {
+                            // Identity: the template's DECLARATION, not its spelling.
+                            .GenericStruct(template_def_id, _) then {
+                                when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
                                     .Some(template) then {
                                         self.ensure_struct_construction_access(self.context().symbol_name(sym), template.def_id);
                                     },
@@ -2228,7 +2234,9 @@ given TypeChecker {
                 },
                 .TraitMethodCall(receiver, trait_type, method_name, method_index, _) then {
                     let expected_self_type = when trait_type in {
-                        .TraitObject(trait_name, _, _) then self.resolve_trait_method_self_type(trait_name, method_name, receiver.expr_type),
+                        // The spelling is read from the DECLARATION; the callee
+                        // resolves it back to the same trait.
+                        .TraitObject(trait_def_id, _) then self.resolve_trait_method_self_type(def_id_spelling(trait_def_id), method_name, receiver.expr_type),
                         _ then Option[Type].None(),
                     };
                     let prepared_receiver = self.prepare_call_receiver(receiver, expected_self_type);
@@ -2255,14 +2263,13 @@ given TypeChecker {
 
     module_private infer_generic_struct_constructor_return_type_for_def_id(
         self,
-        template_name String,
         template_def_id DefId,
         typed_args List[TypedExpr],
     ) Option[Type] = {
         let fields = self.context().get_struct_fields(template_def_id) or else {
             return Option[Type].None();
         };
-        let type_parameter_names = self.generic_struct_type_parameter_names(template_name, template_def_id);
+        let type_parameter_names = self.generic_struct_type_parameter_names(template_def_id);
         if type_parameter_names.is_empty() then {
             return Option[Type].None();
         };
@@ -2284,7 +2291,7 @@ given TypeChecker {
                 },
             };
         };
-        return Option[Type].Some(Type.GenericStruct(template_name, template_def_id, resolved_args));
+        return Option[Type].Some(Type.GenericStruct(template_def_id, resolved_args));
     };
 
     module_private infer_generic_struct_constructor_return_type(self, callee Expr, typed_args List[TypedExpr]) Option[Type] = {
@@ -2298,8 +2305,7 @@ given TypeChecker {
                     },
                     _ then self.storage.generic_templates.lookup_struct_def_id(name),
                 };
-                let template_name = self.context().get_name(template_def_id) or else name;
-                self.infer_generic_struct_constructor_return_type_for_def_id(template_name, template_def_id, typed_args)
+                self.infer_generic_struct_constructor_return_type_for_def_id(template_def_id, typed_args)
             },
             _ then Option[Type].None(),
         };

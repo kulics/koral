@@ -14,12 +14,36 @@ public type mutable MIRProgram(
     globals List[MIRGlobal],
     mutable functions List[MIRFunction],
     context CompilerContext,
-    static_method_lookup Dict[String, DefId],
+    static_method_lookup Dict[MethodInstanceKey, DefId],
+    // Spelling -> declaration. This is the NAME RESOLUTION table and is the only
+    // place a trait name decides anything.
     traits Dict[String, TraitDeclInfo],
+    // Declaration identity -> declaration. Anything asking "is this the trait X"
+    // reads here: two same-named traits from different modules are different
+    // traits, so the spelling cannot answer that.
+    traits_by_def_id Dict[UInt, TraitDeclInfo],
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     conformance_witnesses Dict[String, ConformanceWitness],
 );
+
+/// The DefId index over `traits`. Built alongside the spelling table so the two
+/// never disagree; see `MIRProgram.traits_by_def_id`.
+public let trait_decl_index(traits Dict[String, TraitDeclInfo]) Dict[UInt, TraitDeclInfo] = {
+    let mutable out = Dict[UInt, TraitDeclInfo].new();
+    for entry in traits.iterator() then {
+        out.insert(entry.second.def_id.id, entry.second);
+    };
+    return out;
+};
+
+given MIRProgram {
+    /// The trait declared at `def_id`. Identity lookup -- the spelling is never
+    /// consulted. Mirrors `GenericTemplateRegistry.lookup_trait_by_def_id`.
+    public trait_by_def_id(self, def_id DefId) Option[TraitDeclInfo] = {
+        return self.traits_by_def_id.get(def_id.id);
+    };
+};
 
 public type MIRFunctionWorkItem(
     identifier Symbol,

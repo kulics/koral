@@ -189,7 +189,7 @@ given TypeChecker {
         when binding.type_name in {
             .Some(type_annotation) then {
                 let expected_type = self.resolve_type_in_scope(type_annotation, scope);
-                if expected_type is .TraitObject(_, _, _) then {
+                if expected_type is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type", unknown_span()));
                 };
                 if not self.same_expr_type(binding_type, expected_type) and not self.is_unresolved_expr_type(binding_type) and not self.is_unresolved_expr_type(expected_type) then {
@@ -216,7 +216,7 @@ given TypeChecker {
     };
 
     module_private get_pair_binding_type(self, pair_type Type, field_name String) Option[Type] = {
-        let field_types = self.get_struct_pattern_field_types(pair_type, "Pair");
+        let field_types = self.get_struct_pattern_field_types(pair_type, self.struct_pattern_def_id("Pair"));
         if field_name == "first" and field_types.count() > 0 then {
             return Option[Type].Some(field_types[0(UInt)]);
         };
@@ -271,7 +271,7 @@ given TypeChecker {
         let mutable pair_template_def_id = Option[DefId].None();
         let needs_pair_args = when binding_type in {
             .StructureType(def_id) then self.is_std_type(binding_type, "Pair"),
-            .GenericStruct(_, template_def_id, args) then {
+            .GenericStruct(tplDefId, args) then {
                 if not self.is_std_type(binding_type, "Pair") or args.count() <> 2(UInt) then {
                     false
                 };
@@ -282,7 +282,7 @@ given TypeChecker {
                     };
                 };
                 if unresolved then {
-                    pair_template_def_id = Option[DefId].Some(template_def_id);
+                    pair_template_def_id = Option[DefId].Some(tplDefId);
                 };
                 unresolved
             },
@@ -312,7 +312,7 @@ given TypeChecker {
                     pair_args.push(first_type);
                     pair_args.push(second_type);
                     when pair_template_def_id in {
-                        .Some(template_def_id) then Type.GenericStruct("Pair", template_def_id, pair_args),
+                        .Some(template_def_id) then Type.GenericStruct(template_def_id, pair_args),
                         .None() then binding_type,
                     }
                 },

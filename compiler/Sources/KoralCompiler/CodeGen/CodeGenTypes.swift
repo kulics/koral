@@ -205,10 +205,10 @@ extension CodeGen {
           elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         case .`enum`(let defId):
           elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        case .genericStruct(let template, let tplDefId, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
-        case .genericEnum(let template, let tplDefId, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context, templateDefId: tplDefId)
+        case .genericStruct(let tplDefId, let args):
+          elementTypeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
+        case .genericEnum(let tplDefId, let args):
+          elementTypeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
         default:
           elementTypeName = cTypeName(elementType)
         }

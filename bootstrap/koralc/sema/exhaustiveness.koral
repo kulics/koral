@@ -104,10 +104,10 @@ given ExhaustivenessChecker {
         // 按主题类型分支检查穷举性
         when self.subject_type in {
             .EnumType(_) then {},
-            .GenericEnum(template_name, _, _) then {
-                let _ = template_name;
+            .GenericEnum(tplDefId, _) then {
+                let _ = def_id_spelling(tplDefId);
             },
-            .GenericStruct(_, _, _) then {
+            .GenericStruct(_, _) then {
                 if not has_catchall then {
                     let type_name = type_to_string(self.subject_type);
                     let message = self.missing_catchall_message(type_name);
@@ -303,13 +303,13 @@ given ExhaustivenessChecker {
                 .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), Option[List[EnumCaseInfo]].Some(cases))),
                 .None() then Option[PatternSpace].None(),
             },
-            .GenericEnum(template_name, _, _) then {
-                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+            .GenericEnum(tplDefId, _) then {
+                let maybe_cases = when self.generic_templates.enum_by_def_id(tplDefId) in {
                     .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
                     .None() then Option[List[EnumCaseInfo]].None(),
                 };
                 when maybe_cases in {
-                    .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(template_name, Option[List[EnumCaseInfo]].Some(cases))),
+                    .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(def_id_spelling(tplDefId), Option[List[EnumCaseInfo]].Some(cases))),
                     .None() then Option[PatternSpace].None(),
                 }
             },
@@ -350,12 +350,12 @@ given ExhaustivenessChecker {
         return when t in {
             .BoolType() then PatternSpace.BoolValues(true, true),
             .EnumType(def_id) then self.enum_pattern_space(self.context.type_display_name(t), self.context.get_enum_cases(def_id)),
-            .GenericEnum(template_name, _, _) then {
-                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+            .GenericEnum(tplDefId, _) then {
+                let maybe_cases = when self.generic_templates.enum_by_def_id(tplDefId) in {
                     .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
                     .None() then Option[List[EnumCaseInfo]].None(),
                 };
-                self.enum_pattern_space(template_name, maybe_cases)
+                self.enum_pattern_space(def_id_spelling(tplDefId), maybe_cases)
             },
             _ then PatternSpace.Full(t),
         };
@@ -685,7 +685,7 @@ given ExhaustivenessChecker {
         let mutable cases = Dict[String, List[PatternSpace]].new();
         let maybe_cases = when t in {
             .EnumType(def_id) then self.context.get_enum_cases(def_id),
-            .GenericEnum(template_name, _, _) then when self.generic_templates.lookup_enum(template_name) in {
+            .GenericEnum(tplDefId, _) then when self.generic_templates.enum_by_def_id(tplDefId) in {
                 .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
                 .None() then Option[List[EnumCaseInfo]].None(),
             },
@@ -920,7 +920,7 @@ given ExhaustivenessChecker {
     file_private exhaustiveness_type_name(self) String = {
         return when self.subject_type in {
             .EnumType(_) then self.context.type_display_name(self.subject_type),
-            .GenericEnum(template_name, _, _) then template_name,
+            .GenericEnum(tplDefId, _) then def_id_spelling(tplDefId),
             .BoolType() then "Bool",
             _ then type_to_string(self.subject_type),
         };
@@ -985,8 +985,8 @@ given ExhaustivenessChecker {
                     .None() then {},
                 };
             },
-            .GenericEnum(template_name, _, _) then {
-                when self.generic_templates.lookup_enum(template_name) in {
+            .GenericEnum(tplDefId, _) then {
+                when self.generic_templates.enum_by_def_id(tplDefId) in {
                     .Some(tmpl) then {
                         when self.context.get_enum_cases(tmpl.def_id) in {
                             .Some(cases) then {

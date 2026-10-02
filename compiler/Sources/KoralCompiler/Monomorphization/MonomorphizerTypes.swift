@@ -76,7 +76,7 @@ extension Monomorphizer {
         
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName, isMutable: template.isMutable)
+        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName, templateDefId: template.defId, isMutable: template.isMutable)
         let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 
@@ -104,14 +104,17 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: templateName, isMutable: template.isMutable)
+        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: templateName, templateDefId: template.defId, isMutable: template.isMutable)
         let specificType = Type.structure(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
         
-        // Force instantiate Drop trait method if it exists for this type
-        if let methods = input.genericTemplates.extensionMethods[templateName] {
-            let stdDropDefId = input.genericTemplates.traits["Drop"]?.defId
+        // Force instantiate Drop trait method if it exists for this type.
+        // The std `Drop` is a LANG ITEM, so this compares declarations: a bare
+        // `traits["Drop"]` would also answer for a user trait named `Drop`, and
+        // with a nil lang item `nil == nil` would match every untraited method.
+        if let methods = input.genericTemplates.extensionMethods[context.methodOwner(of: specificType)],
+           let stdDropDefId = context.stdDropTraitDefId {
             for entry in methods {
                 if entry.conformanceTraitDefId == stdDropDefId && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(
@@ -180,7 +183,7 @@ extension Monomorphizer {
         
         // Create placeholder for recursion
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
-        context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        context.updateEnumInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName, templateDefId: template.defId)
         let placeholder = Type.`enum`(defId: defId)
         instantiatedTypes[key] = placeholder
         
@@ -211,14 +214,15 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateEnumInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
+        context.updateEnumInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: templateName, templateDefId: template.defId)
         let specificType = Type.`enum`(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
 
-        // Force instantiate Drop trait method if it exists
-        if let methods = input.genericTemplates.extensionMethods[templateName] {
-            let stdDropDefId = input.genericTemplates.traits["Drop"]?.defId
+        // Force instantiate Drop trait method if it exists.
+        // Lang item, declaration identity -- see the struct branch above.
+        if let methods = input.genericTemplates.extensionMethods[context.methodOwner(of: specificType)],
+           let stdDropDefId = context.stdDropTraitDefId {
             for entry in methods {
                 if entry.conformanceTraitDefId == stdDropDefId && entry.method.name == "drop" {
                     _ = try instantiateExtensionMethodFromEntry(

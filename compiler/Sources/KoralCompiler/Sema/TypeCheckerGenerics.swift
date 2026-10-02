@@ -144,16 +144,16 @@ extension TypeChecker {
         }
       }
     case .generic(let base, let args):
-      if case .genericStruct(let templateName, _, let typeArgs) = type {
-        // Match against genericStruct type
-        if templateName == base && typeArgs.count == args.count {
+      // `base` is a SOURCE SPELLING: resolve it to its declaration once here,
+      // then the two sides compare as identities.
+      if case .genericStruct(let tplDefId, let typeArgs) = type {
+        if currentScope.lookupGenericStructTemplate(base)?.defId == tplDefId, typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
         }
-      } else if case .genericEnum(let templateName, _, let typeArgs) = type {
-        // Match against genericEnum type
-        if templateName == base && typeArgs.count == args.count {
+      } else if case .genericEnum(let tplDefId, let typeArgs) = type {
+        if currentScope.lookupGenericEnumTemplate(base)?.defId == tplDefId, typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }

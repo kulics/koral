@@ -102,10 +102,8 @@ given TypeChecker {
     module_private satisfies_mutable_constraint(self, target_type Type) Bool = {
         return when target_type in {
             .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
-            .GenericStruct(template, _, _) then when self.try_resolve_named_type_without_diag(template) in {
-                .Some(resolved) then self.satisfies_mutable_constraint(self.canonicalize_alias_type(resolved)),
-                .None() then false,
-            },
+            // Identity: the template's DECLARATION decides mutability.
+            .GenericStruct(template_def_id, _) then self.context().def_id_map.is_struct_mutable(template_def_id),
             .GenericParameter(_) then true,
             _ then false,
         };
@@ -219,7 +217,7 @@ given TypeChecker {
                 };
                 self.first_signature_visibility_violation(return_type, required_access)
             },
-            .GenericStruct(_, _, args) then {
+            .GenericStruct(_, args) then {
                 for arg in args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
@@ -228,7 +226,7 @@ given TypeChecker {
                 };
                 Option[Pair[String, AccessModifier]].None()
             },
-            .GenericEnum(_, _, args) then {
+            .GenericEnum(_, args) then {
                 for arg in args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
@@ -237,7 +235,7 @@ given TypeChecker {
                 };
                 Option[Pair[String, AccessModifier]].None()
             },
-            .TraitObject(_, _, type_args) then {
+            .TraitObject(_, type_args) then {
                 for arg in type_args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
@@ -428,6 +426,33 @@ given TypeChecker {
         };
     };
 
+    /// The `Type` a DECLARATION denotes, built from its recorded kind.
+    ///
+    /// An imported generic TEMPLATE has no `symbol_type` -- it is a declaration
+    /// waiting for type arguments, not a monomorphic value -- so reading
+    /// `get_symbol_type` alone loses it and the lookup falls through to a
+    /// last-wins name table. This is the same construction
+    /// `lookup_current_file_type_symbol` does.
+    module_private type_for_declared_def_id(self, def_id DefId) Option[Type] = {
+        return when self.context().get_kind(def_id) in {
+            .Some(kind) then when kind in {
+                .TypeDef(type_kind) then when type_kind in {
+                    .Structure() then Option[Type].Some(Type.StructureType(def_id)),
+                    .Enum() then Option[Type].Some(Type.EnumType(def_id)),
+                    .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
+                    .Trait() then Option[Type].Some(Type.TraitObject(def_id, List[Type].new())),
+                },
+                .GenericTemplate(template_kind) then when template_kind in {
+                    .Structure() then Option[Type].Some(Type.StructureType(def_id)),
+                    .Enum() then Option[Type].Some(Type.EnumType(def_id)),
+                    _ then Option[Type].None(),
+                },
+                _ then Option[Type].None(),
+            },
+            .None() then self.context().get_symbol_type(def_id),
+        };
+    };
+
     module_private lookup_current_file_type_symbol(self, name String) Option[Type] = {
         return when self.lookup_current_file_def_id(name) in {
             .Some(def_id) then when self.context().get_kind(def_id) in {
@@ -438,7 +463,7 @@ given TypeChecker {
                         .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
                         .Trait() then {
                             let trait_name = self.context().get_name(def_id) or else name;
-                            Option[Type].Some(Type.TraitObject(trait_name, def_id, List[Type].new()))
+                            Option[Type].Some(Type.TraitObject(def_id, List[Type].new()))
                         },
                     },
                     .GenericTemplate(template_kind) then when template_kind in {
@@ -466,7 +491,7 @@ given TypeChecker {
                                 .Structure() then Type.StructureType(def_id),
                                 .Enum() then Type.EnumType(def_id),
                                 .Opaque() then Type.OpaqueType(def_id),
-                                .Trait() then Type.TraitObject(name, def_id, List[Type].new()),
+                                .Trait() then Type.TraitObject(def_id, List[Type].new()),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
                                 .Structure() then Type.StructureType(def_id),
@@ -566,7 +591,7 @@ given TypeChecker {
                             let entry = candidates[index(UInt)];
                             if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
                                 return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
-                                    .Some(def_id) then self.context().get_symbol_type(def_id),
+                                    .Some(def_id) then self.type_for_declared_def_id(def_id),
                                     .None() then Option[Type].None(),
                                 };
                             };
@@ -624,7 +649,7 @@ given TypeChecker {
             return trait_arg_types.is_empty() or self.trait_args_match(constraint.type_args, trait_arg_types);
         };
 
-        return when self.storage.trait_registry.get(constraint.trait_name) in {
+        return when self.storage.trait_registry.get_in_module(constraint.trait_name, self.storage.module_path) in {
             .Some(info) then {
                 let previous_scope = self.storage.current_scope;
                 defer { self.storage.current_scope = previous_scope;};
@@ -644,7 +669,7 @@ given TypeChecker {
                     for arg_node in parent.type_arg_nodes then {
                         parent_args.push(self.resolve_type(arg_node));
                     };
-                    if self.generic_constraint_satisfies_trait_bound(GenericConstraintBound(self.trait_def_id_of(parent.name) or else DefId(0(UInt)), parent.name, parent_args), self_type, trait_name, trait_arg_types) then {
+                    if self.generic_constraint_satisfies_trait_bound(GenericConstraintBound(parent.def_id, parent.name, parent_args), self_type, trait_name, trait_arg_types) then {
                         return true;
                     };
                 };
@@ -662,8 +687,8 @@ given TypeChecker {
     module_private is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
         let target_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         when target_type in {
-            .TraitObject(_, trait_def_id, _) then {
-                return self.storage.trait_registry.has_inheritance(trait_def_id, target_id);
+            .TraitObject(trait_object_def_id, _) then {
+                return self.storage.trait_registry.has_inheritance(trait_object_def_id, target_id);
             },
             _ then {},
         };
@@ -743,8 +768,13 @@ given TypeChecker {
         return self.has_explicit_trait_conformance_with_args(target_type, trait_name, List[Type].new());
     };
 
-    module_private has_direct_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
-        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types));
+    /// Direct conformance to the trait declared at `trait_def_id`. The name is
+    /// kept only because the conformance key records it for display; identity
+    /// comes from the declaration.
+    module_private has_direct_explicit_trait_conformance(self, target_type Type, trait_def_id DefId, trait_name String, trait_arg_types List[Type]) Bool = {
+        return self.storage.explicit_trait_conformances.contains(
+            ExplicitTraitConformanceKey(target_type, trait_def_id, trait_name, trait_arg_types)
+        );
     };
 
     module_private has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
@@ -862,32 +892,10 @@ given TypeChecker {
         };
     };
 
-    // Returns the canonical key for conformance template indexing.
-    // Mirrors extension_template_key from type_checker_templates.koral.
-    module_private conformance_template_key(self, target_type Type) String = {
-        return when target_type in {
-            .ReferenceType(_) then "Ref",
-            .MutableReferenceType(_) then "MutRef",
-            .BorrowedReferenceType(_) then "Ref",
-            .MutableBorrowedReferenceType(_) then "MutRef",
-            .PointerType(_) then "Ptr",
-            .MutablePointerType(_) then "MutPtr",
-            .WeakReferenceType(_) then "WeakRef",
-            .MutableWeakReferenceType(_) then "MutWeakRef",
-            .GenericStruct(template, _, _) then template,
-            .GenericEnum(template, _, _) then template,
-            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template_name) then template_name,
-                .None() then self.context().get_name(def_id) or else "struct#\(def_id.id)",
-            },
-            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
-                .Some(template_name) then template_name,
-                .None() then self.context().get_name(def_id) or else "enum#\(def_id.id)",
-            },
-            .GenericParameter(name) then "GenericParam:\(name)",
-            .TraitObject(name, _, _) then "TraitObject:\(name)",
-            _ then self.context().type_display_name(target_type),
-        };
+    /// The owner identity a conformance is indexed by -- the same key the
+    /// method table uses. A conformance is attached to a TYPE, not a type NAME.
+    module_private conformance_template_key(self, target_type Type) MethodOwner = {
+        return self.extension_template_key(target_type);
     };
 
     module_private type_modifier_inner_type(self, target_type Type) Option[Type] = {
@@ -918,9 +926,11 @@ given TypeChecker {
         if self.satisfies_trait_requirement_with_args(inner_type, trait_name, trait_args) then {
             return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied());
         };
-        let modifier_base_name = self.conformance_template_key(target_type);
-        let modifier_display_name = modifier_base_name.to_ascii_lowercase();
-        let templates = when self.storage.conformance_index.get(modifier_base_name) in {
+        let modifier_owner = self.conformance_template_key(target_type);
+        // Display only: the diagnostic names the modifier ("ref", "mutptr", ...).
+        // Identity was already decided by `conformance_template_key`.
+        let modifier_display_name = modifier_owner.display().to_ascii_lowercase();
+        let templates = when self.storage.conformance_index.get(modifier_owner) in {
             .Some(list) then list,
             .None() then {
                 return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name));
@@ -1030,9 +1040,10 @@ given TypeChecker {
                 .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
                 _ then false,
             },
-            .GenericStruct(template, _, p_args) then when actual in {
-                .GenericStruct(actual_template, _, a_args) then {
-                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericStruct(p_def_id, p_args) then when actual in {
+                .GenericStruct(a_def_id, a_args) then {
+                    if not (p_def_id == a_def_id and p_args.count() == a_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
@@ -1045,13 +1056,12 @@ given TypeChecker {
                     return true;
                 },
                 .StructureType(def_id) then {
-                    let actual_template = self.context().get_template_name(def_id) or else {
-                        return false;
-                    };
+                    // Identity: the instance points at its template's DECLARATION.
+                    let actual_def_id = self.context().get_template_def_id(def_id);
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false;
                     };
-                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
@@ -1065,9 +1075,10 @@ given TypeChecker {
                 },
                 _ then false,
             },
-            .GenericEnum(template, _, p_args) then when actual in {
-                .GenericEnum(actual_template, _, a_args) then {
-                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericEnum(p_def_id, p_args) then when actual in {
+                .GenericEnum(a_def_id, a_args) then {
+                    if not (p_def_id == a_def_id and p_args.count() == a_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
@@ -1080,13 +1091,12 @@ given TypeChecker {
                     return true;
                 },
                 .EnumType(def_id) then {
-                    let actual_template = self.context().get_template_name(def_id) or else {
-                        return false;
-                    };
+                    // Identity: the instance points at its template's DECLARATION.
+                    let actual_def_id = self.context().get_template_def_id(def_id);
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false;
                     };
-                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
                         return false;
                     };
                     let mutable i UInt = 0;
@@ -1241,9 +1251,10 @@ given TypeChecker {
                 .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
-            .GenericStruct(template, _, p_args) then when actual in {
-                .GenericStruct(actual_template, _, a_args) then {
-                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericStruct(p_def_id, p_args) then when actual in {
+                .GenericStruct(a_def_id, a_args) then {
+                    if not (p_def_id == a_def_id and p_args.count() == a_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
@@ -1257,13 +1268,12 @@ given TypeChecker {
                     Option[Dict[String, Type]].Some(current_bindings)
                 },
                 .StructureType(def_id) then {
-                    let actual_template = self.context().get_template_name(def_id) or else {
-                        return Option[Dict[String, Type]].None();
-                    };
+                    // Identity: the instance points at its template's DECLARATION.
+                    let actual_def_id = self.context().get_template_def_id(def_id);
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return Option[Dict[String, Type]].None();
                     };
-                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
@@ -1278,9 +1288,10 @@ given TypeChecker {
                 },
                 _ then Option[Dict[String, Type]].None(),
             },
-            .GenericEnum(template, _, p_args) then when actual in {
-                .GenericEnum(actual_template, _, a_args) then {
-                    if not (template == actual_template and p_args.count() == a_args.count()) then {
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericEnum(p_def_id, p_args) then when actual in {
+                .GenericEnum(a_def_id, a_args) then {
+                    if not (p_def_id == a_def_id and p_args.count() == a_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
@@ -1294,13 +1305,12 @@ given TypeChecker {
                     Option[Dict[String, Type]].Some(current_bindings)
                 },
                 .EnumType(def_id) then {
-                    let actual_template = self.context().get_template_name(def_id) or else {
-                        return Option[Dict[String, Type]].None();
-                    };
+                    // Identity: the instance points at its template's DECLARATION.
+                    let actual_def_id = self.context().get_template_def_id(def_id);
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return Option[Dict[String, Type]].None();
                     };
-                    if not (template == actual_template and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
@@ -1375,12 +1385,10 @@ given TypeChecker {
     module_private enforce_mutable_constraint_for_call(self, target_type Type, function String) Bool = {
         let satisfied = when target_type in {
             .StructureType(def_id) then self.context().is_struct_mutable(def_id),
-            .GenericStruct(template_name, template_def_id, _) then {
-                if template_def_id.is_valid() then {
-                    return self.context().is_struct_mutable(template_def_id);
-                };
-                let resolved_def_id = self.storage.generic_templates.lookup_struct_def_id(template_name);
-                resolved_def_id.is_valid() and self.context().is_struct_mutable(resolved_def_id)
+            // Identity: the template's DECLARATION decides mutability. There is
+            // no spelling fallback -- the type carries the declaration.
+            .GenericStruct(template_def_id, _) then {
+                template_def_id.is_valid() and self.context().is_struct_mutable(template_def_id)
             },
             _ then false,
         };

@@ -34,13 +34,20 @@ struct MIRProgram {
   let globals: [MIRGlobal]
   let functions: [MIRFunction]
   let context: CompilerContext
-  let staticMethodLookup: [String: DefId]
+  let staticMethodLookup: [MethodInstanceKey: DefId]
   let traits: [String: TraitDeclInfo]
+  /// Traits indexed by DECLARATION. `traits` is keyed by spelling; identity
+  /// questions must be answered here.
+  let traitDeclsByDefId: [DefId: TraitDeclInfo]
   let conformanceWitnesses: [String: ConformanceWitness]
   let receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo]
 
-  func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
-    staticMethodLookup["\(typeName).\(methodName)"]
+  /// Look up an instantiated static method by the receiver's owner identity AND
+  /// its instantiation arguments -- `List[String].new` and `List[Rune].new` are
+  /// two entries. This used to be keyed by `"\(typeName).\(methodName)"`, so two
+  /// types with the same name answered for each other.
+  func lookupStaticMethod(receiverType: Type, methodName: String) -> DefId? {
+    staticMethodLookup[context.receiverMethodKey(receiverType, methodName)]
   }
 }
 

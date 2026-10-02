@@ -302,7 +302,10 @@ extension TypeChecker {
       return actual
     }
 
-    guard let traitInfo = traits[actual.traitName] else {
+    // `actual` already carries its declaration; go straight to it rather than
+    // re-resolving the spelling (which may be an alias, or a same-named trait
+    // from another module).
+    guard let traitInfo = traitDeclsByDefId[actual.traitDefId] else {
       return nil
     }
 
@@ -356,7 +359,8 @@ extension TypeChecker {
       return actual
     }
 
-    guard let traitInfo = traits[actual.traitName] else {
+    // `actual` already carries its declaration; go straight to it.
+    guard let traitInfo = traitDeclsByDefId[actual.traitDefId] else {
       return nil
     }
 

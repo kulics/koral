@@ -67,12 +67,22 @@ public struct CanonicalTraitRef: Equatable, CustomStringConvertible {
 
   /// A cache/visit key within one compilation.
   ///
-  /// Keyed on the trait's declaration identity, so two same-named traits from
-  /// different modules can never share a slot. `traitDefId` is carried on the
-  /// typed AST and through MIR, so both sides of a witness lookup build the
-  /// same key from the same identity.
+  /// Keyed on the trait's DECLARATION identity and its type arguments and
+  /// nothing else. The spelling is deliberately absent: `traitName` is for
+  /// diagnostics and C-mangling only, and folding it in would split one
+  /// declaration into several keys whenever two call sites spell it differently
+  /// (a source spelling vs. `def_id_spelling`, an import alias, a qualified
+  /// path) -- so a witness recorded under one spelling would not be found under
+  /// another. Both sides of a lookup build the key from the same identity.
+  ///
+  /// Matches bootstrap's `CanonicalTraitRef.cache_key`. (rustc: `Res::Def(..,
+  /// DefId)`; `traitName` is the equivalent of a `Symbol` kept for printing.)
   public var cacheKey: String {
-    "\(traitDefId.id)#\(description)"
+    if traitTypeArgs.isEmpty {
+      return "\(traitDefId.id)"
+    }
+    let args = traitTypeArgs.map(\.stableKey).joined(separator: ",")
+    return "\(traitDefId.id)#[\(args)]"
   }
 }
 
@@ -95,15 +105,15 @@ indirect enum ConformanceTypeKey: Hashable {
   case structure(defId: DefId)
   case `enum`(defId: DefId)
   case opaque(defId: DefId)
-  case genericStruct(template: String, templateDefId: DefId, args: [ConformanceTypeKey])
-  case genericEnum(template: String, templateDefId: DefId, args: [ConformanceTypeKey])
+  case genericStruct(templateDefId: DefId, args: [ConformanceTypeKey])
+  case genericEnum(templateDefId: DefId, args: [ConformanceTypeKey])
   case pointer(element: ConformanceTypeKey)
   case mutablePointer(element: ConformanceTypeKey)
   case reference(inner: ConformanceTypeKey)
   case mutableReference(inner: ConformanceTypeKey)
   case weakReference(inner: ConformanceTypeKey)
   case mutableWeakReference(inner: ConformanceTypeKey)
-  case traitObject(traitName: String, traitDefId: DefId, typeArgs: [ConformanceTypeKey])
+  case traitObject(traitDefId: DefId, typeArgs: [ConformanceTypeKey])
   case anyGeneric
   case fallback(description: String)
 }
@@ -125,12 +135,14 @@ public class TypeChecker {
   // Note: internal access for extension methods in TypeCheckerTypeResolution.swift
   var currentScope: UnifiedScope = UnifiedScope()
   let ast: ASTNode
-  // TypeName -> MethodName -> MethodSymbol
-  var extensionMethods: [String: [String: Symbol]] = [:]
-  // TypeName -> MethodName -> [MethodDefId]: tracks which method declarations
-  // provide an extension slot so repeated trait paths can reuse the same source
-  // without being treated as ambiguous.
-  var extensionMethodTraitSources: [String: [String: [DefId]]] = [:]
+  // Owner IDENTITY -> MethodName -> MethodSymbol. A method belongs to a type,
+  // not to a type NAME: two modules may each declare `Plain`, and
+  // `given Plain { tag }` in each is a different method on a different type.
+  var extensionMethods: [MethodOwner: [String: Symbol]] = [:]
+  // Owner IDENTITY -> MethodName -> [MethodDefId]: tracks which method
+  // declarations provide an extension slot so repeated trait paths can reuse the
+  // same source without being treated as ambiguous.
+  var extensionMethodTraitSources: [MethodOwner: [String: [DefId]]] = [:]
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
@@ -138,6 +150,12 @@ public class TypeChecker {
 
   var traits: [String: TraitDeclInfo] = [:]
   var qualifiedTraits: [String: TraitDeclInfo] = [:]
+  /// Traits indexed by DECLARATION. `traits` is keyed by spelling and is
+  /// last-wins when two modules declare the same name, so it can answer name
+  /// resolution only; every test of the form "which trait is this?" must come
+  /// from here. rustc: `Res::Def(DefKind::Trait, DefId)` leaves rustc_resolve
+  /// and nothing downstream re-reads the name.
+  var traitDeclsByDefId: [DefId: TraitDeclInfo] = [:]
   // Trait tool methods declared via `given Trait { ... }`.
   var traitToolBlocks: [String: [TraitToolBlock]] = [:]
   // Explicit nominal conformances.
@@ -175,9 +193,9 @@ public class TypeChecker {
   var genericTraitBounds: [String: [Bound]] = [:]
 
   // Generic Template Extensions: TemplateName -> [GenericExtensionMethodTemplate]
-  var genericExtensionMethods: [String: [GenericExtensionMethodTemplate]] = [:]
+  var genericExtensionMethods: [MethodOwner: [GenericExtensionMethodTemplate]] = [:]
   var genericIntrinsicExtensionMethods:
-    [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]] =
+    [MethodOwner: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]] =
       [:]
 
   // Instantiation requests collected during type checking (for deferred monomorphization)
@@ -387,12 +405,14 @@ public class TypeChecker {
     functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
 
     // Method `DefId`s are shared with same-named methods on other types, so also
-    // key the labels by owner type name + method name.
+    // key the labels by owner identity + method name.
     let labelName = declaredName ?? context.getName(symbol.defId) ?? ""
+    // Keyed by the owner's IDENTITY (`methodLabelKey`). It used to use the
+    // owner's spelling, which is not unique across modules.
     let labelOwner: String? = {
       switch owner {
-      case .concreteType(let typeName): return typeName
-      case .extensionTemplate(let ownerName): return ownerName
+      case .concreteType(let ownerType): return methodLabelKey(ownerType)
+      case .extensionTemplate(let ownerDefId): return MethodOwner.decl(ownerDefId).display
       case nil: return nil
       }
     }()
@@ -422,6 +442,15 @@ public class TypeChecker {
     }
   }
 
+  /// Cache key for a method's parameter labels: the owner's IDENTITY.
+  ///
+  /// Method `DefId`s can be shared across same-named methods, so labels are
+  /// keyed by owner + method name. The owner key must be an identity -- two
+  /// same-named types from different modules would otherwise share labels.
+  public func methodLabelKey(_ t: Type) -> String {
+    return context.methodOwner(of: t).display
+    }
+
   func isReceiverStyleMethod(_ symbol: Symbol) -> Bool {
     receiverStyleMethodDefIds.contains(symbol.defId.id)
   }
@@ -430,25 +459,14 @@ public class TypeChecker {
     switch type {
     case .structure(let defId):
       return context.isTypeMutable(defId)
-    case .genericStruct(let templateName, _, _):
-      if currentScope.lookupGenericStructTemplate(templateName)?.isMutable == true {
+    case .genericStruct(let tplDefId, _):
+      // Identity only: the template's declaration says whether it is mutable.
+      // Falling back to re-resolving the spelling would let a same-named type
+      // from another module answer for this one.
+      if currentScope.genericStructTemplate(defId: tplDefId)?.isMutable == true {
         return true
       }
-      let unqualifiedName = templateName.split(separator: ":").last.map(String.init)
-      if let unqualifiedName,
-         currentScope.lookupGenericStructTemplate(unqualifiedName)?.isMutable == true {
-        return true
-      }
-      if let resolvedType = currentScope.lookupType(templateName),
-         case .structure(let defId) = resolvedType {
-        return context.isTypeMutable(defId)
-      }
-      if let unqualifiedName,
-         let resolvedType = currentScope.lookupType(unqualifiedName),
-         case .structure(let defId) = resolvedType {
-        return context.isTypeMutable(defId)
-      }
-      return false
+      return context.isTypeMutable(tplDefId)
     default:
       return false
     }
@@ -540,22 +558,22 @@ public class TypeChecker {
       return .opaque(defId: defId)
     case .genericParameter:
       return .anyGeneric
-    case .genericStruct(let template, let defId, let args):
+    case .genericStruct(let defId, let args):
       if mode == .wildcardReceiver {
-        return .genericStruct(template: template, templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
+        return .genericStruct(templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
       }
       if mode == .wildcardTraitArg {
-        return .genericStruct(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .genericStruct(templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .genericStruct(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
-    case .genericEnum(let template, let defId, let args):
+      return .genericStruct(templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
+    case .genericEnum(let defId, let args):
       if mode == .wildcardReceiver {
-        return .genericEnum(template: template, templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
+        return .genericEnum(templateDefId: defId, args: Array(repeating: .anyGeneric, count: args.count))
       }
       if mode == .wildcardTraitArg {
-        return .genericEnum(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .genericEnum(templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .genericEnum(template: template, templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
+      return .genericEnum(templateDefId: defId, args: args.map { conformanceTypeKey($0, mode: .exact) })
     case .pointer(let element):
       if mode == .wildcardReceiver {
         return .pointer(element: .anyGeneric)
@@ -638,11 +656,11 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .mutableWeakReference(inner: conformanceTypeKey(inner, mode: nextMode))
-    case .traitObject(let traitName, let defId, let typeArgs):
+    case .traitObject(let defId, let typeArgs):
       if mode == .wildcardTraitArg {
-        return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
+        return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
-      return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .exact) })
+      return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .exact) })
     default:
       return .fallback(description: type.description)
     }
@@ -688,9 +706,10 @@ public class TypeChecker {
          (.opaque(let lhs), .opaque(let rhs)):
       return lhs == rhs
 
-    case (.genericStruct(let lTemplate, _, let lArgs), .genericStruct(let rTemplate, _, let rArgs)),
-         (.genericEnum(let lTemplate, _, let lArgs), .genericEnum(let rTemplate, _, let rArgs)):
-      guard lTemplate == rTemplate, lArgs.count == rArgs.count else {
+    // Identity: the template's DECLARATION, not its spelling.
+    case (.genericStruct(let lDefId, let lArgs), .genericStruct(let rDefId, let rArgs)),
+         (.genericEnum(let lDefId, let lArgs), .genericEnum(let rDefId, let rArgs)):
+      guard lDefId == rDefId, lArgs.count == rArgs.count else {
         return false
       }
       return zip(lArgs, rArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
@@ -706,8 +725,11 @@ public class TypeChecker {
          (.mutableWeakReference(let l), .mutableWeakReference(let r)):
       return conformanceTypeKeyMatches(l, r)
 
-    case (.traitObject(let lName, _, let lArgs), .traitObject(let rName, _, let rArgs)):
-      guard lName == rName, lArgs.count == rArgs.count else {
+    case (.traitObject(let traitDefId, let lArgs), .traitObject(let actualTraitDefId, let rArgs)):
+      // Compare DECLARATIONS. The second arm used to discard its DefId with `_`
+      // and then compare the first one to itself, which never rejected a
+      // mismatch (rustc: `Ty::Adt` identity is its `&AdtDef`).
+      guard traitDefId == actualTraitDefId, lArgs.count == rArgs.count else {
         return false
       }
       return zip(lArgs, rArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
@@ -763,27 +785,28 @@ public class TypeChecker {
 
   /// Std's `Option` payload type, if `type` is std's `Option`.
   func stdOptionInner(_ type: Type) -> Type? {
-    guard case .genericEnum(_, let defId, let args) = type,
+    guard case .genericEnum(let defId, let args) = type,
           defId == stdOptionEnumDefId, args.count == 1 else { return nil }
     return args[0]
   }
 
   /// Std's `Result` ok-type, if `type` is std's `Result`.
   func stdResultInner(_ type: Type) -> Type? {
-    guard case .genericEnum(_, let defId, let args) = type,
+    guard case .genericEnum(let defId, let args) = type,
           defId == stdResultEnumDefId, args.count == 1 else { return nil }
     return args[0]
   }
 
   /// The std `Drop` trait's declaration identity.
   ///
-  /// Resolved once from its spelling at lookup time -- the lang-item pattern.
-  /// Every later recognition compares identities, so a user-declared trait also
-  /// named `Drop` is a different trait and is never mistaken for the protocol
-  /// the compiler implements drop glue for.
+  /// A LANG ITEM: resolved from the unique `(module, name)` pair, never from the
+  /// bare spelling. Every later recognition compares identities, so a
+  /// user-declared trait also named `Drop` is a different trait and is never
+  /// mistaken for the protocol the compiler implements drop glue for.
+  /// (rustc: `rustc_hir::LangItem::Drop`.) This is the same slot CodeGen,
+  /// MIRLowerer and the Monomorphizer read -- there is one resolver, not four.
   var stdDropTraitDefId: DefId? {
-    guard let info = traits["Drop"], info.modulePath == ["Std"] else { return nil }
-    return info.defId
+    context.stdDropTraitDefId
   }
 
   /// Whether `defId` is the std `Drop` trait.
@@ -906,7 +929,13 @@ public class TypeChecker {
   var nodeSourceInfoMap: [Int: GlobalNodeSourceInfo] = [:]
   
   /// 当前正在处理的节点的源文件路径（绝对路径）
-  var currentSourceFile: String = ""
+  var currentSourceFile: String = "" {
+    didSet {
+      // Import edges are scoped to the file their `using` appears in, so
+      // matching one needs to know which file is being checked.
+      defIdMap.currentSourceFile = currentSourceFile
+    }
+  }
   
   /// 当前正在处理的节点的模块路径
   var currentModulePath: [String] = [] {
@@ -921,7 +950,14 @@ public class TypeChecker {
   var currentPackageID: String = ""
   
   /// 模块导入图（用于可见性检查）
-  var importGraph: ImportGraph? = nil
+  var importGraph: ImportGraph? = nil {
+    didSet {
+      // Ambient next to `defIdMap.currentModulePath`, for the same reason: a
+      // spelling resolves through THIS module's imports, not through a global
+      // name table. `Type` identity still travels on the `DefId`.
+      defIdMap.currentImportGraph = importGraph
+    }
+  }
   
   /// 模块公开符号映射：模块路径 -> 模块公开符号信息
   /// 用于显式 using module { symbol } 导入绑定
@@ -1052,6 +1088,7 @@ public class TypeChecker {
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context
+    context.defIdMap.currentImportGraph = importGraph
     self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
   }
   
@@ -1082,8 +1119,9 @@ public class TypeChecker {
     SemanticErrorContext.currentFileName = userFileName
     
     SemanticErrorContext.currentCompilerContext = context
+    context.defIdMap.currentImportGraph = importGraph
     self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
-    
+
     // 构建源信息映射
     for (index, info) in nodeSourceInfoList.enumerated() {
       self.nodeSourceInfoMap[index] = info
@@ -1562,9 +1600,9 @@ public class TypeChecker {
     case .`enum`(let defId):
       return context.getEnumCases(defId)
       
-    case .genericEnum(let templateName, _, let typeArgs):
+    case .genericEnum(let tplDefId, let typeArgs):
       // Look up the enum template and substitute type parameters
-      guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId) else {
         return nil
       }
       
@@ -1629,8 +1667,9 @@ public class TypeChecker {
       let (expectedInner, actualInner) = expected.compatibleIndirectionInners(with: actual)!
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
 
-    case (.genericStruct(let expectedName, _, let expectedArgs), .genericStruct(let actualName, _, let actualArgs)):
-      guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
+    case (.genericStruct(let tplDefId, let expectedArgs), .genericStruct(let actualDefId, let actualArgs)):
+      // Declarations, not spellings -- and not one binding twice.
+      guard tplDefId == actualDefId && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
         if !unifyTypes(ea, aa, bindings: &bindings) {
           return false
@@ -1638,8 +1677,8 @@ public class TypeChecker {
       }
       return true
       
-    case (.genericEnum(let expectedName, _, let expectedArgs), .genericEnum(let actualName, _, let actualArgs)):
-      guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
+    case (.genericEnum(let tplDefId, let expectedArgs), .genericEnum(let actualDefId, let actualArgs)):
+      guard tplDefId == actualDefId && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
         if !unifyTypes(ea, aa, bindings: &bindings) {
           return false
@@ -1690,7 +1729,7 @@ public class TypeChecker {
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .mutableWeakReference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
-    case .genericStruct(_, _, let args), .genericEnum(_, _, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args):
       for arg in args {
         extractGenericParameterNamesHelper(from: arg, names: &names, seen: &seen)
       }

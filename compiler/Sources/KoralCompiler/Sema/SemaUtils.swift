@@ -322,13 +322,13 @@ public enum SemaUtils {
             )
             return .`enum`(defId: defId)
             
-        case .genericStruct(let template, let defId, let args):
+        case .genericStruct(let defId, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
-            return .genericStruct(template: template, templateDefId: defId, args: newArgs)
+            return .genericStruct(templateDefId: defId, args: newArgs)
             
-        case .genericEnum(let template, let defId, let args):
+        case .genericEnum(let defId, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
-            return .genericEnum(template: template, templateDefId: defId, args: newArgs)
+            return .genericEnum(templateDefId: defId, args: newArgs)
             
         case .opaque:
             return type
@@ -342,10 +342,10 @@ public enum SemaUtils {
             // They are handled by the constraint solver
             return type
             
-        case .traitObject(let traitName, let defId, let typeArgs):
+        case .traitObject(let defId, let typeArgs):
             if typeArgs.isEmpty { return type }
             let newArgs = typeArgs.map { substituteType($0, substitution: substitution, context: context) }
-            return .traitObject(traitName: traitName, traitDefId: defId, typeArgs: newArgs)
+            return .traitObject(traitDefId: defId, typeArgs: newArgs)
         }
     }
     

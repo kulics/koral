@@ -61,15 +61,15 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
             .MutablePointerType(_) then "ptr mutable ...",
             .WeakReferenceType(_) then "weakref ...",
             .MutableWeakReferenceType(_) then "weakref mutable ...",
-            .GenericStruct(template, _, _) then {
+            .GenericStruct(template_def_id, _) then {
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_string("[...]");
                 out.to_string()
             },
-            .GenericEnum(template, _, _) then {
+            .GenericEnum(template_def_id, _) then {
                 let mutable out = StringBuilder.new();
-                out.push_string(template);
+                out.push_string(def_id_spelling(template_def_id));
                 out.push_string("[...]");
                 out.to_string()
             },
@@ -91,7 +91,7 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
                 out.push_string(def_id.id.to_string());
                 out.to_string()
             },
-            .TraitObject(trait_name, _, _) then trait_name,
+            .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             .TypeVar(tv_ref) then tv_ref.display(),
             .Unknown() then "?",
             _ then type_to_string(t),
@@ -195,9 +195,9 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
             out.to_string()
         },
         .GenericParameter(name) then name,
-        .GenericStruct(template, _, args) then {
+        .GenericStruct(tplDefId, args) then {
             let mutable out = StringBuilder.new();
-            out.push_string(template);
+            out.push_string(def_id_spelling(tplDefId));
             out.push_byte('[');
             let mutable first = true;
             for arg in args then {
@@ -208,9 +208,9 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
             out.push_byte(']');
             out.to_string()
         },
-        .GenericEnum(template, _, args) then {
+        .GenericEnum(tplDefId, args) then {
             let mutable out = StringBuilder.new();
-            out.push_string(template);
+            out.push_string(def_id_spelling(tplDefId));
             out.push_byte('[');
             let mutable first = true;
             for arg in args then {
@@ -224,7 +224,7 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
         .ModuleType(info) then {
             if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
         },
-        .TraitObject(trait_name, _, _) then trait_name,
+        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv_ref) then tv_ref.display(),
         .Unknown() then "?",
     };
@@ -294,10 +294,11 @@ given Unifier {
         };
 
         // 两边都是 GenericStruct
-        if lhs_r is .GenericStruct(lhs_tmpl, _, lhs_args) then {
-            if rhs_r is .GenericStruct(rhs_tmpl, _, rhs_args) then {
-                if not (lhs_tmpl == rhs_tmpl) then {
-                    return Result[Void].Error(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span));
+        if lhs_r is .GenericStruct(_, lhs_args) then {
+            if rhs_r is .GenericStruct(_, rhs_args) then {
+                // Identity: the template's DECLARATION, not its spelling.
+                if not (generic_template_id(lhs_r) == generic_template_id(rhs_r)) then {
+                    return Result[Void].Error(UnificationError.TemplateMismatch(def_id_spelling(generic_template_id(lhs_r)), def_id_spelling(generic_template_id(rhs_r)), span));
                 };
                 if not (lhs_args.count() == rhs_args.count()) then {
                     return Result[Void].Error(UnificationError.ArityMismatch(lhs_r, rhs_r, span));
@@ -316,10 +317,10 @@ given Unifier {
         };
 
         // 两边都是 GenericEnum
-        if lhs_r is .GenericEnum(lhs_tmpl, _, lhs_args) then {
-            if rhs_r is .GenericEnum(rhs_tmpl, _, rhs_args) then {
-                if not (lhs_tmpl == rhs_tmpl) then {
-                    return Result[Void].Error(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span));
+        if lhs_r is .GenericEnum(_, lhs_args) then {
+            if rhs_r is .GenericEnum(_, rhs_args) then {
+                if not (generic_template_id(lhs_r) == generic_template_id(rhs_r)) then {
+                    return Result[Void].Error(UnificationError.TemplateMismatch(def_id_spelling(generic_template_id(lhs_r)), def_id_spelling(generic_template_id(rhs_r)), span));
                 };
                 if not (lhs_args.count() == rhs_args.count()) then {
                     return Result[Void].Error(UnificationError.ArityMismatch(lhs_r, rhs_r, span));
@@ -440,7 +441,7 @@ given Unifier {
                 if original_ret <> resolved_ret then { changed = true;};
                 if changed then Type.FunctionType(types_to_param_entries(new_params), resolved_ret) else t
             },
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 for a in args then {
@@ -449,9 +450,9 @@ given Unifier {
                     if original <> resolved then { changed = true;};
                     new_args.push(resolved);
                 };
-                if changed then Type.GenericStruct(template, template_def_id, new_args) else t
+                if changed then Type.GenericStruct(template_def_id, new_args) else t
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 for a in args then {
@@ -460,7 +461,7 @@ given Unifier {
                     if original <> resolved then { changed = true;};
                     new_args.push(resolved);
                 };
-                if changed then Type.GenericEnum(template, template_def_id, new_args) else t
+                if changed then Type.GenericEnum(template_def_id, new_args) else t
             },
             .ReferenceType(inner) then {
                 let resolved = self.resolve(inner);
@@ -547,7 +548,7 @@ given Unifier {
                 let resolved = self.resolve_deep(inner);
                 if inner == resolved then t else Type.MutableWeakReferenceType(resolved)
             },
-            .GenericStruct(template, template_def_id, args) then {
+            .GenericStruct(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 for a in args then {
@@ -556,9 +557,9 @@ given Unifier {
                     if original <> resolved then { changed = true;};
                     new_args.push(resolved);
                 };
-                if changed then Type.GenericStruct(template, template_def_id, new_args) else t
+                if changed then Type.GenericStruct(template_def_id, new_args) else t
             },
-            .GenericEnum(template, template_def_id, args) then {
+            .GenericEnum(template_def_id, args) then {
                 let mutable changed = false;
                 let mutable new_args = List[Type].new();
                 for a in args then {
@@ -567,7 +568,7 @@ given Unifier {
                     if original <> resolved then { changed = true;};
                     new_args.push(resolved);
                 };
-                if changed then Type.GenericEnum(template, template_def_id, new_args) else t
+                if changed then Type.GenericEnum(template_def_id, new_args) else t
             },
             _ then t,
         };
@@ -624,7 +625,7 @@ given Unifier {
             .MutableWeakReferenceType(inner) then {
                 return self.occurs_check_internal(tv_id, inner, visited);
             },
-            .GenericStruct(_, _, args) then {
+            .GenericStruct(_, args) then {
                 let mutable i = 0(UInt);
                 while i < args.count() then {
                     if self.occurs_check_internal(tv_id, args[i], visited) then {
@@ -634,7 +635,7 @@ given Unifier {
                 };
                 return false;
             },
-            .GenericEnum(_, _, args) then {
+            .GenericEnum(_, args) then {
                 let mutable i = 0(UInt);
                 while i < args.count() then {
                     if self.occurs_check_internal(tv_id, args[i], visited) then {
@@ -679,7 +680,7 @@ given Unifier {
                     .None() then false,
                 };
             },
-            .TraitObject(_, _, args) then {
+            .TraitObject(_, args) then {
                 let mutable i = 0(UInt);
                 while i < args.count() then {
                     if self.occurs_check_internal(tv_id, args[i], visited) then {
@@ -692,6 +693,17 @@ given Unifier {
             _ then {},
         };
         return false;
+    };
+};
+
+/// The generic template's DECLARATION carried by a type -- identity, never a
+/// spelling.
+file_private let generic_template_id(t Type) DefId = {
+    return when t in {
+        .GenericStruct(d, _) then d,
+        .GenericEnum(d, _) then d,
+        .TraitObject(d, _) then d,
+        _ then def_id_invalid(),
     };
 };
 
@@ -744,9 +756,10 @@ file_private let types_equal(lhs Type, rhs Type) Bool = {
                 _ then false,
             }
         },
-        .TraitObject(lhs_name, _, _) then {
+        .TraitObject(_, _) then {
             when rhs in {
-                .TraitObject(rhs_name, _, _) then lhs_name == rhs_name,
+                // A type parameter is never a trait object.
+                .TraitObject(_, _) then false,
                 _ then false,
             }
         },
