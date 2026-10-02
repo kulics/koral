@@ -1,0 +1,51 @@
+// Erasing a generic instance to a PARAMETERIZED trait object must work.
+//
+// `given[T Any] Box[T] as Sink[Int]` is a conformance whose trait arguments are
+// concrete while the receiver is generic. Two lookups had to stop dropping
+// information to accept it:
+//
+//   * `can_convert_to_trait_object` asked "does this conform to Sink" with the
+//     trait's type arguments left off, so every parameterized conformance was
+//     rejected with `Type mismatch: expected *Sink, got Box[Int]`.
+//   * `has_explicit_trait_conformance_with_args` compared the instance
+//     (`Box[Int]`) against the declaration (`Box[T]`) and skipped the generic
+//     template index whenever trait arguments were requested.
+// EXPECT: put
+// EXPECT: tag
+// EXPECT: 7
+
+trait Sink[T Any] {
+    put(self, v T) String;
+};
+
+trait Tag[T Any] Parent[T] {
+    tag(self) String;
+};
+
+trait Parent[T Any] {
+    values(self) List[T];
+};
+
+type Box[U Any](value U);
+
+given[T Any] Box[T] as Sink[Int] {
+    public put(self, v Int) String = "put";
+};
+
+given[T Any] Box[T] as Parent[T] {
+    public values(self) List[T] = [self.value];
+};
+
+given[T Any] Box[T] as Tag[T] {
+    public tag(self) String = "tag";
+};
+
+let main() Int = {
+    let b = Box[Int](7);
+    let s Sink[Int] = b;
+    println(s.put(3));
+    let t Tag[Int] = b;
+    println(t.tag());
+    println(t.values()[0].to_string());
+    return 0;
+};

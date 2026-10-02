@@ -1566,6 +1566,160 @@ file_private let resolve_vtable_trait_args(mono Monomorphizer, concrete_type Typ
     return out;
 };
 
+/// Specialize a DECLARATION's conformance witness onto one concrete instance.
+///
+/// sema files a witness per declaration (`given[T] Box[T] as Show` is keyed on
+/// `Box[T]`); codegen and the MIR verifier ask for the instance (`Box[Int]`).
+/// This is the bridge: the receiver becomes the concrete type and every type the
+/// slots carry is substituted with the bindings that turn the declared target
+/// into it. rustc keeps the same split -- the `impl` is a declaration, the
+/// witness belongs to `Instance { def, args }`.
+file_private let specialize_conformance_witness(
+    mono Monomorphizer,
+    witness ConformanceWitness,
+    instance_trait_ref CanonicalTraitRef,
+    concrete_type Type,
+    bindings Dict[String, Type],
+) ConformanceWitness = {
+    let mutable parent_refs = List[CanonicalTraitRef].new();
+    for parent in witness.direct_parent_trait_refs then {
+        let mutable parent_args = List[Type].new();
+        for arg in parent.trait_type_args then {
+            parent_args.push(substitute_type(mono, arg, bindings));
+        };
+        parent_refs.push(CanonicalTraitRef(parent.trait_name, parent.trait_def_id, parent_args));
+    };
+
+    let mutable slots = List[RequirementSlot].new();
+    for slot in witness.requirement_slots then {
+        let mutable declaring_args = List[Type].new();
+        for arg in slot.declaring_trait_ref.trait_type_args then {
+            declaring_args.push(substitute_type(mono, arg, bindings));
+        };
+        let declaring_ref = CanonicalTraitRef(
+            slot.declaring_trait_ref.trait_name,
+            slot.declaring_trait_ref.trait_def_id,
+            declaring_args
+        );
+
+        let mutable parameters = List[RequirementSlotParameter].new();
+        for parameter in slot.parameters then {
+            parameters.push(RequirementSlotParameter(
+                parameter.name,
+                parameter.is_mutable,
+                substitute_type(mono, parameter.param_type, bindings),
+                parameter.named
+            ));
+        };
+
+        slots.push(RequirementSlot(
+            declaring_ref,
+            slot.method_name,
+            parameters,
+            substitute_type(mono, slot.return_type, bindings),
+            slot.index
+        ));
+    };
+
+    // The implementation map must hold the INSTANCE's DefIds. The declaration's
+    // are templates, and binding one of those to a receiver materializes the
+    // template's own generic form (`Box_Param_T_show`) instead of this
+    // receiver's (`Box_I_show`). Resolve each slot by receiver identity the way
+    // codegen does; only fall back to the declaration's id when nothing has been
+    // instantiated for it yet.
+    let mutable implementations = Dict[String, DefId].new();
+    for slot in slots then {
+        when lookup_extension_method_def_id(mono, concrete_type, slot.method_name, List[Type].new()) in {
+            .Some(def_id) then implementations.insert(slot.method_name, def_id),
+            .None() then {
+                when witness.local_implementation_def_ids_by_method_name.get(slot.method_name) in {
+                    .Some(def_id) then implementations.insert(slot.method_name, def_id),
+                    .None() then {},
+                };
+            },
+        };
+    };
+
+    return ConformanceWitness(
+        concrete_type,
+        instance_trait_ref,
+        parent_refs,
+        slots,
+        implementations
+    );
+};
+
+/// File the conformance witness for one concrete instance, if it is missing.
+///
+/// The declaration's witness is found through `source_given_decls` by DECLARED
+/// identity (`trait_def_id` + the unification of its target type with this
+/// receiver), so two same-named givens from different modules never share a
+/// slot. The key it is filed under is computed from the declaration's own
+/// `target_type` / `trait_args` -- the same inputs `record_conformance_witness`
+/// used -- which is why nothing has to guess at the spelling.
+public let materialize_conformance_witness_for_instance(
+    mono Monomorphizer,
+    concrete_type Type,
+    trait_name String,
+    trait_def_id DefId,
+    trait_type_args List[Type],
+) Void = {
+    let instance_trait_ref = CanonicalTraitRef(trait_name, trait_def_id, trait_type_args);
+    let instance_key = instance_trait_ref.key(concrete_type);
+    if mono.storage.conformance_witnesses.contains_key(instance_key) then {
+        return;
+    };
+
+    let normalized = resolve_parameterized_type(mono, concrete_type);
+    let instance_owner = mono.storage.context.method_owner_and_args(normalized);
+    for node_ref in mono.storage.source_given_decls then {
+        when node_ref in {
+            .GivenTraitDecl(target_type, _, declared_trait_args, _, _, given_trait_def_id) then {
+                if given_trait_def_id <> trait_def_id then {
+                    continue;
+                };
+                // Both spellings of an instantiation land on the same
+                // (owner, args) pair, so this matches a declared `Box[T]` against
+                // a materialized `Box[Int]` -- which unifying the two `Type`s
+                // cannot do: the declaration is stored as the template's
+                // `StructureType` and the instance as its own, and their layouts
+                // compare equal while their type arguments are invisible.
+                let declared_owner = mono.storage.context.method_owner_and_args(target_type);
+                if declared_owner.first <> instance_owner.first then {
+                    continue;
+                };
+
+                // The declared target's type ARGUMENTS are where the owner's
+                // type parameters show up (`given[T] Box[T] as ...` -> `[T]`), so
+                // the bindings fall out of pairing them with the instance's.
+                let mutable bindings = Dict[String, Type].new();
+                bindings.insert("Self", concrete_type);
+                let mutable index UInt = 0;
+                while index < declared_owner.second.count() and index < instance_owner.second.count() then {
+                    when declared_owner.second[index] in {
+                        .GenericParameter(name) then bindings.insert(name, instance_owner.second[index]),
+                        _ then {},
+                    };
+                    index += 1;
+                };
+
+                let declared_key = CanonicalTraitRef(trait_name, trait_def_id, declared_trait_args).key(target_type);
+                when mono.storage.conformance_witnesses.get(declared_key) in {
+                    .Some(witness) then {
+                        mono.storage.conformance_witnesses.insert(
+                            instance_key,
+                            specialize_conformance_witness(mono, witness, instance_trait_ref, concrete_type, bindings)
+                        );
+                        return;
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+    };
+};
+
 let collect_concrete_vtable_request(mono Monomorphizer, concrete_type Type, trait_name String, trait_def_id DefId) Void = {
     if has_generic_parameter(concrete_type) then {
         return;

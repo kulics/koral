@@ -620,6 +620,13 @@ given TypeChecker {
         return parents;
     };
 
+    /// The flattened requirement list, PARENTS FIRST.
+    ///
+    /// The order is the layout contract of a generated vtable: the struct lays
+    /// its method fields out in exactly this order, and a call through a trait
+    /// object reaches one by its offset. A witness filed in any other order
+    /// dispatches to the wrong method -- a child trait with both its own methods
+    /// and a parent's used to send `show` to `base`.
     module_private requirement_slots(
         self,
         trait_ref CanonicalTraitRef,
@@ -628,63 +635,73 @@ given TypeChecker {
         let mutable slots = List[RequirementSlot].new();
         let mutable seen_methods = Set[String].new();
         let mutable visited_trait_refs = Set[String].new();
-        let mutable pending = List[CanonicalTraitRef].new();
-        pending.push(trait_ref);
-        while not pending.is_empty() then {
-            let current = pending.pop().unwrap();
-            let current_key = current.cache_key();
-            if visited_trait_refs.contains(current_key) then {
-                continue;
-            };
-            visited_trait_refs.insert(current_key);
+        self.collect_requirement_slots(trait_ref, self_type, slots, seen_methods, visited_trait_refs);
+        return slots;
+    };
 
-            for parent in self.direct_parent_trait_refs(current, self_type) then {
-                pending.push(parent);
-            };
+    /// Depth-first over the parent graph, parents before the trait's own members,
+    /// matching `ordered_trait_method_names_helper_from_def` on the mono side.
+    /// Two same-named traits from different modules are different declarations
+    /// and must not share a visit slot.
+    module_private collect_requirement_slots(
+        self,
+        trait_ref CanonicalTraitRef,
+        self_type Type,
+        slots List[RequirementSlot],
+        seen_methods Set[String],
+        visited_trait_refs Set[String],
+    ) Void = {
+        let current_key = trait_ref.cache_key();
+        if visited_trait_refs.contains(current_key) then {
+            return;
+        };
+        visited_trait_refs.insert(current_key);
 
-            // Identity: the reference carries the trait's DECLARATION.
-            when self.storage.generic_templates.lookup_trait_by_def_id(current.trait_def_id) in {
-                .Some(trait_info) then {
-                    let bindings = self.trait_type_substitution(current, self_type);
-                    for method in trait_info.raw_members then {
-                        if seen_methods.contains(method.name) then {
-                            continue;
-                        };
-                        seen_methods.insert(method.name);
+        for parent in self.direct_parent_trait_refs(trait_ref, self_type) then {
+            self.collect_requirement_slots(parent, self_type, slots, seen_methods, visited_trait_refs);
+        };
 
-                        let mutable method_bindings = Dict[String, Type].new();
-                        for entry in bindings.iterator() then {
-                            method_bindings.insert(entry.first, entry.second);
-                        };
-                        for method_type_param in method.type_params then {
-                            method_bindings.insert(
-                                method_type_param.name,
-                                Type.GenericParameter(method_type_param.name)
-                            );
-                        };
+        // Identity: the reference carries the trait's DECLARATION.
+        when self.storage.generic_templates.lookup_trait_by_def_id(trait_ref.trait_def_id) in {
+            .Some(trait_info) then {
+                let bindings = self.trait_type_substitution(trait_ref, self_type);
+                for method in trait_info.raw_members then {
+                    if seen_methods.contains(method.name) then {
+                        continue;
+                    };
+                    seen_methods.insert(method.name);
 
-                        let mutable parameters = List[RequirementSlotParameter].new();
-                        for parameter in method.params then {
-                            parameters.push(RequirementSlotParameter(
-                                parameter.name,
-                                parameter.is_mutable,
-                                self.resolve_type_with_self_and_bindings(parameter.type_name, self_type, method_bindings),
-                                parameter.named
-                            ));
-                        };
-                        slots.push(RequirementSlot(
-                            current,
-                            method.name,
-                            parameters,
-                            self.resolve_type_with_self_and_bindings(method.return_type, self_type, method_bindings),
-                            slots.count()
+                    let mutable method_bindings = Dict[String, Type].new();
+                    for entry in bindings.iterator() then {
+                        method_bindings.insert(entry.first, entry.second);
+                    };
+                    for method_type_param in method.type_params then {
+                        method_bindings.insert(
+                            method_type_param.name,
+                            Type.GenericParameter(method_type_param.name)
+                        );
+                    };
+
+                    let mutable parameters = List[RequirementSlotParameter].new();
+                    for parameter in method.params then {
+                        parameters.push(RequirementSlotParameter(
+                            parameter.name,
+                            parameter.is_mutable,
+                            self.resolve_type_with_self_and_bindings(parameter.type_name, self_type, method_bindings),
+                            parameter.named
                         ));
                     };
-                },
-                .None() then {},
-            };
+                    slots.push(RequirementSlot(
+                        trait_ref,
+                        method.name,
+                        parameters,
+                        self.resolve_type_with_self_and_bindings(method.return_type, self_type, method_bindings),
+                        slots.count()
+                    ));
+                };
+            },
+            .None() then {},
         };
-        return slots;
     };
 
     module_private record_conformance_witness(

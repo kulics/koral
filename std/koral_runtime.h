@@ -23,7 +23,7 @@ struct __koral_WeakRef {
 
 struct __koral_TraitRef {
     void* ptr;          // 指向目标值；所属 control 块在 ptr - 1
-    const void* vtable; // 静态 vtable 实例，第一个成员是 struct __koral_VTableHeader base
+    const void* vtable; // 静态 vtable 实例，第一个成员是 struct __koral_VTableHeader _Base
 };
 
 struct __koral_TraitWeakRef {
@@ -38,9 +38,14 @@ struct __koral_Closure {
 };
 
 // vtable 的公共前缀。每个 trait 的 vtable 结构体第一个成员必须是
-// `struct __koral_VTableHeader base;`，于是 trait object 的类型擦除销毁可以
-// 统一读 base.destroy，而不用知道具体 trait。对应 Swift 的 value witness table
-// 被塞进 metadata 头的做法（但 Koral 的 trait object 一律装箱，不走扁平布局）。
+// `struct __koral_VTableHeader _Base;`，于是 trait object 的类型擦除销毁可以
+// 把 vtable 起始处直接转成本类型、取 `destroy`，而不用知道具体 trait。
+// 对应 Swift 的 value witness table 被塞进 metadata 头的做法
+// （但 Koral 的 trait object 一律装箱，不走扁平布局）。
+//
+// 字段名取 `_Base` 而不是 `base`：`base` 会和任何声明了 `base` 方法的 trait
+// 撞出 duplicate member。`_Base` 落在 C 标识符转义区（`_` 开头 + 大写），
+// Koral 方法名经转义后不可能落成这个名字。见 `escape_codegen_keyword`。
 struct __koral_VTableHeader {
     __koral_Dtor destroy;
 };

@@ -661,9 +661,19 @@ given TypeChecker {
                     for tool_member in tool_members then {
                         typed_members.push(tool_member);
                     };
-                    if type_params.is_empty() and not self.contains_generic_parameter(resolved_target) then {
-                        self.record_conformance_witness(resolved_target, trait_name, resolved_trait_args, typed_members);
-                    };
+                    // Record a witness for EVERY conformance, generic ones included.
+                    //
+                    // A generic conformance's witness is keyed on its DECLARED
+                    // shape (`given[T] Box[T] as Show` is filed under `Box[T]`),
+                    // so nothing downstream can mistake it for an instance --
+                    // consumers ask for `Box[Int]` and would not find it. It is
+                    // the SOURCE mono specializes from: see
+                    // `materialize_conformance_witness_for_instance`, which
+                    // re-keys it onto the concrete receiver with the type
+                    // parameters substituted. rustc does the same split: the
+                    // `impl` is a declaration, the witness belongs to
+                    // `Instance { def, args }`.
+                    self.record_conformance_witness(resolved_target, trait_name, resolved_trait_args, typed_members);
                     if not self.contains_generic_parameter(resolved_target) then {
                         self.register_conformance_method_signatures_for_concrete_type(resolved_target, tool_members, false, self.trait_def_id_of(trait_name));
                     };

@@ -1104,10 +1104,28 @@ given TypeChecker {
                 },
                 .None() then false,
             },
-            _ then self.satisfies_trait_requirement(normalized, expected_trait_name),
+            // The expected type is a trait OBJECT and carries the trait's type
+            // arguments (`Sink[Int]`). Passing the name alone asks "does this
+            // conform to Sink with NO arguments", which every parameterized
+            // conformance answers no to -- `let s Sink[Int] = b` used to fail
+            // with `Type mismatch: expected *Sink, got Box[Int]`.
+            _ then self.satisfies_trait_requirement_with_args(
+                normalized,
+                expected_trait_name,
+                self.trait_object_type_args(expected_trait_type)
+            ),
         };
     };
 
+
+    /// The type arguments a trait OBJECT carries: `Sink[Int]` -> `[Int]`.
+    /// A trait with no parameters contributes none.
+    module_private trait_object_type_args(self, t Type) List[Type] = {
+        return when t in {
+            .TraitObject(_, args) then args,
+            _ then List[Type].new(),
+        };
+    };
 
     module_private trait_object_concrete_type(self, source_type Type) Type = {
         return when source_type in {

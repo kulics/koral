@@ -246,9 +246,14 @@ extension CodeGen {
   func generateVtableStructDefinition(methods: [MIRTraitVTableMethod], vtableStructName: String) -> String? {
     // Build the vtable struct
     var code = "struct \(vtableStructName) {\n"
-    // 公共前缀必须是第一个成员：trait object 的类型擦除销毁统一读 base.destroy，
-    // 不用知道具体 trait。布局上 base.destroy 落在 offset 0。
-    code += "    struct __koral_VTableHeader base;\n"
+    // 公共前缀必须是第一个成员：trait object 的类型擦除销毁统一从 vtable
+    // 起始处取 drop glue，不用知道具体 trait。布局上它落在 offset 0。
+    //
+    // 字段名 `_Base` 取在 `sanitizeCIdentifier` 的转义区（`_` 开头且第二字符大写）：
+    // Koral 方法名若叫 `_Base`，会被转义成 `_k__Base`，永远落不到 `_Base`。
+    // 所以「trait 方法名」和「这个头字段」按构造不相交——曾经这里叫 `base`，
+    // 任何声明了 `base` 方法的 trait 都会撞出 duplicate member。
+    code += "    struct __koral_VTableHeader _Base;\n"
 
     for method in methods {
       let returnCType = method.returnType.map { cTypeName($0) } ?? "void"
@@ -481,7 +486,7 @@ extension CodeGen {
 
     var code = "static const struct \(vtableStructName) \(instanceName) = {\n"
     // 公共前缀：trait object 释放时从这里取具体类型的 drop glue。
-    code += "    .base = { \(dropFunctionPointer(for: concreteType)) },\n"
+    code += "    ._Base = { \(dropFunctionPointer(for: concreteType)) },\n"
 
     for method in methods {
       let methodName = method.name

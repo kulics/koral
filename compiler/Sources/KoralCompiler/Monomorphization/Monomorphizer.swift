@@ -139,6 +139,14 @@ public class Monomorphizer {
     /// Populated during instantiation so lookup stays DefId-driven.
     internal var extensionMethodDefIds: [MethodInstanceKey: DefId] = [:]
 
+    /// Conformance witnesses this phase adds on top of type checking's.
+    ///
+    /// Type checking files one per DECLARATION (`given[T] Box[T] as Show` is
+    /// keyed on `Box[T]`); codegen and `MIRVerifier` ask for the INSTANCE
+    /// (`Box[Int]`). `materializeConformanceWitness` bridges the two here, which
+    /// is why the table has to be mutable in this phase.
+    internal var conformanceWitnesses: [String: ConformanceWitness] = [:]
+
     /// Mapping from original function DefId to monomorphized function DefIds.
     /// Multiple concrete implementations can originate from a single semantic
     /// method declaration (e.g. trait methods), so we keep all candidates and
@@ -683,7 +691,11 @@ public class Monomorphizer {
         let staticMethodLookup = buildStaticMethodLookup(from: allNodes)
         
         // Remap witness defIds to use monomorphized defIds
-        let remappedWitnesses = remapConformanceWitnesses(input.conformanceWitnesses)
+        var allWitnesses = input.conformanceWitnesses
+        for (key, witness) in conformanceWitnesses {
+            allWitnesses[key] = witness
+        }
+        let remappedWitnesses = remapConformanceWitnesses(allWitnesses)
         
         return MonomorphizedProgram(
             globalNodes: allNodes,
@@ -696,6 +708,148 @@ public class Monomorphizer {
         )
     }
     
+    /// Specialize a DECLARATION's conformance witness onto one concrete instance.
+    ///
+    /// The receiver becomes the concrete type and every type the slots carry is
+    /// substituted with the bindings that turn the declared target into it.
+    /// rustc keeps the same split -- the `impl` is a declaration, the witness
+    /// belongs to `Instance { def, args }`.
+    private func specializeConformanceWitness(
+        _ witness: ConformanceWitness,
+        instanceTraitRef: CanonicalTraitRef,
+        concreteType: Type,
+        bindings: [String: Type]
+    ) -> ConformanceWitness {
+        let parentRefs = witness.directParentTraitRefs.map { parent -> CanonicalTraitRef in
+            CanonicalTraitRef(
+                traitName: parent.traitName,
+                traitDefId: parent.traitDefId,
+                traitTypeArgs: parent.traitTypeArgs.map { substituteType($0, substitution: bindings) }
+            )
+        }
+
+        let slots = witness.requirementSlots.map { slot -> RequirementSlot in
+            let declaring = CanonicalTraitRef(
+                traitName: slot.declaringTraitRef.traitName,
+                traitDefId: slot.declaringTraitRef.traitDefId,
+                traitTypeArgs: slot.declaringTraitRef.traitTypeArgs.map { substituteType($0, substitution: bindings) }
+            )
+            return RequirementSlot(
+                declaringTraitRef: declaring,
+                methodName: slot.methodName,
+                parameters: slot.parameters.map {
+                    RequirementSlotParameter(
+                        name: $0.name,
+                        mutable: $0.mutable,
+                        type: substituteType($0.type, substitution: bindings),
+                        named: $0.named
+                    )
+                },
+                returnType: substituteType(slot.returnType, substitution: bindings),
+                index: slot.index
+            )
+        }
+
+        // The implementation map must hold the INSTANCE's DefIds. The
+        // declaration's are templates, and binding one of those to a receiver
+        // materializes the template's own generic form instead of this
+        // receiver's. Resolve each slot by receiver identity; only fall back to
+        // the declaration's id when nothing has been instantiated for it yet.
+        var implementations: [String: DefId] = [:]
+        for slot in slots {
+            if let symbol = lookupInstantiatedExtensionMethodSymbol(
+                baseType: concreteType,
+                methodName: slot.methodName
+            ) {
+                implementations[slot.methodName] = symbol.defId
+            } else if let defId = witness.localImplementationDefIdsByMethodName[slot.methodName] {
+                implementations[slot.methodName] = defId
+            }
+        }
+
+        return ConformanceWitness(
+            selfType: concreteType,
+            traitRef: instanceTraitRef,
+            directParentTraitRefs: parentRefs,
+            requirementSlots: slots,
+            localImplementationDefIdsByMethodName: implementations
+        )
+    }
+
+    /// File the conformance witness for one concrete instance, if it is missing.
+    ///
+    /// The declaration's witness is found through the program's `given`
+    /// declarations by DECLARED identity (`traitDefId` + the owner identity it
+    /// declares on), so two same-named givens from different modules never share
+    /// a slot.
+    internal func materializeConformanceWitness(
+        concreteType: Type,
+        traitName: String,
+        traitDefId: DefId,
+        traitTypeArgs: [Type]
+    ) {
+        let instanceTraitRef = CanonicalTraitRef(
+            traitName: traitName,
+            traitDefId: traitDefId,
+            traitTypeArgs: traitTypeArgs
+        )
+        let instanceKey = ConformanceWitness.key(selfType: concreteType, traitRef: instanceTraitRef)
+        if conformanceWitnesses[instanceKey] != nil || input.conformanceWitnesses[instanceKey] != nil {
+            return
+        }
+
+        let instanceOwner = context.methodOwnerAndArgs(of: resolveParameterizedType(concreteType))
+
+        // Find the DECLARATION's witness by declared identity: same trait
+        // declaration, same owner. The conformance's declared shape still shows
+        // the owner's type parameters (`given[T] Box[T] as Show` is filed under
+        // `Box[T]`), so pairing those with the instance's arguments is also the
+        // check that this is the conformance being instantiated -- two givens for
+        // the same trait under different arguments do not cross.
+        for (_, witness) in input.conformanceWitnesses {
+            guard witness.traitRef.traitDefId == traitDefId else { continue }
+            let declaredOwner = context.methodOwnerAndArgs(of: witness.selfType)
+            guard declaredOwner.owner == instanceOwner.owner else { continue }
+
+            var bindings: [String: Type] = ["Self": concreteType]
+            var matched = declaredOwner.args.count == instanceOwner.args.count
+            if matched {
+                for (declared, actual) in zip(declaredOwner.args, instanceOwner.args) {
+                    switch declared {
+                    case .genericParameter(let name):
+                        bindings[name] = actual
+                    default:
+                        if declared != actual { matched = false }
+                    }
+                    if !matched { break }
+                }
+            }
+            guard matched else { continue }
+
+            // A conformance `X: Child` implies `X: Parent`, and the erasure
+            // reaches every method the vtable declares -- including inherited
+            // ones. Instantiate them all for this receiver before the witness
+            // points at them, or the vtable is left with a requirement nothing
+            // implements (`Refusing to emit partial vtable`).
+            for slot in witness.requirementSlots {
+                _ = try? instantiateTraitPlaceholderMethod(
+                    baseType: concreteType,
+                    name: slot.methodName,
+                    methodTypeArgs: []
+                )
+            }
+
+            conformanceWitnesses[instanceKey] = specializeConformanceWitness(
+                witness,
+                instanceTraitRef: instanceTraitRef,
+                concreteType: concreteType,
+                bindings: bindings
+            )
+            return
+        }
+
+    }
+
     /// Remap witness defIds to use monomorphized defIds
     /// This ensures that the witness uses the same defIds as the MIR
     private func remapConformanceWitnesses(_ witnesses: [String: ConformanceWitness]) -> [String: ConformanceWitness] {

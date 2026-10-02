@@ -802,44 +802,84 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         for template in templates then {
-            if template.trait_def_id == requested_trait_id then {
-                continue;
-            };
-            if not trait_arg_types.is_empty() then {
-                continue;
-            };
-            if not self.storage.trait_registry.has_inheritance(template.trait_def_id, requested_trait_id) then {
-                continue;
-            };
             let bindings = self.conformance_type_key_bindings(template.target_type, target_type) or else {
                 continue;
             };
-            if true then {
-                let mutable satisfies_owner_constraints = true;
-                for tp in template.owner_type_params then {
-                    if bindings.get(tp.name) is .Some(bound_type) then {
-                        for constraint in tp.constraints then {
-                            when bound_trait_name(constraint) in {
-                                .Some(required_trait_name) then {
-                                    let required_trait_args = self.bound_trait_args_with_bindings(constraint, bindings);
-                                    if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
-                                        satisfies_owner_constraints = false;
-                                    };
-                                },
-                                // Shape bounds (`mutable`, `Deref`) are not trait
-                                // conformances, so they are not owner requirements here.
-                                .None() then {},
-                            };
+
+            let is_direct = template.trait_def_id == requested_trait_id;
+            if is_direct then {
+                // Direct conformance declared by a GENERIC given. Its own trait
+                // arguments are expressed in the owner's type parameters
+                // (`given[T] Box[T] as Sink[T]` declares `[T]`), so they are
+                // substituted with the bindings that turn the declared target
+                // into this receiver before comparing. The exact-key lookup
+                // above compares `Box[Int]` against the declaration's `Box[T]`
+                // and misses, so without this every generic conformance whose
+                // trait arguments mention an owner parameter is rejected --
+                // `let s Sink[Int] = b` used to fail with `Type mismatch`.
+                if not self.trait_args_match_under(template.trait_arg_types, trait_arg_types, bindings) then {
+                    continue;
+                };
+            } else {
+                if not trait_arg_types.is_empty() then {
+                    continue;
+                };
+                if not self.storage.trait_registry.has_inheritance(template.trait_def_id, requested_trait_id) then {
+                    continue;
+                };
+            };
+
+            let mutable satisfies_owner_constraints = true;
+            for tp in template.owner_type_params then {
+                if bindings.get(tp.name) is .Some(bound_type) then {
+                    for constraint in tp.constraints then {
+                        when bound_trait_name(constraint) in {
+                            .Some(required_trait_name) then {
+                                let required_trait_args = self.bound_trait_args_with_bindings(constraint, bindings);
+                                if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                                    satisfies_owner_constraints = false;
+                                };
+                            },
+                            // Shape bounds (`mutable`, `Deref`) are not trait
+                            // conformances, so they are not owner requirements here.
+                            .None() then {},
                         };
                     };
                 };
-                if not satisfies_owner_constraints then {
-                    continue;
-                };
-                return true;
             };
+            if not satisfies_owner_constraints then {
+                continue;
+            };
+            return true;
         };
         return false;
+    };
+
+    /// Do the template's declared trait arguments match the requested ones once
+    /// the owner's type parameters are bound?
+    ///
+    /// `given[T] Box[T] as Sink[T]` declares `[T]`; asking about `Box[Int]`
+    /// binds `T := Int`, so the declaration's `[T]` means `[Int]` here.
+    module_private trait_args_match_under(
+        self,
+        declared_args List[Type],
+        requested_args List[Type],
+        bindings Dict[String, Type],
+    ) Bool = {
+        if declared_args.count() <> requested_args.count() then {
+            return false;
+        };
+        let mutable index UInt = 0;
+        while index < declared_args.count() then {
+            if not self.same_expr_type(
+                self.apply_type_bindings(declared_args[index], bindings),
+                requested_args[index]
+            ) then {
+                return false;
+            };
+            index += 1;
+        };
+        return true;
     };
 
     module_private trait_type_args(self, trait_type TypeNode) List[Type] = {

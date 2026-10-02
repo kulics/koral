@@ -1225,6 +1225,12 @@ extension Monomorphizer {
                     traitTypeArgs: resolvedTraitTypeArgs,
                     witnessKey: ConformanceWitness.key(selfType: resolvedConcreteType, traitRef: traitRef)
                 ))
+                materializeConformanceWitness(
+                    concreteType: resolvedConcreteType,
+                    traitName: traitName,
+                    traitDefId: traitDefId,
+                    traitTypeArgs: resolvedTraitTypeArgs
+                )
             }
             return .traitObjectConversion(
                 inner: resolveTypesInExpression(inner),

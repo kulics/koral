@@ -2409,6 +2409,21 @@ public let extension_type_args_satisfy_constraints(
     return true;
 };
 
+/// Instantiate every method a conformance needs on `concrete_type`.
+///
+/// A conformance `X: Child` IMPLIES `X: Parent` — sema already requires the
+/// parent `given` to be declared explicitly — so the parent's methods are
+/// instantiated here too. Without that the child's vtable still carries the
+/// parent's requirement (the requirement list flattens parents in) with nothing
+/// to bind it to: `resolve_method_def_id` walks to the parent and finds no
+/// conformance for this concrete type, and codegen dies with
+/// `Refusing to emit partial vtable ... missing methods: <inherited one>`.
+///
+/// `visited` breaks cycles in the parent graph and is shared across the whole
+/// walk. It is deliberately NOT consulted by the reference-unwrap recursion at
+/// the end of the body: `Box[Int]` and `Box[Int] ref` are different receivers
+/// that each need their own instantiation even though they share a trait
+/// identity.
 public let instantiate_trait_vtable_methods(
     mono Monomorphizer,
     concrete_type Type,
@@ -2416,9 +2431,25 @@ public let instantiate_trait_vtable_methods(
     trait_def_id DefId,
     trait_type_args List[Type],
 ) Void = {
+    let mutable visited = Set[UInt].new();
+    instantiate_trait_vtable_methods_core(mono, concrete_type, trait_name, trait_def_id, trait_type_args, visited);
+};
+
+file_private let instantiate_trait_vtable_methods_core(
+    mono Monomorphizer,
+    concrete_type Type,
+    trait_name String,
+    trait_def_id DefId,
+    trait_type_args List[Type],
+    visited Set[UInt],
+) Void = {
     if has_generic_parameter(concrete_type) then {
         return;
     };
+    if visited.contains(trait_def_id.id) then {
+        return;
+    };
+    visited.insert(trait_def_id.id);
 
     let mutable parameterized_concrete_type = resolve_parameterized_type(mono, concrete_type);
     let normalized_actual = normalize_trait_conformance_actual_type(mono, parameterized_concrete_type);
@@ -2683,6 +2714,37 @@ public let instantiate_trait_vtable_methods(
             _ then {},
         };
     };
+
+    // The parent's conformance for the SAME concrete type. Its type arguments
+    // come from the parent's own declaration, with this trait's type parameters
+    // bound to what the conformance was asked for -- so `Child[T] Parent[T]`
+    // instantiated for `Child[Int]` carries `[Int]`, not `[T]`.
+    when mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) in {
+        .Some(trait_info) then {
+            let mutable bindings = Dict[String, Type].new();
+            bindings.insert("Self", concrete_type);
+            let mutable param_index UInt = 0;
+            while param_index < trait_info.type_params.count() and param_index < trait_type_args.count() then {
+                bindings.insert(trait_info.type_params[param_index].name, trait_type_args[param_index]);
+                param_index += 1;
+            };
+            for parent in trait_info.parent_traits then {
+                if not parent.def_id.is_valid() then { continue; };
+                let mutable parent_args = List[Type].new();
+                for arg_node in parent.type_arg_nodes then {
+                    parent_args.push(resolve_type_node(mono, arg_node, bindings));
+                };
+                instantiate_trait_vtable_methods_core(mono, concrete_type, parent.name, parent.def_id, parent_args, visited);
+            };
+        },
+        .None() then {},
+    };
+
+    // The witness codegen and the MIR verifier ask for. Filed LAST, once this
+    // trait's and every parent's methods have been instantiated, so the
+    // implementation map can point at the INSTANCE's DefIds rather than the
+    // declaration's templates.
+    materialize_conformance_witness_for_instance(mono, concrete_type, trait_name, trait_def_id, trait_type_args);
 };
 
 // Resolve a trait placeholder method call to a concrete implementation.

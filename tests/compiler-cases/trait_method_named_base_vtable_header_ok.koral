@@ -1,0 +1,34 @@
+// A trait method named `base` must not collide with the vtable header field.
+//
+// Every specialized vtable struct begins with `struct __koral_VTableHeader _Base;`
+// so the trait-object destructor can read the drop glue at offset 0. That field
+// used to be called `base`, and any trait declaring a `base` method produced a C
+// file that failed to compile with `duplicate member 'base'` -- on BOTH
+// compilers, and from entirely legal source.
+//
+// The header name is chosen so no Koral method name can sanitize to it: `_Base`
+// is in the C-identifier escape zone (`_` + uppercase), so a method spelled
+// `_Base` escapes to `_k__Base`, and the language rejects that spelling outright
+// ("Function name '_Base' must start with a lowercase letter").
+// EXPECT: base
+// EXPECT: show
+
+trait Shape {
+    base(self) String;
+    show(self) String;
+};
+
+type Box(value Int);
+
+given Box as Shape {
+    public base(self) String = "base";
+    public show(self) String = "show";
+};
+
+let main() Int = {
+    let b = Box(1);
+    let s Shape = b;
+    println(s.base());
+    println(s.show());
+    return 0;
+};

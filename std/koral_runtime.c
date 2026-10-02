@@ -80,8 +80,8 @@ void __koral_weakref_drop(void* raw_weak_ref) {
     __koral_weak_release(weak_ref->control);
 }
 
-// 类型无关的 trait object 销毁：具体类型的 drop glue 从 vtable 的 base.destroy 取。
-// 这是头里去掉 dtor 之后，类型擦除场景唯一的析构入口。
+// 类型无关的 trait object 销毁：把 vtable 起始处转成 `__koral_VTableHeader`，
+// 从那里取具体类型的 drop glue。这是头里去掉 dtor 之后，类型擦除场景唯一的析构入口。
 void __koral_traitref_drop(void* raw_trait_ref) {
     if (!raw_trait_ref) return;
     struct __koral_TraitRef* ref = (struct __koral_TraitRef*)raw_trait_ref;

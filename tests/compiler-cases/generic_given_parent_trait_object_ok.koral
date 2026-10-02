@@ -1,0 +1,42 @@
+// A GENERIC conformance whose trait inherits another trait must still bind the
+// parent's methods when the type is erased to a trait object.
+//
+// `given[T Any] Box[T] as Show` records no conformance witness (witnesses are
+// only recorded for non-generic conformances), so the vtable assembly falls
+// back to scanning `given` globals per trait identity. The parent's `base` lives
+// in a DIFFERENT given (`Box[T] as Base`), and nothing drove that conformance's
+// materialization for `Box[Int]` -- the erasure only asked for `Show`. Codegen
+// then died with `Refusing to emit partial vtable ... missing methods: base`,
+// on entirely legal source.
+//
+// The fix is that a conformance `X: Child` implies `X: Parent`: materializing
+// the child's vtable methods materializes the parent's for the same receiver.
+// See `instantiate_trait_vtable_methods`.
+// EXPECT: show
+// EXPECT: base
+
+trait Base {
+    base(self) String;
+};
+
+trait Show Base {
+    show(self) String;
+};
+
+type Box[T Any](value T);
+
+given[T Any] Box[T] as Base {
+    public base(self) String = "base";
+};
+
+given[T Any] Box[T] as Show {
+    public show(self) String = "show";
+};
+
+let main() Int = {
+    let b = Box[Int](1);
+    let s Show = b;
+    println(s.show());
+    println(s.base());
+    return 0;
+};

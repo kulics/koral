@@ -3459,23 +3459,31 @@ extension TypeChecker {
         methodTraitConformanceByDefId[entry.typedMethod.identifier.defId] = typedConformance
       }
 
-      if typeParams.isEmpty {
-        let traitRef = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitArgTypes)
-        let parentTraitRefs = try directParentTraitRefs(for: traitRef, selfType: selfType)
-        let slots = try requirementSlots(for: traitRef, selfType: selfType)
-        var localImplementationDefIdsByMethodName: [String: DefId] = [:]
-        for info in methodInfos {
-          localImplementationDefIdsByMethodName[info.method.name] = info.symbol.defId
-        }
-        let witness = ConformanceWitness(
-          selfType: selfType,
-          traitRef: traitRef,
-          directParentTraitRefs: parentTraitRefs,
-          requirementSlots: slots,
-          localImplementationDefIdsByMethodName: localImplementationDefIdsByMethodName
-        )
-        conformanceWitnesses[witness.key] = witness
+      // Record a witness for EVERY conformance, generic ones included.
+      //
+      // A generic conformance's witness is keyed on its DECLARED shape
+      // (`given[T] Box[T] as Show` is filed under `Box[T]`), so nothing
+      // downstream mistakes it for an instance -- consumers ask for `Box[Int]`
+      // and do not find it. It is the SOURCE the monomorphizer specializes
+      // from: see `materializeConformanceWitnessForInstance`, which re-keys it
+      // onto the concrete receiver with the type parameters substituted. rustc
+      // keeps the same split: the `impl` is a declaration, the witness belongs
+      // to `Instance { def, args }`.
+      let traitRef = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitArgTypes)
+      let parentTraitRefs = try directParentTraitRefs(for: traitRef, selfType: selfType)
+      let slots = try requirementSlots(for: traitRef, selfType: selfType)
+      var localImplementationDefIdsByMethodName: [String: DefId] = [:]
+      for info in methodInfos {
+        localImplementationDefIdsByMethodName[info.method.name] = info.symbol.defId
       }
+      let witness = ConformanceWitness(
+        selfType: selfType,
+        traitRef: traitRef,
+        directParentTraitRefs: parentTraitRefs,
+        requirementSlots: slots,
+        localImplementationDefIdsByMethodName: localImplementationDefIdsByMethodName
+      )
+      conformanceWitnesses[witness.key] = witness
 
       if !typeParams.isEmpty {
         guard let baseName = baseNameForGenericStorage else {
