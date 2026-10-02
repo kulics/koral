@@ -1038,6 +1038,20 @@ given TypeChecker {
                     };
                     when tool_methods.get(tool_name) in {
                         .Some(entry) then {
+                            // (d) a GENERIC tool block (`given[T Any] Iterator[T]`)
+                            //     is never copied onto a conformance. Swift never
+                            //     even classifies one as a tool block
+                            //     (`TypeCheckerPasses.swift:1173` gate on
+                            //     `typeParams.isEmpty`); its methods live as generic
+                            //     extension templates and are instantiated from the
+                            //     call sites that actually use them. Materializing
+                            //     them here is what dragged `EnumerateIterator` and
+                            //     the whole adapter family into every binary. The
+                            //     block's `type_params` are the giveaway: a
+                            //     non-generic `given Hash { ... }` has none.
+                            if not entry.type_params.is_empty() then {
+                                continue;
+                            };
                             let source_method = entry.method;
                             let extra_type_params = self.from_template_type_params(entry.type_params);
                             let materialized_method_id = self.allocate_unindexed_def_id(source_method.name, DefKind.Function());

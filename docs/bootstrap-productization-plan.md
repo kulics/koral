@@ -189,7 +189,94 @@ B 的落点已明确：`materialize_trait_tool_members_for_conformance`
 现有的 on-demand 路径统一。届时 `reduce`/`filter`/`take_while` 从未被调用，
 就不会被创建，适配器类型也就不会被解析出来。
 
+> **本段的落点判断已由下面「附：1a 已完成」修正**：tool 物化确实是体量主因，
+> 但触发它的是「泛型 tool block 被当成 tool block」，不是「物化时机太早」。
+> 结果是同一个，改法不同。
+
 ---
+
+## 附：1a 已完成（2026-10-02）
+
+**判据双达**：`list_sort_test` 生成 C 里 `EnumerateIterator` 130 → **0**；
+text 段 163 840 → **98 304**，与 Swift 的 98 304 **完全一致**。
+生成 C 行数 53 563 → 33 552（Swift 29 415）。
+全链：Swift 562/562 · stage1 562/562 · 自举 FIXED POINT + 悬空 0 · stage2 562/562。
+
+### 根因（与切片 A 的猜测不同）
+
+**不是**「非泛型声明无条件发射」——Swift 同样把每个非泛型 `given` 成员原样送进
+MIR/codegen，**没有任何可达性/DCE 过程**（`MIR/MIRLowerer.swift:61-64` +
+`shouldLowerFunction` 只滤泛型参数类型；`CodeGen` 发射每一个 MIR 函数）。
+两边在这一点上一致，所以它不是分歧。
+
+**真正的分歧只有一处：`given[T Any] Iterator[T] { ... }` 这类泛型 trait tool block
+被归到了哪一类。**
+
+Swift 在 `TypeCheckerPasses.swift:1173` 卡死：
+
+```swift
+// `given Trait { ... }` tool method declaration.
+// Generic `given[T] [T]Trait { ... }` must be treated as a generic type extension,
+// not as a trait tool block.
+if typeParams.isEmpty, let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
+   visibleTraitInfo(traitConstraint.baseName) != nil {
+```
+
+只有**非泛型** `given Hash { ... }` 才是 tool block；`given[T Any] Iterator[T] { ... }`
+走 generic extension template，**调用期**才实例化。
+于是 `flattenedTraitToolMethodEntries("Iterator")` 是空表，
+`Materialize trait tool methods`（`TypeCheckerPasses.swift:3322`）那个循环**一次都不进**，
+`StringRunesIterator` 的 conformance 节点里只有它自己写的 `next`。
+
+bootstrap 的 `trait_tool_target_name` 两种都收，于是
+`materialize_trait_tool_members_for_conformance` 把 `enumerate`/`filter`/`take_while`…
+整套盖到**每一个** conformance 上，全是非泛型 `GivenMember`，被无条件带走。
+`EnumerateIterator` 的四个字符串迭代器实例 + 闭包 payload 结构体就是这么进来的。
+
+**证据**：把 `materialize_trait_tool_members_for_conformance` 整个短路成返回空表，
+其余一字未改 —— 53 563 行 → 32 422 行，`EnumerateIterator` 130 → 0。
+一处就吃掉 21 141 行，是 24 148 行差距的 87%，与 text 段目标降幅几乎重合。
+
+（探针也证明了它是 load-bearing 的：直接关掉会产出
+`__mir_h_1.combine_hash` 这种「把方法当字段取值再当闭包调」的坏 C，
+`combine_hash` 是 `given Hash { ... }` 里的**非泛型** tool 方法——Swift 同样会物化它。
+所以要改的是「泛型 tool block 不物化」，不是「tool 全不物化」。）
+
+### 实际改动（四处，都在 bootstrap 侧；Swift 已是正确做法）
+
+1. **`sema/type_checker_members.koral`** — `materialize_trait_tool_members_for_conformance`
+   加跳过规则 (d)：`entry.type_params` 非空（来自泛型 tool block）就不物化。
+2. **`sema/type_checker.koral`** — `given` 分派：非泛型 tool block 仍 `register_trait_tool_block`
+   后直接返回；**泛型** tool block 继续往下走，额外注册成 generic extension template，
+   这是调用期实例化的来源。
+3. **`sema/type_checker_templates.koral`** — 新增 `trait_extension_template_key`：
+   `given[T Any] Iterator[T]` 解析成 `*Iterator`（trait 套在引用修饰符里），
+   `method_owner_of` 会按**修饰符**记成 `Builtin("Ref")`。owner 必须是 **trait 的声明**——
+   Swift 记在 `methodOwnerForName(baseName)` 下，调用点按
+   `MethodOwner.Decl(conformance.trait_def_id)` 找。注册与
+   `update_extension_method_checked_template`（补 body）必须用同一把钥匙，
+   否则方法只有签名没有定义。
+   同时补上 `resolve_conformance_extension_template_signature` 的
+   `checked_bindings`：trait-owner 模板的参数是按 **trait 自己的**类型参数解析的
+   （`fn Func(T) Bool` 里那个 `T`），只有 conformance 的实参能把它收掉。
+4. **`mono/mono_functions.koral`** — `instantiate_extension_method_from_entry` 的
+   符号命名与缓存键改用**实例的**类型实参，不再用 `type_args`（那是 trait 的实参）。
+   否则 `MapIterator[Int, Int, ListIterator[Int]]` 与
+   `MapIterator[Int, Int, FilterIterator[...]]` 共用一个 `MapIterator_I_into_list_d36`，
+   第二个调用过了类型检查却把接收者塞进第一个的定义体。
+
+### 顺带记下的两个独立缺陷（未修，另开）
+
+- **未知成员静默降级成字段访问**：tool 方法没解析出来时，`h.combine_hash(...)`
+  编成 `__mir_h_1.combine_hash` + 闭包调用，C 报一堆莫名其妙的错，
+  而不是「没有成员 `combine_hash`」。应当报诊断。
+- **`instantiate_extension_method_from_entry` 的命名对 trait-owner 模板是结构性欠参数**（见上第 4 条），
+  本次只在这一处按实例参数命名，其它命名点未审。
+
+### 切片 A 的教训仍然成立
+
+引用图裁剪（切片 A）撤回是对的：Swift 根本没有 DCE，两边产物体积差 100% 来自
+「谁被创建」，不是「谁被发射」。按需**创建**，就没有引用图要补全。
 
 ## 附：1b 已完成（2026-10-02）
 

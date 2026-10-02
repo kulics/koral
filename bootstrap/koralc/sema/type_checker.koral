@@ -1879,6 +1879,26 @@ given TypeChecker {
         };
     };
 
+    /// The trait a `given Trait { ... }` block extends, when it is a TRAIT TOOL
+    /// BLOCK — or a generic `given[T Any] Iterator[T] { ... }`, which is one
+    /// for LOOKUP purposes but must not be one for MATERIALISATION.
+    ///
+    /// Swift draws the line at `TypeCheckerPasses.swift:1173`
+    /// (`if typeParams.isEmpty`) and never registers a generic block as a tool
+    /// block at all; its methods live as generic extension templates and are
+    /// instantiated from call sites. Bootstrap keeps generic blocks in
+    /// `trait_tool_blocks` because `resolve_trait_tool_method_signature` is what
+    /// binds the TRAIT's type parameters to a receiver's conformance arguments,
+    /// and that binding is what trait-object and generic-parameter receivers
+    /// resolve through. The divergence is closed at the other end: see
+    /// `materialize_trait_tool_members_for_conformance`, which refuses to copy a
+    /// generic block's methods onto every conformance.
+    ///
+    /// Getting that end wrong is expensive. A tool block's methods are copied
+    /// onto EVERY conformance of the trait at declaration time, so stamping
+    /// `given[T] Iterator[T]` tools onto every iterator drags the whole adapter
+    /// family into every binary — ~21k lines of C for a program that sorts a
+    /// list.
     module_private trait_tool_target_name(self, target_type TypeNode, type_params List[TypeParameter]) Option[String] = {
         let candidate = when target_type in {
             .Identifier(name) then {
@@ -2487,7 +2507,16 @@ given TypeChecker {
                     when self.trait_tool_target_name(target_type, type_params) in {
                         .Some(trait_name) then {
                             self.register_trait_tool_block(trait_name, type_params, members);
-                            return;
+                            // A NON-GENERIC `given Trait { ... }` stops here: its
+                            // methods are copied onto each conformance and never
+                            // need an extension template. A generic
+                            // `given[T Any] Iterator[T] { ... }` falls through and
+                            // ALSO registers generic extension templates, which is
+                            // the path a call site instantiates from — without them
+                            // the method has a signature but no body to monomorphize.
+                            if type_params.is_empty() then {
+                                return;
+                            };
                         },
                         .None() then {},
                     };

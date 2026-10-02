@@ -1506,17 +1506,47 @@ public let instantiate_extension_method_from_entry(
         .Decl(d) then d,
         .Builtin(_) then def_id_invalid(),
     };
+    // The INSTANCE's type arguments, never the extension template's. A trait
+    // tool is declared against the TRAIT's parameters (`given[T Any] Iterator[T]`
+    // has one), so `type_args` carries the trait arguments while the receiver
+    // `MapIterator[T, U, R]` carries three. Mangling and keying on `type_args`
+    // collapsed `MapIterator[Int, Int, ListIterator[Int]]` and
+    // `MapIterator[Int, Int, FilterIterator[Int, ListIterator[Int]]]` into one C
+    // symbol: the second `into_list` call type-checked fine and then passed its
+    // receiver to the first one's definition.
+    let mutable instance_type_args = List[Type].new();
+    let resolved_base_for_args = resolve_parameterized_type(mono, base_type);
+    when resolved_base_for_args in {
+        .GenericStruct(_, args) then { for a in args then instance_type_args.push(a); },
+        .GenericEnum(_, args) then { for a in args then instance_type_args.push(a); },
+        .StructureType(did) then {
+            when mono.storage.context.get_type_arguments(did) in {
+                .Some(args) then { for a in args then instance_type_args.push(a); },
+                .None() then {},
+            };
+        },
+        .EnumType(did) then {
+            when mono.storage.context.get_type_arguments(did) in {
+                .Some(args) then { for a in args then instance_type_args.push(a); },
+                .None() then {},
+            };
+        },
+        _ then {},
+    };
+    if instance_type_args.is_empty() then {
+        for a in type_args then instance_type_args.push(a);
+    };
     let mangled_name = make_extension_method_layout_name(
         mono,
         mangle_template_name,
         mangle_owner_id,
-        type_args,
+        instance_type_args,
         resolved_template.method.name,
         method_type_args,
     );
     // Keyed by the INSTANTIATION: the owner plus the type arguments this method
     // was instantiated with. `List[String]` and `List[Rune]` are two entries.
-    let lookup_key = MethodInstanceKey(effective_owner, type_args, resolved_template.method.name, method_type_args);
+    let lookup_key = MethodInstanceKey(effective_owner, instance_type_args, resolved_template.method.name, method_type_args);
     let cache_key = "ext:\(mangled_name)";
     when mono.storage.instantiated_function_symbols.get(cache_key) in {
         .Some(cached_symbol) then {

@@ -367,11 +367,48 @@ given TypeChecker {
         return self.context().method_owner_of(target_type);
     };
 
+    /// The owner a `given` block's methods are registered under, when the block
+    /// targets a TRAIT.
+    ///
+    /// A trait written as a type arrives under a reference modifier (`*Iterator`,
+    /// `*MyEq[T]`), and `method_owner_of` would key that by the MODIFIER
+    /// (`Builtin("Ref")`). The owner is the trait's declaration: Swift keys such
+    /// a block by `methodOwnerForName(baseName)`, and a call site looks it up
+    /// through the receiver's conformance
+    /// (`resolve_conformance_extension_template_signature` asks for
+    /// `MethodOwner.Decl(conformance.trait_def_id)`). Keyed by the modifier the
+    /// block is unreachable from any receiver, so `enumerate`/`filter` come back
+    /// with the trait's type parameters still unbound.
+    ///
+    /// Unwrap exactly the modifiers `is_trait_tool_target` accepts, and only when
+    /// the inner type is a trait — `given[T] mutref List[T]` is a modifier
+    /// extension and must stay keyed by the modifier.
+    module_private trait_extension_template_key(self, target_type Type) MethodOwner = {
+        let effective = when target_type in {
+            .ReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then inner,
+                _ then target_type,
+            },
+            .MutableReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then inner,
+                _ then target_type,
+            },
+            .BorrowedReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then inner,
+                _ then target_type,
+            },
+            .MutableBorrowedReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then inner,
+                _ then target_type,
+            },
+            _ then target_type,
+        };
+        return self.extension_template_key(effective);
+    };
+
     /// Same identity, taken from the declaration syntax of a `given` target.
-    /// The node form only matters for modifiers, where the resolved type is
-    /// already the modifier and `method_owner_of` reaches the same answer.
     module_private extension_template_key_for_target_node(self, target_type TypeNode, resolved_target Type) MethodOwner = {
-        return self.extension_template_key(resolved_target);
+        return self.trait_extension_template_key(resolved_target);
     };
 
     module_private register_extension_method_template(
@@ -452,7 +489,12 @@ given TypeChecker {
         checked_parameters Option[List[Symbol]],
         checked_return_type Type,
     ) Void = {
-        let type_key = self.extension_template_key(target_type);
+        // Must agree with where `register_extension_method_template` filed the
+        // template. For a trait-targeted `given` that is the TRAIT's declaration
+        // (`trait_extension_template_key`), not the modifier the trait arrived
+        // under — otherwise the body never reaches the template and the method
+        // is emitted with a signature and no definition.
+        let type_key = self.trait_extension_template_key(target_type);
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
                 let mutable updated = existing;
