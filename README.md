@@ -50,7 +50,7 @@ let label = when status in {
     .Active() then "running",
     .Paused(reason) then "paused: " + reason,
     .Stopped() then "done",
-}
+};
 ```
 
 Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. A block may end with a final expression without a trailing semicolon; that final expression becomes the block's value. If the block has no final expression, or the last expression ends with a semicolon, the block evaluates to `Void`.
@@ -64,7 +64,7 @@ let label = if score >= 90 then {
     }
 } else {
     "other"
-}
+};
 ```
 
 `while` and `for` intentionally keep the same `... then ...` surface shape and are ordinary expressions whose result type is `Void`.
@@ -105,7 +105,7 @@ when temperature in {
     > 0 and < 100 then "liquid",
     <= 0 then "solid",
     >= 100 then "gas",
-}
+};
 ```
 
 ### `or else` / `and then` / `or return` — Error flow as keywords
@@ -119,7 +119,7 @@ let read_config(path String) Result[Config] = {
     let text = read_text_file(path) or return;
     let parsed = parse_json(text) or return;
     return .Ok(parsed);
-}
+};
 ```
 
 ### Generics
@@ -135,13 +135,13 @@ let max[T Ord](a T, b T) T = if a > b then a else b;
 ```koral
 trait Greet {
     greet(self) String;
-}
+};
 
 type Bot(name String);
 
 given Bot as Greet {
     greet(self) String = "beep boop, I'm " + self.name;
-}
+};
 
 let g Greet = Bot("K-9");  // trait object
 
@@ -164,7 +164,7 @@ Rules:
 type Result[T Any] {
     Ok(value T),
     Error(error Error),
-}
+};
 
 let parse_int(s String) Result[Int] =
     if s == "42" then .Ok(42) else .Error("bad input");
@@ -172,11 +172,16 @@ let parse_int(s String) Result[Int] =
 
 ### Lazy streams
 
+A chain is one expression — the calls are joined by the leading `.`, and the
+statement ends at the single trailing `;`. Do not put `;` between the calls;
+that would terminate the statement and leave the next line as a bare implicit
+member expression.
+
 ```koral
-let result = list.iterator();
-    .filter((x) -> x > 0);
-    .map((x) -> x * 2);
-    .take(10);
+let result = list.iterator()
+    .filter((x) -> x > 0)
+    .map((x) -> x * 2)
+    .take(10)
     .fold(0, (acc, x) -> acc + x);
 ```
 
@@ -304,7 +309,7 @@ let doubled = Option[Int].Some(21) and then it * 2;
 let parse_port(text String) Result[Int] = {
     let port = parse_int(text) or return;
     return .Ok(port);
-}
+};
 
 let ok = Result[Int].Ok(42);
 let err = Result[Int].Error("failed");
