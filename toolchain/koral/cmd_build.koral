@@ -22,6 +22,18 @@ public let find_koralc() Option[String] = {
     return find_executable("koralc", preferred_dirs);
 };
 
+/// The compiler flags a build mode maps to. Mirrors koralc's own mapping so
+/// `koral build --release` and `koralc build --release` agree.
+public let build_mode_args(flags Dict[String, String]) List[String] = {
+    if flags.get("--release") is .Some(_) then {
+        return ["--release"];
+    };
+    if flags.get("--debug") is .Some(_) then {
+        return ["--debug"];
+    };
+    return List[String].new();
+};
+
 /// Build the project
 /// koral build [--release]
 public let cmd_build(args List[String], flags Dict[String, String]) Int = {
@@ -55,6 +67,11 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
     cmd.arg(target_module);
     cmd.arg("--requires-root");
     cmd.arg(".requires");
+    // Forward the build mode so `koral build --release` is not a no-op. The
+    // compiler selects the clang level from these; without them it uses -O1.
+    for mode_flag in build_mode_args(flags) then {
+        cmd.arg(mode_flag);
+    };
     cmd.args(compiler_std_args());
     cmd.arg("-o");
     cmd.arg(".build/");

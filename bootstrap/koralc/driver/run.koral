@@ -10,6 +10,9 @@ file_private type InvocationOptions(
     std_config_path Option[String],
     no_std Bool,
     out_dir Option[String],
+    // Clang flags for the generated C. `-O1` is the historical default;
+    // `--debug` / `--release` / `--optimize` select the conventional pairs.
+    optimize_args List[String],
 );
 
 file_private type PreparedCompilation(
@@ -60,6 +63,8 @@ public let run_driver() Int = {
     let mutable std_config_path = Option[String].None();
     let mutable no_std = false;
     let mutable out_dir = Option[String].None();
+    let mutable optimize_args = List[String].new();
+    optimize_args.push("-O1");
 
     let mutable i = index;
     while i < argv.count() then {
@@ -69,6 +74,26 @@ public let run_driver() Int = {
             return 0;
         } else if arg == "--no-std" then {
             no_std = true;
+        } else if arg == "--debug" then {
+            optimize_args = List[String].new();
+            optimize_args.push("-O0");
+            optimize_args.push("-g");
+        } else if arg == "--release" then {
+            optimize_args = List[String].new();
+            optimize_args.push("-O2");
+        } else if arg == "--optimize" then {
+            i += 1;
+            if i >= argv.count() or argv[i].starts_with("-") then {
+                eprintln("Error: Missing value for --optimize option");
+                return 1;
+            };
+            let level = argv[i];
+            if level <> "0" and level <> "1" and level <> "2" and level <> "3" and level <> "s" and level <> "fast" then {
+                eprintln("Error: Invalid value for --optimize (expected 0, 1, 2, 3, s or fast): \(level)");
+                return 1;
+            };
+            optimize_args = List[String].new();
+            optimize_args.push("-O\(level)");
         } else if arg == "--package-config" then {
             i += 1;
             if i >= argv.count() then {
@@ -127,6 +152,7 @@ public let run_driver() Int = {
         std_config_path,
         no_std,
         out_dir,
+        optimize_args,
     );
 
     if options.package_config_path is .None() and options.entry_file_path is .None() then {
@@ -165,6 +191,12 @@ file_private let print_usage() Void = {
     println("  --requires-root <path>        Root directory for resolved requires (default unresolved)");
     println("  --std-config <path>       Standard library manifest path");
     println("  --no-std                  Compile without standard library");
+    println("");
+    println("Build mode (selects the clang flags used for the generated C):");
+    println("  --debug                   -O0 -g   (unoptimized, debuggable)");
+    println("  --release                 -O2      (optimized)");
+    println("  --optimize <level>        Explicit clang level: 0, 1, 2, 3, s or fast");
+    println("                            Default: -O1");
 };
 
 // Shared: lex + parse source text.
@@ -895,7 +927,7 @@ file_private let find_clang() String = {
 // Invoke clang to compile a .c file to an executable.
 // Uses Inherit stdio (no pipe) to avoid buffer deadlock, mirroring Swift runSubprocess.
 // Returns true on success.
-file_private let run_clang(c_file String, exe_file String, linked_libraries List[String]) Bool = {
+file_private let run_clang(c_file String, exe_file String, linked_libraries List[String], optimize_args List[String]) Bool = {
     let clang = find_clang();
 
     let mutable clang_args = List[String].new();
@@ -914,7 +946,9 @@ file_private let run_clang(c_file String, exe_file String, linked_libraries List
     clang_args.push("-o");
     clang_args.push(exe_file);
     clang_args.push("-Wno-everything");
-    clang_args.push("-O1");
+    for opt in optimize_args then {
+        clang_args.push(opt);
+    };
 
     let mutable seen_libs = Set[String].new();
     for lib in linked_libraries then {
@@ -1173,7 +1207,7 @@ file_private let run_build(options InvocationOptions) Int = {
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false;
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
 
-    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
+    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries, options.optimize_args) then {
         eprintln("clang compilation failed");
         return 1;
     };
@@ -1190,7 +1224,7 @@ file_private let run_run(options InvocationOptions) Int = {
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false;
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
 
-    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
+    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries, options.optimize_args) then {
         eprintln("clang compilation failed");
         return 1;
     };
