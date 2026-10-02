@@ -39,6 +39,36 @@ given TypeChecker {
         return Option[Symbol].None();
     };
 
+    /// Neither a field nor a method — say so.
+    ///
+    /// Without this the member expression keeps type-checking as `Unknown` and
+    /// later lowers to a C struct-field access followed by a closure call
+    /// (`__mir_h_1.combine_hash` / `__mir_f_1.nope`), so a typo in a member name
+    /// surfaces as half a dozen baffling clang errors instead of one diagnostic.
+    /// Swift reports `Member 'nope' not found in type 'Foo'` at the same point.
+    module_private report_missing_member_if_needed(self, lookup_type Type, member String, span SourceSpan) Bool = {
+        // A cascade, not a second mistake: once the receiver's type is already
+        // `Unknown` the first diagnostic has said everything. Reporting again
+        // would print `Member 'x' not found in type '?'` for every downstream use.
+        if lookup_type is .Unknown() then {
+            return false;
+        };
+        // An inaccessible method has its own diagnostic, already pushed by
+        // `reject_inaccessible_method_from_current_context`.
+        if self.resolve_method_signature(lookup_type, member) is .Some(_) then {
+            return false;
+        };
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'"
+
+            , span)
+        );
+        return true;
+    };
+
     module_private report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointer_type Type, pointee Type, member String) Void = {
         if resolved is not .Unknown() or has_pointer_method then {
             return;

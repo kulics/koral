@@ -5219,8 +5219,12 @@ extension TypeChecker {
           }
           throw SemanticError.undefinedMember(memberName, name)
         } else {
-          throw SemanticError.invalidOperation(
-            op: "member access", type1: typeToLookup.description, type2: "")
+          // Every receiver kind reports the same missing-member diagnostic.
+          // This used to fall through to
+          // `.invalidOperation(op: "member access", type1: typeToLookup.description, type2: "")`,
+          // which renders as `Invalid operation member access between types Box[Int] and `
+          // -- `type2` is spelled as an empty string, so the message ends mid-clause.
+          throw SemanticError.undefinedMember(memberName, typeToLookup.description)
         }
       }
     }
