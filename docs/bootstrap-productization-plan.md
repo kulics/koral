@@ -821,3 +821,101 @@ witness 侧用 `method_owner_and_args` 解决，conformance 侧用
 | 5 | object-safety 诊断（span + 原因列表） | 仍在清单 |
 | 6 | C 标识符转义规则（`__koral_` 放行分支） | 仍在清单 |
 | 7 | mono 泛型判据（`has_generic_parameter` 漏 `TypeVar`） | 仍在清单 |
+| 8 | **已闭合**：缺失成员诊断。Swift 只对非泛型 `structure` 给 `Member 'x' not found in type 'Y'`，其余 receiver 掉进 `invalidOperation(op: "member access", type1: ..., type2: "")`，渲染成 `Invalid operation member access between types Int and `（`type2` 明写空串，句子断在半截）。**已按最佳实践两边统一**成 `Member 'x' not found in type 'Y'`。 | **已闭合** |
+| 9 | **解析分歧**：`*T` 受管引用语法。Swift 一律拒（`managed refs are removed; raw pointers must be '*unsafe T'`），bootstrap 的 `parse_type` 仍接受 `.Star()` 走 `TypeNode.Reference`。本轮新增用例时撞到。**未修**——属解析层，另开。 | 仍在清单 |
+| 10 | **潜在隐患**：mono 的 `layout_key(Type)` 对 `StructureType` 给 `struct_<id>`，`CompilerContext.get_layout_key` 给真名。目前 `layout_key` 只做内部相等比较、不产符号名，所以无害；一旦有人拿它命名就会静默不一致。**未修，记一笔。** | 仍在清单 |
+
+---
+
+## 附：两个独立缺陷已修（2026-10-03）
+
+1a 收口时连带记下的两处，都已修。
+
+### 1. 未知成员静默降级成字段访问
+
+**症状**：`h.combine_hash(...)` / `f.nope` / `n.nope()` 这类「成员既非字段也非方法」的写法，
+sema 照单全收，codegen 发成 C 结构体字段访问再当闭包调：
+
+```c
+__mir_tmp_14_14 = __mir_h_1.combine_hash;          // 成员取值
+_t789 = ((void (*)(void))(__mir_tmp_14_14.fn))();  // 再当闭包调
+```
+
+clang 报一堆莫名其妙的错（`member reference base type 'intptr_t' is not a structure or union`、
+`variable has incomplete type 'void'`），用户根本看不出是拼错了成员名。
+1a 的根因就是被这层挡了很久。
+
+**根因**：`check_member_dispatch_expr_ref`（`sema/type_checker_expressions_dispatch.koral`）
+的分段循环里，每个分支只把失败记进 `inaccessible_method_member`，**没有一处报诊断**。
+`check_member_expr_ref` 里那两处 `Member 'x' not found in type 'Y'` 是死代码（无调用点）。
+
+**修法**：新增 `report_missing_member_if_needed`（`sema/type_checker_expressions.koral`），
+在 `_ then` 与引用/指针各分支统一调用。三条护栏：
+
+- receiver 类型已是 `Unknown` 就不报 —— 那是级联，不是第二个错；
+  否则下游每次使用都印一条 `Member 'x' not found in type '?'`。
+- 已有方法（含不可访问的）不报 —— `reject_inaccessible_method_from_current_context` 自己报过了。
+- 文案与 Swift 的 `.undefinedMember` 一致。
+
+**新增用例 4 个**（562 → 566）：`member_not_found_struct_error` /
+`member_not_found_call_error` / `member_not_found_generic_struct_error` /
+`member_not_found_scalar_error`。
+
+### 2. trait-owner 模板的符号命名欠实例参数
+
+**审计结论：全库只有 `make_extension_method_layout_name` 一处会欠参数，已在 1a 修掉。**
+
+逐点核过：
+
+| 命名点 | 判据 | 结论 |
+|---|---|---|
+| `make_extension_method_layout_name`（`mono_types.koral:368`） | 唯一调用点 `instantiate_extension_method_from_entry` | **1a 已修**（用实例实参） |
+| `make_layout_name`（`mono_types.koral:274`） | 3 个调用点（struct/enum/function），`args` 是模板自身实参，且 `args.count() <> type_parameters.count()` 有闸 | 自洽 |
+| 调用侧 key：`make_extension_method_key` | 由 `collect_receiver_instantiations` 从 **receiver** 抽实参 | 与修复后一致 |
+| `set_cname` 写入点 | 只有 `instantiate_function` 与 `instantiate_extension_method_from_entry` 两处，都是实例期一次写死 | 自洽 |
+| codegen 侧 `c_name_for_def_id` / `nominal_layout_c_identifier` | 按 DefId 读 `get_cname`，不重算 | 自洽 |
+
+顺带查出一条**无害但危险**的不一致（分歧清单 #10）：
+`mono_types.koral` 的 `layout_key(Type)` 对 `StructureType` 给 `struct_<id>`，
+而 `CompilerContext.get_layout_key` 给真名。目前 `layout_key` 只做内部相等比较
+（如 `mono_functions.koral:759`），不产符号名，所以两边各自自洽；
+一旦有人拿它命名就会静默不一致。记一笔，未修。
+
+---
+
+## 附：第 2 步 panic 收口已完成（2026-10-03）
+
+**取证表 26 处全部落地**（判定见上「第 2 步取证」一节）：
+
+| 类 | 数 | 处置 | 结果 |
+|---|---|---|---|
+| A 流水线不变量 | 21 | 文案统一成 ICE + bug-report | ✅ 21 处已改 |
+| B vtable 部分表 | 4 | witness 缺口（B 路线）修好后转 ICE | ✅ 4 处已改 |
+| C 内部 API 契约 | 1 | 保留 panic，**文案不动**（计划原文只对 A 指定文案） | 按计划保持 |
+
+**实现**：新增 `codegen/ice.koral`，一个措辞出口：
+
+```kotlin
+public let internal_compiler_error(detail String) String = {
+    return "internal compiler error: \(detail)\nThis is a bug in the Koral compiler, not the program being compiled. Please report it, along with the source that triggered it.";
+};
+```
+
+25 处 `panic("...")` 改成 `panic(internal_compiler_error("..."))`，**detail 一字未改**
+—— 哪个符号、哪个类型照旧，只是外面的框变成「这是编译器的 bug」。
+措辞只有这一处，要改也只改一个地方。
+
+**验证**：自举产物的 C 里字符串以十六进制字节序列发射，按字节查证，
+`internal compiler error` / `This is a bug in the Koral compiler` / `Please report it`
+三段各恰好出现 1 次，detail 串（`Generic function symbol reached codegen` 等）同时在。
+
+**全链**：Swift 566/566 · stage1 566/566 · 自举 FIXED POINT + 悬空 0 · stage2 566/566。
+
+### 顺带修掉的 Swift 缺陷
+
+`TypeCheckerExpressions.swift:5223` 的
+`.invalidOperation(op: "member access", type1: typeToLookup.description, type2: "")`
+—— `type2` 明写空串，句子断在半截。Swift 只对非泛型 `structure` 走
+`.undefinedMember`，其余 receiver 全掉进这条。
+按「两边按最佳实践选」统一成 `.undefinedMember(memberName, typeToLookup.description)`，
+与 bootstrap 同文案。列入分歧清单 #8（已闭合）。
