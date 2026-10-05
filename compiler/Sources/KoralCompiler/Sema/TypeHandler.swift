@@ -203,6 +203,8 @@ extension TypeHandlerKind {
             return .opaque
         case .traitObject:
             return .reference  // trait object 在 C 层面是 struct Ref，与 reference 相同
+        case .error:
+            return .primitive
         }
     }
 }

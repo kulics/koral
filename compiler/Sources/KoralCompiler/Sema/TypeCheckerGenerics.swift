@@ -34,7 +34,7 @@ extension TypeChecker {
     
     // First, do basic unification from argument types
     for (typedArg, param) in zip(arguments, template.parameters) {
-      if case .identifier(let name) = param.type,
+      if case .identifier(let name, _) = param.type,
          typeParams.contains(name),
          let existing = inferred[name],
          typedArg.type != existing {
@@ -112,7 +112,7 @@ extension TypeChecker {
   ) throws {
     // print("Unify node: \(node) with type: \(type) (canonical: \(type.canonical))")
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
       if typeParams.contains(name) {
         if let existing = inferred[name] {
           if existing != type {
@@ -124,7 +124,7 @@ extension TypeChecker {
       }
     case .inferredSelf:
       break
-    case .reference(let inner, mutable: let mutable):
+    case .reference(let inner, mutable: let mutable, span: _):
       if let actual = Type.reference(inner: .void).compatibleIndirectionInners(with: type)?.actualInner,
          (!mutable || type.indirectionCompatibilityInfo?.mutable == true),
          type.indirectionCompatibilityInfo?.family == .managedReference {
@@ -132,7 +132,7 @@ extension TypeChecker {
       } else {
         try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
       }
-    case .pointer(let inner, mutable: let mutable):
+    case .pointer(let inner, mutable: let mutable, span: _):
       if mutable, case .mutablePointer(let elementType) = type {
         try unify(node: inner, type: elementType, inferred: &inferred, typeParams: typeParams)
       } else if !mutable {
@@ -143,7 +143,7 @@ extension TypeChecker {
           break
         }
       }
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       // `base` is a SOURCE SPELLING: resolve it to its declaration once here,
       // then the two sides compare as identities.
       if case .genericStruct(let tplDefId, let typeArgs) = type {
@@ -159,7 +159,7 @@ extension TypeChecker {
           }
         }
       }
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       // Match against function type
       if case .function(let params, let returns) = type {
         if params.count == paramTypes.count {
@@ -169,7 +169,7 @@ extension TypeChecker {
           try unify(node: returnType, type: returns, inferred: &inferred, typeParams: typeParams)
         }
       }
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       if mutable, case .mutableWeakReference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
       } else if !mutable {
@@ -188,7 +188,8 @@ extension TypeChecker {
   func inferGenericStructConstruction(
     template: GenericStructTemplate,
     name: String,
-    callArgs: [CallArg]
+    callArgs: [CallArg],
+    span: SourceSpan = .unknown
   ) throws -> TypedExpressionNode {
     try ensureStructConstructionAccess(
       typeName: name,
@@ -196,7 +197,7 @@ extension TypeChecker {
       members: template.parameters.map { param in
         (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
       },
-      span: currentSpan
+      span: span
     )
 
     let plan = try planConstructorArguments(

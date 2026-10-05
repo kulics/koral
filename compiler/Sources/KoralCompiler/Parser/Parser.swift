@@ -42,7 +42,8 @@ public class Parser {
     } else {
       throw ParserError.unexpectedToken(
         span: currentSpan,
-        got: currentToken.description
+        got: currentToken.description,
+        expected: "'\(expected.description)'"
       )
     }
   }
@@ -331,25 +332,28 @@ public class Parser {
   /// Parse a default value literal for a named parameter.
   /// Supported literals: integer, float, bool, string, rune, empty collection ([]), full-range (..)
   func parseDefaultValueLiteral() throws -> ExpressionNode {
+    // The literal's own span: `match` advances past it, so `currentSpan` after
+    // the match is the NEXT token.
+    let startSpan = currentSpan
     switch currentToken {
     case .integer(let value):
       try match(.integer(value))
-      return .integerLiteral(value)
+      return .integerLiteral(value, span: startSpan)
     case .float(let value):
       try match(.float(value))
-      return .floatLiteral(value)
+      return .floatLiteral(value, span: startSpan)
     case .string(let value):
       try match(.string(value))
-      return .stringLiteral(value)
+      return .stringLiteral(value, span: startSpan)
     case .rune(let value):
       try match(.rune(value))
-      return .runeLiteral(value)
+      return .runeLiteral(value, span: startSpan)
     case .bool(true):
       try match(.bool(true))
-      return .booleanLiteral(true)
+      return .booleanLiteral(true, span: startSpan)
     case .bool(false):
       try match(.bool(false))
-      return .booleanLiteral(false)
+      return .booleanLiteral(false, span: startSpan)
     case .leftBracket:
       let span = currentSpan
       try match(.leftBracket)

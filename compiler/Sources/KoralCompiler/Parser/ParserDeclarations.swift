@@ -20,6 +20,7 @@ extension Parser {
       throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
     }
 
+    let selfSpan = currentSpan
     try match(.selfKeyword)
     if currentToken === .colon {
       throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
@@ -28,7 +29,7 @@ extension Parser {
     if currentToken !== .comma && currentToken !== .rightParen {
       throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
     }
-    return .inferredSelf
+    return .inferredSelf(span: selfSpan)
   }
   
   // MARK: - Global Declaration Parsing
@@ -55,6 +56,9 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "let declaration")
       }
+      // The name's own span: a case check written after `match` would report at
+      // whatever follows the name (`(`, `=`, ...), one token too far right.
+      let nameSpan = currentSpan
       try match(.identifier(name))
 
       let typePrams = try parseTypeParameters()
@@ -66,45 +70,45 @@ extension Parser {
       // If mutable keyword was detected, it must be a variable declaration
       if mutable {
         if !isValidVariableName(name) {
-          throw ParserError.invalidVariableName(span: currentSpan, name: name)
+          throw ParserError.invalidVariableName(span: nameSpan, name: name)
         }
         if isForeign {
           if currentToken === .leftParen {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
           }
-          return try foreignLetDeclaration(name: name, mutable: true, access: access, span: startSpan)
+          return try foreignLetDeclaration(name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
         }
         if currentToken === .leftParen {
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
         return try globalVariableDeclaration(
-          name: name, mutable: true, access: access, span: startSpan)
+          name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
       }
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
         if !isValidVariableName(name) {
-          throw ParserError.invalidFunctionName(span: currentSpan, name: name)
+          throw ParserError.invalidFunctionName(span: nameSpan, name: name)
         }
         if isForeign {
-          return try foreignFunctionDeclaration(name: name, access: access, span: startSpan)
+          return try foreignFunctionDeclaration(name: name, access: access, span: startSpan, nameSpan: nameSpan)
         }
         return try globalFunctionDeclaration(
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
-          span: startSpan)
+          span: startSpan, nameSpan: nameSpan)
       } else {
         if !isValidVariableName(name) {
-          throw ParserError.invalidVariableName(span: currentSpan, name: name)
+          throw ParserError.invalidVariableName(span: nameSpan, name: name)
         }
         if isForeign {
-          return try foreignLetDeclaration(name: name, mutable: false, access: access, span: startSpan)
+          return try foreignLetDeclaration(name: name, mutable: false, access: access, span: startSpan, nameSpan: nameSpan)
         }
         if isIntrinsic {
           throw ParserError.unexpectedToken(
             span: currentSpan, got: "intrinsic variable not supported")
         }
         return try globalVariableDeclaration(
-          name: name, mutable: false, access: access, span: startSpan)
+          name: name, mutable: false, access: access, span: startSpan, nameSpan: nameSpan)
       }
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
@@ -127,9 +131,10 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "type declaration")
       }
+      let nameSpan = currentSpan
 
       if !isValidTypeName(name) {
-        throw ParserError.invalidTypeName(span: currentSpan, name: name)
+        throw ParserError.invalidTypeName(span: nameSpan, name: name)
       }
 
       try match(.identifier(name))
@@ -139,9 +144,9 @@ extension Parser {
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
         if isNominalMutable {
-          throw ParserError.unexpectedToken(
+          throw ParserError.rejectedConstruct(
             span: currentSpan,
-            got: "Type alias cannot be marked mutable"
+            message: "Type alias cannot be marked mutable"
           )
         }
         if isIntrinsic {
@@ -159,7 +164,8 @@ extension Parser {
           name: name,
           targetType: targetType,
           access: access,
-          span: startSpan
+          span: startSpan,
+          nameSpan: nameSpan
         )
       }
 
@@ -170,7 +176,7 @@ extension Parser {
         )
       }
       if isForeign {
-        return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan)
+        return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
       }
       return try parseStructDeclaration(
         name,
@@ -178,7 +184,8 @@ extension Parser {
         access: access,
         isIntrinsic: isIntrinsic,
         isMutable: isNominalMutable,
-        span: startSpan
+        span: startSpan,
+        nameSpan: nameSpan
       )
     } else if currentToken === .givenKeyword {
       if explicitAccess != nil {
@@ -207,9 +214,10 @@ extension Parser {
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait declaration")
     }
+    let nameSpan = currentSpan
 
     if !isValidTypeName(name) {
-      throw ParserError.invalidTypeName(span: currentSpan, name: name)
+      throw ParserError.invalidTypeName(span: nameSpan, name: name)
     }
     try match(.identifier(name))
 
@@ -309,7 +317,8 @@ extension Parser {
       }
       try match(.rightParen)
 
-      var returnType: TypeNode = .identifier("Void")
+      // A missing return type is synthesised, not written -- no location.
+      var returnType: TypeNode = .identifier("Void", span: .unknown)
       if currentToken !== .semicolon {
         returnType = try parseType()
       }
@@ -338,7 +347,8 @@ extension Parser {
       superTraits: superTraits,
       methods: methods,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
@@ -431,7 +441,8 @@ extension Parser {
       }
       try match(.rightParen)
 
-      var returnType: TypeNode = .identifier("Void")
+      // A missing return type is synthesised, not written -- no location.
+      var returnType: TypeNode = .identifier("Void", span: .unknown)
       if currentToken !== .semicolon {
         returnType = try parseType()
       }
@@ -666,7 +677,7 @@ extension Parser {
   
   /// Parse global variable declaration
   private func globalVariableDeclaration(
-    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan
+    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     var type: TypeNode? = nil
     if currentToken !== .equal {
@@ -676,7 +687,7 @@ extension Parser {
     try match(.equal)
     let value = try expression()
     return .globalVariableDeclaration(
-      name: name, type: type, value: value, mutable: mutable, access: access, span: span)
+      name: name, type: type, value: value, mutable: mutable, access: access, span: span, nameSpan: nameSpan)
   }
 
   // MARK: - Type Parameters
@@ -736,8 +747,9 @@ extension Parser {
 
   private func parseTraitConstraint() throws -> TypeNode {
     if currentToken === .mutableKeyword {
+      let keywordSpan = currentSpan
       try match(.mutableKeyword)
-      return .identifier("mutable")
+      return .identifier("mutable", span: keywordSpan)
     }
     // Trait constraints now share the full type surface, including postfix generics.
     if canStartTypeSyntax() {
@@ -749,8 +761,9 @@ extension Parser {
     if !isValidTypeName(name) {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
+    let nameSpan = currentSpan
     try match(.identifier(name))
-    return .identifier(name)
+    return .identifier(name, span: nameSpan)
   }
 
   // MARK: - Function Declaration
@@ -758,7 +771,7 @@ extension Parser {
   /// Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
   private func globalFunctionDeclaration(
     name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, span: SourceSpan
+    isIntrinsic: Bool, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -818,7 +831,8 @@ extension Parser {
         parameters: parameters,
         returnType: returnType,
         access: access,
-        span: span
+        span: span,
+        nameSpan: nameSpan
       )
     } else {
       try match(.equal)
@@ -830,7 +844,8 @@ extension Parser {
         returnType: returnType,
         body: body,
         access: access,
-        span: span
+        span: span,
+        nameSpan: nameSpan
       )
     }
   }
@@ -838,7 +853,7 @@ extension Parser {
   // MARK: - Foreign Declarations
 
   private func foreignFunctionDeclaration(
-    name: String, access: AccessModifier, span: SourceSpan
+    name: String, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -855,6 +870,10 @@ extension Parser {
       if !isValidVariableName(pname) {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
+      // The name is what makes `name: Type` a NAMED parameter. Both `match`
+      // calls below move past it, so the rejection has to remember where it
+      // was -- reporting at `currentSpan` points at the type instead.
+      let nameSpan = currentSpan
       try match(.identifier(pname))
       var isNamed = false
       if currentToken === .colon {
@@ -865,7 +884,7 @@ extension Parser {
         throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
       }
       if isNamed {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in foreign declarations")
+        throw ParserError.rejectedConstruct(span: nameSpan, message: "Named parameters are not supported in foreign declarations")
       }
       let paramType = try parseType()
       parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
@@ -889,12 +908,13 @@ extension Parser {
       parameters: parameters,
       returnType: returnType,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
   private func foreignTypeDeclaration(
-    name: String, cname: String?, access: AccessModifier, span: SourceSpan
+    name: String, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     var fields: [(name: String, type: TypeNode)]? = nil
     if currentToken === .leftBrace {
@@ -924,12 +944,13 @@ extension Parser {
       cname: cname,
       fields: fields,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
   private func foreignLetDeclaration(
-    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan
+    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     let type = try parseType()
     return .foreignLetDeclaration(
@@ -937,7 +958,8 @@ extension Parser {
       type: type,
       mutable: mutable,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
@@ -946,7 +968,7 @@ extension Parser {
   /// Parse type declaration
   private func parseStructDeclaration(
     _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, isMutable: Bool = false, span: SourceSpan
+    isIntrinsic: Bool, isMutable: Bool = false, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     if isIntrinsic {
       if currentToken === .leftParen {
@@ -954,17 +976,17 @@ extension Parser {
           span: currentSpan, got: "Intrinsic type should not have body")
       }
       return .intrinsicTypeDeclaration(
-        name: name, typeParameters: typeParams, access: access, span: span)
+        name: name, typeParameters: typeParams, access: access, span: span, nameSpan: nameSpan)
     }
 
     if currentToken === .leftBrace {
       if isMutable {
-        throw ParserError.unexpectedToken(
+        throw ParserError.rejectedConstruct(
           span: currentSpan,
-          got: "Enum type cannot be marked mutable"
+          message: "Enum type cannot be marked mutable"
         )
       }
-      return try parseEnumDeclaration(name, typeParams: typeParams, access: access, span: span)
+      return try parseEnumDeclaration(name, typeParams: typeParams, access: access, span: span, nameSpan: nameSpan)
     }
 
     try match(.leftParen)
@@ -994,7 +1016,7 @@ extension Parser {
         seenNamedField = true
         try match(.colon)
       } else if seenNamedField {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional field '\(paramName)' cannot appear after named fields")
+        throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional field '\(paramName)' cannot appear after named fields")
       }
       let paramType = try parseType()
       // Parse optional default value for named fields
@@ -1023,7 +1045,8 @@ extension Parser {
       parameters: parameters,
       isMutable: isMutable,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
@@ -1031,7 +1054,7 @@ extension Parser {
   
   /// Parse enum declaration (sum type)
   private func parseEnumDeclaration(
-    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, span: SourceSpan
+    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftBrace)
     var cases: [EnumCaseDeclaration] = []
@@ -1064,7 +1087,7 @@ extension Parser {
           seenNamedParam = true
           try match(.colon)
         } else if seenNamedParam {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional field '\(paramName)' cannot appear after named fields")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional field '\(paramName)' cannot appear after named fields")
         }
         let paramType = try parseType()
         // Parse optional default value for named fields
@@ -1100,7 +1123,8 @@ extension Parser {
       typeParameters: typeParams,
       cases: cases,
       access: access,
-      span: span
+      span: span,
+      nameSpan: nameSpan
     )
   }
 
@@ -1121,10 +1145,9 @@ extension Parser {
       try match(currentToken)
 
       if currentToken === .asKeyword {
-        throw ParserError.unexpectedToken(
+        throw ParserError.rejectedConstruct(
           span: currentSpan,
-          got: currentToken.description,
-          expected: "file merge syntax no longer supports aliases; declare a module in koral.json instead"
+          message: "file merge syntax no longer supports aliases; declare a module in koral.json instead"
         )
       }
 
@@ -1252,10 +1275,9 @@ extension Parser {
 
       if currentToken === .comma {
         if sawAllPublic {
-          throw ParserError.unexpectedToken(
+          throw ParserError.rejectedConstruct(
             span: currentSpan,
-            got: currentToken.description,
-            expected: "'..' must not be combined with other imports"
+            message: "'..' must not be combined with other imports"
           )
         }
         try match(.comma)
@@ -1266,10 +1288,9 @@ extension Parser {
 
     try match(.rightBrace)
     if items.isEmpty {
-      throw ParserError.unexpectedToken(
+      throw ParserError.rejectedConstruct(
         span: currentSpan,
-        got: currentToken.description,
-        expected: "at least one import item"
+        message: "using declaration requires at least one import item"
       )
     }
     return (pathSegments, items)

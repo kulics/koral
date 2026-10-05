@@ -919,3 +919,281 @@ public let internal_compiler_error(detail String) String = {
 `.undefinedMember`，其余 receiver 全掉进这条。
 按「两边按最佳实践选」统一成 `.undefinedMember(memberName, typeToLookup.description)`，
 与 bootstrap 同文案。列入分歧清单 #8（已闭合）。
+
+---
+
+## 附：第 3 步跨编译器对拍预言机已落地（2026-10-03）
+
+**做成的是 runner 的一个模式，不是一套新脚本。** runner 本来就掌握用例怎么编
+（多文件走 `--package-config`、`EXPECT-ERROR`-only 走 `check`、超时/内存上限、
+重试），另写一个壳去对拍会量到另一套编排上的差异，那测的就不是编译器了。
+
+```
+./bin/compiler-test-runner/compiler_runner --compiler differential \
+    --swift-koralc compiler/.build/release/koralc \
+    --bootstrap-koralc bin/bootstrap/koralc -j 8
+```
+
+### 对拍三层，一层比一层深
+
+| 层 | 判据 | 判错意味 |
+|---|---|---|
+| 1 接受/拒绝 | 两边同判「这是不是合法源码」 | 两个编译器实现了不同的语言 |
+| 2 运行行为 | 都接受时，程序 stdout **逐行全等** + 退出码全等 | 同一程序两边跑出不同结果 |
+| 3 诊断串 | 都拒绝时，两边说的一字不差 | 同一错误两边说两样 |
+
+第 2 层必须是**全等**，不能沿用 `// EXPECT` 的子序列匹配：两条编译器可以都满足
+「输出里有 show / base」而中间打的东西完全不同。`run_single_case` 丢掉的正是
+原始文本，所以对拍需要 `CaseObservation` 把它留下。
+
+**产出的不是 pass/fail 而是分歧种类**：`diverge_accept_reject` /
+`diverge_runtime` / `diverge_diagnostic` / `diverge_incomplete`，
+失败信息里点名**第一处不同**（哪一行、两边各说什么），不是笼统一句「these are different」。
+
+### 与计划的两处偏差（都是数据说话）
+
+**一、覆盖全量 566，不用子集。** 计划写的是「取语义敏感的子集」。实测：
+**566/566 全部行为等价** —— 包括 29 个多文件包用例。子集是保守估计，
+数据说全量可行，那就上全量；挑子集来让它变绿属于「选最容易通过的办法」。
+
+**二、第 3 层默认不进闸门。** 计划原文「诊断串（已在套件里，复用）」——
+诊断本来就有交叉验证：每个 `EXPECT-ERROR` 用例**在两个编译器上各跑一遍**，
+断言同一个子串。所以第 3 层不是计划要求的新增闸门。
+
+但它值得做成开关，因为**查出来的分歧比预期大得多**：
+
+```
+--compare-diagnostics    566 中 210 处诊断文本不一致（37%）
+```
+
+比早先按「消息正文归一化」估的 121 处更多，因为预言机比的是**整行原文**——
+span 列号、`1 error generated.` 尾行、路径前缀的差异全算数，这些也是分歧。
+
+### 诊断分歧的构成（210 处）
+
+| 类 | 量 | 例 |
+|---|---|---|
+| 尾行/格式 | 大头 | Swift 打 `1 error generated.`，bootstrap 不打；span 列号不同（`11:5` vs `11:13`） |
+| 阶段前缀 | 62 | 同一条消息，一边 `error:` 一边 `syntax error:` |
+| 措辞不同 | 38 | 见下 |
+| 级联多报 | 12 | bootstrap 在真错误后面追加 `Type mismatch: expected Int, got Void` 等 |
+| 同集合不同序/重复 | 9 | `borrow_ptr_non_pod_error` 里 bootstrap 把同一条错误打 9 遍 |
+
+**措辞上两边各有更好的部分**（「两边按最佳实践选」的下一批）：
+
+- **Swift 更好**（多数）：带有用的上下文后缀 ——
+  `Cannot capture mutable variable 'counter'; hold the state in a Cell and capture the cell instead`、
+  `Type MyIter does not explicitly implement trait [Int]Iterator (for-in iterator result check)`、
+  `Type Int is not iterable: missing iterator() method and does not implement Iterator`；
+  bootstrap 全砍到光秃秃一句。
+- **bootstrap 更好**：`drop_wrong_param_count_error` 里 Swift 打
+  `Invalid operation drop must have exactly one parameter between types  and`
+  —— **又一处 `type2: ""` 的半截句**（同 #8 的病根），bootstrap 打的是完整句
+  `drop must have exactly one parameter`。
+- **bootstrap 的缺陷**：把内部类型名漏进用户可见诊断 ——
+  `Member 'borrow_ptr' not found in type 'List[struct#52]'`、
+  `Given implementation for type 'struct#112' is invalid: ...`。
+  用户不该看见 `struct#52`。
+
+**这 210 处不进本期闸门，但也不藏**：`--compare-diagnostics` 一次跑出完整清单，
+数字写在这里。收掉它们是独立一批工作（要动两边的诊断文本，而「诊断文本一字不变」
+的约束只锁套件已断言的子串，对齐到更好的措辞不破子串）。
+
+### CI：仓库此前没有任何 CI
+
+`.github/workflows/ci.yml` 是新建的。六步照抄固定验证链，另加第 6 步对拍闸门：
+
+1. Swift 套件 · 2. host→stage1 · 3. stage1 套件
+4. 自举两轮 + 不动点 + 悬空扫描 · 5. stage2 套件 · 6. **跨编译器对拍**
+
+**「任何一边单侧回归立即报警」正是第 6 步**：1–5 可以全绿而两边仍各说各话——
+自举不动点只证明稳定，不证明对。一边单独漂走，第 6 步必红，即使它自己的套件还绿。
+
+矩阵 `macos-latest` + `ubuntu-latest`。**CI 本身尚未跑过**（仓库此前无 CI，
+本机只验证过 macOS 上的每条命令）；悬空扫描那段 shell 的两个方向已单独验过
+（为 0 时过，非 0 时确实失败）。
+
+### 改动面
+
+| 文件 | 改了什么 |
+|---|---|
+| `tests/compiler-runner/model.koral` | `CaseObservation` / `ProgramRun`；`RunnerConfig` 加 `compare_diagnostics` |
+| `tests/compiler-runner/executor.koral` | `observe_case` / `run_single_case_differential`；`run_single_case` 按 kind 分派 |
+| `tests/compiler-runner/cli.koral` | `--compiler differential`、`--compare-diagnostics` |
+| `tests/compiler-runner/runner.koral` | 对拍模式下两个编译器二进制都先查存在 |
+| `.github/workflows/ci.yml` | 新建 |
+
+---
+
+## 附：第 1a 步收口 + 诊断分歧清零（2026-10-05）
+
+计划本体三步全部落地。这一节记当前实测状态，并更新分歧清单。
+
+### 第 1a 步：过度实例化 —— 判据全部达成
+
+`list_sort_test` 生成 C / 产物实测（同一输入、同一 clang）：
+
+| 判据 | 计划起点 | 现在 | Swift | 结论 |
+|---|---|---|---|---|
+| `EnumerateIterator` 出现次数 | 95 | **0** | 0 | ✅ |
+| `FilterIterator` / `InspectIterator` | — | **0** | 0 | ✅ |
+| 生成 C 行数 | 53 563 | **33 552** | 29 415 | 1.8× → **1.14×** |
+| text 段 | 163 840 | **98 304** | 98 304 | **逐字节相同** |
+| 二进制大小 | 296K | **202K** | 219K | bootstrap 更小 |
+
+text 段从「+67%」到与 Swift 完全相同，且不是靠名字白名单滤掉的——是「谁被创建」变了。
+
+### 诊断分歧：210 → 0
+
+`--compare-diagnostics` 现在 **566/566 逐行全等**（含顺序、span、阶段前缀）。
+计划里那句「这 210 处不进本期闸门……收掉它们是独立一批工作」——**已收掉**。
+
+收敛过程（每一步都是「两边按最佳实践选」，不是让一边去模仿另一边）：
+
+| 批次 | 量 | 主要内容 |
+|---|---|---|
+| 尾行 / 格式 | 大头 | 去掉 `N errors generated.` 尾行（破坏了一行一诊断的可解析性）；span 锚点 |
+| 阶段前缀 | 62 | `error:` / `syntax error:` 归位 |
+| 措辞 | 38 | **取两边更好的**：Swift 的上下文后缀（`hold the state in a Cell...`、`(for-in iterator result check)`、`(operator 'to_string')`）补进 bootstrap；bootstrap 的完整句修掉 Swift 的半截句（`type2: ""`） |
+| 内部类型名泄漏 | — | `List[struct#52]` → `List[T]`；用户不该看见 `struct#N` |
+| 级联多报 | 12 | `Type.error`：失败表达式惰性，不与任何东西（含自己）不一致 |
+| 重复上报 | 9 | 同消息 + 同位置 = 同一个问题；方法槽冲突只在注册时报，不在每个调用点复述 |
+
+**`Type.error` 是这一批的支点**（Swift 侧）。惰性错误类型让「一个错一件事」成为可判定的规则，
+而不是一堆散落的特判：`Type` 的手写 `==` 里补上 `(.error, .error) = true` 才让它真正生效
+——缺这一条时所有 `!= .error` 守卫全部失效。
+
+**顺带收掉的接受面缺口**（比文案更要紧）：
+
+- 类型可见性在**所有**解析路径上检查 —— 裸名表命中也可能指向别的模块的类型
+- `drop` 参数必须叫 `self`
+- 非法构造毒化该值，不往下传
+
+### 全链
+
+```
+Swift 566 · stage1 566 · FIXED POINT + 悬空 0 · stage2 566 · 行为对拍 566
+--compare-diagnostics   566/566
+```
+
+### 分歧清单更新（2026-10-05 实测）
+
+| # | 形状 | 状态 |
+|---|---|---|
+| 5 | object-safety 诊断 | **文案已对齐**（span + 原因列表两边都有了）。**剩下的病是次数**：同一 trait 有 N 处 trait-object 位置时，bootstrap 报 N 条，Swift 报 1 条。Swift 的「1 条」看着也像抛出后放弃后续检查，不是设计过的策略。正解是**在 trait 声明处说一次，然后继续查**。未修 |
+| 6 | C 标识符转义规则（`__koral_` / `__mir_` / `_k__` 放行分支） | **仍未对齐，但造不出用户可见的复现**。实测 `int` / `_k__foo` / `__x` / `__koral_y` / `_z` 五个名字两边都编过、都跑出相同结果（exit 15），没有 C 符号撞名。属潜在隐患（转义规则不同 → 撞名风险），不是现行缺陷。**无用例可写** |
+| 7 | mono 泛型判据 `has_generic_parameter` 漏 `TypeVar` | **仍在**。`mono_types.koral:443` 的枚举没有 `.TypeVar` 分支，掉进 `_ then false`。与 1a 同族（漏裁 → 过度实例化） |
+| 9 | **解析分歧** `*T` 受管引用语法 | **仍在，且是接受面分歧**：Swift 一律拒（`managed refs are removed; raw pointers must be '*unsafe T'`），bootstrap 的 `parse_type` 仍接受 `.Star()` 走 `TypeNode.Reference`，直接编过。一边拒一边收 = 两个编译器实现了不同的语言 |
+| 10 | `layout_key` 两套命名 | **仍无用户可见效果**。`layout_key` 只做内部相等比较、不产符号名。**无用例可写**，只能靠注释/审查看住 |
+
+**关键判断**：预言机是绿的，但**绿的覆盖面小于已知分歧面**——#5/#6/#7/#9/#10 五条
+没有一条在 566 个用例里，所以测不到。下一步的第一件事就是把能造出用例的几条变成用例。
+
+---
+
+## 附：分歧清单尾批收口（2026-10-05）
+
+上一节列的 5 条里，能造出用例的 3 条已闭合。568 个用例（新增 2 个），
+全链与 `--compare-diagnostics` 均 568/568。
+
+### 一、先造用例，再动手
+
+**这是本轮的第一件事，也是最重要的一件。** 在这之前，预言机的绿只等于
+「566 个用例里没有分歧」，而清单上的分歧**一条都不在那 566 个里**——
+绿的覆盖面小于已知分歧面。先让分歧各自有一个用例看着，红着就是工作清单。
+
+用例落在哪一层取决于分歧长什么样：
+
+| 分歧 | 用例 | 红在哪 |
+|---|---|---|
+| #9 `*T` | `managed_ref_star_removed_error.koral` | **套件**（bootstrap 接受了应拒的程序） |
+| #5 object-safety | `object_safety_every_use_error.koral` | **套件**（Swift 少报、且中途放弃） |
+| #7 `TypeVar` | 造不出复现，见下 | — |
+
+`object_safety_every_use_error` 的第三条期望是关键：
+
+```
+// EXPECT-ERROR: is not object-safe
+// EXPECT-ERROR: is not object-safe
+// EXPECT-ERROR: Undefined variable: not_a_binding
+```
+
+`match_expectations_in_order` **消费**匹配位置（`current = j + 1`），所以
+两条同样的期望要求**两次出现**；第三条则是「查完没有」的证据——
+只报第一条就走开的实现，永远到不了底下的未定义名字。
+
+### 二、#9 `*T`：`*` 只是裸指针
+
+`parse_type` 的 `.Star()` 分支原来把 `* [mutable] T` 收成 `TypeNode.Reference`
+——那是**已从语言模型删除的受管引用**。改成与 Swift 同一句拒绝，并指出还剩什么：
+
+```
+syntax error: Unexpected token: *, expected: managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'
+```
+
+**顺带修掉 Swift 的 span 错位**：`match(.multiply)` 之后才抛，span 落在 `*` 后面
+那个 token 上（`11:12` 指着 `Box`），而消息明写 `Unexpected token: *`。
+按「出错的 token 规则」两边都指到 `*`（`11:11`）。诊断正文一字未改。
+
+### 三、#5 object-safety：每处都要说，而且不能说完就走
+
+**上一节把正解写成「在 trait 声明处说一次」——错了，这里更正。**
+
+取证：三个 trait-object 位置 + 底下一个未定义名字。
+
+| | 表现 |
+|---|---|
+| bootstrap | 报 3 条，且继续查到底下的 `nope` |
+| Swift（改前） | 只报 1 条，**底下的 `nope` 根本没查到** |
+
+Swift 的「1 条」不是策略，是**抛出后放弃了整个声明**。所以真正的分歧是两条：
+
+1. **每处一个错**：`NotSafe` 不能当对象，是**每一个写它的地方**的问题，
+   读者得挨个看。只说一次，修完一处还会撞下一堵墙。
+   这和「未导入的名字在每个使用点都要说」是同一条规矩（`TypeCheckerExpressions`
+   里那句注释：*"each unimported use is a place the reader has to look at"*）。
+2. **说完继续查**：报完就走会把文件后面的问题全藏起来。
+
+所以是 **Swift 向 bootstrap 的策略靠拢**，5 处 `checkObjectSafety` 的
+`throw` 全部改成 `handleError` 后照常返回 trait object 类型。
+
+### 四、#7 `has_generic_parameter` 补 `TypeVar`
+
+`mono_types.koral` 的判据原来把推断变量当成「已实例化」。
+函数名说的是「有没有泛型参数」，但**每个调用点问的都是「我现在能不能布局」**——
+所以补 `.TypeVar(_) then true` 并把这层意思写进注释，而不是去改 20 个调用点。
+
+**造不出用户可见的复现**：`TypeVar` 来自整/浮点字面量的默认类型推断，
+sema 结束时应当已被代换掉；多数 mono 闸门本来就还额外查
+`is_placeholder_inferred_type`（它已含 `TypeVar`），缺口只在单独用
+`has_generic_parameter` 的几处（`mono_functions.koral:1123/2476`、
+`mono_expr_substitution.koral:478/520/780/1103`）。
+按第 2 步的取证标准，这属于「不可由合法输入触发，但判据写错了」——
+修的是判据本身，不是绕过一个复现。**因此没有用例**，靠注释和这笔记住。
+
+### 清单终态
+
+| # | 形状 | 状态 |
+|---|---|---|
+| 5 | object-safety 诊断 | **已闭合**。每处都说，说完继续查 |
+| 6 | C 标识符转义规则 | **仍未对齐**，但造不出用户可见复现（`int`/`_k__foo`/`__x`/`__koral_y`/`_z` 五个名字两边都编过、都跑出 exit 15，无符号撞名）。潜在隐患，无用例可写 |
+| 7 | `has_generic_parameter` 漏 `TypeVar` | **已闭合**（判据修正，无复现，见上） |
+| 9 | `*T` 受管引用语法 | **已闭合**。`*` 只是裸指针，必须 `unsafe` |
+| 10 | `layout_key` 两套命名 | **仍无用户可见效果**（只做内部相等比较、不产符号名）。无用例可写 |
+
+### 残留的解析层不一致（本轮撞到，未开）
+
+`*T` 在**模式**位置：两边都拒，但阶段和文案不同——
+Swift 在解析期就按 `*` 前缀规则拒掉；
+bootstrap 的 `parse_pattern_primary` 还留着 `.Star() → PatternNode.TraitObjectType`，
+走到 sema 才报 `Trait object type pattern target must be a concrete nominal type`。
+`PatternNode.TraitObjectType` 另有非 `*` 产生路径（大写裸名，文档里
+`err is IoError` 那种），所以那条 `.Star()` 分支是旧拼写的残留。
+**不在本轮范围**（本轮只动计划点名的 `parse_type`），记一笔。
+
+### 全链
+
+```
+Swift 568 · stage1 568 · FIXED POINT + 悬空 0 · stage2 568 · 行为对拍 568
+--compare-diagnostics   568/568
+```

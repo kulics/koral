@@ -1,9 +1,16 @@
 import Foundation
 
-/// Interpolated string token parts
+/// Interpolated string token parts.
+///
+/// `interpolationStart` carries where the expression begins in the ORIGINAL
+/// file. The expression is re-lexed from its own text, and a lexer that starts
+/// at line 1 column 1 reports every position inside it relative to that text --
+/// which reads as `1:1` in a diagnostic and tells the reader nothing. Handing
+/// the nested lexer the real starting position is what keeps those spans
+/// absolute.
 public enum InterpolatedStringPart: CustomStringConvertible {
   case stringPart(String)
-  case interpolationStart
+  case interpolationStart(SourceLocation)
   case interpolationEnd
 
   public var description: String {
@@ -436,9 +443,18 @@ public class Lexer {
     self._hasNewlineBeforeCurrentToken
   }
 
-  public init(input: String) {
+  /// - Parameters:
+  ///   - input: the text to lex
+  ///   - start: where `input` sits in the file it came from. A fragment such as
+  ///     an interpolated expression is lexed on its own, so without this every
+  ///     position inside it would be relative to the fragment.
+  public init(input: String, start: SourceLocation = SourceLocation(line: 1, column: 1)) {
     self.input = input
     self.position = input.startIndex
+    self._line = start.line
+    self._column = start.column
+    self._tokenStartLine = start.line
+    self._tokenStartColumn = start.column
   }
 
   public func saveState() -> State {
@@ -923,7 +939,9 @@ public class Lexer {
             parts.append(.stringPart(literalBuffer))
             literalBuffer = ""
           }
-          parts.append(.interpolationStart)
+          // `processStringContent` walks a de-quoted buffer with no absolute
+          // positions, so the fragment keeps the literal's own start.
+          parts.append(.interpolationStart(tokenStartLocation))
           // Extract interpolation expression from content string
           var expr = ""
           var depth = 1
@@ -1068,7 +1086,7 @@ public class Lexer {
             parts.append(.stringPart(literalBuffer))
             literalBuffer = ""
           }
-          parts.append(.interpolationStart)
+          parts.append(.interpolationStart(currentLocation))
           let expr = try readInterpolationExpression()
           parts.append(.stringPart(expr))
           parts.append(.interpolationEnd)

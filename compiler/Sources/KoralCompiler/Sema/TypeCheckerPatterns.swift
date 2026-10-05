@@ -253,7 +253,7 @@ extension TypeChecker {
             let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
-            ), span: span)
+            ), span: subPat.span)
           }
         }
         
@@ -427,7 +427,7 @@ extension TypeChecker {
             let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
-            ), span: span)
+            ), span: subPat.span)
           }
         }
         

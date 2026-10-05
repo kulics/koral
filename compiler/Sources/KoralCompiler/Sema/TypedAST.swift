@@ -410,7 +410,14 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .integerLiteral(let v): return "\(v)"
     case .stringLiteral(let v): return "\"\(v)\""
     case .wildcard: return "_"
-    case .variable(let s): return "def#\(s.defId.id)"
+    case .variable(let s):
+      // The NAME, never the DefId number: two compilers number their DefIds
+      // differently, so a message quoting `def#3` can never agree with one
+      // quoting `sym#7`. The name is also the thing the reader wrote.
+      let name =
+        SemanticErrorContext.currentCompilerContext?.getName(s.defId)
+        ?? "<binding>"
+      return s.isMutable() ? "mutable \(name)" : name
     case .traitObjectType(let targetType): return targetType.description
     case .traitObjectTypeBinding(let symbol, let targetType):
       _ = symbol

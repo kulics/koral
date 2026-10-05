@@ -220,6 +220,7 @@ given ExhaustivenessChecker {
         let mutable covered_trait_object_types = Set[String].new();
         let mutable has_catchall = false;
         let mutable catchall_is_struct = false;
+        let mutable catchall_index UInt = 0;
         let mutable catchall_pattern_desc = StringBuilder.new();
         catchall_pattern_desc.push_string("");
         let pattern_count = self.patterns.count();
@@ -237,7 +238,7 @@ given ExhaustivenessChecker {
             // fresh name so two arms with the same type are not duplicates.
             let has_binding = (p is .Variable(_)) or (p is .TraitObjectType(_)) or (p is .TraitObjectTypeBinding(_, _));
             if not has_binding then {
-                let pd = pattern_description(p);
+                let pd = pattern_description(p, self.context);
                 if seen_patterns.contains(pd) then {
                     return Result[Void].Error("Duplicate pattern: '" + pd + "' already matched earlier");
                 };
@@ -251,8 +252,8 @@ given ExhaustivenessChecker {
                 // node that never runs the exhaustiveness checker).
                 let skip = catchall_is_struct and (p is .Wildcard());
                 if not skip then {
-                    let message = unreachable_after_pattern_message(catchall_pattern_desc.to_string());
-                    return Result[Void].Error(message.to_string());
+                    let message = unreachable_after_pattern_message(pattern_description(p, self.context), catchall_pattern_desc.to_string(), catchall_index);
+                    return Result[Void].Error(message);
                 };
             };
 
@@ -270,12 +271,14 @@ given ExhaustivenessChecker {
                 .None() then {},
             };
 
-            let pattern_trait_types = collect_trait_object_types(p);
+            let pattern_trait_types = collect_trait_object_types(p, self.context);
             if not pattern_trait_types.is_empty() then {
                 for type_name in pattern_trait_types.iterator() then {
                     if covered_trait_object_types.contains(type_name) then {
                         let mutable msg = StringBuilder.new();
-                        msg.push_string("Unreachable pattern: implementation type pattern '");
+                        msg.push_string("Unreachable pattern '");
+                        msg.push_string(pattern_description(p, self.context));
+                        msg.push_string("': implementation type pattern '");
                         msg.push_string(type_name);
                         msg.push_string("' is already covered");
                         return Result[Void].Error(msg.to_string());
@@ -289,7 +292,8 @@ given ExhaustivenessChecker {
             if is_catchall(p) then {
                 has_catchall = true;
                 catchall_is_struct = p is .StructPattern(_, _);
-                catchall_pattern_desc = StringBuilder.new(); catchall_pattern_desc.push_string(pattern_description(p));
+                catchall_index = pattern_index;
+                catchall_pattern_desc = StringBuilder.new(); catchall_pattern_desc.push_string(pattern_description(p, self.context));
             };
             pattern_index += 1;
         };
@@ -1089,17 +1093,24 @@ public let is_catchall(pattern TypedPattern) Bool = {
 
 
 // 获取模式的简短描述（用于错误消息）
-public let pattern_description(pattern TypedPattern) String = {
+//
+// `context` is what turns a `Type` into a NAME. Without it the printer falls
+// back to `struct#<id>` / `enum#<id>`, and those internal stamps end up in
+// user-facing diagnostics.
+public let pattern_description(pattern TypedPattern, context CompilerContext) String = {
     return when pattern in {
         .Wildcard() then "_",
+        // The NAME, never the DefId number: two compilers number their DefIds
+        // differently, so a message quoting `sym#7` can never agree with one
+        // quoting `def#3`. The name is also the thing the reader wrote.
         .Variable(symbol) then if symbol.is_mutable() then {
             let mutable msg = StringBuilder.new();
             msg.push_string("mutable ");
-            msg.push_string("sym#\(symbol.def_id.id)");
+            msg.push_string(context.get_name(symbol.def_id) or else "<binding>");
             msg.to_string()
-        } else "sym#\(symbol.def_id.id)",
-        .TraitObjectType(target_type) then type_to_string(target_type),
-        .TraitObjectTypeBinding(_, target_type) then type_to_string(target_type),
+        } else context.get_name(symbol.def_id) or else "<binding>",
+        .TraitObjectType(target_type) then context.type_display_name(target_type),
+        .TraitObjectTypeBinding(_, target_type) then context.type_display_name(target_type),
         .BoolLiteral(value) then if value then "true" else "false",
         .IntegerLiteral(value) then value,
         .NegativeIntegerLiteral(value) then {
@@ -1122,38 +1133,35 @@ public let pattern_description(pattern TypedPattern) String = {
             msg.push_string("'");
             msg.to_string()
         },
+        // A case or struct pattern always renders with its parentheses, empty
+        // or not: that is how it is written at the call site (`Status.Active()`),
+        // and dropping them for the empty case read as a bare field name.
         .EnumCase(name, _, elements) then {
             let mutable msg = StringBuilder.new();
             msg.push_string(".");
             msg.push_string(name);
-            if elements.count() > 0 then {
-                msg.push_string("(");
-                let mutable first = true;
-                for elem in elements then {
-                    if not first then { msg.push_string(", "); };
-                    msg.push_string(pattern_description(elem.pattern));
-                    first = false;
-                };
-                msg.push_string(")");
+            msg.push_string("(");
+            let mutable first = true;
+            for elem in elements then {
+                if not first then { msg.push_string(", "); };
+                msg.push_string(pattern_description(elem.pattern, context));
+                first = false;
             };
+            msg.push_string(")");
             msg.to_string()
         },
         .StructPattern(name, elements) then {
-            if elements.count() == 0 then {
-                name
-            } else {
-                let mutable msg = StringBuilder.new();
-                msg.push_string(name);
-                msg.push_string("(");
-                let mutable first = true;
-                for elem in elements then {
-                    if not first then { msg.push_string(", "); };
-                    msg.push_string(pattern_description(elem.pattern));
-                    first = false;
-                };
-                msg.push_string(")");
-                msg.to_string()
-            }
+            let mutable msg = StringBuilder.new();
+            msg.push_string(name);
+            msg.push_string("(");
+            let mutable first = true;
+            for elem in elements then {
+                if not first then { msg.push_string(", "); };
+                msg.push_string(pattern_description(elem.pattern, context));
+                first = false;
+            };
+            msg.push_string(")");
+            msg.to_string()
         },
         .ComparisonPattern(op, value) then {
             let op_str = when op in {
@@ -1170,53 +1178,53 @@ public let pattern_description(pattern TypedPattern) String = {
         .AndPattern(left, right) then {
             let mutable msg = StringBuilder.new();
             msg.push_byte('(');
-            msg.push_string(pattern_description(left));
+            msg.push_string(pattern_description(left, context));
             msg.push_string(" and ");
-            msg.push_string(pattern_description(right));
+            msg.push_string(pattern_description(right, context));
             msg.push_byte(')');
             msg.to_string()
         },
         .OrPattern(left, right) then {
             let mutable msg = StringBuilder.new();
             msg.push_byte('(');
-            msg.push_string(pattern_description(left));
+            msg.push_string(pattern_description(left, context));
             msg.push_string(" or ");
-            msg.push_string(pattern_description(right));
+            msg.push_string(pattern_description(right, context));
             msg.push_byte(')');
             msg.to_string()
         },
         .NotPattern(inner) then {
             let mutable msg = StringBuilder.new();
             msg.push_string("not ");
-            msg.push_string(pattern_description(inner));
+            msg.push_string(pattern_description(inner, context));
             msg.to_string()
         },
     };
 };
 
-file_private let unreachable_after_pattern_message(pattern_desc String) String = {
-    let mutable msg = StringBuilder.new();
-    msg.push_string("Unreachable pattern: pattern after '");
-    msg.push_string(pattern_desc);
-    msg.push_string("' is unreachable");
-    return msg.to_string();
+/// Why this arm is dead: the pattern it matches is already handled.
+/// Name BOTH patterns and the position of the covering one -- "pattern after X
+/// is unreachable" makes the reader count the arms by hand to find which one
+/// already ate the subject.
+file_private let unreachable_after_pattern_message(offending String, catchall_desc String, catchall_index UInt) String = {
+    return "Unreachable pattern '\(offending)': already covered by '\(catchall_desc)' at position \(catchall_index + 1(UInt))";
 };
 
-public let collect_trait_object_types(pattern TypedPattern) Set[String] = {
+public let collect_trait_object_types(pattern TypedPattern, context CompilerContext) Set[String] = {
     let mutable covered = Set[String].new();
     when pattern in {
         .TraitObjectType(target_type) then {
-            covered.insert(type_to_string(target_type));
+            covered.insert(context.type_display_name(target_type));
         },
         .TraitObjectTypeBinding(_, target_type) then {
-            covered.insert(type_to_string(target_type));
+            covered.insert(context.type_display_name(target_type));
         },
         .OrPattern(left, right) then {
-            let left_types = collect_trait_object_types(left);
+            let left_types = collect_trait_object_types(left, context);
             for type_name in left_types.iterator() then {
                 covered.insert(type_name);
             };
-            let right_types = collect_trait_object_types(right);
+            let right_types = collect_trait_object_types(right, context);
             for type_name in right_types.iterator() then {
                 covered.insert(type_name);
             };

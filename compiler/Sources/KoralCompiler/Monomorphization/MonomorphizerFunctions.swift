@@ -17,7 +17,7 @@ extension Monomorphizer {
         for parameterType: TypeNode
     ) -> PassKind {
         switch parameterType {
-        case .reference(_, let mutable):
+        case .reference(_, let mutable, _):
             return mutable ? .byMutRef : .byRef
         default:
             return .byVal

@@ -12,12 +12,18 @@ extension TypeChecker {
   ///   - body: Lambda body expression
   ///   - expectedType: Expected function type for type inference (optional)
   /// - Returns: Typed lambda expression
+  /// `span` is the lambda expression itself. An uninferable parameter is a
+  /// defect in that lambda, and the statement checker calls this directly --
+  /// bypassing the cursor update `inferTypedExpression` would have made -- so
+  /// the location has to be named.
   func inferLambdaExpression(
     parameters: [(name: String, type: TypeNode?)],
     returnType: TypeNode?,
     body: ExpressionNode,
-    expectedType: Type?
+    expectedType: Type?,
+    span: SourceSpan = .unknown
   ) throws -> TypedExpressionNode {
+    let blame = span.isKnown ? span : currentSpan
     // Extract expected parameter types and return type from expectedType
     var expectedParamTypes: [Type]? = nil
     var expectedReturnType: Type? = nil
@@ -39,7 +45,7 @@ extension TypeChecker {
         // Infer from expected type
         paramType = expected[i]
       } else {
-        throw SemanticError(.generic("Cannot infer type for parameter '\(param.name)'"), span: currentSpan)
+        throw SemanticError(.generic("Cannot infer type for parameter '\(param.name)'"), span: blame)
       }
       
       typedParams.append((name: param.name, type: paramType))
@@ -58,7 +64,7 @@ extension TypeChecker {
 
       for symbol in paramSymbols {
         if let name = context.getName(symbol.defId) {
-          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+          try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
         }
       }
 
@@ -130,8 +136,12 @@ extension TypeChecker {
       if let explicitReturnType = resolvedExplicitReturnType {
         actualReturnType = explicitReturnType
         // Verify body type matches declared return type
-        if typedBody.type != actualReturnType && typedBody.type != .never {
-          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan)
+        // A body that already complained about itself has no reliable type to
+        // disagree about: `() -> { 1; }` against `Func() Int` is ONE mistake.
+        if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
+          && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
+        {
+          try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan))
         }
       } else if let expected = expectedReturnType {
         // If expected return type is a generic parameter, infer from body instead
@@ -141,8 +151,10 @@ extension TypeChecker {
         } else {
           actualReturnType = expected
           // Verify body type matches expected return type
-          if typedBody.type != actualReturnType && typedBody.type != .never {
-            throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan)
+          if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
+            && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
+          {
+            try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan))
           }
         }
       } else {
@@ -201,7 +213,10 @@ extension TypeChecker {
         }
       }
       return
-    case .identifier(let name):
+    // The message names the captured VARIABLE, so it points at the use of
+    // that variable inside the closure -- not at the statement or the lambda
+    // that happens to contain it.
+    case .identifier(let name, let nameSpan):
       if localNames.contains(name) { return }
       
       // Look up the variable in scope with full info
@@ -221,7 +236,7 @@ extension TypeChecker {
         }
 
         if info.type.containsBorrowedReference {
-          throw SemanticError(.generic("Cannot capture borrowed reference value '\(name)'"), span: currentSpan)
+          throw SemanticError(.generic("Cannot capture borrowed reference value '\(name)'"), span: nameSpan)
         }
 
         // Avoid duplicates
@@ -234,7 +249,7 @@ extension TypeChecker {
             // (a `type mutable` object) and capture the cell instead.
             throw SemanticError(
               .generic("Cannot capture mutable variable '\(name)'; hold the state in a Cell and capture the cell instead"),
-              span: currentSpan
+              span: nameSpan
             )
           } else if case .reference(_) = info.type {
             captureKind = .byReference
@@ -246,7 +261,7 @@ extension TypeChecker {
         }
       }
       
-    case .blockExpression(let statements, let tailExpression):
+    case .blockExpression(let statements, let tailExpression, _):
       var blockLocalNames = localNames
       for stmt in statements {
         switch stmt {
@@ -265,7 +280,7 @@ extension TypeChecker {
         try collectCapturedVariables(expr: tailExpression, localNames: blockLocalNames, captures: &captures)
       }
       
-    case .call(let callee, let arguments):
+    case .call(let callee, let arguments, _):
       try collectCapturedVariables(expr: callee, localNames: localNames, captures: &captures)
       for arg in arguments {
         if let expr = arg.expression {
@@ -273,11 +288,11 @@ extension TypeChecker {
         }
       }
       
-    case .arithmeticExpression(let left, _, let right),
-         .comparisonExpression(let left, _, let right),
-         .bitwiseExpression(let left, _, let right),
-         .andExpression(let left, let right),
-         .orExpression(let left, let right):
+    case .arithmeticExpression(let left, _, let right, _),
+         .comparisonExpression(let left, _, let right, _),
+         .bitwiseExpression(let left, _, let right, _),
+         .andExpression(let left, let right, _),
+         .orExpression(let left, let right, _):
       try collectCapturedVariables(expr: left, localNames: localNames, captures: &captures)
       try collectCapturedVariables(expr: right, localNames: localNames, captures: &captures)
 
@@ -286,34 +301,34 @@ extension TypeChecker {
         try collectCapturedVariables(expr: operand, localNames: localNames, captures: &captures)
       }
       
-    case .notExpression(let inner),
-       .bitwiseNotExpression(let inner),
-       .unaryMinusExpression(let inner),
-       .addressOfExpression(let inner, _),
-       .derefExpression(let inner),
-       .unsafeDerefExpression(let inner),
-        .ptrExpression(let inner, _):
+    case .notExpression(let inner, _),
+       .bitwiseNotExpression(let inner, _),
+       .unaryMinusExpression(let inner, _),
+       .addressOfExpression(let inner, _, _),
+       .derefExpression(let inner, _),
+       .unsafeDerefExpression(let inner, _),
+        .ptrExpression(let inner, _, _):
       try collectCapturedVariables(expr: inner, localNames: localNames, captures: &captures)
       
-    case .ifExpression(let condition, let thenBranch, let elseBranch):
+    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
       try collectCapturedVariables(expr: condition, localNames: localNames, captures: &captures)
       try collectCapturedVariables(expr: thenBranch, localNames: localNames, captures: &captures)
       if let elseBranch = elseBranch {
         try collectCapturedVariables(expr: elseBranch, localNames: localNames, captures: &captures)
       }
       
-    case .whileExpression(let condition, let body):
+    case .whileExpression(let condition, let body, _):
       try collectCapturedVariables(expr: condition, localNames: localNames, captures: &captures)
       try collectCapturedVariables(expr: body, localNames: localNames, captures: &captures)
       
-    case .memberPath(let base, _):
+    case .memberPath(let base, _, _):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
 
     case .traitQualificationExpression:
       // The left side is a type, not an expression — nothing to capture.
       return
       
-    case .subscriptExpression(let base, let arguments):
+    case .subscriptExpression(let base, let arguments, _):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
       for arg in arguments {
         try collectCapturedVariables(expr: arg, localNames: localNames, captures: &captures)
@@ -341,23 +356,23 @@ extension TypeChecker {
         try collectCapturedVariables(expr: c.body, localNames: caseLocalNames, captures: &captures)
       }
       
-    case .castExpression(_, let inner):
+    case .castExpression(_, let inner, _):
       try collectCapturedVariables(expr: inner, localNames: localNames, captures: &captures)
       
-    case .staticMethodCall(_, _, _, let arguments):
+    case .staticMethodCall(_, _, _, let arguments, _):
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)
         }
       }
       
-    case .forExpression(let pattern, let iterable, let body):
+    case .forExpression(let pattern, let iterable, let body, _):
       try collectCapturedVariables(expr: iterable, localNames: localNames, captures: &captures)
       var bodyLocalNames = localNames
       collectBindingPatternNames(pattern, into: &bodyLocalNames)
       try collectCapturedVariables(expr: body, localNames: bodyLocalNames, captures: &captures)
       
-    case .rangeExpression(_, let left, let right):
+    case .rangeExpression(_, let left, let right, _):
       if let left = left {
         try collectCapturedVariables(expr: left, localNames: localNames, captures: &captures)
       }
@@ -382,7 +397,7 @@ extension TypeChecker {
       }
       try collectCapturedVariables(expr: body, localNames: nestedLocalNames, captures: &captures)
       
-    case .genericMethodCall(let base, _, _, let arguments):
+    case .genericMethodCall(let base, _, _, let arguments, _):
       // Generic method call - collect from base and arguments
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
       for arg in arguments {
@@ -391,7 +406,7 @@ extension TypeChecker {
         }
       }
 
-    case .qualifiedMethodCall(_, _, _, let arguments):
+    case .qualifiedMethodCall(_, _, _, let arguments, _):
       // The receiver (if any) is an ordinary argument below.
       for arg in arguments {
         if let expr = arg.expression {
@@ -399,7 +414,7 @@ extension TypeChecker {
         }
       }
 
-    case .qualifiedGenericMethodCall(_, _, _, _, let arguments):
+    case .qualifiedGenericMethodCall(_, _, _, _, let arguments, _):
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)

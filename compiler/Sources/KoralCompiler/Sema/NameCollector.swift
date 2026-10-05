@@ -148,7 +148,7 @@ public class NameCollector: CompilerPass {
             // Using 声明在 ModuleResolver 中处理，这里跳过
             return
             
-        case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
+        case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
             try collectTraitDefinition(
                 name: name,
                 typeParameters: typeParameters,
@@ -156,30 +156,33 @@ public class NameCollector: CompilerPass {
                 methods: methods,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span, let nameSpan):
             try collectStructDefinition(
                 name: name,
                 typeParameters: typeParameters,
                 parameters: parameters,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
-        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
             try collectEnumDefinition(
                 name: name,
                 typeParameters: typeParameters,
                 cases: cases,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
-        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span):
+        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span, let nameSpan):
             try collectFunctionDeclaration(
                 name: name,
                 typeParameters: typeParameters,
@@ -187,9 +190,10 @@ public class NameCollector: CompilerPass {
                 returnType: returnType,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span, let nameSpan):
             try collectFunctionDeclaration(
                 name: name,
                 typeParameters: [],
@@ -197,14 +201,16 @@ public class NameCollector: CompilerPass {
                 returnType: returnType,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
-        case .globalVariableDeclaration(let name, _, _, _, let access, let span):
+        case .globalVariableDeclaration(let name, _, _, _, let access, let span, let nameSpan):
             try collectVariableDeclaration(
                 name: name,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
@@ -213,6 +219,7 @@ public class NameCollector: CompilerPass {
                 typeParams: typeParams,
                 typeNode: typeNode,
                 span: span,
+                nameSpan: span,
                 isStdLib: isStdLib
             )
 
@@ -221,37 +228,42 @@ public class NameCollector: CompilerPass {
                 typeParams: typeParams,
                 typeNode: typeNode,
                 span: span,
+                nameSpan: span,
                 isStdLib: isStdLib
             )
-        case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
+        case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span, let nameSpan):
             try collectIntrinsicTypeDeclaration(
                 name: name,
                 typeParameters: typeParameters,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
+        case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
             try collectForeignTypeDefinition(
                 name: name,
                 fields: fields,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
 
-        case .foreignLetDeclaration(let name, _, _, let access, let span):
+        case .foreignLetDeclaration(let name, _, _, let access, let span, let nameSpan):
             try collectVariableDeclaration(
                 name: name,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
-        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span):
+        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span, let nameSpan):
             try collectIntrinsicFunctionDeclaration(
                 name: name,
                 typeParameters: typeParameters,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
             
@@ -261,11 +273,12 @@ public class NameCollector: CompilerPass {
                 throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
             }
 
-        case .typeAliasDeclaration(let name, _, let access, let span):
+        case .typeAliasDeclaration(let name, _, let access, let span, let nameSpan):
             try collectTypeAliasDeclaration(
                 name: name,
                 access: access,
                 span: span,
+                nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
         }
@@ -279,7 +292,7 @@ public class NameCollector: CompilerPass {
         superTraits: [TypeNode],
         methods: [TraitMethodSignature],
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // 生成完整限定名用于重复检查
@@ -287,7 +300,7 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义
         if collectedTraits[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
         
         // 检查方法级类型参数冲突
@@ -331,7 +344,7 @@ public class NameCollector: CompilerPass {
         typeParameters: [TypeParameterDecl],
         parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         let isPrivate = (access == .file_private)
@@ -341,12 +354,12 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
 
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
         
         // 确定定义类型
@@ -405,7 +418,7 @@ public class NameCollector: CompilerPass {
         typeParameters: [TypeParameterDecl],
         cases: [EnumCaseDeclaration],
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         let isPrivate = (access == .file_private)
@@ -415,12 +428,12 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
 
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
         
         // 确定定义类型
@@ -480,7 +493,7 @@ public class NameCollector: CompilerPass {
         parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
         returnType: TypeNode,
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // 确定定义类型
@@ -509,7 +522,7 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义（同名自由函数不允许重载，后定义不得覆盖先前定义）
         if collectedFunctions[key] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
 
         collectedFunctions[key] = CollectedFunctionInfo(
@@ -528,7 +541,7 @@ public class NameCollector: CompilerPass {
     private func collectVariableDeclaration(
         name: String,
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // 分配 DefId
@@ -548,7 +561,7 @@ public class NameCollector: CompilerPass {
     private func collectGivenDeclaration(
         typeParams: [TypeParameterDecl],
         typeNode: TypeNode,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // Given 声明不需要分配 DefId，它们扩展现有类型
@@ -556,7 +569,7 @@ public class NameCollector: CompilerPass {
         
         if !typeParams.isEmpty {
             // 泛型 given - 验证基类型存在
-            if case .generic(let baseName, _) = typeNode {
+            if case .generic(let baseName, _, _) = typeNode {
                 // 基类型应该已经在前面注册
                 // 这里只是记录，实际验证在 Pass 2 中进行
                 _ = baseName
@@ -569,7 +582,7 @@ public class NameCollector: CompilerPass {
     private func collectIntrinsicTypeDeclaration(
         name: String,
         typeParameters: [TypeParameterDecl],
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // 检查是否在标准库中
@@ -582,7 +595,7 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义
         if collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
         
         // 确定定义类型
@@ -635,7 +648,7 @@ public class NameCollector: CompilerPass {
         name: String,
         fields: [(name: String, type: TypeNode)]?,
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         let isPrivate = (access == .file_private)
@@ -643,7 +656,7 @@ public class NameCollector: CompilerPass {
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
 
         let kind: TypeDefKind = fields == nil ? .opaque : .structure
@@ -679,7 +692,7 @@ public class NameCollector: CompilerPass {
     private func collectTypeAliasDeclaration(
         name: String,
         access: AccessModifier,
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         let isPrivate = (access == .file_private)
@@ -689,7 +702,7 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && (collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil) {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
 
         // 分配 DefId（别名最终解析为目标类型，使用 .type(.structure)）
@@ -726,7 +739,7 @@ public class NameCollector: CompilerPass {
     private func collectIntrinsicFunctionDeclaration(
         name: String,
         typeParameters: [TypeParameterDecl],
-        span: SourceSpan,
+        span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
         // 检查是否在标准库中
@@ -756,7 +769,7 @@ public class NameCollector: CompilerPass {
         // 收集函数信息
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
         if collectedFunctions[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: span)
+            throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
         collectedFunctions[qualifiedName] = CollectedFunctionInfo(
             defId: defId,

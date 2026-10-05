@@ -140,22 +140,26 @@ extension TypeChecker {
       return try self.resolveTypeNode(node)
     }
 
-    if case .identifier(let name) = inner, visibleTraitInfo(name) != nil {
+    if case .identifier(let name, _) = inner, visibleTraitInfo(name) != nil {
       let (safe, reasons) = try checkObjectSafety(name)
       if !safe {
-        throw SemanticError(.generic(
+        // A trait that cannot be an object is a problem at every place one is
+        // written, and the reader has to look at all of them. Recording it and
+        // carrying on leaves the rest of the file in view -- an implementation
+        // that stops here never sees what comes after.
+        try handleError(SemanticError(.generic(
           "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-        ), span: currentSpan)
+        ), span: currentSpan))
       }
       return wrap(.traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []), mutable)
     }
 
-    if case .generic(let base, let args) = inner, visibleTraitInfo(base) != nil {
+    if case .generic(let base, let args, _) = inner, visibleTraitInfo(base) != nil {
       let (safe, reasons) = try checkObjectSafety(base)
       if !safe {
-        throw SemanticError(.generic(
+        try handleError(SemanticError(.generic(
           "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-        ), span: currentSpan)
+        ), span: currentSpan))
       }
       let resolvedArgs = try args.map { try resolveChild($0) }
       return wrap(.traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs), mutable)
@@ -291,36 +295,38 @@ extension TypeChecker {
   /// 将 TypeNode 解析为语义层 Type，支持函数参数/返回位置的一层 reference(T)
   func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, let nameSpan):
       if let t = currentScope.resolveType(name, sourceFile: currentSourceFile) {
         // 检查类型的模块可见性
-        try checkTypeVisibility(type: t, typeName: name)
+        try checkTypeVisibility(type: t, typeName: name, span: nameSpan)
         return t
       }
       if visibleTraitInfo(name) != nil {
         let (safe, reasons) = try checkObjectSafety(name)
         if !safe {
-          throw SemanticError(.generic(
+          try handleError(SemanticError(.generic(
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
+          ), span: nameSpan))
         }
         return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []))
       }
       if let importError = explicitImportErrorForUnresolvedType(name) {
         throw importError
       }
-      throw SemanticError.undefinedType(name)
-    case .inferredSelf:
+      // The message names the type, so it points at the type -- not at the
+      // declaration or statement that happens to carry the annotation.
+      throw SemanticError(.undefinedType(name), span: nameSpan)
+    case .inferredSelf(let selfSpan):
       guard let t = currentScope.resolveType("Self") else {
-        throw SemanticError.undefinedType("Self")
+        throw SemanticError(.undefinedType("Self"), span: selfSpan)
       }
       return t
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapManagedReference)
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       if let template = currentScope.lookupGenericStructTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -400,23 +406,23 @@ extension TypeChecker {
       } else if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
         if !safe {
-          throw SemanticError(.generic(
+          try handleError(SemanticError(.generic(
             "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
+          ), span: currentSpan))
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       } else {
         throw SemanticError.undefinedType(base)
       }
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       // Resolve function type: [ParamType1, ParamType2, ..., ReturnType]Func
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0) }
       let resolvedReturnType = try resolveTypeNode(returnType)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
       
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapWeakReference)
     }
   }
@@ -424,7 +430,7 @@ extension TypeChecker {
   /// Resolves a TypeNode to a Type using the given substitution map for type parameters.
   func resolveTypeNodeWithSubstitution(_ node: TypeNode, substitution: [String: Type]) throws -> Type {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
       // Check if it's a type parameter that should be substituted
       if let substitutedType = substitution[name] {
         return substitutedType
@@ -432,14 +438,14 @@ extension TypeChecker {
       // Otherwise resolve as a regular type
       return try resolveTypeNode(node)
       
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapManagedReference)
 
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
       
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
       
       if let template = currentScope.lookupGenericStructTemplate(base) {
@@ -453,17 +459,17 @@ extension TypeChecker {
       if visibleTraitInfo(base) != nil {
         let (safe, reasons) = try checkObjectSafety(base)
         if !safe {
-          throw SemanticError(.generic(
+          try handleError(SemanticError(.generic(
             "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
+          ), span: currentSpan))
         }
         return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
       }
-      
+
       // Conservative default to generic struct if template is unresolved (diagnosed later)
       return .genericStruct(templateDefId: currentScope.lookupGenericStructTemplate(base)?.defId ?? .invalid, args: resolvedArgs)
       
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
       let resolvedReturnType = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
@@ -475,7 +481,7 @@ extension TypeChecker {
       }
       return try resolveTypeNode(node)
       
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapWeakReference)
     }
   }
@@ -621,6 +627,9 @@ extension TypeChecker {
   private func enforceMutableConstraint(_ type: Type, context: String? = nil) throws {
     let satisfied: Bool
     switch type {
+    case .error:
+      // A value that already failed agrees with nothing.
+      return
     case .structure(let defId):
       satisfied = context_isTypeMutable(defId)
     case .genericStruct(let templateDefId, _):
@@ -649,6 +658,12 @@ extension TypeChecker {
     traitRef: CanonicalTraitRef,
     context: String? = nil
   ) throws {
+    // A value that already failed agrees with nothing -- including a trait
+    // bound. Asking whether it has one is asking about the consequence of the
+    // failure, not about a second mistake.
+    if selfType == .error {
+      return
+    }
     if case .genericParameter(let paramName) = selfType {
       let satisfiesBound = traitRef.traitTypeArgs.isEmpty
         ? hasTraitBound(paramName, traitRef.traitName)
@@ -709,7 +724,10 @@ extension TypeChecker {
       if let context {
         msg += " (\(context))"
       }
-      throw SemanticError(.generic(msg), span: currentSpan)
+      // A missing conformance is one problem among several a program may have.
+      // Recording it keeps checking the rest -- a `for` loop whose iterator and
+      // iterable are both unqualified has two of them.
+      try handleError(SemanticError(.generic(msg), span: currentSpan))
     }
 
     traitConformanceCache[cacheKey] = true
@@ -876,6 +894,10 @@ extension TypeChecker {
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
   func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode
   {
+    // Something that already failed to check has no type to coerce.
+    if expr.type == .error {
+      return expr
+    }
     if case .pointer = expected,
        case .intrinsicCall(.nullPtr) = expr {
       return .intrinsicCall(.nullPtr(resultType: expected))

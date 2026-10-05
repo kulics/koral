@@ -18,12 +18,12 @@ extension Parser {
       return false
     }
   }
-  private func wrapType(_ base: TypeNode, with prefix: TypeModifierPrefix) -> TypeNode {
+  private func wrapType(_ base: TypeNode, with prefix: TypeModifierPrefix, span: SourceSpan) -> TypeNode {
     switch prefix {
     case .pointer(let mutable):
-      return .pointer(base, mutable: mutable)
+      return .pointer(base, mutable: mutable, span: span)
     case .weakReference:
-      return .weakReference(base, mutable: false)
+      return .weakReference(base, mutable: false, span: span)
     }
   }
 
@@ -37,10 +37,13 @@ extension Parser {
         continue
       }
       if currentToken === .multiply {
+        // The complaint is about the `*`, which is the token that no longer
+        // means what it used to -- not about whatever follows it.
+        let multiplySpan = currentSpan
         try match(.multiply)
         guard currentToken === .unsafeKeyword else {
           throw ParserError.unexpectedToken(
-            span: currentSpan,
+            span: multiplySpan,
             got: "*",
             expected: "managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'"
           )
@@ -91,7 +94,9 @@ extension Parser {
     return args
   }
 
-  private func parseFunctionTypeAfterFuncKeyword() throws -> TypeNode {
+  /// `startSpan` is the `Func` keyword -- a `Func(Int) String` type begins
+  /// there, not at its return type.
+  private func parseFunctionTypeAfterFuncKeyword(startSpan: SourceSpan) throws -> TypeNode {
     let paramTypes = try parseTypeListInParens()
     guard isTypeStart(currentToken) else {
       throw ParserError.invalidFunctionType(
@@ -100,13 +105,17 @@ extension Parser {
       )
     }
     let returnType = try parseType()
-    return .functionType(paramTypes: paramTypes, returnType: returnType)
+    return .functionType(paramTypes: paramTypes, returnType: returnType,
+                         span: SourceSpan(start: startSpan.start, end: returnType.span.end))
   }
 
   private func parseTypeAtom() throws -> TypeNode {
+    // The name is the type. `match` moves past it, so remember where it was.
+    let startSpan = currentSpan
+
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
-      return .inferredSelf
+      return .inferredSelf(span: startSpan)
     }
 
     guard case .identifier(let name) = currentToken else {
@@ -117,7 +126,7 @@ extension Parser {
 
     if name == "Func" {
       if currentToken === .leftParen {
-        return try parseFunctionTypeAfterFuncKeyword()
+        return try parseFunctionTypeAfterFuncKeyword(startSpan: startSpan)
       }
       if currentToken === .leftBracket {
         throw ParserError.invalidFunctionType(
@@ -133,10 +142,11 @@ extension Parser {
 
     if currentToken === .leftBracket {
       let args = try parseTypeListInBrackets()
-      return .generic(base: name, args: args)
+      return .generic(base: name, args: args,
+                      span: SourceSpan(start: startSpan.start, end: currentSpan.end))
     }
 
-    return .identifier(name)
+    return .identifier(name, span: startSpan)
   }
 
   // MARK: - Type Parsing
@@ -150,11 +160,14 @@ extension Parser {
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {
+    // A prefixed type (`*unsafe T`, `?T`) starts at the prefix, not at `T`.
+    let startSpan = currentSpan
     let prefixes = try parseTypePrefixModifiers()
     var type = try parseTypeAtom()
 
     for prefix in prefixes.reversed() {
-      type = wrapType(type, with: prefix)
+      type = wrapType(type, with: prefix,
+                      span: SourceSpan(start: startSpan.start, end: type.span.end))
     }
 
     return type

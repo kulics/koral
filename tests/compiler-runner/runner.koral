@@ -66,7 +66,26 @@ public let run_compiler_tests() Int = {
         return 2;
     };
 
-    if not path_exist(config.compiler_bin) then {
+    // Differential mode needs BOTH compilers -- a single missing one is a setup
+    // error, not a divergence, so say which before doing any work.
+    if config.compiler_kind == "differential" then {
+        let mutable missing = false;
+        if not path_exist(config.swift_koralc) then {
+            report_error_line(config, "compiler binary not found: swift: \(config.swift_koralc.to_string())");
+            report_error_line(config, "Hint: build Swift compiler first, e.g.");
+            report_error_line(config, "  cd compiler && swift build -c release");
+            missing = true;
+        };
+        if not path_exist(config.bootstrap_koralc) then {
+            report_error_line(config, "compiler binary not found: bootstrap: \(config.bootstrap_koralc.to_string())");
+            report_error_line(config, "Hint: build bootstrap with the host Swift compiler first, e.g.");
+            report_error_line(config, "  compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap");
+            missing = true;
+        };
+        if missing then {
+            return 2;
+        };
+    } else if not path_exist(config.compiler_bin) then {
         report_error_line(config, "compiler binary not found for kind '\(config.compiler_kind)': \(config.compiler_bin.to_string())");
         if config.compiler_kind == "bootstrap" then {
             report_error_line(config, "Hint: build with host Swift compiler first, e.g.");

@@ -80,8 +80,11 @@ given NameCollector {
         return access is not .FilePrivate() and self.std_type_names.contains(name);
     };
 
-    file_private push_name_diagnostic(self, message String) Void = {
-        self.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message, unknown_span()));
+    /// Report at a source location. A name-collection diagnostic with no span
+    /// cannot be jumped to, so every caller must say where the offending
+    /// declaration is.
+    file_private push_name_diagnostic(self, message String, span SourceSpan) Void = {
+        self.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message, span));
     };
 
     file_private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
@@ -116,13 +119,13 @@ given NameCollector {
 
     file_private collect_decl(self, decl Decl) Void = {
         when decl in {
-            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span) then {
+            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
                 if self.reserve_std_type_name_if_needed(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let kind = if type_params.is_empty() then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.GenericTemplate(GenericTemplateKind.Structure());
@@ -132,13 +135,13 @@ given NameCollector {
                 let t = Type.StructureType(def_id);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
-            .TypeEnumDecl(access, name, type_params, cases, span) then {
+            .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
                 if self.reserve_std_type_name_if_needed(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let kind = if type_params.is_empty() then DefKind.TypeDef(TypeDefKind.Enum()) else DefKind.GenericTemplate(GenericTemplateKind.Enum());
@@ -147,18 +150,18 @@ given NameCollector {
                 let t = Type.EnumType(def_id);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
-            .TypeAliasDecl(access, name, target, span) then {
+            .TypeAliasDecl(access, name, target, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let mutable context = self.context;
                 let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, self.package_id, access, span);
                 self.global_scope.define_scoped_type(self.module_path, name, Type.StructureType(def_id));
             },
-            .IntrinsicTypeDecl(access, name, type_params, span) then {
+            .IntrinsicTypeDecl(access, name, type_params, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 // Register intrinsic types as their dedicated enum cases (matching Swift compiler)
@@ -187,9 +190,9 @@ given NameCollector {
                 };
                 self.global_scope.define_scoped_type(self.module_path, name, intrinsic_type);
             },
-            .ForeignTypeDecl(access, name, cname, fields, span) then {
+            .ForeignTypeDecl(access, name, cname, fields, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let kind = when fields in {
@@ -204,13 +207,13 @@ given NameCollector {
                 };
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
-            .TraitDecl(access, name, type_params, parents, members, span) then {
+            .TraitDecl(access, name, type_params, parents, members, span, name_span) then {
                 let trait_source_file = when access in {
                     .FilePrivate() then Option[String].Some(self.source_file),
                     _ then Option[String].None(),
                 };
                 if self.has_existing_top_level_definition(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let mutable context = self.context;
@@ -221,9 +224,9 @@ given NameCollector {
                 };
                 self.global_scope.define_scoped_type(self.module_path, name, Type.TraitObject(def_id, trait_type_args));
             },
-            .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+            .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let kind = if type_params.is_empty() then DefKind.Function() else DefKind.GenericTemplate(GenericTemplateKind.Function());
@@ -232,9 +235,9 @@ given NameCollector {
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
-            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let mutable context = self.context;
@@ -242,9 +245,9 @@ given NameCollector {
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
-            .ForeignFunctionDecl(access, name, params, return_type, span) then {
+            .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let mutable context = self.context;
@@ -252,17 +255,17 @@ given NameCollector {
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
-            .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
+            .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let sym = self.make_var_symbol(name, is_mutable, access, span);
                 self.global_scope.define(self.context, sym);
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name));
+                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
                 let sym = self.make_var_symbol(name, is_mutable, access, span);

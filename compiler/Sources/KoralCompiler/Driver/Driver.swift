@@ -232,7 +232,11 @@ public class Driver {
         writeStderr(diagnostic.renderForCLI())
         exit(1)
       }
-      writeStderr("Module Error: \(error)")
+      // No `Module Error:` category prefix. A module-resolution failure that
+      // carries a span goes through `renderForCLI()` above like every other
+      // diagnostic; this branch is the span-less remainder, and it prints its
+      // message alone -- the same shape the bootstrap compiler uses.
+      writeStderr("\(error)")
       exit(1)
     } catch let error as AccessError {
       writeStderr("Access Error: \(error)")

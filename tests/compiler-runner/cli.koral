@@ -46,7 +46,7 @@ public let print_usage() Void =
         usage: compiler-test-runner [options]
         options:
           --cases <dir>                cases root (default: tests/compiler-cases)
-          --compiler <kind>            compiler kind: bootstrap|swift|custom (default: bootstrap)
+          --compiler <kind>            compiler kind: bootstrap|swift|custom|differential (default: bootstrap)
           --filter <substring>         run only matching case name/path
           -j <N> | -j=<N>              parallel workers (default: 1)
           --timeout <sec>              per-case timeout seconds (default: 120)
@@ -54,6 +54,8 @@ public let print_usage() Void =
           --compiler-bin <path>        compiler executable path when --compiler custom
           --bootstrap-koralc <path>    bootstrap compiler executable path
           --swift-koralc <path>        swift compiler executable path
+          --compare-diagnostics        with --compiler differential, also require the two
+                                       compilers to say exactly the same thing (off by default)
           --report-file <path>         write stable summary log (default: tests/compiler-cases_output/_reports/latest-summary.log)
           --verbose                    print verbose case command logs
           -h, --help                   show this help
@@ -75,6 +77,7 @@ public let parse_runner_config() Result[RunnerConfig] = {
     let mutable bootstrap_koralc = default_bootstrap_koralc_path();
     let mutable swift_koralc = default_swift_koralc_path();
     let mutable report_file_opt = Option[Path].None();
+    let mutable compare_diagnostics = false;
     let mutable verbose = false;
 
     let mutable i UInt = 1;
@@ -91,13 +94,19 @@ public let parse_runner_config() Result[RunnerConfig] = {
             continue;
         };
 
+        if arg == "--compare-diagnostics" then {
+            compare_diagnostics = true;
+            i += 1;
+            continue;
+        };
+
         if arg == "--compiler" then {
             i += 1;
             if i >= argv.count() then {
                 return Result[RunnerConfig].Error("missing value for --compiler");
             };
             let value = argv[i];
-            if value <> "bootstrap" and value <> "swift" and value <> "custom" then {
+            if value <> "bootstrap" and value <> "swift" and value <> "custom" and value <> "differential" then {
                 return Result[RunnerConfig].Error("invalid value for --compiler: " + value);
             };
             compiler_kind = value;
@@ -237,6 +246,10 @@ public let parse_runner_config() Result[RunnerConfig] = {
     let compiler_bin = when compiler_kind in {
         "bootstrap" then abs_bootstrap_koralc,
         "swift" then abs_swift_koralc,
+        // Differential mode drives both compilers through their own fields;
+        // `compiler_bin` is only read by the single-compiler path and by the
+        // up-front existence check, which this mode overrides to check both.
+        "differential" then abs_swift_koralc,
         "custom" then when compiler_bin_opt in {
             .Some(path) then make_absolute(run_root, path).normalize(),
             .None() then {
@@ -261,6 +274,7 @@ public let parse_runner_config() Result[RunnerConfig] = {
         compiler_bin,
         abs_bootstrap_koralc,
         abs_swift_koralc,
+        compare_diagnostics,
         verbose
     ));
 };

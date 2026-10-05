@@ -15,9 +15,9 @@ public enum SemaUtils {
     /// - Throws: SemanticError if the node is not a valid trait identifier
     public static func resolveTraitName(from node: TypeNode) throws -> String {
         switch node {
-        case .identifier(let name):
+        case .identifier(let name, _):
             return name
-        case .generic(let base, _):
+        case .generic(let base, _, _):
             // For generic traits like [T]Iterator, return the base name
             return base
         default:
@@ -35,9 +35,9 @@ public enum SemaUtils {
     /// - Throws: SemanticError if the node is not a valid trait constraint
     public static func resolveTraitConstraint(from node: TypeNode) throws -> TraitConstraint {
         switch node {
-        case .identifier(let name):
+        case .identifier(let name, _):
             return .trait(defId: .invalid, name: name, args: [])
-        case .generic(let base, let args):
+        case .generic(let base, let args, _):
             return .trait(defId: .invalid, name: base, args: args)
         default:
             throw SemanticError.invalidOperation(
@@ -346,6 +346,8 @@ public enum SemaUtils {
             if typeArgs.isEmpty { return type }
             let newArgs = typeArgs.map { substituteType($0, substitution: substitution, context: context) }
             return .traitObject(traitDefId: defId, typeArgs: newArgs)
+        case .error:
+            return type
         }
     }
     

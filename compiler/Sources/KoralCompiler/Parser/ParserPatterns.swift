@@ -44,9 +44,9 @@ extension Parser {
     var left = try parseAndPattern()
 
     if currentToken === .pipe {
-      throw ParserError.unexpectedToken(
+      throw ParserError.rejectedConstruct(
         span: currentSpan,
-        got: "Pattern separator '|' is not supported; use 'or'"
+        message: "Pattern separator '|' is not supported; use 'or'"
       )
     }
     
@@ -190,8 +190,9 @@ extension Parser {
       // Type pattern binding without *: name TypeName (new syntax)
       // Check if next token is a type identifier (starts with uppercase)
       if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
+        let typeNameSpan = currentSpan
         try match(.identifier(typeName))
-        let targetNode = TypeNode.identifier(typeName)
+        let targetNode = TypeNode.identifier(typeName, span: typeNameSpan)
         let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
         return .traitObjectTypeBinding(name: name, mutable: false, targetType: targetNode, span: span)
       }
@@ -210,7 +211,7 @@ extension Parser {
 
       // Bare type name pattern (no binding): e.g., `err is ProbeIoError`
       if isValidTypeName(name) {
-        let targetNode = TypeNode.identifier(name)
+        let targetNode = TypeNode.identifier(name, span: startSpan)
         let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
         return .traitObjectTypeBinding(name: "_", mutable: false, targetType: targetNode, span: span)
       }

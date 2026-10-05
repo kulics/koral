@@ -73,9 +73,16 @@ public struct DiagnosticRenderer {
         if let parser = error as? ParserError {
             return parser.messageWithoutLocation
         }
+        // `LexerError` has `messageWithoutLocation` too. Falling through to
+        // `"\(error)"` picked up its `description`, which prefixes the span --
+        // so the location printed twice: once from `formatLocation`, once from
+        // inside the message.
+        if let lexer = error as? LexerError {
+            return lexer.messageWithoutLocation
+        }
         return "\(error)"
     }
-    
+
     /// Extracts the source span from an error.
     private func extractSpan(from error: Error) -> SourceSpan {
         if let moduleError = error as? ModuleError {
@@ -86,6 +93,12 @@ public struct DiagnosticRenderer {
         }
         if let parser = error as? ParserError {
             return parser.span
+        }
+        // `LexerError` carries its span as well; without this the location part
+        // came out as just the file name and the span had to be smuggled
+        // through the message text instead.
+        if let lexer = error as? LexerError {
+            return lexer.span
         }
         return .unknown
     }

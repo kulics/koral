@@ -193,6 +193,12 @@ given TypeChecker {
     };
 
     module_private require_effectful_statement_expression(self, source_expr Expr, typed_expr TypedExpr, span SourceSpan) Void = {
+        // A statement that already stands accused at this very place is one
+        // mistake -- `2;` after a `return` is unreachable AND pure, and the
+        // first of those is the one to act on.
+        if self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+            return;
+        };
         if self.source_expr_is_obviously_pure_statement(source_expr) then {
             self.push_diagnostic_at_span("Expression statement has no effect", span);
             return;
@@ -398,7 +404,7 @@ given TypeChecker {
                 return when self.resolve_builtin_subscript_kind(typed_outer_base.expr_type) in {
                     .Some(kind) then when kind in {
                         .String() then {
-                            self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(typed_outer_base));
+                            self.push_diagnostic_at_span("String subscript is not addressable", expr_span(base));
                             self.empty_typed_block(Type.Unknown())
                         },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
@@ -414,7 +420,7 @@ given TypeChecker {
                             if not self.is_type_mutable_nominal(subscript_value.expr_type) then {
                                 self.push_diagnostic_at_span(
                                     "Collection subscript results are values and cannot be used as writable base addresses",
-                                    self.typed_expr_span(subscript_value)
+                                    expr_span(base)
                                 );
                                 return self.empty_typed_block(Type.Unknown());
                             };
@@ -449,7 +455,11 @@ given TypeChecker {
         };
     };
 
-    module_private lower_subscript_assignment_stmt(self, base Expr, args List[Expr], value Expr, typed_target TypedExpr, op Option[CompoundAssignmentOperator], scope Scope) TypedStatement = {
+    /// `target_span` is the source location of the assignment target `base[args]`.
+    /// Every diagnostic here is a problem with assigning TO that target, so it
+    /// is the place to blame -- `typed_base` is a lowered receiver whose only
+    /// recoverable location is some sub-expression's declaration.
+    module_private lower_subscript_assignment_stmt(self, base Expr, args List[Expr], value Expr, typed_target TypedExpr, op Option[CompoundAssignmentOperator], scope Scope, target_span SourceSpan) TypedStatement = {
         let typed_base = self.infer_writable_subscript_base_expr_ref(base, scope);
         let base_inner_type = self.builtin_subscript_base_type(typed_base.expr_type);
         when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
@@ -458,7 +468,7 @@ given TypeChecker {
                     if not mutable_pointer then {
                         self.push_diagnostic_at_span(
                             "Cannot assign through read-only pointer of type '\(self.display_type_name(base_inner_type))'",
-                            self.typed_expr_span(typed_base)
+                            target_span
                         );
                         return TypedStatement.ExprStmt(self.empty_typed_block(Type.Unknown()), unknown_span());
                     };
@@ -497,7 +507,7 @@ given TypeChecker {
                 .String() then {
                     self.push_diagnostic_at_span(
                         "String subscript returns a UInt8 value and cannot be assigned",
-                        self.typed_expr_span(typed_base)
+                        target_span
                     );
                     return TypedStatement.ExprStmt(self.empty_typed_block(Type.Unknown()), unknown_span());
                 },
@@ -506,7 +516,7 @@ given TypeChecker {
             .None() then {
                 self.push_diagnostic_at_span(
                     "subscript is only supported for String, List, Deque, Dict, and pointer types",
-                    self.typed_expr_span(typed_base)
+                    target_span
                 );
                 return TypedStatement.ExprStmt(self.empty_typed_block(Type.Unknown()), unknown_span());
             },
@@ -581,6 +591,7 @@ given TypeChecker {
     // A block with no tail is Void, or Never when a control-flow terminator is
     // reachable at the end.
     module_private check_block_in_scope(self, statements List[Statement], tail_expression Option[Expr], expected Option[Type], scope Scope) TypedExpr = {
+        let diagnostics_before = self.storage.diagnostics.count();
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
         let mutable explicit_terminator = Option[String].None();
@@ -616,6 +627,14 @@ given TypeChecker {
                     block_type = Type.NeverType();
                 };
             },
+        };
+        // A block that already complained has no reliable type. `let x Int =
+        // { 1; }` is ONE mistake -- the `;` turned the value into a statement
+        // -- and saying "expected Int, got Void" at the binding as well adds a
+        // line and no information. Poisoning the type lets every downstream
+        // complaint about it fall silent, which is what an error type is for.
+        if self.storage.diagnostics.count() > diagnostics_before then {
+            block_type = Type.Unknown();
         };
         return make_typed_expr(TypedExprKind.Block(typed_stmts, typed_tail), block_type);
     };
@@ -656,6 +675,8 @@ given TypeChecker {
     };
 
     module_private check_statement(self, stmt Statement, expected Option[Type], scope Scope) TypedStatement = {
+        let outer_span = self.enter_current_span(self.statement_span(stmt));
+        defer { self.leave_current_span(outer_span); };
 
         return when stmt in {
             .LetStmt(name, is_mutable, type_annotation, value, span) then {
@@ -730,10 +751,19 @@ given TypeChecker {
                 };
                 if val_expected is .Some(expected_t) then {
                     if not self.same_expr_type(typed_val.expr_type, expected_t) and not self.is_unresolved_expr_type(expected_t) and not self.is_unresolved_expr_type(typed_val.expr_type) then {
-                        self.push_diagnostic_at_span(
-                            "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_val.expr_type))",
-                            span
-                        );
+                        // The value has already been checked and has already
+                        // objected about itself -- `let x Int = <a conditional
+                        // whose then-branch is Void>` is one mistake, not two.
+                        // Saying it again at the binding adds a line and no
+                        // information.
+                        if not self.storage.diagnostics.has_error_at(self.storage.file_path, expr_span(value)) then {
+                            // Blame the VALUE, not the binding: the declared type
+                            // is fine, the initialiser is what does not fit it.
+                            self.push_diagnostic_at_span(
+                                "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_val.expr_type))",
+                                expr_span(value)
+                            );
+                        };
                     };
                 };
                 typed_val = if val_expected is .None() and (self.is_unresolved_expr_type(typed_val.expr_type) or self.contains_generic_parameter(typed_val.expr_type)) then
@@ -797,7 +827,7 @@ given TypeChecker {
                 let typed_target = self.check_assignment_target_expr_ref(target, scope);
                 let subscript_stmt = when target in {
                     .SubscriptExpr(base, args, _) then {
-                        Option[TypedStatement].Some(self.lower_subscript_assignment_stmt(base, args, value, typed_target, op, scope))
+                        Option[TypedStatement].Some(self.lower_subscript_assignment_stmt(base, args, value, typed_target, op, scope, expr_span(target)))
                     },
                     _ then Option[TypedStatement].None(),
                 };
@@ -807,28 +837,12 @@ given TypeChecker {
                 };
                 when self.first_immutable_field_in_assignment_target(typed_target) in {
                     .Some(name) then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Cannot assign to immutable variable: \(name)",
-                                span
-                            
-                            )
-                        );
+                        self.push_diagnostic("Cannot assign to immutable variable: \(name)", span);
                     },
                     .None() then {
                         if not self.assignment_target_root_is_mutable(target, typed_target, scope) then {
                             let target_name = self.assignment_target_error_name(typed_target);
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Cannot assign to immutable variable: \(target_name)",
-                                    span
-                                
-                                )
-                            );
+                            self.push_diagnostic("Cannot assign to immutable variable: \(target_name)", span);
                         };
                     },
                 };
@@ -848,7 +862,7 @@ given TypeChecker {
                             .LeftShiftAssign() then TypedExprKind.BitwiseExpr(typed_target, BitwiseOperator.LeftShift(), typed_rhs),
                             .RightShiftAssign() then TypedExprKind.BitwiseExpr(typed_target, BitwiseOperator.RightShift(), typed_rhs),
                         };
-                        TypedExpr(combined_kind, typed_target.expr_type)
+                        TypedExpr(combined_kind, typed_target.expr_type, typed_target.span)
                     },
                     .None() then self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope),
                 };
@@ -883,8 +897,8 @@ given TypeChecker {
                         };
                         let value_expected = if expected_return is .Some(_) then expected_return else self.storage.function_return_context.inferred_return_type;
                         let raw_checked = when v in {
-                            .StaticMethodCall(type_name, type_args, method_name, args, _) then {
-                                self.check_static_method_call_ref(type_name, type_args, method_name, args, value_expected, scope)
+                            .StaticMethodCall(type_name, type_args, method_name, args, call_span) then {
+                                self.check_static_method_call_ref(type_name, call_span, type_args, method_name, args, value_expected, scope)
                             },
                             .Call(callee, args, _) then {
                                 self.check_call_expr_ref(callee, args, value_expected, scope)
@@ -897,10 +911,17 @@ given TypeChecker {
                                 if self.storage.function_return_context.is_inferring and self.contains_generic_parameter(return_t) then {
                                     self.merge_inferred_function_return_type(checked.expr_type);
                                 } else if checked.expr_type is not .NeverType() and not self.same_expr_type(checked.expr_type, return_t) and not self.is_unresolved_expr_type(checked.expr_type) and not self.is_unresolved_expr_type(return_t) then {
-                                    self.push_diagnostic_at_span(
-                                        "Type mismatch: expected \(self.display_type_name(return_t)), got \(self.display_type_name(checked.expr_type))",
-                                        span
-                                    );
+                                    // The return has already been complained
+                                    // about where it stands -- a `return` inside
+                                    // a `defer`, say. Its type is then a
+                                    // consequence of that mistake, not a second
+                                    // one.
+                                    if not self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+                                        self.push_diagnostic_at_span(
+                                            "Type mismatch: expected \(self.display_type_name(return_t)), got \(self.display_type_name(checked.expr_type))",
+                                            span
+                                        );
+                                    };
                                 };
                             },
                             .None() then {
@@ -917,10 +938,15 @@ given TypeChecker {
                             .None() then false,
                         };
                         if has_non_void_expected_return and expected_return is .Some(return_t) then {
-                            self.push_diagnostic_at_span(
-                                "Type mismatch: expected \(self.display_type_name(return_t)), got Void",
-                                span
-                            );
+                            // Same as above: a `return` that already stands
+                            // accused is one mistake, and its missing value is
+                            // part of it.
+                            if not self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected \(self.display_type_name(return_t)), got Void",
+                                    span
+                                );
+                            };
                         };
                         let should_note_void = when expected_return in {
                             .None() then true,
@@ -1173,7 +1199,7 @@ given TypeChecker {
                 return when self.resolve_builtin_subscript_kind(typed_outer_base.expr_type) in {
                     .Some(kind) then when kind in {
                         .String() then {
-                            self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(typed_outer_base));
+                            self.push_diagnostic_at_span("String subscript is not addressable", expr_span(base));
                             self.empty_typed_block(Type.Unknown())
                         },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
@@ -1189,7 +1215,7 @@ given TypeChecker {
                             if not self.is_type_mutable_nominal(subscript_value.expr_type) then {
                                 self.push_diagnostic_at_span(
                                     "Collection subscript results are values and cannot be used as writable base addresses",
-                                    self.typed_expr_span(subscript_value)
+                                    expr_span(base)
                                 );
                                 return self.empty_typed_block(Type.Unknown());
                             };

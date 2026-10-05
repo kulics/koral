@@ -189,6 +189,7 @@ extension CompilerContext {
     case .function: return .builtin("Function")
     case .genericParameter(let name): return .builtin("TypeParam.\(name)")
     case .module: return .builtin("Module")
+    case .error: return .builtin("Error")
     case .typeVariable: return .builtin("TypeVar")
     }
   }

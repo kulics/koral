@@ -6,7 +6,6 @@
 
 public type mutable MethodTable(
     mutable methods Dict[MethodOwner, Dict[String, Symbol]],
-    mutable conflict_keys Dict[MethodOwner, Set[String]],
     mutable inherent_keys Dict[MethodOwner, Set[String]],
     // Declaration identity of each trait that has provided a given
     // (owner, method_name). The DefId form of Swift's
@@ -18,7 +17,6 @@ given MethodTable {
     public new() MethodTable = {
         return MethodTable(
             Dict[MethodOwner, Dict[String, Symbol]].new(),
-            Dict[MethodOwner, Set[String]].new(),
             Dict[MethodOwner, Set[String]].new(),
             Dict[MethodOwner, Dict[String, List[DefId]]].new(),
         );
@@ -41,7 +39,14 @@ given MethodTable {
     // Identity is the METHOD's declaration DefId, not its name and not the
     // trait's name: one declaration arriving twice is a re-registration, two
     // declarations sharing a name are ambiguous.
-    public register_with_source(self, owner MethodOwner, method_name String, method Symbol, source_def_id DefId) Void = {
+    /// Register `method` under `owner`, arriving from declaration `source_def_id`.
+    ///
+    /// Returns true when this registration made the name AMBIGUOUS: a second,
+    /// distinct declaration reaching the same slot. One declaration arriving
+    /// twice is a re-registration and returns false. The caller reports the
+    /// conflict at the declaration -- this table has no diagnostic channel --
+    /// and lookups afterwards read the slot as they would an uncontested name.
+    public register_with_source(self, owner MethodOwner, method_name String, method Symbol, source_def_id DefId) Bool = {
         let mutable sources = when self.method_sources.get(owner) in {
             .Some(by_name) then by_name,
             .None() then Dict[String, List[DefId]].new(),
@@ -53,11 +58,10 @@ given MethodTable {
                 already_known = true;
             };
         };
+        let mutable made_ambiguous = false;
         if not already_known then {
             if not source_list.is_empty() then {
-                let mutable conflicts = self.name_set(self.conflict_keys, owner);
-                conflicts.insert(method_name);
-                self.conflict_keys.insert(owner, conflicts);
+                made_ambiguous = true;
             };
             source_list.push(source_def_id);
             sources.insert(method_name, source_list);
@@ -66,10 +70,11 @@ given MethodTable {
         let mutable m = self.method_names(owner);
         m.insert(method_name, method);
         self.methods.insert(owner, m);
+        return made_ambiguous;
     };
 
     public register(self, owner MethodOwner, method_name String, method Symbol) Void = {
-        self.register_with_source(owner, method_name, method, method.def_id);
+        let _ = self.register_with_source(owner, method_name, method, method.def_id);
     };
 
     public lookup(self, owner MethodOwner, method_name String) Option[Symbol] = {
@@ -84,9 +89,5 @@ given MethodTable {
 
     public is_inherent(self, owner MethodOwner, method_name String) Bool = {
         return self.name_set(self.inherent_keys, owner).contains(method_name);
-    };
-
-    public has_conflict(self, owner MethodOwner, method_name String) Bool = {
-        return self.name_set(self.conflict_keys, owner).contains(method_name);
     };
 };

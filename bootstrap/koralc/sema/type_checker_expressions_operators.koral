@@ -183,21 +183,14 @@ given TypeChecker {
                         if not self.generic_parameter_satisfies_trait_constraint(unwrapped_left, trait_name, trait_args) then {
                             let type_name = self.context().type_display_name(left_t);
                             let right_type_name = self.context().type_display_name(right_t);
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)"
-                                
-                                , expr_span(left))
-                            );
+                            self.push_diagnostic("Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)", expr_span(left));
                             return make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), Type.Unknown());
                         };
                         return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), unwrapped_left);
                     },
                     _ then {},
                 };
-                if not self.enforce_explicit_generic_trait_conformance(left_t, trait_name, trait_args) then {
+                if not self.enforce_explicit_generic_trait_conformance_with_note(left_t, trait_name, trait_args, "operator '\(self.arithmetic_method_name(op))'", expr_span(left)) then {
                     return make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), Type.Unknown());
                 };
                 return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), left_t);
@@ -314,14 +307,7 @@ given TypeChecker {
             let typed_param = typed_params[i];
             if param.type_annotation is .None() then {
                 if typed_param.param_type is .Unknown() then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "Cannot infer type for parameter '\(param.name)'"
-                        
-                        , unknown_span())
-                    );
+                    self.push_diagnostic("Cannot infer type for parameter '\(param.name)'", unknown_span());
                 };
             };
             i += 1;
@@ -377,34 +363,26 @@ given TypeChecker {
         return module_path.is_empty() and source_file.is_empty();
     };
 
-    module_private report_mutable_lambda_capture(self, symbol Symbol, reported_ids Set[UInt]) Void = {
+    /// `span` is the USE of the captured variable inside the closure. The
+    /// message names that variable, so it points at the capture, not at the
+    /// statement or the closure that happens to contain it.
+    module_private report_mutable_lambda_capture(self, symbol Symbol, reported_ids Set[UInt], span SourceSpan) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return;
         };
         reported_ids.insert(symbol.def_id.id);
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Cannot capture mutable variable '\(self.context().symbol_name(symbol))'"
-            
-            , unknown_span())
-        );
+        // The second half is the ADVICE, and it is half the message: saying
+        // only that the capture is illegal leaves the reader without a way to
+        // write the program they meant.
+        self.push_diagnostic("Cannot capture mutable variable '\(self.context().symbol_name(symbol))'; hold the state in a Cell and capture the cell instead", span);
     };
 
-    module_private report_borrowed_lambda_capture(self, symbol Symbol, reported_ids Set[UInt]) Void = {
+    module_private report_borrowed_lambda_capture(self, symbol Symbol, reported_ids Set[UInt], span SourceSpan) Void = {
         if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(symbol.def_id.id) then {
             return;
         };
         reported_ids.insert(symbol.def_id.id);
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Cannot capture borrowed reference '\(self.context().symbol_name(symbol))'"
-            
-            , unknown_span())
-        );
+        self.push_diagnostic("Cannot capture borrowed reference '\(self.context().symbol_name(symbol))'", span);
     };
 
     module_private collect_pattern_binding_names(self, pattern TypedPattern, names Set[String]) Void = {
@@ -504,8 +482,8 @@ given TypeChecker {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
-                    self.report_borrowed_lambda_capture(symbol, reported_ids);
-                    self.report_mutable_lambda_capture(symbol, reported_ids);
+                    self.report_borrowed_lambda_capture(symbol, reported_ids, expr.span);
+                    self.report_mutable_lambda_capture(symbol, reported_ids, expr.span);
                 };
             },
             .LambdaExpr(params, _, body_ref) then {
@@ -780,7 +758,7 @@ given TypeChecker {
         return Pair[TypedExpr, TypedExpr](typed_left, typed_right);
     };
 
-    module_private build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr) TypedExpr = {
+    module_private build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr, span SourceSpan) TypedExpr = {
         let mutable same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type);
         let is_eq_op = when op in {
             .Equal() then true,
@@ -796,10 +774,10 @@ given TypeChecker {
         };
 
         if same_type and is_eq_op and not self.is_builtin_equality_comparable(typed_left.expr_type) then {
-            if not self.enforce_explicit_trait_requirement(typed_left.expr_type, "Eq") then {
+            if not self.enforce_explicit_trait_requirement_with_context(typed_left.expr_type, "Eq", "", "operator 'equals'", span) then {
                 return make_typed_expr(TypedExprKind.ComparisonExpr(typed_left, op, typed_right), Type.BoolType());
             };
-            let equals_call = self.build_equals_call(typed_left, typed_right);
+            let equals_call = self.build_equals_call(typed_left, typed_right, span);
             let result = when op in {
                 .NotEqual() then make_typed_expr(TypedExprKind.Unary(UnaryOperator.Not(), equals_call), Type.BoolType()),
                 _ then equals_call,
@@ -808,10 +786,10 @@ given TypeChecker {
         };
 
         if same_type and is_ord_op and not self.is_builtin_ordering_comparable(typed_left.expr_type) then {
-            if not self.enforce_explicit_trait_requirement(typed_left.expr_type, "Ord") then {
+            if not self.enforce_explicit_trait_requirement_with_context(typed_left.expr_type, "Ord", "", "operator 'compare'", span) then {
                 return make_typed_expr(TypedExprKind.ComparisonExpr(typed_left, op, typed_right), Type.BoolType());
             };
-            let compare_call = self.build_compare_call(typed_left, typed_right);
+            let compare_call = self.build_compare_call(typed_left, typed_right, span);
             let zero = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType());
             let result = make_typed_expr(TypedExprKind.ComparisonExpr(compare_call, op, zero), Type.BoolType());
             return result;
@@ -835,12 +813,12 @@ given TypeChecker {
         let normalized = self.normalize_comparison_operands(left_expr, left_source, raw_right, Option[Expr].Some(right_source_ref), scope);
 
         if index + 1(UInt) == operators.count() then {
-            return self.build_typed_comparison_expr(normalized.first, operators[index], normalized.second);
+            return self.build_typed_comparison_expr(normalized.first, operators[index], normalized.second, when left_source in { .Some(e) then expr_span(e), .None() then self.typed_expr_span(left_expr) });
         };
 
         let temp_symbol = self.make_expr_temp_symbol("__cmp_chain", normalized.second.expr_type, VariableKind.Value());
         let temp_ref = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
-        let condition = self.build_typed_comparison_expr(normalized.first, operators[index], temp_ref);
+        let condition = self.build_typed_comparison_expr(normalized.first, operators[index], temp_ref, when left_source in { .Some(e) then expr_span(e), .None() then self.typed_expr_span(left_expr) });
         let next = self.lower_comparison_chain_step(operands, operators, index + 1(UInt), temp_ref, Option[Expr].None(), scope);
         let mutable block_statements = List[TypedStatement].new();
         block_statements.push(TypedStatement.LetStmt(temp_symbol, normalized.second, unknown_span()));
@@ -873,7 +851,7 @@ given TypeChecker {
             Option[Expr].Some(right),
             scope,
         );
-        return self.build_typed_comparison_expr(normalized.first, op, normalized.second);
+        return self.build_typed_comparison_expr(normalized.first, op, normalized.second, expr_span(left));
     };
 
     module_private is_builtin_equality_comparable(self, t Type) Bool = {
@@ -915,8 +893,8 @@ given TypeChecker {
         };
     };
 
-    module_private build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "operator 'equals'") then {
+    module_private build_equals_call(self, lhs TypedExpr, rhs TypedExpr, span SourceSpan) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "", "operator 'equals'", span) then {
             return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown());
         };
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
@@ -946,8 +924,8 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
     };
 
-    module_private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "operator 'compare'") then {
+    module_private build_compare_call(self, lhs TypedExpr, rhs TypedExpr, span SourceSpan) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "", "operator 'compare'", span) then {
             return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown());
         };
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
@@ -1063,7 +1041,7 @@ given TypeChecker {
                 let typed = self.check_expr_scoped_ref(expr_ref, .None(), scope);
                 when typed.expr_type in {
                     _ then if self.is_string_type(typed.expr_type) then typed else {
-                        let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString");
+                        let _ = self.enforce_explicit_trait_requirement_with_context(typed.expr_type, "ToString", "", "operator 'to_string'", expr_span(expr_ref));
                         self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", List[Type].new());
                         let mutable ret_type = self.resolve_method_return_type(typed.expr_type, "to_string");
                         let call_expr = self.lower_receiver_method_call_expr(typed, "to_string", List[TypedExpr].new());

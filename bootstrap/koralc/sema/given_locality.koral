@@ -144,9 +144,11 @@ given GivenLocalityChecker {
                 Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             // Identity: ownership comes from the DECLARATION's module.
-            .GenericStruct(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId),
-            .GenericEnum(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId),
-            .TraitObject(trait_def_id, _) then self.resolve_owner_by_def_id(trait_def_id),
+            .GenericStruct(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId, GivenOwnerKind.TypeOwner()),
+            .GenericEnum(tplDefId, _) then self.resolve_owner_by_def_id(tplDefId, GivenOwnerKind.TypeOwner()),
+            // A trait object is owned by the TRAIT, and the message must say so:
+            // "type is declared in" sends the reader looking for a type declaration.
+            .TraitObject(trait_def_id, _) then self.resolve_owner_by_def_id(trait_def_id, GivenOwnerKind.TraitOwner()),
             // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
             _ then Option[GivenOwner].None(),
         };
@@ -162,10 +164,12 @@ given GivenLocalityChecker {
     /// Ownership from a DECLARATION: the module comes from the DefId itself, so
     /// no spelling is round-tripped. Two same-named types in different modules
     /// have different owners, which is exactly what the orphan rule needs.
-    file_private resolve_owner_by_def_id(self, def_id DefId) Option[GivenOwner] = {
+    /// The kind comes from the caller, because only the caller knows whether the
+    /// DefId names a trait or a type -- and the diagnostic prints that word.
+    file_private resolve_owner_by_def_id(self, def_id DefId, kind GivenOwnerKind) Option[GivenOwner] = {
         let name = self.context.get_name(def_id) or else def_id_spelling(def_id);
         let mod_path = self.context.get_module_path(def_id) or else List[String].new();
-        return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path));
+        return Option[GivenOwner].Some(GivenOwner(kind, name, mod_path));
     };
 
     file_private resolve_generic_base_owner(self, base_name String) Option[GivenOwner] = {

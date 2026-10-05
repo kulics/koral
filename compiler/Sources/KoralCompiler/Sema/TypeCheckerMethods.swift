@@ -534,9 +534,11 @@ extension TypeChecker {
     }
 
     if traitMatchedSymbols.count > 1 {
-      throw SemanticError(.generic(
+      // The conflict is one problem among several the file may have; a call
+      // site that trips over it is not the only thing worth saying.
+      try handleError(SemanticError(.generic(
         "Ambiguous method '\(name)' for type '\(selfType.description)' via trait extensions"
-      ), span: currentSpan)
+      ), span: currentSpan))
     }
     if let matched = traitMatchedSymbols.first {
       return matched
@@ -1193,7 +1195,7 @@ extension TypeChecker {
     return call
   }
 
-  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], expectedType: Type? = nil) throws
+  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], expectedType: Type? = nil, span: SourceSpan = .unknown) throws
     -> TypedExpressionNode
   {
     let type = base.type
@@ -1243,7 +1245,7 @@ extension TypeChecker {
     guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
       throw SemanticError(.generic(
         "subscript is only supported for String, List, Deque, Dict, and pointer types"
-      ), span: currentSpan)
+      ), span: span)
     }
 
     if let expectedType {
@@ -1398,10 +1400,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be *unsafe mutable *unsafe UInt8"))
+        throw SemanticError(.generic("spawn_thread: first argument must be *unsafe mutable *unsafe UInt8"), span: arguments[0].span)
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be *unsafe mutable UInt64"))
+        throw SemanticError(.generic("spawn_thread: second argument must be *unsafe mutable UInt64"), span: arguments[1].span)
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

@@ -43,7 +43,10 @@ public type mutable TraitRegistry(
     // step; anything that asks "is this the same trait" must come here.
     mutable traits_by_def_id Dict[UInt, TraitInfo],
     mutable flattened_cache Dict[String, Dict[String, TypedTraitMember]],
-    mutable object_safety_cache Dict[String, Bool],
+    /// The reasons a trait is not object-safe, keyed like the trait. Empty
+    /// means it is safe. Keeping the reasons and not just the verdict is what
+    /// lets the diagnostic say WHICH method is the problem.
+    mutable object_safety_cache Dict[String, List[String]],
 );
 
 given TraitRegistry {
@@ -53,7 +56,7 @@ given TraitRegistry {
             Dict[String, TraitInfo].new(),
             Dict[UInt, TraitInfo].new(),
             Dict[String, Dict[String, TypedTraitMember]].new(),
-            Dict[String, Bool].new()
+            Dict[String, List[String]].new()
         );
     };
 
@@ -62,7 +65,7 @@ given TraitRegistry {
         self.traits.insert(qualified_symbol_key(info.module_path, info.name), info);
         self.traits_by_def_id.insert(info.def_id.id, info);
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
-        self.object_safety_cache = Dict[String, Bool].new();
+        self.object_safety_cache = Dict[String, List[String]].new();
     };
 
     public get_by_def_id(self, def_id DefId) Option[TraitInfo] = {
@@ -202,26 +205,37 @@ given TraitRegistry {
 
     public check_object_safety_in_module(self, trait_name String, module_path List[String]) Result[Bool] = {
         let cache_key = qualified_symbol_key(module_path, trait_name);
+        let reasons = self.object_safety_reasons(trait_name, module_path) or return;
+        return Result[Bool].Ok(reasons.is_empty());
+    };
+
+    /// Why a trait cannot be a trait object -- one reason per offending method.
+    /// Empty means it can.
+    ///
+    /// The verdict alone is not enough to report: "is not object-safe" leaves
+    /// the reader to find which method is responsible.
+    public object_safety_reasons(self, trait_name String, module_path List[String]) Result[List[String]] = {
+        let cache_key = qualified_symbol_key(module_path, trait_name);
         if self.object_safety_cache.get(cache_key) is .Some(cached) then {
-            return Result[Bool].Ok(cached);
+            return Result[List[String]].Ok(cached);
         };
 
         let methods = self.flatten_methods_in_module(trait_name, module_path) or return;
-        let mutable is_safe = true;
+        let mutable reasons = List[String].new();
         for entry in methods then {
             let m = entry.second;
             if m.has_generic_type_params then {
-                is_safe = false;
+                reasons.push("method '\(m.name)' has generic type parameters");
             };
             if not m.params.is_empty() then {
                 let receiver = m.params[0(UInt)];
                 if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
-                    is_safe = false;
+                    reasons.push("method '\(m.name)' uses Self in receiver");
                 };
             };
             // 检查返回值是否使用 Self（receiver 之外不允许）
             if self.type_uses_self(m.return_type) then {
-                is_safe = false;
+                reasons.push("method '\(m.name)' uses Self in return type");
             };
             // 检查参数（跳过第一个 self 参数）
             let mutable param_index UInt = 0;
@@ -231,13 +245,13 @@ given TraitRegistry {
                     continue;
                 };
                 if self.type_uses_self(p.param_type) then {
-                    is_safe = false;
+                    reasons.push("method '\(m.name)' uses Self in parameter '\(p.name)'");
                 };
                 param_index += 1(UInt);
             };
         };
-        self.object_safety_cache.insert(cache_key, is_safe);
-        return Result[Bool].Ok(is_safe);
+        self.object_safety_cache.insert(cache_key, reasons);
+        return Result[List[String]].Ok(reasons);
     };
 
     file_private is_object_safe_receiver_type(self, t Type) Bool = {
@@ -334,48 +348,93 @@ given TraitRegistry {
 public type TraitChecker(
     registry TraitRegistry,
     method_table MethodTable,
+    context CompilerContext,
 );
 
 given TraitChecker {
 
-    public new(registry TraitRegistry, method_table MethodTable) TraitChecker = {
-        return TraitChecker(registry, method_table);
+    public new(registry TraitRegistry, method_table MethodTable, context CompilerContext) TraitChecker = {
+        return TraitChecker(registry, method_table, context);
+    };
+
+    /// Render a trait method requirement the way the implementer must write it:
+    /// `equals(self Box, other Box) Bool`. `Self` and the trait's type parameters
+    /// are substituted with the conformance's actual arguments first -- printing
+    /// them unbound shows the reader a signature they cannot copy.
+    file_private display_trait_method_signature(
+        self,
+        method TypedTraitMember,
+        target_type Type,
+        trait_type_params List[String],
+        trait_type_args List[Type],
+    ) String = {
+        let mutable out = StringBuilder.new();
+        out.push_string(method.name);
+        out.push_byte('(');
+        let mutable first = true;
+        for p in method.params then {
+            if not first then { out.push_string(", ");};
+            first = false;
+            if p.is_mutable then { out.push_string("mutable ");};
+            out.push_string(p.name);
+            out.push_byte(' ');
+            out.push_string(self.display_trait_method_type(p.param_type, target_type, trait_type_params, trait_type_args));
+        };
+        out.push_string(") ");
+        out.push_string(self.display_trait_method_type(method.return_type, target_type, trait_type_params, trait_type_args));
+        return out.to_string();
+    };
+
+    file_private display_trait_method_type(
+        self,
+        t Type,
+        target_type Type,
+        trait_type_params List[String],
+        trait_type_args List[Type],
+    ) String = {
+        return when t in {
+            .GenericParameter(name) then {
+                if name == "Self" then {
+                    self.context.type_display_name(target_type)
+                } else {
+                    let mutable idx UInt = 0;
+                    while idx < trait_type_params.count() then {
+                        if trait_type_params[idx] == name and idx < trait_type_args.count() then {
+                            return self.context.type_display_name(trait_type_args[idx]);
+                        };
+                        idx += 1;
+                    };
+                    name
+                }
+            },
+            _ then self.context.type_display_name(t),
+        };
     };
 
     // 检查 given Type as Trait { ... } 声明的一致性
     // 返回 Ok 或 Error(message)
-    public check_conformance(
-        self,
-        target_type Type,
-        trait_name String,
-        members List[TypedGivenMember],
-        span SourceSpan,
-    ) Result[Void] = {
-        return self.check_conformance_in_module(target_type, trait_name, members, span, List[String].new());
-    };
-
     public check_conformance_in_module(
         self,
         target_type Type,
         trait_name String,
+        trait_type_args List[Type],
         members List[TypedGivenMember],
         span SourceSpan,
         module_path List[String],
     ) Result[Void] = {
         // 仅检查当前 trait 自身的方法 requirement。
         // 父 trait 的显式实现在 TypeChecker 中单独检查。
-        let required_methods = when self.registry.get_in_module(trait_name, module_path) in {
+        let trait_info = when self.registry.get_in_module(trait_name, module_path) in {
             .None() then {
                 return Result[Void].Error("Undefined trait: " + trait_name);
             },
-            .Some(info) then {
-                let mutable own = Dict[String, TypedTraitMember].new();
-                for m in info.methods then {
-                    own.insert(m.name, m);
-                };
-                own
-            },
+            .Some(info) then info,
         };
+        let mutable required_methods = Dict[String, TypedTraitMember].new();
+        for m in trait_info.methods then {
+            required_methods.insert(m.name, m);
+        };
+        let trait_type_params = trait_info.type_params;
 
         // 构建已实现方法的名称集合
         let mutable implemented = Dict[String, TypedGivenMember].new();
@@ -385,16 +444,17 @@ given TraitChecker {
         };
 
         // 检查是否包含非 requirement 的额外方法
+        let self_type_name = self.context.type_display_name(target_type);
         for entry in implemented then {
             if required_methods.get(entry.first) is .None() then {
                 let mutable message = StringBuilder.new();
-                message.push_string("Given implementation for type '");
-                message.push_string(type_to_string(target_type));
-                message.push_string("' is invalid: extra method '");
-                message.push_string(entry.first);
-                message.push_string("' is not a requirement of trait '");
+                message.push_string("Implementation 'given ");
+                message.push_string(self_type_name);
+                message.push_byte(' ');
                 message.push_string(trait_name);
-                message.push_byte('\'');
+                message.push_string("' is invalid: extra method ");
+                message.push_string(entry.first);
+                message.push_string(" is not a requirement");
                 return Result[Void].Error(message.to_string());
             };
         };
@@ -407,13 +467,12 @@ given TraitChecker {
             when implemented.get(method_name) in {
                 .None() then {
                     let mutable message = StringBuilder.new();
-                    message.push_string("Given implementation for type '");
-                    message.push_string(type_to_string(target_type));
-                    message.push_string("' is invalid: missing method '");
-                    message.push_string(method_name);
-                    message.push_string("' required by trait '");
+                    message.push_string("Implementation 'given ");
+                    message.push_string(self_type_name);
+                    message.push_byte(' ');
                     message.push_string(trait_name);
-                    message.push_byte('\'');
+                    message.push_string("' is invalid: missing method ");
+                    message.push_string(self.display_trait_method_signature(required, target_type, trait_type_params, trait_type_args));
                     return Result[Void].Error(message.to_string());
                 },
                 .Some(actual) then {

@@ -40,35 +40,35 @@ extension TypeChecker {
          .andThenExpression,
          .orReturnExpression:
       return false
-    case .castExpression(_, let inner),
-         .addressOfExpression(let inner, _),
-         .derefExpression(let inner),
-          .unsafeDerefExpression(let inner),
-          .ptrExpression(let inner, _),
-         .unaryMinusExpression(let inner),
-         .notExpression(let inner),
-         .bitwiseNotExpression(let inner),
+    case .castExpression(_, let inner, _),
+         .addressOfExpression(let inner, _, _),
+         .derefExpression(let inner, _),
+          .unsafeDerefExpression(let inner, _),
+          .ptrExpression(let inner, _, _),
+         .unaryMinusExpression(let inner, _),
+         .notExpression(let inner, _),
+         .bitwiseNotExpression(let inner, _),
          .isExpression(let inner, _, _),
          .isNotExpression(let inner, _, _):
       return sourceExpressionIsObviouslyPureStatement(inner)
-    case .arithmeticExpression(let left, _, let right),
-         .comparisonExpression(let left, _, let right),
-         .bitwiseExpression(let left, _, let right),
-         .andExpression(let left, let right),
-         .orExpression(let left, let right):
+    case .arithmeticExpression(let left, _, let right, _),
+         .comparisonExpression(let left, _, let right, _),
+         .bitwiseExpression(let left, _, let right, _),
+         .andExpression(let left, let right, _),
+         .orExpression(let left, let right, _):
       return sourceExpressionIsObviouslyPureStatement(left) && sourceExpressionIsObviouslyPureStatement(right)
     case .comparisonChainExpression:
       return true
-    case .memberPath(let base, _):
+    case .memberPath(let base, _, _):
       return sourceExpressionIsObviouslyPureStatement(base)
     case .traitQualificationExpression:
       // The left side is a type — a bare qualification is pure (though it is a
       // semantic error not to follow it with a method call).
       return true
-    case .subscriptExpression(let base, let arguments):
+    case .subscriptExpression(let base, let arguments, _):
       return sourceExpressionIsObviouslyPureStatement(base)
         && arguments.allSatisfy(sourceExpressionIsObviouslyPureStatement)
-    case .rangeExpression(_, let left, let right):
+    case .rangeExpression(_, let left, let right, _):
       return sourceOptionalExpressionIsPureStatement(left)
         && sourceOptionalExpressionIsPureStatement(right)
     }
@@ -127,10 +127,14 @@ extension TypeChecker {
   func requireEffectfulStatementExpression(_ sourceExpr: ExpressionNode, typedExpr: TypedExpressionNode) throws {
     let span = sourceExpr.span == .unknown ? currentSpan : sourceExpr.span
     if sourceExpressionIsObviouslyPureStatement(sourceExpr) {
-      throw SemanticError(.generic("Expression statement has no effect"), span: span)
+      // A pure statement is one problem among several a file may have. Going
+      // through `handleError` keeps checking the rest of it instead of
+      // stopping the run here.
+      try handleError("Expression statement has no effect", at: span)
+      return
     }
     if !typedExpressionHasObservableStatementEffect(typedExpr) {
-      throw SemanticError(.generic("Expression statement has no effect"), span: span)
+      try handleError("Expression statement has no effect", at: span)
     }
   }
 
@@ -191,7 +195,7 @@ extension TypeChecker {
 
   func inferStatementExpression(_ expr: ExpressionNode) throws -> TypedStatementNode {
     switch expr {
-    case .ifExpression(let condition, let thenBranch, let elseBranch):
+    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
       if let lowered = try lowerIfConditionWithBindings(
         condition: condition,
         thenBranch: thenBranch,
@@ -211,7 +215,7 @@ extension TypeChecker {
       let typedElse = try elseBranch.map { try inferStatementBodyExpression($0) }
       return .ifStatement(condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse)
 
-    case .whenExpression(let subject, let cases, _):
+    case .whenExpression(let subject, let cases, let whenSpan):
       let typedSubject = try inferTypedExpression(subject)
       var subjectType = typedSubject.type
       if let inner = dereferenceTargetType(of: subjectType) {
@@ -227,7 +231,7 @@ extension TypeChecker {
         let typedBody = try withNewScope {
           for symbol in extractPatternSymbols(from: pattern) {
             if let name = context.getName(symbol.defId) {
-              try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+              try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
             }
           }
           return try inferStatementBodyExpression(c.body)
@@ -240,14 +244,14 @@ extension TypeChecker {
       let checker = ExhaustivenessChecker(
         subjectType: subjectType,
         patterns: patterns,
-        currentLine: currentLine,
+        span: whenSpan,
         resolvedEnumCases: resolvedCases,
         context: context
       )
       try checker.check()
       return .whenStatement(subject: typedSubject, cases: typedCases)
 
-    case .whileExpression(let condition, let body):
+    case .whileExpression(let condition, let body, _):
       if let lowered = try lowerWhileConditionWithBindings(
         condition: condition,
         body: body
@@ -284,27 +288,27 @@ extension TypeChecker {
   /// addressable. Collection subscripts are value-based and must be rewritten through
   /// get/set at the caller.
   private func inferWritableSubscriptBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
-    if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
+    if case .subscriptExpression(let outerBaseExpr, let outerArgExprs, _) = baseExpr {
       let typedOuterBase = try inferWritableSubscriptBase(outerBaseExpr)
       let typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
 
       switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
       case .string:
-        throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
+        throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
       case .dict, .list, .deque:
-        let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+        let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
         if isMutableNominalReceiverType(subscriptValue.type) {
           return subscriptValue
         }
         throw SemanticError(.generic(
           "Collection subscript results are values and cannot be used as writable base addresses"
-        ), span: currentSpan)
+        ), span: outerBaseExpr.span)
       case .pointer:
-        return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+        return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
       case .none:
         throw SemanticError(.generic(
           "subscript is only supported for String, List, Deque, Dict, and pointer types"
-        ), span: currentSpan)
+        ), span: outerBaseExpr.span)
       }
     }
 
@@ -334,19 +338,20 @@ extension TypeChecker {
       }
       
       // Check if value is a Lambda expression and pass expected type
-      if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
+      if case .lambdaExpression(let parameters, let returnType, let body, let lambdaSpan) = value {
         typedValue = try inferLambdaExpression(
           parameters: parameters,
           returnType: returnType,
           body: body,
-          expectedType: expectedType
+          expectedType: expectedType,
+          span: lambdaSpan
         )
       } else {
         // Pass expected type for implicit member expression support
         typedValue = try inferTypedExpression(value, expectedType: expectedType)
       }
 
-      if expectedType == nil, case .identifier("self") = value {
+      if expectedType == nil, case .identifier("self", _) = value {
         typedValue = autoDereferenceValueContext(typedValue)
       }
       
@@ -354,9 +359,18 @@ extension TypeChecker {
       if let expectedType = expectedType {
         type = expectedType
         typedValue = try coerceLiteral(typedValue, to: type)
-        if typedValue.type != .never && typedValue.type != type {
-          throw SemanticError.typeMismatch(
-            expected: type.description, got: typedValue.type.description)
+        if typedValue.type != .never && typedValue.type != .error && typedValue.type != type
+          && !diagnosticCollector.hasError(in: value.span, fileName: currentFileName)
+        {
+          // Blame the VALUE, not the binding: the annotation is fine, the
+          // initialiser is what does not fit it. Anchoring at `let` pointed the
+          // reader at a keyword that names no type at all, and disagreed with
+          // the other variable-declaration path, which already used the value.
+          try handleError(
+            SemanticError(
+              .typeMismatch(
+                expected: type.description, got: typedValue.type.description),
+              span: value.span))
         }
       } else {
         type = typedValue.type
@@ -369,7 +383,7 @@ extension TypeChecker {
         type: type,
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
-      try currentScope.defineLocal(name, defId: symbol.defId, line: currentSpan.line)
+      try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
       return .variableDeclaration(
         identifier: symbol,
         value: typedValue,
@@ -419,7 +433,7 @@ extension TypeChecker {
           type: firstType,
           kind: first.mutable ? .variable(.MutableValue) : .variable(.Value)
         )
-        try currentScope.defineLocal(first.name, defId: sym.defId, line: span.line)
+        try currentScope.defineLocal(first.name, defId: sym.defId, span: span)
         firstSymbol = sym
       }
 
@@ -438,7 +452,7 @@ extension TypeChecker {
           type: secondType,
           kind: second.mutable ? .variable(.MutableValue) : .variable(.Value)
         )
-        try currentScope.defineLocal(second.name, defId: sym.defId, line: span.line)
+        try currentScope.defineLocal(second.name, defId: sym.defId, span: span)
         secondSymbol = sym
       }
 
@@ -452,7 +466,7 @@ extension TypeChecker {
       self.currentSpan = span
       if let op {
         // Lower `x[i] op= v` into builtin get/set or pointer write.
-        if case .subscriptExpression(let baseExpr, let argExprs) = target {
+        if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
           let typedBase = try inferWritableSubscriptBase(baseExpr)
           var typedArgs = try argExprs.map { try inferTypedExpression($0) }
           // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
@@ -498,7 +512,7 @@ extension TypeChecker {
 
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
-            if typedRhs.type != .never && typedRhs.type != element {
+            if typedRhs.type != .never && typedRhs.type != .error && typedRhs.type != element {
               throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
             }
 
@@ -563,7 +577,7 @@ extension TypeChecker {
 
           var typedRhs = try inferTypedExpression(value)
           typedRhs = try coerceLiteral(typedRhs, to: elementType)
-          if typedRhs.type != .never && typedRhs.type != elementType {
+          if typedRhs.type != .never && typedRhs.type != .error && typedRhs.type != elementType {
             throw SemanticError.typeMismatch(
               expected: elementType.description, got: typedRhs.type.description)
           }
@@ -612,7 +626,7 @@ extension TypeChecker {
         var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
         typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-        if typedValue.type != .never && typedTarget.type != typedValue.type {
+        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != typedValue.type {
           throw SemanticError.typeMismatch(
             expected: typedTarget.type.description, got: typedValue.type.description)
         }
@@ -642,7 +656,7 @@ extension TypeChecker {
 
       // Simple assignment
       // Lower `x[i] = v` into builtin set or pointer write.
-      if case .subscriptExpression(let baseExpr, let argExprs) = target {
+      if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
         let typedBase = try inferWritableSubscriptBase(baseExpr)
         var typedArgs = try argExprs.map { try inferTypedExpression($0) }
         // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
@@ -688,7 +702,7 @@ extension TypeChecker {
 
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)
-          if typedValue.type != .never && typedValue.type != element {
+          if typedValue.type != .never && typedValue.type != .error && typedValue.type != element {
             throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
           }
           return .assignment(target: derefTarget, operator: nil, value: typedValue)
@@ -746,7 +760,7 @@ extension TypeChecker {
 
         var typedValue = try inferTypedExpression(value)
         typedValue = try coerceLiteral(typedValue, to: expectedValueType)
-        if typedValue.type != .never && typedValue.type != expectedValueType {
+        if typedValue.type != .never && typedValue.type != .error && typedValue.type != expectedValueType {
           throw SemanticError.typeMismatch(
             expected: expectedValueType.description, got: typedValue.type.description)
         }
@@ -770,7 +784,7 @@ extension TypeChecker {
       var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
       typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-      if typedValue.type != .never && typedTarget.type != typedValue.type {
+      if typedValue.type != .never && typedValue.type != .error && typedTarget.type != typedValue.type {
         throw SemanticError.typeMismatch(
           expected: typedTarget.type.description, got: typedValue.type.description)
       }
@@ -794,7 +808,7 @@ extension TypeChecker {
             var typedValue = try inferTypedExpression(value, expectedType: expectedType)
             if let expectedType {
               typedValue = try coerceLiteral(typedValue, to: expectedType)
-              if typedValue.type != .never && typedValue.type != expectedType {
+              if typedValue.type != .never && typedValue.type != .error && typedValue.type != expectedType {
                 throw SemanticError.typeMismatch(
                   expected: expectedType.description, got: typedValue.type.description)
               }
@@ -822,7 +836,7 @@ extension TypeChecker {
         // Pass expected type for implicit member expression support
         var typedValue = try inferTypedExpression(value, expectedType: returnType)
         typedValue = try coerceLiteral(typedValue, to: returnType)
-        if typedValue.type != .never && typedValue.type != returnType {
+        if typedValue.type != .never && typedValue.type != .error && typedValue.type != returnType {
           throw SemanticError.typeMismatch(
             expected: returnType.description, got: typedValue.type.description)
         }

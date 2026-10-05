@@ -183,7 +183,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
 
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span, _):
             try resolveStructSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -193,7 +193,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, _):
             try resolveEnumSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -203,7 +203,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span):
+        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span, _):
             try resolveFunctionSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -214,7 +214,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let span):
+        case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let span, _):
             try resolveIntrinsicFunctionSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -223,7 +223,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span, _):
             try resolveFunctionSignature(
                 name: name,
                 typeParameters: [],
@@ -233,7 +233,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
+        case .foreignTypeDeclaration(let name, _, let fields, let access, let span, _):
             if fields == nil {
                 try resolveOpaqueTypeSignature(
                     name: name,
@@ -281,7 +281,7 @@ public class TypeResolver: CompilerPass {
         if !typeParams.isEmpty {
             // 泛型 given
             switch typeNode {
-            case .generic(let name, _):
+            case .generic(let name, _, _):
                 baseName = name
             case .pointer:
                 baseName = "Ptr"
@@ -341,7 +341,7 @@ public class TypeResolver: CompilerPass {
         let baseName: String
         if !typeParams.isEmpty {
             switch typeNode {
-            case .generic(let name, _):
+            case .generic(let name, _, _):
                 baseName = name
             case .pointer:
                 baseName = "Ptr"
@@ -609,7 +609,7 @@ public class TypeResolver: CompilerPass {
         defIdMap: DefIdMap
     ) -> ResolvedModuleSymbol? {
         switch node {
-        case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, let access, _):
+        case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, let access, _, _):
             // 跳过泛型函数
             if !typeParameters.isEmpty { return nil }
             
@@ -620,7 +620,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignFunctionDeclaration(let name, _, _, let access, _):
+        case .foreignFunctionDeclaration(let name, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .function,
@@ -629,7 +629,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, _, _, let access, _):
+        case .globalStructDeclaration(let name, let typeParameters, _, _, let access, _, _):
             // 跳过泛型结构体
             if !typeParameters.isEmpty { return nil }
             
@@ -641,7 +641,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalEnumDeclaration(let name, let typeParameters, _, let access, _):
+        case .globalEnumDeclaration(let name, let typeParameters, _, let access, _, _):
             // 跳过泛型枚举类型
             if !typeParameters.isEmpty { return nil }
             
@@ -652,7 +652,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignTypeDeclaration(let name, _, _, let access, _):
+        case .foreignTypeDeclaration(let name, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,
@@ -660,7 +660,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignLetDeclaration(let name, _, _, let access, _):
+        case .foreignLetDeclaration(let name, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .variable,
@@ -669,7 +669,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalVariableDeclaration(let name, _, _, _, let access, _):
+        case .globalVariableDeclaration(let name, _, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .variable,
@@ -748,15 +748,15 @@ public class TypeResolver: CompilerPass {
     /// 从 TypeNode 中提取类型名称
     private func extractTypeName(from typeNode: TypeNode) -> String {
         switch typeNode {
-        case .identifier(let name):
+        case .identifier(let name, _):
             return name
-        case .generic(let name, _):
+        case .generic(let name, _, _):
             return name
-        case .reference(let inner, _):
+        case .reference(let inner, _, _):
             return extractTypeName(from: inner)
-        case .pointer(let inner, _):
+        case .pointer(let inner, _, _):
             return extractTypeName(from: inner)
-        case .weakReference(let inner, _):
+        case .weakReference(let inner, _, _):
             return extractTypeName(from: inner)
         case .functionType, .inferredSelf:
             return ""

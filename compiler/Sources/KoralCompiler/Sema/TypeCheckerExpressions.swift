@@ -57,7 +57,7 @@ extension TypeChecker {
   }
 
   private func isModulePrefixedMemberPath(baseExpr: ExpressionNode, path: [String]) -> Bool {
-    guard case .identifier(let baseName) = baseExpr,
+    guard case .identifier(let baseName, _) = baseExpr,
           !path.isEmpty,
           isASCIITypeStyleIdentifier(baseName),
           currentScope.lookup(baseName, sourceFile: currentSourceFile) == nil,
@@ -70,7 +70,7 @@ extension TypeChecker {
 
   /// Enforce that a type satisfies the 'mutable' constraint at a call site.
   /// Used by downgrade/upgrade name-matching paths that bypass normal constraint enforcement.
-  private func enforceMutableConstraintForCall(_ type: Type, function: String) throws {
+  private func enforceMutableConstraintForCall(_ type: Type, function: String, span: SourceSpan) throws {
     let satisfied: Bool
     switch type {
     case .structure(let defId):
@@ -88,7 +88,7 @@ extension TypeChecker {
     if !satisfied {
       throw SemanticError(.generic(
         "'\(function)' requires a 'type mutable' argument, but '\(type)' is not declared as 'type mutable'"
-      ), span: currentSpan)
+      ), span: span)
     }
   }
 
@@ -732,7 +732,7 @@ extension TypeChecker {
         body: body,
         expectedType: expectedType
       )
-    } else if case .rangeExpression(let op, let left, let right) = arg {
+    } else if case .rangeExpression(let op, let left, let right, _) = arg {
       typedArg = try inferRangeExpression(
         operator: op,
         left: left,
@@ -759,7 +759,7 @@ extension TypeChecker {
     targetType: Type
   ) throws -> TypedExpressionNode? {
     switch expr {
-    case .integerLiteral(let value):
+    case .integerLiteral(let value, _):
       if isUnsignedIntegerType(targetType), value.hasPrefix("-") {
         throw SemanticError(.generic("Cannot cast negative integer literal to unsigned type \(targetType.description)"), span: currentSpan)
       }
@@ -770,7 +770,7 @@ extension TypeChecker {
         return .floatLiteral(value: value, type: targetType)
       }
       return nil
-    case .floatLiteral(let value):
+    case .floatLiteral(let value, _):
       if isFloatType(targetType) {
         return .floatLiteral(value: value, type: targetType)
       }
@@ -781,7 +781,7 @@ extension TypeChecker {
   }
 
   private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
-    .blockExpression(statements: [.break(span: span)], tailExpression: nil)
+    .blockExpression(statements: [.break(span: span)], tailExpression: nil, span: span)
   }
 
   func mergeBranchResultTypes(_ current: Type?, _ incoming: Type, span: SourceSpan) throws -> Type {
@@ -797,6 +797,10 @@ extension TypeChecker {
     }
     if let mergedType = commonBranchSupertype(current, incoming) {
       return mergedType
+    }
+    // A branch that already failed has no type to disagree about.
+    if current == .error || incoming == .error {
+      return .error
     }
     throw SemanticError.typeMismatch(expected: current.description, got: incoming.description)
   }
@@ -848,7 +852,11 @@ extension TypeChecker {
       return normalized
     }
 
-    throw SemanticError.typeMismatch(expected: expectedType.description, got: normalized.type.description)
+    if normalized.type == .error {
+      return normalized
+    }
+    try handleError(SemanticError.typeMismatch(expected: expectedType.description, got: normalized.type.description))
+    return normalized
   }
 
   // Pick a read-only common supertype when branches differ only by mutability.
@@ -878,16 +886,21 @@ extension TypeChecker {
       // Single-branch if must have Void or Never type in the then branch.
       // Without an else branch, the overall if-expression cannot carry a
       // value-producing tail expression.
-      if thenBranch.type != .void && thenBranch.type != .never {
-        throw SemanticError(.generic(
+      if thenBranch.type != .void && thenBranch.type != .never && thenBranch.type != .error {
+        try handleError(SemanticError(.generic(
           "Single-branch 'if' must have Void or Never type in then branch, got '\(thenBranch.type.description)'"
-        ))
+        )))
       }
       return (thenBranch, nil, .void)
     }
 
     var typedThen = thenBranch
     var resultType: Type
+
+    // A branch that already failed has no type to reconcile with the other.
+    if typedThen.type == .error || typedElse.type == .error {
+      return (typedThen, typedElse, .error)
+    }
     if let implicitDeref = makeImplicitDereference(typedThen, expectedType: typedElse.type) {
       typedThen = implicitDeref
     }
@@ -914,6 +927,12 @@ extension TypeChecker {
       typedThen = try coerceLiteral(typedThen, to: typedElse.type)
       typedElse = try coerceLiteral(typedElse, to: typedThen.type)
       if typedThen.type == typedElse.type {
+        resultType = typedThen.type
+      } else if expectedType != nil {
+        // The conditional is being checked against a declared type, and that
+        // check is the one to act on: "expected Int, got Void" names the
+        // problem the reader has to fix. Saying the branches disagree as well
+        // is the same mistake from a second angle.
         resultType = typedThen.type
       } else {
         throw SemanticError.typeMismatch(
@@ -1033,6 +1052,11 @@ extension TypeChecker {
         continue
       }
 
+      // A branch that already failed has no type to disagree about.
+      if currentType == .error || body.type == .error {
+        mergedType = .error
+        continue
+      }
       throw SemanticError.typeMismatch(expected: currentType.description, got: body.type.description)
     }
 
@@ -1079,7 +1103,7 @@ extension TypeChecker {
     let typedThen = try withNewScope {
       for symbol in extractPatternSymbols(from: typedPattern) {
         if let name = context.getName(symbol.defId) {
-          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+          try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
         }
       }
       return try normalizeBranchExpression(
@@ -1149,7 +1173,7 @@ extension TypeChecker {
     let typedBody = try withNewScope {
       for symbol in extractPatternSymbols(from: typedPattern) {
         if let name = context.getName(symbol.defId) {
-          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+          try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
         }
       }
       return try bodyBuilder()
@@ -1217,11 +1241,11 @@ extension TypeChecker {
     switch expr {
     case .isExpression(_, let pattern, _):
       return untypedPatternContainsBindings(pattern)
-    case .andExpression(let left, let right):
+    case .andExpression(let left, let right, _):
       return conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right)
-    case .orExpression(let left, let right):
+    case .orExpression(let left, let right, _):
       return conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right)
-    case .notExpression(let inner):
+    case .notExpression(let inner, _):
       return conditionContainsIsWithBindings(inner)
     default:
       return false
@@ -1234,12 +1258,29 @@ extension TypeChecker {
     switch expr {
     case .isExpression:
       return true
-    case .andExpression(let left, let right), .orExpression(let left, let right):
+    case .andExpression(let left, let right, _), .orExpression(let left, let right, _):
       return conditionContainsIsExpression(left) || conditionContainsIsExpression(right)
-    case .notExpression(let inner):
+    case .notExpression(let inner, _):
       return conditionContainsIsExpression(inner)
     default:
       return false
+    }
+  }
+
+  /// The first `is` with variable bindings inside `expr`, if any.
+  ///
+  /// The rule is about a binding written in a pattern, so the violation is
+  /// reported ON THAT `is` -- not on the `or` / `not` that happens to wrap it.
+  private func firstIsWithBindings(_ expr: ExpressionNode) -> ExpressionNode? {
+    switch expr {
+    case .isExpression(_, let pattern, _):
+      return untypedPatternContainsBindings(pattern) ? expr : nil
+    case .andExpression(let left, let right, _), .orExpression(let left, let right, _):
+      return firstIsWithBindings(left) ?? firstIsWithBindings(right)
+    case .notExpression(let inner, _):
+      return firstIsWithBindings(inner)
+    default:
+      return nil
     }
   }
 
@@ -1247,24 +1288,24 @@ extension TypeChecker {
   /// Reports a diagnostic error if found.
   private func checkOrBranchesForBindings(_ expr: ExpressionNode) throws {
     switch expr {
-    case .orExpression(let left, let right):
-      // Check if either side of `or` contains `is` with bindings
-      if conditionContainsIsWithBindings(left) || conditionContainsIsWithBindings(right) {
+    case .orExpression(let left, let right, _):
+      // Report on the `is` that carries the binding, not on the wrapping `or`.
+      if let offending = firstIsWithBindings(left) ?? firstIsWithBindings(right) {
         throw SemanticError(
           .generic("Variable bindings in 'is' expression are not allowed in 'or' branches"),
-          span: currentSpan
+          span: offending.span
         )
       }
-    case .andExpression(let left, let right):
+    case .andExpression(let left, let right, _):
       // Recurse into `and` branches to find nested `or`
       try checkOrBranchesForBindings(left)
       try checkOrBranchesForBindings(right)
-    case .notExpression(let inner):
-      // Check if `not` wraps an `is` with bindings
-      if conditionContainsIsWithBindings(inner) {
+    case .notExpression(let inner, _):
+      // Report on the `is` that carries the binding, not on the wrapping `not`.
+      if let offending = firstIsWithBindings(inner) {
         throw SemanticError(
           .generic("Variable bindings in 'is' expression are not allowed under 'not'"),
-          span: currentSpan
+          span: offending.span
         )
       }
     default:
@@ -1276,7 +1317,7 @@ extension TypeChecker {
   /// e.g. `a and b and c` → `[a, b, c]`
   private func flattenAndChain(_ expr: ExpressionNode) -> [ExpressionNode] {
     switch expr {
-    case .andExpression(let left, let right):
+    case .andExpression(let left, let right, _):
       return flattenAndChain(left) + flattenAndChain(right)
     default:
       return [expr]
@@ -1409,8 +1450,24 @@ extension TypeChecker {
     expectedType: Type? = nil,
     usage: ExpressionUsage = .value
   ) throws -> TypedExpressionNode {
+    // Point span-less errors at the expression being checked, not at the
+    // enclosing statement. An error inherits `currentSpan`, which the statement
+    // checker set to the whole statement -- so `let _ = &unsafe 1;` used to
+    // blame `let ...` instead of the `&unsafe 1` that is actually wrong.
+    //
+    // Restored on the way out, which is what keeps the call-argument case
+    // intact: `takes_bytes_1(payload)` reports the CALLEE, because the argument
+    // is checked and its span popped before the coercion that finds the
+    // mismatch runs. Three tests pin that exact column.
+    let outerSpan = currentSpan
+    let exprSpan = expr.span
+    if exprSpan.isKnown {
+      currentSpan = exprSpan
+    }
+    defer { currentSpan = outerSpan }
+
     switch expr {
-    case .castExpression(let typeNode, let innerExpr):
+    case .castExpression(let typeNode, let innerExpr, _):
       let targetType = try resolveTypeNode(typeNode)
 
       if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
@@ -1430,16 +1487,16 @@ extension TypeChecker {
       // Cast always produces an rvalue.
       return .castExpression(expression: typedInner, type: targetType)
 
-    case .integerLiteral(let value):
+    case .integerLiteral(let value, _):
       return .integerLiteral(value: value, type: .int)
 
-    case .floatLiteral(let value):
+    case .floatLiteral(let value, _):
       return .floatLiteral(value: value, type: .float64)
 
-    case .stringLiteral(let value):
+    case .stringLiteral(let value, _):
       return .stringLiteral(value: value, type: builtinStringType())
 
-    case .runeLiteral(let value):
+    case .runeLiteral(let value, _):
       // Default inference: Rune. If expected type is UInt8 (byte), infer as byte directly.
       if let expected = expectedType, expected == .uint8 {
         guard let cp = singleRuneCodePoint(from: value), cp <= 127 else {
@@ -1453,7 +1510,7 @@ extension TypeChecker {
       let typedParts = try typeCheckInterpolatedParts(parts, span: span)
       return try lowerInterpolatedString(parts: typedParts, span: span)
 
-    case .booleanLiteral(let value):
+    case .booleanLiteral(let value, _):
       return .booleanLiteral(value: value, type: .bool)
 
     case .emptyLiteral(let span):
@@ -1499,7 +1556,7 @@ extension TypeChecker {
           let (pattern, _) = try checkPattern(c.pattern, subjectType: subjectType)
           for symbol in extractPatternSymbols(from: pattern) {
             if let name = context.getName(symbol.defId) {
-              try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+              try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
             }
           }
           // Use the current target's evolving type, if any, for subsequent arms.
@@ -1544,7 +1601,7 @@ extension TypeChecker {
       let checker = ExhaustivenessChecker(
         subjectType: subjectType,
         patterns: patterns,
-        currentLine: currentLine,
+        span: span,
         resolvedEnumCases: resolvedCases,
         context: context
       )
@@ -1565,12 +1622,18 @@ extension TypeChecker {
 
       return .whenExpression(subject: typedSubject, cases: typedCases, type: resultType)
 
-    case .identifier(let name):
+    case .identifier(let name, let nameSpan):
       if currentScope.isMoved(name) {
         throw SemanticError.variableMoved(name)
       }
       guard let resolvedInfo = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
-        throw SemanticError.undefinedVariable(name)
+        // A name that does not exist is one problem among several a body may
+        // have. Recording it and standing in for the value keeps the rest of
+        // the body in view: the statements after this one, and the mistakes in
+        // the statement this one sits in. A speculative query never gets here --
+        // it re-throws instead of reporting.
+        try handleError(SemanticError.undefinedVariable(name))
+        return failedExpression()
       }
 
       let info = resolvedInfo
@@ -1589,7 +1652,9 @@ extension TypeChecker {
         // 检查符号是否可以从当前模块直接访问（传递符号名用于成员导入检查）
         if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
           let modulePath = symbolModulePath.joined(separator: "::")
-          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(name) }."), span: currentSpan)
+          // The name is used more than once in a file; each unimported use is
+          // a place the reader has to look at.
+          try handleError(SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(name) }."), span: nameSpan))
         }
       }
       
@@ -1630,10 +1695,11 @@ extension TypeChecker {
       
       return .variable(identifier: symbol)
 
-    case .blockExpression(let statements, let tailExpression):
+    case .blockExpression(let statements, let tailExpression, _):
       currentBlockExpressionDepth += 1
       defer { currentBlockExpressionDepth -= 1 }
       return try withNewScope {
+        let diagnosticsBeforeBlock = diagnosticCollector.errorCountValue
         var typedStatements: [TypedStatementNode] = []
         var blockType: Type = .void
         var controlFlowTerminator: String? = nil
@@ -1678,13 +1744,21 @@ extension TypeChecker {
           blockType = .never
         }
 
+        // A block that already complained has no reliable type. `let x Int =
+        // { 1; }` is ONE mistake -- the `;` turned the value into a statement
+        // -- and the `expected Int, got Void` that would follow is that same
+        // mistake said again at the binding.
+        if diagnosticCollector.errorCountValue > diagnosticsBeforeBlock {
+          blockType = .error
+        }
+
         return .blockExpression(
           statements: typedStatements,
           tailExpression: typedTailExpression,
           type: blockType)
       }
 
-    case .arithmeticExpression(let left, let op, let right):
+    case .arithmeticExpression(let left, let op, let right, _):
       var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
       var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
 
@@ -1700,7 +1774,7 @@ extension TypeChecker {
 
       return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
 
-    case .comparisonExpression(let left, let op, let right):
+    case .comparisonExpression(let left, let op, let right, _):
       let typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
       let typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
       return try buildTypedComparisonExpression(lhs: typedLeft, op: op, rhs: typedRight)
@@ -1708,7 +1782,7 @@ extension TypeChecker {
     case .comparisonChainExpression(let operands, let operators, let span):
       return try inferComparisonChainExpression(operands: operands, operators: operators, span: span)
 
-    case .ifExpression(let condition, let thenBranch, let elseBranch):
+    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
       if usage == .statement {
         let stmt = try inferStatementExpression(expr)
         let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
@@ -1741,23 +1815,26 @@ extension TypeChecker {
         )
       }
 
+      // Both branches are checked before either is reconciled against the
+      // expected type. Normalising the `then` first would report the
+      // conditional's type mismatch and never look inside the `else`, so a
+      // pure statement sitting there went unmentioned.
       let branchExpectedType = expectedType
-      let typedThen = try normalizeBranchExpression(
-        try inferTypedExpression(thenBranch, expectedType: branchExpectedType, usage: .value),
-        expectedType: branchExpectedType
-      )
+      let rawThen = try inferTypedExpression(
+        thenBranch, expectedType: branchExpectedType, usage: .value)
 
       var nextExpectedType = expectedType
       if nextExpectedType == nil,
-         typedThen.type != .never,
-         isImplicitMemberContextType(typedThen.type),
+         rawThen.type != .never,
+         isImplicitMemberContextType(rawThen.type),
          branchNeedsExpectedTypeForImplicitMember(elseBranch) {
-        nextExpectedType = typedThen.type
+        nextExpectedType = rawThen.type
       }
-      let typedElse = try normalizeBranchExpression(
-        try inferTypedExpression(elseBranch, expectedType: nextExpectedType, usage: .value),
-        expectedType: nextExpectedType
-      )
+      let rawElse = try inferTypedExpression(
+        elseBranch, expectedType: nextExpectedType, usage: .value)
+
+      let typedThen = try normalizeBranchExpression(rawThen, expectedType: branchExpectedType)
+      let typedElse = try normalizeBranchExpression(rawElse, expectedType: nextExpectedType)
       return try buildTypedIfExpression(
         condition: typedCondition,
         thenBranch: typedThen,
@@ -1770,10 +1847,10 @@ extension TypeChecker {
       let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
       return .blockExpression(statements: [stmt], tailExpression: nil, type: blockType)
 
-    case .call(let callee, let arguments):
+    case .call(let callee, let arguments, _):
       return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)
 
-    case .andExpression(let left, let right):
+    case .andExpression(let left, let right, _):
       let typedLeft = try inferTypedExpression(left)
       let typedRight = try inferTypedExpression(right)
       if typedLeft.type != .bool || typedRight.type != .bool {
@@ -1782,7 +1859,7 @@ extension TypeChecker {
       }
       return .andExpression(left: typedLeft, right: typedRight, type: .bool)
 
-    case .orExpression(let left, let right):
+    case .orExpression(let left, let right, _):
       let typedLeft = try inferTypedExpression(left)
       let typedRight = try inferTypedExpression(right)
       if typedLeft.type != .bool || typedRight.type != .bool {
@@ -1791,7 +1868,7 @@ extension TypeChecker {
       }
       return .orExpression(left: typedLeft, right: typedRight, type: .bool)
 
-    case .unaryMinusExpression(let expr):
+    case .unaryMinusExpression(let expr, _):
       let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
       if isIntegerType(typedExpr.type) {
         let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
@@ -1812,14 +1889,14 @@ extension TypeChecker {
       }
       throw SemanticError.undefinedMember("neg", typedExpr.type.description)
 
-    case .notExpression(let expr):
+    case .notExpression(let expr, _):
       let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
       if typedExpr.type != .bool {
         throw SemanticError.typeMismatch(expected: "Bool", got: typedExpr.type.description)
       }
       return .notExpression(expression: typedExpr, type: .bool)
 
-    case .bitwiseExpression(let left, let op, let right):
+    case .bitwiseExpression(let left, let op, let right, _):
       var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
       var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
 
@@ -1839,14 +1916,14 @@ extension TypeChecker {
       }
       return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: typedLeft.type)
 
-    case .bitwiseNotExpression(let expr):
+    case .bitwiseNotExpression(let expr, _):
       let typedExpr = try inferTypedExpression(expr)
       if !isIntegerScalarType(typedExpr.type) {
         throw SemanticError.typeMismatch(expected: "Integer Type", got: typedExpr.type.description)
       }
       return .bitwiseNotExpression(expression: typedExpr, type: typedExpr.type)
 
-    case .derefExpression(let inner):
+    case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
       if let info = typedInner.type.indirectionCompatibilityInfo,
          let targetType = dereferenceTargetType(of: typedInner.type) {
@@ -1877,7 +1954,7 @@ extension TypeChecker {
         )
       }
 
-    case .unsafeDerefExpression(let inner):
+    case .unsafeDerefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
       guard let info = typedInner.type.indirectionCompatibilityInfo,
             info.family == .rawPointer,
@@ -1891,7 +1968,7 @@ extension TypeChecker {
       try requireDerefablePointee(targetType, operation: "*", spelledType: spelledType)
       return .unsafeDerefExpression(expression: typedInner, type: targetType)
 
-    case .addressOfExpression(let inner, let mutable):
+    case .addressOfExpression(let inner, let mutable, _):
       let typedInner = try inferTypedExpression(inner)
 
       if mutable && !canTakeMutableReference(to: typedInner) {
@@ -1902,7 +1979,7 @@ extension TypeChecker {
       let refType: Type = mutable ? .mutableReference(inner: typedInner.type) : .reference(inner: typedInner.type)
       return .referenceExpression(expression: typedInner, type: refType)
 
-    case .ptrExpression(let inner, let mutable):
+    case .ptrExpression(let inner, let mutable, _):
       let typedInner = try inferTypedExpression(inner)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
@@ -1920,18 +1997,19 @@ extension TypeChecker {
         : .pointer(element: typedInner.type)
       return .ptrExpression(expression: typedInner, type: ptrType)
 
-    case .subscriptExpression(let base, let arguments):
+    case .subscriptExpression(let base, let arguments, let span):
       let typedBase = try inferTypedExpression(base)
       let typedArguments = try arguments.map { try inferTypedExpression($0) }
       let resolvedSubscript = try resolveSubscript(
         base: typedBase,
         args: typedArguments,
-        expectedType: expectedType
+        expectedType: expectedType,
+        span: span
       )
 
       return resolvedSubscript
 
-    case .genericMethodCall(let baseExpr, let methodTypeArgs, let methodName, let arguments):
+    case .genericMethodCall(let baseExpr, let methodTypeArgs, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
@@ -1947,7 +2025,7 @@ extension TypeChecker {
         "Trait qualification must be followed by a method call"
       ), span: currentSpan)
 
-    case .qualifiedMethodCall(let typeNode, let traitType, let methodName, let arguments):
+    case .qualifiedMethodCall(let typeNode, let traitType, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
@@ -1959,7 +2037,7 @@ extension TypeChecker {
         callArgs: arguments
       )
 
-    case .qualifiedGenericMethodCall(let typeNode, let traitType, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let typeNode, let traitType, let methodTypeArgs, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
@@ -1971,10 +2049,10 @@ extension TypeChecker {
         callArgs: arguments
       )
 
-    case .memberPath(let baseExpr, let path):
+    case .memberPath(let baseExpr, let path, _):
       return try inferMemberPathExpression(baseExpr: baseExpr, path: path)
 
-    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
+    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
@@ -1985,10 +2063,10 @@ extension TypeChecker {
         callArgs: arguments
       )
 
-    case .forExpression(let pattern, let iterable, let body):
+    case .forExpression(let pattern, let iterable, let body, _):
       return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
 
-    case .rangeExpression(let op, let left, let right):
+    case .rangeExpression(let op, let left, let right, _):
       return try inferRangeExpression(
         operator: op,
         left: left,
@@ -1996,11 +2074,11 @@ extension TypeChecker {
         expectedType: expectedType
       )
 
-    case .genericInstantiation(let base, _):
+    case .genericInstantiation(let base, _, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
       
-    case .lambdaExpression(let parameters, let returnType, let body, _):
-      return try inferLambdaExpression(parameters: parameters, returnType: returnType, body: body, expectedType: expectedType)
+    case .lambdaExpression(let parameters, let returnType, let body, let span):
+      return try inferLambdaExpression(parameters: parameters, returnType: returnType, body: body, expectedType: expectedType, span: span)
       
     case .implicitMemberExpression(let memberName, let arguments, let span):
       // Implicit member expression requires an expected type from context.
@@ -2248,13 +2326,19 @@ extension TypeChecker {
 
   private func inferEmptyLiteral(span: SourceSpan, expectedType: Type?) throws -> TypedExpressionNode {
     guard let expectedType else {
-      throw SemanticError(
-        .generic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."),
-        span: span
-      )
+      // One problem among several: record it and let the rest of the file be
+      // checked.
+      try handleError(
+        SemanticError(
+          .generic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."),
+          span: span
+        ))
+      return failedExpression()
     }
 
-    let target = try classifyCollectionTarget(expectedType, span: span)
+    guard let target = try classifyCollectionTarget(expectedType, span: span) else {
+      return failedExpression()
+    }
     switch target {
     case .list, .set, .map:
       return try buildWithCapacityCall(targetType: expectedType, count: 0)
@@ -2273,7 +2357,10 @@ extension TypeChecker {
     let target: CollectionTargetKind
 
     if let expectedType {
-      target = try classifyCollectionTarget(expectedType, span: span)
+      guard let classified = try classifyCollectionTarget(expectedType, span: span) else {
+        return failedExpression()
+      }
+      target = classified
     } else {
       let inferredElementType = try inferCommonElementType(elements: elements, span: span)
       target = .list(element: inferredElementType)
@@ -2324,7 +2411,9 @@ extension TypeChecker {
     let valueType: Type
 
     if let expectedType {
-      let target = try classifyCollectionTarget(expectedType, span: span)
+      guard let target = try classifyCollectionTarget(expectedType, span: span) else {
+        return failedExpression()
+      }
       switch target {
       case .map(let k, let v):
         keyType = k
@@ -2350,7 +2439,7 @@ extension TypeChecker {
     )
   }
 
-  private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind {
+  private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind? {
     switch type {
     case .genericStruct(let defId, let args):
       switch Type.spelling(defId) {
@@ -2370,10 +2459,12 @@ extension TypeChecker {
         }
         return .map(key: args[0], value: args[1])
       default:
-        throw SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
-          span: span
-        )
+        try handleError(
+          SemanticError(
+            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+            span: span
+          ))
+        return nil
       }
 
     case .genericEnum(let defId, let args):
@@ -2384,17 +2475,21 @@ extension TypeChecker {
         }
         return .range(element: args[0])
       default:
-        throw SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
-          span: span
-        )
+        try handleError(
+          SemanticError(
+            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+            span: span
+          ))
+        return nil
       }
 
     default:
-      throw SemanticError(
-        .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
-        span: span
-      )
+      try handleError(
+        SemanticError(
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+          span: span
+        ))
+      return nil
     }
   }
 
@@ -2434,9 +2529,9 @@ extension TypeChecker {
     // This helper intentionally only covers primitive defaults used in literal type reconciliation.
     switch type {
     case .int, .int8, .int16, .int32, .int64, .uint, .uint8, .uint16, .uint32, .uint64:
-      return .integerLiteral("0")
+      return .integerLiteral("0", span: .unknown)
     case .float32, .float64:
-      return .floatLiteral("0.0")
+      return .floatLiteral("0.0", span: .unknown)
     default:
       return nil
     }
@@ -2563,7 +2658,7 @@ extension TypeChecker {
       typeName: typeName,
       typeArgs: typeArgs,
       methodName: "with_capacity",
-      callArgs: [CallArg(expression: .integerLiteral("\(count)"))]
+      callArgs: [CallArg(expression: .integerLiteral("\(count)", span: .unknown))]
     )
   }
 
@@ -2585,58 +2680,60 @@ extension TypeChecker {
 
   private func toTypeNode(_ type: Type) throws -> TypeNode {
     switch type {
-    case .int: return .identifier("Int")
-    case .int8: return .identifier("Int8")
-    case .int16: return .identifier("Int16")
-    case .int32: return .identifier("Int32")
-    case .int64: return .identifier("Int64")
-    case .uint: return .identifier("UInt")
-    case .uint8: return .identifier("UInt8")
-    case .uint16: return .identifier("UInt16")
-    case .uint32: return .identifier("UInt32")
-    case .uint64: return .identifier("UInt64")
-    case .float32: return .identifier("Float32")
-    case .float64: return .identifier("Float64")
-    case .bool: return .identifier("Bool")
-    case .void: return .identifier("Void")
-    case .never: return .identifier("Never")
-    case .reference(let inner): return .reference(try toTypeNode(inner), mutable: false)
-    case .mutableReference(let inner): return .reference(try toTypeNode(inner), mutable: true)
-    case .borrowedReference(let inner): return .reference(try toTypeNode(inner), mutable: false)
-    case .mutableBorrowedReference(let inner): return .reference(try toTypeNode(inner), mutable: true)
-    case .pointer(let inner): return .pointer(try toTypeNode(inner), mutable: false)
-    case .mutablePointer(let inner): return .pointer(try toTypeNode(inner), mutable: true)
-    case .weakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: false)
-    case .mutableWeakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: true)
-    case .genericParameter(let name): return .identifier(name)
+    case .int: return .identifier("Int", span: .unknown)
+    case .int8: return .identifier("Int8", span: .unknown)
+    case .int16: return .identifier("Int16", span: .unknown)
+    case .int32: return .identifier("Int32", span: .unknown)
+    case .int64: return .identifier("Int64", span: .unknown)
+    case .uint: return .identifier("UInt", span: .unknown)
+    case .uint8: return .identifier("UInt8", span: .unknown)
+    case .uint16: return .identifier("UInt16", span: .unknown)
+    case .uint32: return .identifier("UInt32", span: .unknown)
+    case .uint64: return .identifier("UInt64", span: .unknown)
+    case .float32: return .identifier("Float32", span: .unknown)
+    case .float64: return .identifier("Float64", span: .unknown)
+    case .bool: return .identifier("Bool", span: .unknown)
+    case .void: return .identifier("Void", span: .unknown)
+    case .never: return .identifier("Never", span: .unknown)
+    case .reference(let inner): return .reference(try toTypeNode(inner), mutable: false, span: .unknown)
+    case .mutableReference(let inner): return .reference(try toTypeNode(inner), mutable: true, span: .unknown)
+    case .borrowedReference(let inner): return .reference(try toTypeNode(inner), mutable: false, span: .unknown)
+    case .mutableBorrowedReference(let inner): return .reference(try toTypeNode(inner), mutable: true, span: .unknown)
+    case .pointer(let inner): return .pointer(try toTypeNode(inner), mutable: false, span: .unknown)
+    case .mutablePointer(let inner): return .pointer(try toTypeNode(inner), mutable: true, span: .unknown)
+    case .weakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: false, span: .unknown)
+    case .mutableWeakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: true, span: .unknown)
+    case .genericParameter(let name): return .identifier(name, span: .unknown)
     case .genericStruct(let defId, let args):
-      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) })
+      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) }, span: .unknown)
     case .genericEnum(let defId, let args):
-      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) })
+      return .generic(base: Type.spelling(defId), args: try args.map { try toTypeNode($0) }, span: .unknown)
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
       guard let name = context.getName(defId) else {
         throw SemanticError(.generic("Unable to resolve type node name"), span: currentSpan)
       }
-      return .identifier(name)
+      return .identifier(name, span: .unknown)
     case .function(let params, let returns):
       let paramNodes = try params.map { try toTypeNode($0.type) }
-      return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns))
+      return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns), span: .unknown)
     case .module, .typeVariable, .traitObject:
+      throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
+    case .error:
       throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
     }
   }
 
   private func extractCompileTimeConstantKey(from expr: ExpressionNode) -> String? {
     switch expr {
-    case .integerLiteral(let value):
+    case .integerLiteral(let value, _):
       return "int:\(value)"
-    case .floatLiteral(let value):
+    case .floatLiteral(let value, _):
       return "float:\(value)"
-    case .stringLiteral(let value):
+    case .stringLiteral(let value, _):
       return "string:\(value)"
-    case .runeLiteral(let value):
+    case .runeLiteral(let value, _):
       return "rune:\(value)"
-    case .booleanLiteral(let value):
+    case .booleanLiteral(let value, _):
       return "bool:\(value)"
     default:
       return nil
@@ -3245,7 +3342,7 @@ extension TypeChecker {
     
     if shouldRecoverCallSiteOnce {
       shouldRecoverCallSiteOnce = false
-      if case .identifier(let name) = callee,
+      if case .identifier(let name, _) = callee,
         let callSpan = bestEffortIdentifierCallSpan(name, startLine: currentSpan.start.line)
       {
         currentSpan = callSpan
@@ -3255,8 +3352,8 @@ extension TypeChecker {
     // Compiler protocol methods are blocked after concrete method resolution,
     // based on structural method kind metadata rather than name checks.
     // Static trait method calls on generic parameter types (e.g., T.method())
-    if case .memberPath(let baseExpr, let path) = callee,
-       case .identifier(let baseName) = baseExpr,
+    if case .memberPath(let baseExpr, let path, _) = callee,
+       case .identifier(let baseName, _) = baseExpr,
        path.count == 1,
        let baseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile),
        case .genericParameter(let paramName) = baseType
@@ -3373,8 +3470,8 @@ extension TypeChecker {
     }
 
     // Check if callee is a static method call on a generic type (e.g., [Int]List.new())
-    if case .memberPath(let baseExpr, let path) = callee,
-       case .genericInstantiation(let baseName, let args) = baseExpr,
+    if case .memberPath(let baseExpr, let path, _) = callee,
+       case .genericInstantiation(let baseName, let args, _) = baseExpr,
        path.count == 1 {
       let memberName = path[0]
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -3565,12 +3662,12 @@ extension TypeChecker {
     }
     
     // Check if callee is a generic instantiation (Constructor call or Function call)
-    if case .genericInstantiation(let base, let args) = callee {
-      return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs)
+    if case .genericInstantiation(let base, let args, _) = callee {
+      return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs, span: callee.span)
     }
 
-    if case .memberPath(let baseExpr, let path) = callee,
-       case .identifier(let baseName) = baseExpr,
+    if case .memberPath(let baseExpr, let path, _) = callee,
+       case .identifier(let baseName, _) = baseExpr,
        path.count == 1,
        let rawBaseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile) {
       let memberName = path[0]
@@ -3639,8 +3736,8 @@ extension TypeChecker {
 
     // Check if callee is a generic enum constructor with type inference from expected type
     // e.g., Option.Some(42) when expected type is Option[Int]
-    if case .memberPath(let baseExpr, let path) = callee,
-       case .identifier(let baseName) = baseExpr,
+    if case .memberPath(let baseExpr, let path, _) = callee,
+       case .identifier(let baseName, _) = baseExpr,
        path.count == 1,
        let template = currentScope.lookupGenericEnumTemplate(baseName) {
       let memberName = path[0]
@@ -3695,13 +3792,19 @@ extension TypeChecker {
         }
       }
     }
-    // Resolve Callee (Check Enum Constructor)
+    // Resolve Callee (Check Enum Constructor). This is a QUERY, not an
+    // assertion: a name that fails it is still resolved below -- by a template,
+    // a type, or an intrinsic -- so it must stay silent.
     var preResolvedCallee: TypedExpressionNode? = nil
     do {
-      preResolvedCallee = try inferTypedExpression(callee)
-    } catch is SemanticError {
-      // Fallthrough
-      preResolvedCallee = nil
+      beginSpeculativeQuery()
+      defer { endSpeculativeQuery() }
+      do {
+        preResolvedCallee = try inferTypedExpression(callee)
+      } catch is SemanticError {
+        // Fallthrough
+        preResolvedCallee = nil
+      }
     }
 
     if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
@@ -3749,7 +3852,7 @@ extension TypeChecker {
     }
 
     // Check if it is a constructor call OR implicit generic function call
-    if case .identifier(let name) = callee {
+    if case .identifier(let name, _) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
       // A local binding of the same name shadows the template: `f(x)` where `f`
       // is a parameter or local `let` calls that value. Consulting the global
@@ -3780,7 +3883,7 @@ extension TypeChecker {
           typeName: name,
           defId: defId,
           members: parameters,
-          span: currentSpan
+          span: callee.span
         )
         let plan = try planConstructorArguments(
           callArgs,
@@ -3810,7 +3913,7 @@ extension TypeChecker {
       if isASCIITypeStyleIdentifier(name) {
         // Try generic struct template
         if let template = currentScope.lookupGenericStructTemplate(name) {
-          return try inferGenericStructConstruction(template: template, name: name, callArgs: callArgs)
+          return try inferGenericStructConstruction(template: template, name: name, callArgs: callArgs, span: callee.span)
         }
         
         // Try generic enum template (for enum case constructors without dot notation)
@@ -3819,13 +3922,30 @@ extension TypeChecker {
     }
 
     // Special handling for intrinsic function calls (alloc_memory, etc.)
-    if case .identifier(let name) = callee {
+    if case .identifier(let name, _) = callee {
       if let intrinsicNode = try checkIntrinsicCall(name: name, arguments: arguments) {
         return intrinsicNode
       }
     }
 
-    var typedCallee = try inferTypedExpression(callee)
+    // Nothing resolved the callee -- no constructor, no template, no intrinsic,
+    // and no ordinary binding. That is one problem among several the body may
+    // have, so it is recorded and the call stands in for its result: a
+    // statement after this one may have a mistake of its own, and the one in
+    // this call does not excuse it.
+    var typedCallee: TypedExpressionNode
+    do {
+      typedCallee = try inferTypedExpression(callee)
+    } catch let error as SemanticError {
+      try handleError(error)
+      return failedExpression()
+    }
+    if typedCallee.type == .error {
+      // The callee has already objected about itself. The call stands in for
+      // its result rather than complaining that a failed value is not
+      // callable.
+      return failedExpression()
+    }
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
     if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _) = typedCallee,
@@ -3907,7 +4027,7 @@ extension TypeChecker {
             body: body,
             expectedType: param.type
           )
-        } else if case .rangeExpression(let op, let left, let right) = arg {
+        } else if case .rangeExpression(let op, let left, let right, _) = arg {
           typedArg = try inferRangeExpression(
             operator: op,
             left: left,
@@ -3985,7 +4105,7 @@ extension TypeChecker {
             body: body,
             expectedType: param.type
           )
-          } else if case .rangeExpression(let op, let left, let right) = arg {
+          } else if case .rangeExpression(let op, let left, let right, _) = arg {
             typedArg = try inferRangeExpression(
               operator: op,
               left: left,
@@ -4021,7 +4141,7 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a generic instantiation call (e.g., [Int]List(...) or [T]func(...))
-  func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode], callArgs: [CallArg]? = nil) throws -> TypedExpressionNode {
+  func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode], callArgs: [CallArg]? = nil, span: SourceSpan = .unknown) throws -> TypedExpressionNode {
     if let template = currentScope.lookupGenericStructTemplate(base) {
       try ensureStructConstructionAccess(
         typeName: base,
@@ -4029,7 +4149,7 @@ extension TypeChecker {
         members: template.parameters.map { param in
           (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
         },
-        span: currentSpan
+        span: span
       )
 
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -4224,7 +4344,7 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        try enforceMutableConstraintForCall(resolvedArgs[0], function: "downgrade")
+        try enforceMutableConstraintForCall(resolvedArgs[0], function: "downgrade", span: arguments[0].span)
         let refArg = try inferArgumentExpression(arguments[0], expectedType: resolvedArgs[0])
         let resultType: Type = .weakReference(inner: refArg.type)
         return .intrinsicCall(.downgradeRef(val: refArg, resultType: resultType))
@@ -4242,7 +4362,7 @@ extension TypeChecker {
         }
         let weakArg = try inferArgumentExpression(arguments[0], expectedType: .weakReference(inner: resolvedArgs[0]))
         guard case .weakReference(let innerType) = weakArg.type else {
-          throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakArg.type)"), span: currentSpan)
+          throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakArg.type)"), span: arguments[0].span)
         }
         let resultType: Type = genericEnumType(template: "Option", args: [innerType])
         return .intrinsicCall(.upgradeRef(val: weakArg, resultType: resultType))
@@ -4419,7 +4539,7 @@ extension TypeChecker {
 
       if name == "downgrade" {
         // downgrade takes a managed value T (must satisfy 'mutable' constraint) and produces ?T
-        try enforceMutableConstraintForCall(typedArgument.type, function: "downgrade")
+        try enforceMutableConstraintForCall(typedArgument.type, function: "downgrade", span: arguments[0].span)
         let resultType: Type = .weakReference(inner: typedArgument.type)
         return .intrinsicCall(.downgradeRef(val: typedArgument, resultType: resultType))
       }
@@ -4430,7 +4550,7 @@ extension TypeChecker {
           let resultType: Type = genericEnumType(template: "Option", args: [innerType])
           return .intrinsicCall(.upgradeRef(val: typedArgument, resultType: resultType))
         default:
-          throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(typedArgument.type)"), span: currentSpan)
+          throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(typedArgument.type)"), span: arguments[0].span)
         }
       }
 
@@ -4531,7 +4651,7 @@ extension TypeChecker {
     if templateName == "downgrade" {
       // downgrade takes a managed value T (must satisfy 'mutable' constraint) and produces ?T
       let refValue = typedArguments[0]
-      try enforceMutableConstraintForCall(refValue.type, function: "downgrade")
+      try enforceMutableConstraintForCall(refValue.type, function: "downgrade", span: arguments[0].span)
       let resultType: Type = .weakReference(inner: refValue.type)
       return .intrinsicCall(.downgradeRef(val: refValue, resultType: resultType))
     }
@@ -4539,7 +4659,7 @@ extension TypeChecker {
     if templateName == "upgrade" {
       let weakValue = typedArguments[0]
       guard case .weakReference(let innerType) = weakValue.type else {
-        throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakValue.type)"), span: currentSpan)
+        throw SemanticError(.generic("'upgrade' expects a weak reference (?T), got \(weakValue.type)"), span: arguments[0].span)
       }
       let resultType: Type = genericEnumType(template: "Option", args: [innerType])
       return .intrinsicCall(.upgradeRef(val: weakValue, resultType: resultType))
@@ -4683,7 +4803,7 @@ extension TypeChecker {
             continue
           }
           let typedArg: TypedExpressionNode
-          if case .rangeExpression(let op, let left, let right) = arg {
+          if case .rangeExpression(let op, let left, let right, _) = arg {
             typedArg = try inferRangeExpression(
               operator: op,
               left: left,
@@ -4720,7 +4840,7 @@ extension TypeChecker {
           if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           }
-        } else if case .rangeExpression(let op, let left, let right) = arg {
+        } else if case .rangeExpression(let op, let left, let right, _) = arg {
           // For Range expressions (especially Full), pass the expected type for type inference
           var expectedType = param.type
           if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
@@ -4833,7 +4953,7 @@ extension TypeChecker {
     methodName: String,
     callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
-    if case .identifier(let typeName) = baseExpr,
+    if case .identifier(let typeName, _) = baseExpr,
        currentScope.lookup(typeName, sourceFile: currentSourceFile) == nil,
        let baseType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       if case .genericParameter = baseType {
@@ -4934,7 +5054,7 @@ extension TypeChecker {
           body: body,
           expectedType: param.type
         )
-      } else if case .rangeExpression(let op, let left, let right) = arg {
+      } else if case .rangeExpression(let op, let left, let right, _) = arg {
         typedArg = try inferRangeExpression(
           operator: op,
           left: left,
@@ -4993,14 +5113,14 @@ extension TypeChecker {
     }
 
     // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Enum Constructor
-    if case .genericInstantiation(let baseName, let args) = baseExpr {
+    if case .genericInstantiation(let baseName, let args, _) = baseExpr {
       if let result = try inferGenericInstantiationMemberPath(baseName: baseName, args: args, path: path) {
         return result
       }
     }
 
     // 2. Check if baseExpr is a Type (Identifier) for static method access
-    if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+    if case .identifier(let name, _) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       let type = canonicalizedTypeForStaticMemberLookup(rawType)
       switch type {
       case .genericStruct(let tplDefId, let typeArgs):
@@ -5023,7 +5143,7 @@ extension TypeChecker {
     }
 
     // 3. Enum Constructor Access via member path (e.g., EnumType.CaseName)
-    if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+    if case .identifier(let name, _) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       let type = canonicalizedTypeForStaticMemberLookup(rawType)
       if path.count == 1 {
         let memberName = path[0]
@@ -5037,7 +5157,7 @@ extension TypeChecker {
     
     // 4. Generic Enum Constructor Access with type inference from return type context
     // e.g., Result.Ok(x) when return type is [T, E]Result
-    if case .identifier(let name) = baseExpr,
+    if case .identifier(let name, _) = baseExpr,
        let template = currentScope.lookupGenericEnumTemplate(name),
        path.count == 1 {
       let memberName = path[0]
@@ -5085,7 +5205,7 @@ extension TypeChecker {
       }
     }
 
-    if case .identifier(let name) = baseExpr,
+    if case .identifier(let name, _) = baseExpr,
        isASCIITypeStyleIdentifier(name),
        let importError = explicitImportErrorForUnresolvedType(name) {
       throw importError
@@ -5095,6 +5215,12 @@ extension TypeChecker {
     let inferredBase = try inferTypedExpression(baseExpr)
 
     let typedBase = inferredBase
+
+    // The base has already objected about itself. What it does or does not
+    // contain is a consequence of that failure, not a second problem.
+    if typedBase.type == .error {
+      return failedExpression()
+    }
 
     var currentType: Type = typedBase.type
     var typedPath: [Symbol] = []
@@ -6512,9 +6638,9 @@ extension TypeChecker {
     var currentCallee = callee
     var currentArgs = callArgs
 
-    while case .memberPath(let baseExpr, let path) = currentCallee, path.count == 1 {
+    while case .memberPath(let baseExpr, let path, _) = currentCallee, path.count == 1 {
       segments.append((memberName: path[0], callArgs: currentArgs))
-      guard case .call(let nestedCallee, let nestedArgs) = baseExpr else {
+      guard case .call(let nestedCallee, let nestedArgs, _) = baseExpr else {
         if segments.count >= 8 {
           return (baseExpr, segments.reversed())
         }
@@ -6869,14 +6995,19 @@ extension TypeChecker {
     throw SemanticError.undefinedMember(methodName, lhs.type.description)
   }
 
+  /// `span` names the construct that needs the trait -- the operator, the
+  /// interpolated value. Left unset the diagnostic falls back to `currentSpan`,
+  /// which is the enclosing expression and is usually the wrong one.
   private func buildOperatorMethodCall(
     base: TypedExpressionNode,
     methodName: String,
     traitName: String,
     requiredTraitArgs: [Type]?,
     arguments: [TypedExpressionNode],
-    allowMissingTrait: Bool = false
+    allowMissingTrait: Bool = false,
+    span: SourceSpan = .unknown
   ) throws -> TypedExpressionNode? {
+    let blame = span.isKnown ? span : currentSpan
     if case .genericParameter(let paramName) = base.type {
       return try buildTraitMethodCall(
         paramName: paramName,
@@ -6894,6 +7025,13 @@ extension TypeChecker {
       return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
     }
 
+    // The complaint belongs to the construct that demanded the trait -- the
+    // operator, the interpolated value -- not to whatever statement the check
+    // happens to run under. `enforceTraitConformance` blames `currentSpan`, so
+    // aim it before calling.
+    let outerSpan = currentSpan
+    currentSpan = blame
+    defer { currentSpan = outerSpan }
     let nominalTraitSatisfied: Bool = {
       do {
         if let requiredTraitArgs {
@@ -6920,14 +7058,18 @@ extension TypeChecker {
       if allowMissingTrait {
         return nil
       }
+      // The note the enforcement above computed is not decoration: it is what
+      // tells the reader which operator demanded the trait. It was being
+      // thrown away with the caught error and this message rebuilt without it.
+      let note = " (operator '\(methodName)')"
       if let requiredTraitArgs {
         throw SemanticError(.generic(
-          "Type \(base.type) does not explicitly implement trait [\(requiredTraitArgs.map { $0.description }.joined(separator: ", "))]\(traitName)"
-        ), span: currentSpan)
+          "Type \(base.type) does not explicitly implement trait [\(requiredTraitArgs.map { $0.description }.joined(separator: ", "))]\(traitName)\(note)"
+        ), span: blame)
       }
       throw SemanticError(.generic(
-        "Type \(base.type) does not explicitly implement trait \(traitName)"
-      ), span: currentSpan)
+        "Type \(base.type) does not explicitly implement trait \(traitName)\(note)"
+      ), span: blame)
     }
 
     if let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
@@ -7085,7 +7227,7 @@ extension TypeChecker {
   /// Resolves an lvalue expression for assignment
   func resolveLValue(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
-    case .identifier(let name):
+    case .identifier(let name, _):
       guard let defId = currentScope.lookup(name, sourceFile: currentSourceFile),
             let type = defIdMap.getSymbolType(defId) else {
         throw SemanticError.undefinedVariable(name)
@@ -7095,32 +7237,32 @@ extension TypeChecker {
       let symbol = Symbol(defId: defId, type: type, kind: kind)
       return .variable(identifier: symbol)
 
-    case .memberPath(let base, let path):
+    case .memberPath(let base, let path, _):
       // Check if base evaluates to a Reference type (RValue allowed)
       // OR if base resolves to an LValue (Mut Value required)
 
       func inferWritableMemberBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
-        if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
+        if case .subscriptExpression(let outerBaseExpr, let outerArgExprs, _) = baseExpr {
           let typedOuterBase = try inferWritableMemberBase(outerBaseExpr)
           let typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
 
           switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
           case .string:
-            throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
+            throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
           case .dict, .list, .deque:
-            let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+            let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
             if isMutableNominalReceiverType(subscriptValue.type) {
               return subscriptValue
             }
             throw SemanticError(.generic(
               "Collection subscript results are values and cannot be used as writable base addresses"
-            ), span: currentSpan)
+            ), span: outerBaseExpr.span)
           case .pointer:
-            return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+            return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
           case .none:
             throw SemanticError(.generic(
               "subscript is only supported for String, List, Deque, Dict, and pointer types"
-            ), span: currentSpan)
+            ), span: outerBaseExpr.span)
           }
         }
 
@@ -7347,12 +7489,12 @@ extension TypeChecker {
       }
       return .memberPath(source: typedBase, path: resolvedPath)
 
-    case .subscriptExpression(_, _):
+    case .subscriptExpression(_, _, _):
       // Direct assignment to `x[i]` is lowered to `set_at` in statement checking.
       // Treat subscript as an invalid assignment target here.
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
-    case .derefExpression(let inner):
+    case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
       switch typedInner.type {
       case .reference:
@@ -7383,7 +7525,7 @@ extension TypeChecker {
         )
       }
 
-    case .unsafeDerefExpression(let inner):
+    case .unsafeDerefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
       switch typedInner.type {
       case .pointer:
@@ -7435,7 +7577,7 @@ extension TypeChecker {
       case .expression(let expr):
         let typedExpr = try inferTypedExpression(expr)
         if !isStringType(typedExpr.type) {
-          _ = try buildToStringExpression(typedExpr, span: span)
+          _ = try buildToStringExpression(typedExpr, span: expr.span)
         }
         typedParts.append(.expression(typedExpr))
       }
@@ -7645,7 +7787,8 @@ extension TypeChecker {
       methodName: "to_string",
       traitName: "ToString",
       requiredTraitArgs: nil,
-      arguments: []
+      arguments: [],
+      span: span
     ) {
       return call
     }
@@ -7960,7 +8103,7 @@ extension TypeChecker {
       let typedBody = try withNewScope {
         for symbol in extractPatternSymbols(from: typedPattern) {
           if let name = context.getName(symbol.defId) {
-            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+            try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
           }
         }
         let savedInLoop = inLoop
@@ -8220,7 +8363,7 @@ extension TypeChecker {
       // Bind pattern variables using the typed pattern symbols
       for symbol in extractPatternSymbols(from: somePattern) {
         if let name = context.getName(symbol.defId) {
-          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+          try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
         }
       }
 
@@ -8328,7 +8471,7 @@ extension TypeChecker {
         type: type,
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
-      try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+      try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
     case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType:
       break
     case .traitObjectTypeBinding(let name, let mutable, let targetType, let span):
@@ -8338,7 +8481,7 @@ extension TypeChecker {
         type: boundType,
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
-      try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+      try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
     case .enumCase(_, let elements, _):
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)
@@ -8489,14 +8632,26 @@ extension TypeChecker {
     guard currentFunctionReturnType != nil else {
       throw SemanticError(.generic("'or return' can only be used inside a function"), span: span)
     }
+    // Where the construct stands decides whether it may exist at all, and that
+    // is said BEFORE its operand is looked at: `or return` inside a `defer` is
+    // wrong whatever it is applied to. Recording it and then looking inside
+    // keeps the operand's own complaints visible without putting them ahead of
+    // the complaint about the whole.
+    var misplaced = false
     if insideDefer {
-      throw SemanticError(
+      try handleError(SemanticError(
         .generic("control flow statement 'return' is not allowed in defer expression"),
         span: span
-      )
+      ))
+      misplaced = true
     }
 
     let typedOperand = try inferTypedExpression(operand)
+    if misplaced {
+      // The construct has objected to its own placement. Desugaring it would
+      // put a `return` in the same place and say the same thing again.
+      return typedOperand
+    }
     let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or return")
 
     let returnValue: ExpressionNode
@@ -8506,14 +8661,15 @@ extension TypeChecker {
     case .result:
       returnValue = .implicitMemberExpression(
         memberName: "Error",
-        arguments: [CallArg(label: nil, expression: .identifier("it"))],
+        arguments: [CallArg(label: nil, expression: .identifier("it", span: span))],
         span: span
       )
     }
 
     let defaultExpr: ExpressionNode = .blockExpression(
       statements: [.return(value: returnValue, span: span)],
-      tailExpression: nil
+      tailExpression: nil,
+      span: span
     )
 
     return try lowerOrElseExpressionCore(

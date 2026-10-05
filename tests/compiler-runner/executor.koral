@@ -514,7 +514,301 @@ file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Resu
     return Result[Path].Error("failed to create unique temp output dir");
 };
 
+// ---------------------------------------------------------------------------
+// Differential oracle
+//
+// The two compilers stamp DefIds into C symbol names under different numbering
+// rules, so their generated artifacts can never be byte-identical -- a textual
+// diff would be pure noise. BEHAVIOUR can be identical, and it is the thing
+// worth holding them to:
+//
+//   * both accept the program, or both reject it;
+//   * when accepted, the program prints the same lines and exits the same way;
+//   * when rejected, both say the same thing.
+//
+// The `// EXPECT` comments are a hand-written oracle, checked per compiler by
+// `run_single_case`. This checks the two compilers against EACH OTHER, which is
+// what has to keep holding before the Swift compiler can be deleted: losing it
+// would trade the strongest cross-check for the weakest. A self-host fixed
+// point only proves the compiler is stable under its own output, not that it is
+// right.
+//
+// Note the diagnostic comparison is behind `--compare-diagnostics`. The runtime
+// half is exact and on by default; the wording half has a backlog (the two
+// compilers disagree on diagnostic text for a large slice of the corpus) and is
+// opt-in so the gate cannot be green by ignoring it silently -- turning it on
+// shows the whole inventory.
+// ---------------------------------------------------------------------------
+
+file_private let first_output_line(text String) String = {
+    for line in output_lines_trimmed(text) then {
+        if not line.is_empty() then {
+            return line;
+        };
+    };
+    return "<no output>";
+};
+
+file_private let output_lines_equal(a String, b String) Bool = {
+    let a_lines = output_lines_trimmed(a);
+    let b_lines = output_lines_trimmed(b);
+    if a_lines.count() <> b_lines.count() then {
+        return false;
+    };
+    let mutable i UInt = 0;
+    while i < a_lines.count() then {
+        if a_lines[i] <> b_lines[i] then {
+            return false;
+        };
+        i += 1;
+    };
+    return true;
+};
+
+/// Name the first place two outputs part company, so the report points at a
+/// line rather than at "these are different".
+file_private let first_output_difference(a_label String, a String, b_label String, b String) String = {
+    let a_lines = output_lines_trimmed(a);
+    let b_lines = output_lines_trimmed(b);
+    let shared = min(a_lines.count(), b_lines.count());
+    let mutable i UInt = 0;
+    while i < shared then {
+        if a_lines[i] <> b_lines[i] then {
+            return "line " + i.to_string() + ": " + a_label + " said '" + a_lines[i] + "', " + b_label + " said '" + b_lines[i] + "'";
+        };
+        i += 1;
+    };
+    if a_lines.count() > b_lines.count() then {
+        return a_label + " has " + a_lines.count().to_string() + " line(s), " + b_label + " has " + b_lines.count().to_string() + "; first extra " + a_label + " line: '" + a_lines[shared] + "'";
+    };
+    if b_lines.count() > a_lines.count() then {
+        return b_label + " has " + b_lines.count().to_string() + " line(s), " + a_label + " has " + a_lines.count().to_string() + "; first extra " + b_label + " line: '" + b_lines[shared] + "'";
+    };
+    return "line counts agree; outputs differ only in trailing whitespace";
+};
+
+/// Run one case under one compiler and keep what it ACTUALLY did, not whether
+/// that matched the hand-written expectations.
+file_private let observe_case(
+    config RunnerConfig,
+    compiler_bin Path,
+    label String,
+    info CaseInfo,
+    output_dir Path,
+    stop_requested AtomicInt,
+) CaseObservation = {
+    let timeout_secs = config.timeout_secs(Int64);
+    let expectations = parse_expectations(info.absolute_path) or else {
+        return .Infra(label + " side: failed to parse expectations: " + it.message());
+    };
+
+    // Same split `run_single_case` makes: a case that only asserts a compile
+    // error is checked, not built, so there is nothing to run afterwards.
+    let check_only = expectations.expect_error.count() > 0 and expectations.expect_items.is_empty() and expectations.expect_exact_output.is_empty() and not has_runtime_expect_error(expectations.expect_error);
+
+    let build_args = when if check_only then check_command_args_for_case(config, info, output_dir) else build_command_args_for_case(config, info, output_dir) in {
+        .Ok(args) then args,
+        .Error(err) then {
+            return .Infra(label + " side: failed to prepare compiler arguments: " + err.message());
+        },
+    };
+
+    let compile_output = when execute_command_with_timeout(
+        config,
+        compiler_bin.to_string(),
+        build_args,
+        output_dir,
+        if check_only then "check" else "build",
+        timeout_secs,
+        "failed to spawn compiler",
+        stop_requested,
+    ) in {
+        .Finished(output, _) then output,
+        .TimedOut(_) then {
+            return .DidNotFinish("compile timed out");
+        },
+        .Aborted(_) then {
+            return .DidNotFinish("aborted after another case exceeded the memory limit");
+        },
+        .MemoryExceeded(_, _) then {
+            return .DidNotFinish("compile exceeded the memory limit");
+        },
+        .InfrastructureError(message) then {
+            return .Infra(label + " side: " + message);
+        },
+    };
+
+    let compile_text = normalize_output(compile_output.stdout + compile_output.stderr);
+    let accepted = infer_exit_code(compile_output.status) == 0;
+    if not accepted then {
+        return .Observed(label, false, compile_text, Option[ProgramRun].None());
+    };
+
+    // A `check`-only case never produces a binary; treat "accepted, nothing to
+    // run" as agreeing with the other side doing the same.
+    if check_only then {
+        return .Observed(label, true, compile_text, Option[ProgramRun].None());
+    };
+
+    let run_output = when execute_built_executable_with_retry(
+        config,
+        info,
+        output_dir,
+        output_dir,
+        timeout_secs,
+        stop_requested,
+    ) in {
+        .Finished(output, _) then output,
+        .TimedOut(_) then {
+            return .DidNotFinish("program timed out");
+        },
+        .Aborted(_) then {
+            return .DidNotFinish("program aborted after another case exceeded the memory limit");
+        },
+        .MemoryExceeded(_, _) then {
+            return .DidNotFinish("program exceeded the memory limit");
+        },
+        .InfrastructureError(message) then {
+            return .Infra(label + " side: " + message);
+        },
+    };
+
+    let run_text = normalize_output(run_output.stdout + run_output.stderr);
+    let run_exit = infer_exit_code(run_output.status);
+    return .Observed(label, true, compile_text, Option[ProgramRun].Some(ProgramRun(run_exit, run_text)));
+};
+
+file_private let run_single_case_differential(config RunnerConfig, info CaseInfo, stop_requested AtomicInt) CaseResult = {
+    let start = MonoTime.now();
+    let duration_ms = start.elapsed().as_milliseconds();
+
+    // Separate output dirs so the two compilers cannot see each other's
+    // artifacts -- a leftover binary on one side would be indistinguishable
+    // from that side having produced one.
+    let swift_dir = create_case_output_dir(config, info) or else {
+        return failure_result(info, "failed", "infrastructure_error", "failed to create output dir for swift: " + it.message(), -1, duration_ms);
+    };
+    let boot_dir = create_case_output_dir(config, info) or else {
+        return failure_result(info, "failed", "infrastructure_error", "failed to create output dir for bootstrap: " + it.message(), -1, duration_ms);
+    };
+
+    let swift_obs = observe_case(config, config.swift_koralc, "swift", info, swift_dir, stop_requested);
+    let boot_obs = observe_case(config, config.bootstrap_koralc, "bootstrap", info, boot_dir, stop_requested);
+
+    when swift_obs in {
+        .Infra(message) then {
+            return failure_result(info, "failed", "infrastructure_error", message, -1, duration_ms);
+        },
+        .DidNotFinish(reason) then {
+            when boot_obs in {
+                .Infra(message) then {
+                    return failure_result(info, "failed", "infrastructure_error", message, -1, duration_ms);
+                },
+                .DidNotFinish(_) then {
+                    // Neither finished. Not evidence of agreement, but not a
+                    // divergence either -- report it as a timeout so it does not
+                    // masquerade as a pass.
+                    return failure_result(info, "timed_out", "timeout", "swift side " + reason + "; bootstrap side also did not finish", -1, duration_ms);
+                },
+                .Observed(boot_label, boot_accepted, boot_compile, _) then {
+                    let what = if boot_accepted then "accepted and ran the program" else "rejected: " + first_output_line(boot_compile);
+                    return failure_result(info, "failed", "diverge_incomplete", "swift side " + reason + ", but " + boot_label + " " + what, -1, duration_ms);
+                },
+            };
+        },
+        .Observed(swift_label, swift_accepted, swift_compile, swift_run) then {
+            when boot_obs in {
+                .Infra(message) then {
+                    return failure_result(info, "failed", "infrastructure_error", message, -1, duration_ms);
+                },
+                .DidNotFinish(reason) then {
+                    let what = if swift_accepted then "accepted and ran the program" else "rejected: " + first_output_line(swift_compile);
+                    return failure_result(info, "failed", "diverge_incomplete", "bootstrap side " + reason + ", but " + swift_label + " " + what, -1, duration_ms);
+                },
+                .Observed(boot_label, boot_accepted, boot_compile, boot_run) then {
+                    // (1) Do they agree on what is even legal source? The
+                    // sharpest possible disagreement, and the one that means the
+                    // two compilers implement different languages.
+                    if swift_accepted <> boot_accepted then {
+                        let swift_side = if swift_accepted then "accepted" else "rejected: " + first_output_line(swift_compile);
+                        let boot_side = if boot_accepted then "accepted" else "rejected: " + first_output_line(boot_compile);
+                        return failure_result(
+                            info,
+                            "failed",
+                            "diverge_accept_reject",
+                            "one compiler accepts this program and the other does not -- " + swift_label + " " + swift_side + "; " + boot_label + " " + boot_side,
+                            -1,
+                            duration_ms,
+                        );
+                    };
+
+                    // (2) Both rejected: they must say the same thing.
+                    if not swift_accepted then {
+                        if config.compare_diagnostics then {
+                            if not output_lines_equal(swift_compile, boot_compile) then {
+                                return failure_result(
+                                    info,
+                                    "failed",
+                                    "diverge_diagnostic",
+                                    "both reject the program but say different things -- " + first_output_difference(swift_label, swift_compile, boot_label, boot_compile),
+                                    -1,
+                                    duration_ms,
+                                );
+                            };
+                        };
+                        return pass_result(info, duration_ms, -1);
+                    };
+
+                    // (3) Both accepted and both produced a program: the
+                    // programs must behave the same. Exactly -- the EXPECT
+                    // comments only assert a subsequence of the output, so two
+                    // compilers can both satisfy them and still disagree about
+                    // everything in between.
+                    when swift_run in {
+                        .None() then {
+                            return failure_result(info, "failed", "infrastructure_error", swift_label + " accepted but produced no program to run", -1, duration_ms);
+                        },
+                        .Some(swift_program) then {
+                            when boot_run in {
+                                .None() then {
+                                    return failure_result(info, "failed", "infrastructure_error", boot_label + " accepted but produced no program to run", -1, duration_ms);
+                                },
+                                .Some(boot_program) then {
+                                    if swift_program.exit_code <> boot_program.exit_code then {
+                                        return failure_result(
+                                            info,
+                                            "failed",
+                                            "diverge_runtime",
+                                            "programs exit differently -- " + swift_label + " " + swift_program.exit_code.to_string() + ", " + boot_label + " " + boot_program.exit_code.to_string() + " | " + swift_label + " printed: " + first_output_line(swift_program.stdout) + " | " + boot_label + " printed: " + first_output_line(boot_program.stdout),
+                                            boot_program.exit_code,
+                                            duration_ms,
+                                        );
+                                    };
+                                    if not output_lines_equal(swift_program.stdout, boot_program.stdout) then {
+                                        return failure_result(
+                                            info,
+                                            "failed",
+                                            "diverge_runtime",
+                                            "programs print different things -- " + first_output_difference(swift_label, swift_program.stdout, boot_label, boot_program.stdout),
+                                            swift_program.exit_code,
+                                            duration_ms,
+                                        );
+                                    };
+                                    return pass_result(info, duration_ms, swift_program.exit_code);
+                                },
+                            };
+                        },
+                    };
+                },
+            };
+        },
+    };
+};
+
 public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested AtomicInt) CaseResult = {
+    if config.compiler_kind == "differential" then {
+        return run_single_case_differential(config, info, stop_requested);
+    };
     let start = MonoTime.now();
     let timeout_secs = config.timeout_secs(Int64);
 

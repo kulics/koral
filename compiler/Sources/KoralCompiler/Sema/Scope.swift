@@ -86,13 +86,12 @@ public class UnifiedScope {
     names[name] = defId
   }
 
-  public func defineLocal(_ name: String, defId: DefId, line: Int? = nil) throws {
+  public func defineLocal(_ name: String, defId: DefId, span: SourceSpan = .unknown) throws {
     if name == "_" {
       // Wildcard bindings are discarded; allow multiple `let _ = ...` in the same scope.
       return
     }
     if names[name] != nil {
-      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
       throw SemanticError.duplicateDefinition(name, span: span)
     }
     names[name] = defId
@@ -493,7 +492,7 @@ public class UnifiedScope {
     return names[name] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
   }
 
-  public func defineType(_ name: String, type: Type, line: Int? = nil) throws {
+  public func defineType(_ name: String, type: Type, span: SourceSpan = .unknown) throws {
     guard let map = defIdMap else {
       return
     }
@@ -514,7 +513,6 @@ public class UnifiedScope {
     // A top-level type is (module, name).
     let modulePath = map.getModulePath(defId) ?? []
     if typeNames[typeKey(name, modulePath: modulePath)] != nil {
-      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
       throw SemanticError.duplicateDefinition(name, span: span)
     }
     map.addSymbolInfo(defId: defId, type: type, kind: .type, isMutable: false)
@@ -721,8 +719,8 @@ public class UnifiedScope {
     return typeNames[name] != nil
   }
 
-  public func defineTypeAsDirectlyAccessible(_ name: String, type: Type, line: Int? = nil) throws {
-    try defineType(name, type: type, line: line)
+  public func defineTypeAsDirectlyAccessible(_ name: String, type: Type, span: SourceSpan = .unknown) throws {
+    try defineType(name, type: type, span: span)
     directlyAccessibleTypes.insert(name)
   }
 

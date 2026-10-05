@@ -199,24 +199,24 @@ given CodeGen {
 
     module_private resolve_type_node_for_vtable(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
-            .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
-            .Reference(inner, is_mutable) then {
+            .Identifier(name, span) then self.resolve_vtable_named_type(name, bindings),
+            .Reference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner, bindings);
                 if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner)
             },
-            .Pointer(inner, is_mutable) then {
+            .Pointer(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner, bindings);
                 if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
             },
-            .WeakReference(inner, is_mutable) then {
+            .WeakReference(inner, is_mutable, span) then {
                 let resolved = self.resolve_type_node_for_vtable(inner, bindings);
                 if is_mutable then Type.MutableWeakReferenceType(resolved) else Type.WeakReferenceType(resolved)
             },
-            .BorrowedReference(inner, is_mutable) then {
+            .BorrowedReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner, bindings);
                 if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
             },
-            .Generic(base, args) then {
+            .Generic(base, args, _) then {
                 let mutable resolved_args = List[Type].new();
                 for arg_ref in args then {
                     resolved_args.push(self.resolve_type_node_for_vtable(arg_ref, bindings));
@@ -239,13 +239,13 @@ given CodeGen {
                     .None() then Type.GenericStruct(self.context.lookup_def_id(List[String].new(), base, Option[String].None()) or else def_id_invalid(), resolved_args),
                 }
             },
-            .InferredSelf() then {
+            .InferredSelf(span) then {
                 when bindings.get("Self") in {
                     .Some(bound) then bound,
                     .None() then Type.Unknown(),
                 }
             },
-            .FunctionType(param_types, return_type) then {
+            .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for param_ref in param_types then {
                     resolved_params.push(self.resolve_type_node_for_vtable(param_ref, bindings));

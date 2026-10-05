@@ -112,7 +112,7 @@ public enum Bound: CustomStringConvertible {
 /// as bound kinds.
 public func boundFromTypeNode(_ node: TypeNode) throws -> Bound? {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
         if name == "Any" {
             return nil
         } else if name == "mutable" {
@@ -120,7 +120,7 @@ public func boundFromTypeNode(_ node: TypeNode) throws -> Bound? {
         } else {
             return .trait(defId: .invalid, name: name, args: [])
         }
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
         if base == "Any" {
             return nil
         }

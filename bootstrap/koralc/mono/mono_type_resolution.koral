@@ -1086,7 +1086,7 @@ public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dic
     return when node in {
         // TypeNode.Identifier: priority: substitution map → built-in types → concrete registry
         //
-        .Identifier(name) then {
+        .Identifier(name, span) then {
             when substitution.get(name) in {
                 .Some(concrete) then {
                     when concrete in {
@@ -1142,7 +1142,7 @@ public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dic
         },
 
         // TypeNode.Generic: recursively resolve type args and instantiate.
-        .Generic(base, args) then {
+        .Generic(base, args, _) then {
             let mutable resolved_args = List[Type].new();
             for arg in args then {
                 let resolved = resolve_type_node(mono, arg, substitution);
@@ -1163,13 +1163,13 @@ public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dic
         },
 
         // TypeNode.Reference: recursively resolve inner type and wrap.
-        .Reference(inner, is_mutable) then {
+        .Reference(inner, is_mutable, _) then {
             let trait_ref_override = when inner in {
-                .Identifier(name) then if mono.storage.generic_templates.traits.get(name) is .Some(_) then {
+                .Identifier(name, span) then if mono.storage.generic_templates.traits.get(name) is .Some(_) then {
                     let trait_ref_inner = trait_object_type_from_registry(mono, name);
                     Option[Type].Some(if is_mutable then Type.MutableReferenceType(trait_ref_inner) else Type.ReferenceType(trait_ref_inner))
                 } else Option[Type].None(),
-                .Generic(base, args) then {
+                .Generic(base, args, _) then {
                     if mono.storage.generic_templates.traits.get(base) is .Some(_) then {
                         let mutable resolved_args = List[Type].new();
                         for arg in args then {
@@ -1192,25 +1192,25 @@ public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dic
         },
 
         // TypeNode.BorrowedReference: recursively resolve inner type and wrap with lifetime.
-        .BorrowedReference(inner, is_mutable) then {
+        .BorrowedReference(inner, is_mutable, _) then {
             let resolved_inner = resolve_type_node(mono, inner, substitution);
             if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
         },
 
         // TypeNode.Pointer: recursively resolve inner type and wrap.
-        .Pointer(inner, is_mutable) then {
+        .Pointer(inner, is_mutable, _) then {
             let resolved_inner = resolve_type_node(mono, inner, substitution);
             if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
         },
 
         // TypeNode.WeakReference: recursively resolve inner type and wrap.
-        .WeakReference(inner, is_mutable) then {
+        .WeakReference(inner, is_mutable, _) then {
             let resolved_inner = resolve_type_node(mono, inner, substitution);
             if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner)
         },
 
         // TypeNode.FunctionType: recursively resolve param types and return type.
-        .FunctionType(param_types, return_type) then {
+        .FunctionType(param_types, return_type, _) then {
             let mutable resolved_params = List[Type].new();
             for pt in param_types then {
                 let resolved = resolve_type_node(mono, pt, substitution);
@@ -1221,7 +1221,7 @@ public let resolve_type_node(mono Monomorphizer, node TypeNode, substitution Dic
         },
 
         // TypeNode.InferredSelf: look up `Self` in substitution map.
-        .InferredSelf() then {
+        .InferredSelf(_) then {
             when substitution.get("Self") in {
                 .Some(self_type) then self_type,
                 .None() then Type.Unknown(),
@@ -1309,7 +1309,7 @@ public let resolve_type_node_identity(
     type_params List[TypeParameterDecl],
 ) Type = {
     return when node in {
-        .Identifier(name) then {
+        .Identifier(name, span) then {
             if is_type_parameter_name(name, type_params) then {
                 Type.GenericParameter(name)
             } else {
@@ -1317,7 +1317,7 @@ public let resolve_type_node_identity(
             }
         },
 
-        .Generic(base, args) then {
+        .Generic(base, args, span) then {
             let mutable resolved_args = List[Type].new();
             for arg in args then {
                 resolved_args.push(resolve_type_node_identity(mono, arg, type_params));
@@ -1336,24 +1336,24 @@ public let resolve_type_node_identity(
             }
         },
 
-        .Reference(inner, is_mutable) then {
+        .Reference(inner, is_mutable, _) then {
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
             if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner)
         },
-        .BorrowedReference(inner, is_mutable) then {
+        .BorrowedReference(inner, is_mutable, span) then {
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
             if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
         },
-        .Pointer(inner, is_mutable) then {
+        .Pointer(inner, is_mutable, span) then {
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
             if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
         },
-        .WeakReference(inner, is_mutable) then {
+        .WeakReference(inner, is_mutable, span) then {
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
             if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner)
         },
 
-        .FunctionType(param_nodes, ret_node) then {
+        .FunctionType(param_nodes, ret_node, span) then {
             let mutable resolved_params = List[Type].new();
             for pt in param_nodes then {
                 resolved_params.push(resolve_type_node_identity(mono, pt, type_params));
@@ -1362,7 +1362,7 @@ public let resolve_type_node_identity(
         },
 
         // `Self` in a shape position is the receiver, not something to bind.
-        .InferredSelf() then Type.Unknown(),
+        .InferredSelf(span) then Type.Unknown(),
     };
 };
 
@@ -2034,21 +2034,21 @@ file_private let adapt_receiver_expr_for_method(
                     let mutable inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type),
+                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span),
                         }
                     } else when effective_current_type in {
                         .MutableReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2056,7 +2056,7 @@ file_private let adapt_receiver_expr_for_method(
                         .BorrowedReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2064,7 +2064,7 @@ file_private let adapt_receiver_expr_for_method(
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2076,21 +2076,21 @@ file_private let adapt_receiver_expr_for_method(
                     let mutable inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type),
+                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span),
                         }
                     } else when effective_current_type in {
                         .ReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2098,7 +2098,7 @@ file_private let adapt_receiver_expr_for_method(
                         .MutableReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2106,7 +2106,7 @@ file_private let adapt_receiver_expr_for_method(
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -2118,7 +2118,7 @@ file_private let adapt_receiver_expr_for_method(
                     .ReferenceType(inner) then {
                         let mutable inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -2126,7 +2126,7 @@ file_private let adapt_receiver_expr_for_method(
                     .MutableReferenceType(inner) then {
                         let mutable inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -2861,7 +2861,7 @@ file_private let method_semantic_name_from_callsite(
 };
 
 file_private let make_zero_integer_literal_expr(t Type) TypedExpr = {
-    return TypedExpr(TypedExprKind.IntegerLiteral("0"), t);
+    return TypedExpr(TypedExprKind.IntegerLiteral("0"), t, unknown_span());
 };
 
 file_private let is_wrapping_method_name(name String) Bool = {
@@ -3094,31 +3094,31 @@ file_private let try_lower_wrapping_method_name_call(
         let mutable rhs_type = resolve_parameterized_type(mono, rhs.expr_type);
         let compatible_rhs = layout_key(base_type) == layout_key(rhs_type) or is_concrete_integer_type(rhs_type);
         if method_name == "wrapping_add" and compatible_rhs then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Add(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Add(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_sub" and compatible_rhs then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Subtract(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Subtract(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_mul" and compatible_rhs then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Multiply(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Multiply(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_div" and compatible_rhs then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Divide(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Divide(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_rem" and compatible_rhs then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Remainder(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(base, ArithmeticOperator.Remainder(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_shl" and is_matching_unsigned_shift_amount_type(base_type, rhs_type) then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingShiftExpr(base, BitwiseOperator.LeftShift(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingShiftExpr(base, BitwiseOperator.LeftShift(), rhs), result_type, base.span));
         };
         if method_name == "wrapping_shr" and is_matching_unsigned_shift_amount_type(base_type, rhs_type) then {
-            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingShiftExpr(base, BitwiseOperator.RightShift(), rhs), result_type));
+            return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingShiftExpr(base, BitwiseOperator.RightShift(), rhs), result_type, base.span));
         };
     };
 
     if method_name == "wrapping_neg" and args.count() == 0 then {
         let zero = make_zero_integer_literal_expr(base_type);
-        return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(zero, ArithmeticOperator.Subtract(), base), result_type));
+        return Option[TypedExpr].Some(TypedExpr(TypedExprKind.WrappingArithmeticExpr(zero, ArithmeticOperator.Subtract(), base), result_type, base.span));
     };
 
     return Option[TypedExpr].None();
@@ -3843,7 +3843,7 @@ file_private let normalize_resolved_call_callee(
                     _ then {
                         let stable_symbol = resolve_symbol_type(mono, original_symbol);
                         let stable_symbol_ref = stable_symbol;
-                        TypedExpr(TypedExprKind.Variable(stable_symbol_ref), stable_symbol.symbol_type)
+                        TypedExpr(TypedExprKind.Variable(stable_symbol_ref), stable_symbol.symbol_type, unknown_span())
                     },
                 },
                 _ then resolved_callee,
@@ -3907,8 +3907,7 @@ file_private let resolve_trait_placeholder_call_callee(
                     };
                     return Option[TypedExpr].Some(TypedExpr(
                         TypedExprKind.TraitMethodCall(trait_receiver, trait_object_type, logical_method_name, method_index, new_args),
-                        resolved_call_type
-                    ));
+                        resolved_call_type, expr.span));
                 };
             },
             _ then {},
@@ -3951,13 +3950,12 @@ file_private let resolve_trait_placeholder_call_callee(
                                 resolved_method_type_args_ref,
                                 dispatch_callsite,
                             ),
-                            trait_target_method_type,
-                        );
+                            trait_target_method_type, adapted_base.span);
                         let call_return_type = when trait_target_method_type in {
                             .FunctionType(_, ret) then resolve_parameterized_type(mono, ret),
                             _ then resolved_call_type,
                         };
-                        return Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), call_return_type));
+                        return Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), call_return_type, rebound_callee.span));
                     },
                     .None() then {},
                 };
@@ -3989,13 +3987,12 @@ file_private let resolve_trait_placeholder_call_callee(
                             method_type_args,
                             dispatch_callsite,
                         ),
-                        rebound_method.symbol_type,
-                    );
+                        rebound_method.symbol_type, expr.span);
                     let call_return_type = when rebound_method.symbol_type in {
                         .FunctionType(_, ret) then resolve_parameterized_type(mono, ret),
                         _ then resolved_call_type,
                     };
-                    return Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), call_return_type));
+                    return Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), call_return_type, expr.span));
                 };
             };
         },
@@ -4464,26 +4461,23 @@ file_private let resolve_method_reference_call_callee(
             if vtable_method_index(mono, trait_name, logical_method_name) < 0 then {
                 let callee_expr = TypedExpr(
                     TypedExprKind.Variable(bound_method),
-                    bound_method.symbol_type,
-                );
+                    bound_method.symbol_type, expr.span);
                 let mutable direct_args = List[TypedExpr].new();
                 direct_args.push(adapted_base);
                 for arg in new_args then {
                     direct_args.push(arg);
                 };
-                return TypedExpr(TypedExprKind.Call(callee_expr, direct_args), resolved_type);
+                return TypedExpr(TypedExprKind.Call(callee_expr, direct_args), resolved_type, expr.span);
             };
         },
         .None() then {},
     };
     let rebound_callee = TypedExpr(
         TypedExprKind.MethodReference(adapted_base, adapted_base.expr_type, bound_method, type_args, method_type_args, effective_dispatch_callsite),
-        bound_method.symbol_type,
-    );
+        bound_method.symbol_type, adapted_base.span);
     return TypedExpr(
         TypedExprKind.Call(rebound_callee, adapted_args),
-        resolved_type
-    );
+        resolved_type, expr.span);
 };
 
 file_private let resolve_member_path_call_callee(
@@ -4505,7 +4499,7 @@ file_private let resolve_member_path_call_callee(
             idx += 1;
         };
         let receiver_type = resolve_member_path_type(mono, resolved_base.expr_type, receiver_path, expr.expr_type);
-        TypedExpr(TypedExprKind.MemberPath(resolved_base, receiver_path), receiver_type)
+        TypedExpr(TypedExprKind.MemberPath(resolved_base, receiver_path), receiver_type, expr.span)
     };
     let binding_receiver_type = resolve_parameterized_type(mono, receiver_expr.expr_type);
     let resolved_call_type = resolve_parameterized_type(mono, expr.expr_type);
@@ -4567,9 +4561,8 @@ file_private let resolve_member_path_call_callee(
             };
             let rebound_callee = TypedExpr(
                 TypedExprKind.MethodReference(adapted_receiver, adapted_receiver.expr_type, bound_method, List[Type].new(), List[Type].new(), dispatch_callsite),
-                bound_method.symbol_type,
-            );
-            Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), resolved_type))
+                bound_method.symbol_type, expr.span);
+            Option[TypedExpr].Some(TypedExpr(TypedExprKind.Call(rebound_callee, new_args), resolved_type, expr.span))
         },
         .None() then Option[TypedExpr].None(),
     };
@@ -4642,7 +4635,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
     when expr.expr_kind in {
         .Variable(symbol) then {
             let new_symbol = resolve_symbol_type(mono, symbol);
-            return TypedExpr(TypedExprKind.Variable(new_symbol), new_symbol.symbol_type);
+            return TypedExpr(TypedExprKind.Variable(new_symbol), new_symbol.symbol_type, expr.span);
         },
         .RefExpr(inner) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -4654,7 +4647,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                 .WeakReferenceType(_) then Type.WeakReferenceType(resolved_inner),
                 _ then Type.ReferenceType(resolved_inner),
             };
-            return TypedExpr(TypedExprKind.RefExpr(new_inner), resolved_type);
+            return TypedExpr(TypedExprKind.RefExpr(new_inner), resolved_type, expr.span);
         },
         .PtrExpr(inner) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -4664,7 +4657,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                 .PointerType(_) then Type.PointerType(resolved_inner),
                 _ then Type.PointerType(resolved_inner),
             };
-            return TypedExpr(TypedExprKind.PtrExpr(new_inner), resolved_type);
+            return TypedExpr(TypedExprKind.PtrExpr(new_inner), resolved_type, expr.span);
         },
         .DerefExpr(inner) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -4677,7 +4670,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                 .MutablePointerType(inner_ref) then resolve_parameterized_type(mono, inner_ref),
                 _ then resolve_parameterized_type(mono, expr.expr_type),
             };
-            return TypedExpr(TypedExprKind.DerefExpr(new_inner), resolved_type);
+            return TypedExpr(TypedExprKind.DerefExpr(new_inner), resolved_type, expr.span);
         },
         .UnsafeDerefExpr(inner) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -4686,7 +4679,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                 .MutablePointerType(inner_ref) then resolve_parameterized_type(mono, inner_ref),
                 _ then resolve_parameterized_type(mono, expr.expr_type),
             };
-            return TypedExpr(TypedExprKind.UnsafeDerefExpr(new_inner), resolved_type);
+            return TypedExpr(TypedExprKind.UnsafeDerefExpr(new_inner), resolved_type, expr.span);
         },
         .Call(callee, args) then {
             let mutable new_args = List[TypedExpr].new();
@@ -4776,9 +4769,8 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                                             if vtable_method_index(mono, trait_name, normalized_name) < 0 then {
                                                 let callee_expr = TypedExpr(
                                                     TypedExprKind.Variable(rebound_method),
-                                                    rebound_method.symbol_type,
-                                                );
-                                                return TypedExpr(TypedExprKind.Call(callee_expr, new_args), resolved_type);
+                                                    rebound_method.symbol_type, expr.span);
+                                                return TypedExpr(TypedExprKind.Call(callee_expr, new_args), resolved_type, expr.span);
                                             };
                                         },
                                         .None() then {},
@@ -4798,9 +4790,8 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                                     let adapted_receiver = adapt_receiver_expr_for_method(mono, first_arg, rebound_method);
                                     let rebound_callee = TypedExpr(
                                         TypedExprKind.MethodReference(adapted_receiver, adapted_receiver.expr_type, rebound_method, List[Type].new(), List[Type].new(), dispatch_callsite),
-                                        rebound_method.symbol_type,
-                                    );
-                                    return TypedExpr(TypedExprKind.Call(rebound_callee, method_args), resolved_type);
+                                        rebound_method.symbol_type, expr.span);
+                                    return TypedExpr(TypedExprKind.Call(rebound_callee, method_args), resolved_type, expr.span);
                                 },
                                 .None() then {},
                             };
@@ -4809,7 +4800,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                             when lookup_extension_method_def_id(mono, binding_receiver_type, normalized_name, List[Type].new()) in {
                                 .Some(def_id) then {
                                     let rebound_symbol = resolved_method_symbol(mono, def_id, normalized_name, symbol.symbol_type);
-                                    bound_callee = TypedExpr(TypedExprKind.Variable(rebound_symbol), rebound_symbol.symbol_type);
+                                    bound_callee = TypedExpr(TypedExprKind.Variable(rebound_symbol), rebound_symbol.symbol_type, expr.span);
                                 },
                                 .None() then {},
                             };
@@ -4825,7 +4816,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
             };
             if bound_callee.expr_kind is .AndExpr(_, _) or bound_callee.expr_kind is .OrExpr(_, _) then {
                 mono.report_monomorphization_internal_error("mono produced invalid call callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())");
-                return TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type);
+                return TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type, expr.span);
             };
             when callee.expr_kind in {
                 .Variable(original_symbol) then when original_symbol.kind in {
@@ -4842,7 +4833,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                         };
                         if not bound_is_callable then {
                             mono.report_monomorphization_internal_error("mono invalid function callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())");
-                            return TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type);
+                            return TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type, expr.span);
                         };
                     },
                     _ then {},
@@ -4855,12 +4846,12 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                         .Variable(bound_symbol) then {
                             when bound_symbol.kind in {
                                 .Function() then {
-                                    TypedExpr(TypedExprKind.Variable(bound_symbol), bound_symbol.symbol_type)
+                                    TypedExpr(TypedExprKind.Variable(bound_symbol), bound_symbol.symbol_type, expr.span)
                                 },
                                 _ then {
                                     let stable_symbol = resolve_symbol_type(mono, original_symbol);
                                     let stable_symbol_ref = stable_symbol;
-                                    TypedExpr(TypedExprKind.Variable(stable_symbol_ref), stable_symbol.symbol_type)
+                                    TypedExpr(TypedExprKind.Variable(stable_symbol_ref), stable_symbol.symbol_type, unknown_span())
                                 },
                             }
                         },
@@ -4870,7 +4861,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                 },
                 _ then bound_callee,
             };
-            return TypedExpr(TypedExprKind.Call(final_callee, new_args), resolved_type);
+            return TypedExpr(TypedExprKind.Call(final_callee, new_args), resolved_type, expr.span);
         },
         _ then {},
     };
@@ -4920,7 +4911,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
         _ then resolve_parameterized_type(mono, expr.expr_type),
     };
 
-    return TypedExpr(resolved_kind, resolved_type);
+    return TypedExpr(resolved_kind, resolved_type, expr.span);
 };
 
 file_private let mono_debug_expr_kind(expr TypedExpr) String = {
@@ -5669,7 +5660,7 @@ file_private let bind_generic_function_call_callee(
                                     };
                                     let concrete_symbol = Symbol(candidate_def_id, candidate_type, SymbolKind.Function());
                                     let _ = concrete_name;
-                                    return TypedExpr(TypedExprKind.Variable(concrete_symbol), candidate_type);
+                                    return TypedExpr(TypedExprKind.Variable(concrete_symbol), candidate_type, unknown_span());
                                 };
                             };
                         };
@@ -5730,13 +5721,13 @@ file_private let bind_generic_function_call_callee(
                 // didn't bind (Dict may not persist), try direct identifier matching.
                 if inferred.count() == 0 then {
                     when expected_node in {
-                        .Identifier(name) then {
+                        .Identifier(name, span) then {
                             if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual) then {
                                 inferred.insert(name, actual);
                             };
                         },
-                        .Reference(inner, _) then when inner in {
-                            .Identifier(name) then when actual in {
+                        .Reference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
                                 .ReferenceType(actual_inner) then {
                                     if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual_inner) then {
                                         inferred.insert(name, resolve_parameterized_type(mono, actual_inner));
@@ -5751,8 +5742,8 @@ file_private let bind_generic_function_call_callee(
                             },
                             _ then {},
                         },
-                        .Pointer(inner, _) then when inner in {
-                            .Identifier(name) then when actual in {
+                        .Pointer(inner, _, _) then when inner in {
+                            .Identifier(name, span) then when actual in {
                                 .PointerType(actual_inner) then {
                                     if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual_inner) then {
                                         inferred.insert(name, resolve_parameterized_type(mono, actual_inner));
@@ -5767,8 +5758,8 @@ file_private let bind_generic_function_call_callee(
                             },
                             _ then {},
                         },
-                        .WeakReference(inner, _) then when inner in {
-                            .Identifier(name) then when actual in {
+                        .WeakReference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
                                 .WeakReferenceType(actual_inner) then {
                                     if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual_inner) then {
                                         inferred.insert(name, resolve_parameterized_type(mono, actual_inner));
@@ -5783,8 +5774,8 @@ file_private let bind_generic_function_call_callee(
                             },
                             _ then {},
                         },
-                        .BorrowedReference(inner, _) then when inner in {
-                            .Identifier(name) then when actual in {
+                        .BorrowedReference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
                                 .BorrowedReferenceType(actual_inner) then {
                                     if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual_inner) then {
                                         inferred.insert(name, resolve_parameterized_type(mono, actual_inner));
@@ -5865,7 +5856,7 @@ file_private let bind_generic_function_call_callee(
                     .None() then resolve_parameterized_type(mono, substitute_type(mono, symbol.symbol_type, inferred)),
                 };
                 let intrinsic_symbol = Symbol(template.def_id, intrinsic_type, SymbolKind.Function());
-                return TypedExpr(TypedExprKind.Variable(intrinsic_symbol), intrinsic_type);
+                return TypedExpr(TypedExprKind.Variable(intrinsic_symbol), intrinsic_type, unknown_span());
             };
 
             let mutable type_args = List[Type].new();
@@ -5875,7 +5866,7 @@ file_private let bind_generic_function_call_callee(
                     .None() then {
                         // Fallback to expected call return type when template return is this type parameter.
                         let from_expected_return = when template.return_type in {
-                            .Identifier(ret_name) then ret_name == tp.name,
+                            .Identifier(ret_name, span) then ret_name == tp.name,
                             _ then false,
                         };
                         let constrained_by_params = template_type_parameter_constrained_by_parameters(template, tp.name);
@@ -5905,7 +5896,7 @@ file_private let bind_generic_function_call_callee(
                 .None() then bound_symbol.symbol_type,
             };
             let concrete_symbol = Symbol(bound_symbol.def_id, concrete_type, SymbolKind.Function());
-            return TypedExpr(TypedExprKind.Variable(concrete_symbol), concrete_type);
+            return TypedExpr(TypedExprKind.Variable(concrete_symbol), concrete_type, unknown_span());
         },
         _ then {},
     };
@@ -6135,24 +6126,24 @@ file_private let is_type_parameter_name(name String, type_params List[TypeParame
 
 file_private let type_node_mentions_type_parameter(node TypeNode, type_param_name String) Bool = {
     return when node in {
-        .Identifier(name) then name == type_param_name,
-        .Reference(inner, _) then type_node_mentions_type_parameter(inner, type_param_name),
-        .Pointer(inner, _) then type_node_mentions_type_parameter(inner, type_param_name),
-        .WeakReference(inner, _) then type_node_mentions_type_parameter(inner, type_param_name),
-        .BorrowedReference(inner, _) then type_node_mentions_type_parameter(inner, type_param_name),
-        .Generic(_, args) then {
+        .Identifier(name, span) then name == type_param_name,
+        .Reference(inner, _, span) then type_node_mentions_type_parameter(inner, type_param_name),
+        .Pointer(inner, _, span) then type_node_mentions_type_parameter(inner, type_param_name),
+        .WeakReference(inner, _, span) then type_node_mentions_type_parameter(inner, type_param_name),
+        .BorrowedReference(inner, _, span) then type_node_mentions_type_parameter(inner, type_param_name),
+        .Generic(_, args, span) then {
             for arg in args then {
                 if type_node_mentions_type_parameter(arg, type_param_name) then { return true;};
             };
             false
         },
-        .FunctionType(param_nodes, ret_node) then {
+        .FunctionType(param_nodes, ret_node, span) then {
             for p in param_nodes then {
                 if type_node_mentions_type_parameter(p, type_param_name) then { return true;};
             };
             type_node_mentions_type_parameter(ret_node, type_param_name)
         },
-        .InferredSelf() then false,
+        .InferredSelf(span) then false,
     };
 };
 
@@ -6767,8 +6758,7 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
             let declared_return_type = resolve_parameterized_type(mono, expr.expr_type);
             let initial_callee = TypedExpr(
                 TypedExprKind.Variable(new_function_symbol),
-                new_function_symbol.symbol_type,
-            );
+                new_function_symbol.symbol_type, expr.span);
             let bound_callee = bind_generic_function_call_callee(
                 mono,
                 initial_callee,
@@ -7176,8 +7166,7 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
                                 empty_method_type_args,
                                 .None(),
                             ),
-                            method_type,
-                        );
+                            method_type, adjusted_base.span);
                         TypedExprKind.Call(callee, new_args)
                     },
                     .None() then {
@@ -8713,8 +8702,7 @@ file_private let resolve_static_method_call_to_call(
                                 if vtable_method_index(mono, trait_name, method_name) < 0 then {
                                     let callee_expr = TypedExpr(
                                         TypedExprKind.Variable(sym),
-                                        sym.symbol_type,
-                                    );
+                                        sym.symbol_type, expr.span);
                                     return TypedExprKind.Call(callee_expr, new_args);
                                 };
                             },
@@ -8737,8 +8725,7 @@ file_private let resolve_static_method_call_to_call(
                         );
                         let callee_expr = TypedExpr(
                             TypedExprKind.MethodReference(receiver_arg, receiver_arg.expr_type, sym, List[Type].new(), List[Type].new(), dispatch_callsite),
-                            sym.symbol_type,
-                        );
+                            sym.symbol_type, receiver_arg.span);
                         return TypedExprKind.Call(callee_expr, method_args);
                     };
                 };
@@ -8773,8 +8760,7 @@ file_private let resolve_static_method_call_to_call(
     };
     let callee_expr = TypedExpr(
         TypedExprKind.Variable(callee_symbol),
-        callee_symbol.symbol_type,
-    );
+        callee_symbol.symbol_type, expr.span);
     return TypedExprKind.Call(callee_expr, new_args);
 };
 
@@ -10161,13 +10147,13 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
         .LetDecl(access, name, is_mutable, decl_type, initializer, span, id) then {
             let mutable resolved_type = resolve_parameterized_type(mono, decl_type);
             if mono.storage.context.get_concrete_global_initializer(id.def_id) is .Some(_) then {
-                return TypedDecl.LetDecl(access, name, is_mutable, resolved_type, TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type), span, id);
+                return TypedDecl.LetDecl(access, name, is_mutable, resolved_type, TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type, unknown_span()), span, id);
             };
             let source_initializer = mono.storage.context.take_concrete_global_initializer(id.def_id) or else initializer;
             let resolved_initializer = resolve_types_in_expression(mono, source_initializer);
             let mutable context = mono.storage.context;
             context.set_concrete_global_initializer(id.def_id, resolved_initializer);
-            TypedDecl.LetDecl(access, name, is_mutable, resolved_type, TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type), span, id)
+            TypedDecl.LetDecl(access, name, is_mutable, resolved_type, TypedExpr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), resolved_type, unknown_span()), span, id)
         },
 
         // ForeignLetDecl: resolve decl type.

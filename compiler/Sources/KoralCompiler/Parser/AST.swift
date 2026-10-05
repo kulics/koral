@@ -71,32 +71,51 @@ public indirect enum ASTNode {
 
 public typealias TypeParameterDecl = (name: String, constraints: [Bound])
 
+/// A type as WRITTEN.
+///
+/// `span` is where the type appears. A diagnostic that names a type
+/// (`Undefined type: X`, `FFI incompatible type 'Y'`) has to point at the
+/// spelling that is wrong; without it the only location available is whatever
+/// declaration or statement happens to contain the annotation.
 public indirect enum TypeNode: CustomStringConvertible {
-  case identifier(String)
-  case reference(TypeNode, mutable: Bool)
-  case pointer(TypeNode, mutable: Bool)
-  case weakReference(TypeNode, mutable: Bool)
-  case generic(base: String, args: [TypeNode])
-  case inferredSelf
+  case identifier(String, span: SourceSpan)
+  case reference(TypeNode, mutable: Bool, span: SourceSpan)
+  case pointer(TypeNode, mutable: Bool, span: SourceSpan)
+  case weakReference(TypeNode, mutable: Bool, span: SourceSpan)
+  case generic(base: String, args: [TypeNode], span: SourceSpan)
+  case inferredSelf(span: SourceSpan)
   /// Function type: Func(ParamType1, ParamType2, ...) ReturnType
-  case functionType(paramTypes: [TypeNode], returnType: TypeNode)
+  case functionType(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
+
+  /// Where this type is written.
+  public var span: SourceSpan {
+    switch self {
+    case .identifier(_, let span): return span
+    case .reference(_, _, let span): return span
+    case .pointer(_, _, let span): return span
+    case .weakReference(_, _, let span): return span
+    case .generic(_, _, let span): return span
+    case .inferredSelf(let span): return span
+    case .functionType(_, _, let span): return span
+    }
+  }
   
   public var description: String {
     switch self {
-    case .identifier(let name):
+    case .identifier(let name, _):
       return name
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       return mutable ? "*unsafe mutable \(inner)" : "*unsafe \(inner)"
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       return mutable ? "?*mutable \(inner)" : "?*\(inner)"
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(base)[\(argsStr)]"
     case .inferredSelf:
       return "Self"
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
       return "Func(\(paramsStr)) \(returnType)"
     }
@@ -135,7 +154,7 @@ public indirect enum GlobalNode {
   
   case globalVariableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, access: AccessModifier,
-    span: SourceSpan)
+    span: SourceSpan, nameSpan: SourceSpan)
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
@@ -143,7 +162,8 @@ public indirect enum GlobalNode {
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case intrinsicFunctionDeclaration(
     name: String,
@@ -151,14 +171,16 @@ public indirect enum GlobalNode {
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case foreignFunctionDeclaration(
     name: String,
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
     returnType: TypeNode,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case globalStructDeclaration(
     name: String,
@@ -166,27 +188,31 @@ public indirect enum GlobalNode {
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
     isMutable: Bool,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case globalEnumDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
     cases: [EnumCaseDeclaration],
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case intrinsicTypeDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
   case foreignTypeDeclaration(
     name: String,
     cname: String?,
     fields: [(name: String, type: TypeNode)]?,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
 
   case foreignLetDeclaration(
@@ -194,7 +220,8 @@ public indirect enum GlobalNode {
     type: TypeNode,
     mutable: Bool,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
 
   // trait Name [SuperTrait ...] { methodSignatures... }
@@ -204,7 +231,8 @@ public indirect enum GlobalNode {
     superTraits: [TypeNode],
     methods: [TraitMethodSignature],
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
 
   // given [T] Type { ...methods... }
@@ -223,7 +251,8 @@ public indirect enum GlobalNode {
     name: String,
     targetType: TypeNode,
     access: AccessModifier,
-    span: SourceSpan
+    span: SourceSpan,
+    nameSpan: SourceSpan
   )
 }
 
@@ -232,25 +261,25 @@ extension GlobalNode {
     switch self {
     case .usingDeclaration(let decl):
       return decl.span
-    case .globalVariableDeclaration(_, _, _, _, _, let span):
+    case .globalVariableDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .globalFunctionDeclaration(_, _, _, _, _, _, let span):
+    case .globalFunctionDeclaration(_, _, _, _, _, _, let span, _):
       return span
-    case .intrinsicFunctionDeclaration(_, _, _, _, _, let span):
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .foreignFunctionDeclaration(_, _, _, _, let span):
+    case .foreignFunctionDeclaration(_, _, _, _, let span, _):
       return span
-    case .globalStructDeclaration(_, _, _, _, _, let span):
+    case .globalStructDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .globalEnumDeclaration(_, _, _, _, let span):
+    case .globalEnumDeclaration(_, _, _, _, let span, _):
       return span
-    case .intrinsicTypeDeclaration(_, _, _, let span):
+    case .intrinsicTypeDeclaration(_, _, _, let span, _):
       return span
-    case .foreignTypeDeclaration(_, _, _, _, let span):
+    case .foreignTypeDeclaration(_, _, _, _, let span, _):
       return span
-    case .foreignLetDeclaration(_, _, _, _, let span):
+    case .foreignLetDeclaration(_, _, _, _, let span, _):
       return span
-    case .traitDeclaration(_, _, _, _, _, let span):
+    case .traitDeclaration(_, _, _, _, _, let span, _):
       return span
     case .givenDeclaration(_, _, _, let span):
       return span
@@ -258,7 +287,45 @@ extension GlobalNode {
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
       return span
-    case .typeAliasDeclaration(_, _, _, let span):
+    case .typeAliasDeclaration(_, _, _, let span, _):
+      return span
+    }
+  }
+
+  /// Where this declaration's NAME is written. A diagnostic that names the
+  /// symbol points here -- `Duplicate definition: f` blames `f`, not the
+  /// `foreign`/`public` keyword the declaration starts at.
+  public var nameSpan: SourceSpan {
+    switch self {
+    case .usingDeclaration(let decl):
+      return decl.span
+    case .globalVariableDeclaration(_, _, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .globalFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .foreignFunctionDeclaration(_, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .globalStructDeclaration(_, _, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .globalEnumDeclaration(_, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .intrinsicTypeDeclaration(_, _, _, _, let nameSpan):
+      return nameSpan
+    case .foreignTypeDeclaration(_, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .foreignLetDeclaration(_, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .traitDeclaration(_, _, _, _, _, _, let nameSpan):
+      return nameSpan
+    case .givenDeclaration(_, _, _, let span):
+      return span
+    case .givenTraitDeclaration(_, _, _, _, let span):
+      return span
+    case .intrinsicGivenDeclaration(_, _, _, let span):
+      return span
+    case .typeAliasDeclaration(_, _, _, let span, _):
       return span
     }
   }
@@ -458,15 +525,22 @@ public enum InterpolatedPart {
 public struct CallArg {
     public let label: String?
   public let expression: ExpressionNode?
-    
-    public init(label: String? = nil, expression: ExpressionNode) {
+  /// The `label: value` pair as written. Argument-shape diagnostics -- an
+  /// unknown label, a label on a positional parameter -- are about this pair,
+  /// not about the call and not about the bare value, so it needs its own span.
+  /// Defaults to `.unknown` for arguments the compiler synthesises.
+  public let span: SourceSpan
+
+    public init(label: String? = nil, expression: ExpressionNode, span: SourceSpan = .unknown) {
         self.label = label
         self.expression = expression
+    self.span = span
     }
 
   public init(defaultFill: Void = ()) {
     self.label = nil
     self.expression = nil
+    self.span = .unknown
   }
 
   public var isDefaultFill: Bool {
@@ -485,75 +559,75 @@ public struct PatternArg {
 }
 
 public indirect enum ExpressionNode {
-  case integerLiteral(String)  // Store as string
-  case floatLiteral(String)    // Store as string
-  case stringLiteral(String)
-  case runeLiteral(String)     // Rune/byte literal, e.g.: 'A', '\n'
+  case integerLiteral(String, span: SourceSpan)  // Store as string
+  case floatLiteral(String, span: SourceSpan)    // Store as string
+  case stringLiteral(String, span: SourceSpan)
+  case runeLiteral(String, span: SourceSpan)     // Rune/byte literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
-  case booleanLiteral(Bool)
-  case castExpression(type: TypeNode, expression: ExpressionNode)
+  case booleanLiteral(Bool, span: SourceSpan)
+  case castExpression(type: TypeNode, expression: ExpressionNode, span: SourceSpan)
   case arithmeticExpression(
-    left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode)
+    left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode, span: SourceSpan)
   case comparisonExpression(
-    left: ExpressionNode, operator: ComparisonOperator, right: ExpressionNode)
+    left: ExpressionNode, operator: ComparisonOperator, right: ExpressionNode, span: SourceSpan)
   case comparisonChainExpression(
     operands: [ExpressionNode], operators: [ComparisonOperator], span: SourceSpan)
   case bitwiseExpression(
-    left: ExpressionNode, operator: BitwiseOperator, right: ExpressionNode)
-  case andExpression(left: ExpressionNode, right: ExpressionNode)
-  case orExpression(left: ExpressionNode, right: ExpressionNode)
-  case unaryMinusExpression(ExpressionNode)
-  case notExpression(ExpressionNode)
-  case bitwiseNotExpression(ExpressionNode)
-  case addressOfExpression(ExpressionNode, mutable: Bool)
-  case derefExpression(ExpressionNode)
-  case unsafeDerefExpression(ExpressionNode)
-  case ptrExpression(ExpressionNode, mutable: Bool)
-  case identifier(String)
-  case blockExpression(statements: [StatementNode], tailExpression: ExpressionNode?)
+    left: ExpressionNode, operator: BitwiseOperator, right: ExpressionNode, span: SourceSpan)
+  case andExpression(left: ExpressionNode, right: ExpressionNode, span: SourceSpan)
+  case orExpression(left: ExpressionNode, right: ExpressionNode, span: SourceSpan)
+  case unaryMinusExpression(ExpressionNode, span: SourceSpan)
+  case notExpression(ExpressionNode, span: SourceSpan)
+  case bitwiseNotExpression(ExpressionNode, span: SourceSpan)
+  case addressOfExpression(ExpressionNode, mutable: Bool, span: SourceSpan)
+  case derefExpression(ExpressionNode, span: SourceSpan)
+  case unsafeDerefExpression(ExpressionNode, span: SourceSpan)
+  case ptrExpression(ExpressionNode, mutable: Bool, span: SourceSpan)
+  case identifier(String, span: SourceSpan)
+  case blockExpression(statements: [StatementNode], tailExpression: ExpressionNode?, span: SourceSpan)
   case ifExpression(
-    condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
-  case call(callee: ExpressionNode, arguments: [CallArg])
-  case whileExpression(condition: ExpressionNode, body: ExpressionNode)
+    condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?, span: SourceSpan)
+  case call(callee: ExpressionNode, arguments: [CallArg], span: SourceSpan)
+  case whileExpression(condition: ExpressionNode, body: ExpressionNode, span: SourceSpan)
   // 连续成员访问聚合为路径
-  case memberPath(base: ExpressionNode, path: [String])
+  case memberPath(base: ExpressionNode, path: [String], span: SourceSpan)
   /// Rust-style fully qualified path `Type(Trait[Args])`, used only as an
   /// intermediate parser node. It must be followed by `.method(...)` or
   /// `.method[TypeArgs](...)`. The receiver of an instance method is passed as
   /// the first call argument.
-  case traitQualificationExpression(type: TypeNode, trait: TypeNode)
+  case traitQualificationExpression(type: TypeNode, trait: TypeNode, span: SourceSpan)
   /// Generic method call with explicit type arguments: obj.[Type]method(args)
   /// - base: The object expression
   /// - methodTypeArgs: The explicit type arguments for the method
   /// - methodName: The method name
   /// - arguments: The method arguments
-  case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
+  case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
   /// Fully qualified method call: Type(Trait[Args]).method(args)
-  case qualifiedMethodCall(type: TypeNode, trait: TypeNode, methodName: String, arguments: [CallArg])
+  case qualifiedMethodCall(type: TypeNode, trait: TypeNode, methodName: String, arguments: [CallArg], span: SourceSpan)
   /// Fully qualified generic method call: Type(Trait[Args]).method[TypeArgs](args)
-  case qualifiedGenericMethodCall(type: TypeNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg])
-  case genericInstantiation(base: String, args: [TypeNode])
+  case qualifiedGenericMethodCall(type: TypeNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
+  case genericInstantiation(base: String, args: [TypeNode], span: SourceSpan)
   /// Collection literal: [e1, e2, ...]
   case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)
   /// Dict literal: [k1: v1, k2: v2, ...]
   case dictLiteral(entries: [(key: ExpressionNode, value: ExpressionNode)], span: SourceSpan)
   /// Empty collection literal: []
   case emptyLiteral(span: SourceSpan)
-  case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
+  case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode], span: SourceSpan)
   case whenExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)
   /// Static method call on a type: TypeName.methodName(args) or [T]TypeName.methodName(args)
   /// - typeName: The type name (e.g., "String", "List")
   /// - typeArgs: Optional type arguments for generic types (e.g., [Int] for List)
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
-  case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg])
+  case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
   /// For loop expression: for <binding-pattern> in <iterable> then <body>
-  case forExpression(pattern: BindingPatternNode, iterable: ExpressionNode, body: ExpressionNode)
+  case forExpression(pattern: BindingPatternNode, iterable: ExpressionNode, body: ExpressionNode, span: SourceSpan)
   /// Range expression with operator and operands
   /// - operator: The range operator type
   /// - left: Left operand (nil for To, Until, Full)
   /// - right: Right operand (nil for From, After, Full)
-  case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?)
+  case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?, span: SourceSpan)
   /// Lambda expression: (params) [ReturnType] -> body
   /// - parameters: Parameter list with optional type annotations
   /// - returnType: Optional return type annotation
@@ -728,6 +802,22 @@ public struct MatchCaseNode {
 extension ExpressionNode {
   public var span: SourceSpan {
     switch self {
+    case .integerLiteral(_, let span):
+      return span
+    case .floatLiteral(_, let span):
+      return span
+    case .stringLiteral(_, let span):
+      return span
+    case .runeLiteral(_, let span):
+      return span
+    case .booleanLiteral(_, let span):
+      return span
+    case .identifier(_, let span):
+      return span
+    case .call(_, _, let span):
+      return span
+    case .memberPath(_, _, let span):
+      return span
     case .interpolatedString(_, let span):
       return span
     case .whenExpression(_, _, let span):
@@ -748,14 +838,62 @@ extension ExpressionNode {
       return span
     case .comparisonChainExpression(_, _, let span):
       return span
+    case .ptrExpression(_, _, let span):
+      return span
     case .collectionLiteral(_, let span):
       return span
     case .dictLiteral(_, let span):
       return span
     case .emptyLiteral(let span):
       return span
-    default:
-      return .unknown
+    case .castExpression(_, _, let span):
+      return span
+    case .arithmeticExpression(_, _, _, let span):
+      return span
+    case .comparisonExpression(_, _, _, let span):
+      return span
+    case .bitwiseExpression(_, _, _, let span):
+      return span
+    case .andExpression(_, _, let span):
+      return span
+    case .orExpression(_, _, let span):
+      return span
+    case .unaryMinusExpression(_, let span):
+      return span
+    case .notExpression(_, let span):
+      return span
+    case .bitwiseNotExpression(_, let span):
+      return span
+    case .addressOfExpression(_, _, let span):
+      return span
+    case .derefExpression(_, let span):
+      return span
+    case .unsafeDerefExpression(_, let span):
+      return span
+    case .blockExpression(_, _, let span):
+      return span
+    case .ifExpression(_, _, _, let span):
+      return span
+    case .whileExpression(_, _, let span):
+      return span
+    case .traitQualificationExpression(_, _, let span):
+      return span
+    case .genericMethodCall(_, _, _, _, let span):
+      return span
+    case .qualifiedMethodCall(_, _, _, _, let span):
+      return span
+    case .qualifiedGenericMethodCall(_, _, _, _, _, let span):
+      return span
+    case .genericInstantiation(_, _, let span):
+      return span
+    case .subscriptExpression(_, _, let span):
+      return span
+    case .staticMethodCall(_, _, _, _, let span):
+      return span
+    case .forExpression(_, _, _, let span):
+      return span
+    case .rangeExpression(_, _, _, let span):
+      return span
     }
   }
 }

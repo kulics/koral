@@ -17,7 +17,7 @@ extension TypeChecker {
       if arg.label != nil {
         seenNamed = true
       } else if seenNamed {
-        throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(functionName)'"), span: currentSpan)
+        throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(functionName)'"), span: arg.span)
       }
     }
     // Validate labels match param named status
@@ -27,10 +27,10 @@ extension TypeChecker {
         if let label = arg.label {
           // Named arg - check that the param is named
           guard let fieldIndex = names.firstIndex(of: label) else {
-            throw SemanticError(.generic("Unknown named argument '\(label)' for '\(functionName)'"), span: currentSpan)
+            throw SemanticError(.generic("Unknown named argument '\(label)' for '\(functionName)'"), span: arg.span)
           }
           guard isNamed[fieldIndex] else {
-            throw SemanticError(.generic("Positional parameter cannot be passed by label '\(label)'"), span: currentSpan)
+            throw SemanticError(.generic("Positional parameter cannot be passed by label '\(label)'"), span: arg.span)
           }
         } else {
           // Positional arg - check that the param is positional
@@ -38,10 +38,10 @@ extension TypeChecker {
             positionalIndex += 1
           }
           guard positionalIndex < names.count else {
-            throw SemanticError(.generic("Too many positional arguments in call to '\(functionName)'"), span: currentSpan)
+            throw SemanticError(.generic("Too many positional arguments in call to '\(functionName)'"), span: arg.span)
           }
           guard !isNamed[positionalIndex] else {
-            throw SemanticError(.generic("Named parameter '\(names[positionalIndex])' must be passed by label"), span: currentSpan)
+            throw SemanticError(.generic("Named parameter '\(names[positionalIndex])' must be passed by label"), span: arg.span)
           }
           positionalIndex += 1
         }
@@ -77,19 +77,19 @@ extension TypeChecker {
         // Named argument
         seenNamed = true
         guard let fieldIndex = paramNames.firstIndex(of: label) else {
-          throw SemanticError(.generic("Unknown named argument '\(label)' for '\(callDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Unknown named argument '\(label)' for '\(callDescription)'"), span: arg.span)
         }
         guard paramIsNamed[fieldIndex] else {
-          throw SemanticError(.generic("Parameter '\(label)' is positional and cannot be passed by label"), span: currentSpan)
+          throw SemanticError(.generic("Parameter '\(label)' is positional and cannot be passed by label"), span: arg.span)
         }
         if orderedCallArgs[fieldIndex] != nil {
-          throw SemanticError(.generic("Duplicate argument '\(label)'"), span: currentSpan)
+          throw SemanticError(.generic("Duplicate argument '\(label)'"), span: arg.span)
         }
         orderedCallArgs[fieldIndex] = arg
       } else {
         // Positional argument
         if seenNamed {
-          throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(callDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Positional argument cannot appear after named argument in call to '\(callDescription)'"), span: arg.span)
         }
         // Find next positional parameter
         while positionalIndex < paramNames.count && paramIsNamed[positionalIndex] {
@@ -99,9 +99,9 @@ extension TypeChecker {
           // Every remaining parameter is named-only, so this argument can only
           // have been meant for one of them.
           if let required = paramNames.indices.firstIndex(where: { paramIsNamed[$0] && orderedCallArgs[$0] == nil }) {
-            throw SemanticError(.generic("Named parameter '\(paramNames[required])' must be passed by label"), span: currentSpan)
+            throw SemanticError(.generic("Named parameter '\(paramNames[required])' must be passed by label"), span: arg.span)
           }
-          throw SemanticError(.generic("Too many positional arguments in call to '\(callDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Too many positional arguments in call to '\(callDescription)'"), span: arg.span)
         }
         orderedCallArgs[positionalIndex] = arg
         positionalIndex += 1
@@ -116,9 +116,9 @@ extension TypeChecker {
         if self.parsedParameterDefaults[key] != nil {
           usesDefaults = true
         } else if paramIsNamed[index] {
-          throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: currentSpan)
+          throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
         } else {
-          throw SemanticError(.generic("Missing positional argument '\(param)' for '\(callDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Missing positional argument '\(param)' for '\(callDescription)'"), span: callArgs.first?.span ?? currentSpan)
         }
       }
     }
@@ -156,9 +156,9 @@ extension TypeChecker {
       let key = "\(defaultsKeyPrefix).\(param)"
       guard let defaultExpr = self.parsedParameterDefaults[key] else {
         if paramIsNamed[index] {
-          throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: currentSpan)
+          throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
         } else {
-          throw SemanticError(.generic("Missing positional argument '\(param)' for '\(callDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Missing positional argument '\(param)' for '\(callDescription)'"), span: callArgs.first?.span ?? currentSpan)
         }
       }
       expressions.append(defaultExpr)
@@ -398,7 +398,8 @@ extension TypeChecker {
       if let callArg = plan.orderedCallArgs[index], let expression = callArg.expression {
         var typedArg = try inferTypedExpression(expression, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)
-        if typedArg.type != member.type {
+        // An argument that already failed disagrees with nothing.
+        if typedArg.type != .error && typedArg.type != member.type {
           throw SemanticError.typeMismatch(
             expected: member.type.description,
             got: typedArg.type.description
@@ -414,7 +415,7 @@ extension TypeChecker {
       if let defaultExpr = self.parsedParameterDefaults[key] {
         var typedArg = try inferTypedExpression(defaultExpr, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)
-        if typedArg.type != member.type {
+        if typedArg.type != .error && typedArg.type != member.type {
           throw SemanticError.typeMismatch(
             expected: member.type.description,
             got: typedArg.type.description
@@ -426,9 +427,9 @@ extension TypeChecker {
 
       // No default available
       if member.named {
-        throw SemanticError(.generic("Missing named argument '\(member.name)' for '\(constructorDescription)'; provide '\(member.name):' or declare a default value"), span: currentSpan)
+        throw SemanticError(.generic("Missing named argument '\(member.name)' for '\(constructorDescription)'; provide '\(member.name):' or declare a default value"), span: plan.orderedCallArgs.compactMap { $0 }.first?.span ?? currentSpan)
       } else {
-        throw SemanticError(.generic("Missing positional argument '\(member.name)' for '\(constructorDescription)'"), span: currentSpan)
+        throw SemanticError(.generic("Missing positional argument '\(member.name)' for '\(constructorDescription)'"), span: plan.orderedCallArgs.compactMap { $0 }.first?.span ?? currentSpan)
       }
     }
 

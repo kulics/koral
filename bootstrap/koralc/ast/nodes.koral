@@ -15,15 +15,35 @@ public type TypeParameter(
     constraints List[Bound],
 );
 
+/// A type as WRITTEN.
+///
+/// `span` is where the type appears. A diagnostic that names a type
+/// (`Undefined type: X`, `FFI incompatible type 'Y'`) has to point at the
+/// spelling that is wrong; without it the only location available is whatever
+/// declaration or statement happens to carry the annotation.
 public type TypeNode {
-    Identifier(name String),
-    Reference(inner TypeNode, is_mutable Bool),
-    BorrowedReference(inner TypeNode, is_mutable Bool),
-    Pointer(inner TypeNode, is_mutable Bool),
-    WeakReference(inner TypeNode, is_mutable Bool),
-    Generic(base String, args List[TypeNode]),
-    InferredSelf(),
-    FunctionType(param_types List[TypeNode], return_type TypeNode),
+    Identifier(name String, span SourceSpan),
+    Reference(inner TypeNode, is_mutable Bool, span SourceSpan),
+    BorrowedReference(inner TypeNode, is_mutable Bool, span SourceSpan),
+    Pointer(inner TypeNode, is_mutable Bool, span SourceSpan),
+    WeakReference(inner TypeNode, is_mutable Bool, span SourceSpan),
+    Generic(base String, args List[TypeNode], span SourceSpan),
+    InferredSelf(span SourceSpan),
+    FunctionType(param_types List[TypeNode], return_type TypeNode, span SourceSpan),
+};
+
+/// Where a type is written.
+public let type_node_span(node TypeNode) SourceSpan = {
+    return when node in {
+        .Identifier(_, span) then span,
+        .Reference(_, _, span) then span,
+        .BorrowedReference(_, _, span) then span,
+        .Pointer(_, _, span) then span,
+        .WeakReference(_, _, span) then span,
+        .Generic(_, _, span) then span,
+        .InferredSelf(span) then span,
+        .FunctionType(_, _, span) then span,
+    };
 };
 
 // ── Bounds ──────────────────────────────────────────────────────────────────
@@ -59,7 +79,7 @@ public type Bound {
 /// consumer had to special-case.
 public let bound_from_type_node(node TypeNode) Option[Bound] = {
     return when node in {
-        .Identifier(name) then {
+        .Identifier(name, span) then {
             if name == "Any" then {
                 Option[Bound].None()
             } else if name == "mutable" then {
@@ -68,7 +88,7 @@ public let bound_from_type_node(node TypeNode) Option[Bound] = {
                 Option[Bound].Some(Bound.Trait(DefId(0(UInt)), name, List[TypeNode].new()))
             }
         },
-        .Generic(base, args) then {
+        .Generic(base, args, span) then {
             if base == "Any" then {
                 Option[Bound].None()
             } else {
@@ -109,8 +129,8 @@ public let bound_base_name(b Bound) String = {
 /// closely enough that constraint argument printing matches exactly.
 public let type_node_display(node TypeNode) String = {
     return when node in {
-        .Identifier(name) then name,
-        .Generic(base, args) then {
+        .Identifier(name, span) then name,
+        .Generic(base, args, span) then {
             let mutable out = StringBuilder.new();
             out.push_string(base);
             out.push_byte('[');
@@ -123,12 +143,12 @@ public let type_node_display(node TypeNode) String = {
             out.push_byte(']');
             out.to_string()
         },
-        .Reference(inner, is_mutable) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
-        .BorrowedReference(inner, is_mutable) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
-        .Pointer(inner, is_mutable) then (if is_mutable then "mutable *" else "*") + type_node_display(inner),
-        .WeakReference(inner, _) then "?" + type_node_display(inner),
-        .InferredSelf() then "Self",
-        .FunctionType(_, _) then "Func",
+        .Reference(inner, is_mutable, span) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
+        .BorrowedReference(inner, is_mutable, _) then (if is_mutable then "mutable &" else "&") + type_node_display(inner),
+        .Pointer(inner, is_mutable, _) then (if is_mutable then "mutable *" else "*") + type_node_display(inner),
+        .WeakReference(inner, _, _) then "?" + type_node_display(inner),
+        .InferredSelf(span) then "Self",
+        .FunctionType(_, _, _) then "Func",
     };
 };
 
@@ -245,23 +265,52 @@ public type GivenMember(
     def_id DefId,
 );
 
+/// A top-level declaration.
+///
+/// `name_span` is where the declaration's NAME is written. A diagnostic that
+/// names the symbol (`Duplicate definition: f`) has to point at `f`; the
+/// declaration's own `span` starts at its first keyword and blames the whole
+/// construct instead. The name was carried as a bare string, so the position
+/// had to be reconstructed -- or, as here, carried.
 public type Decl {
-    LetDecl(access AccessModifier, name String, is_mutable Bool, type_name Option[TypeNode], initializer Expr, span SourceSpan),
-    FunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, body Expr, span SourceSpan),
-    IntrinsicFunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, span SourceSpan),
-    ForeignFunctionDecl(access AccessModifier, name String, params List[Param], return_type TypeNode, span SourceSpan),
-    ForeignLetDecl(access AccessModifier, name String, is_mutable Bool, type_name TypeNode, span SourceSpan),
-    TypeStructDecl(access AccessModifier, name String, is_mutable_type Bool, type_params List[TypeParameter], fields List[Field], span SourceSpan),
-    TypeEnumDecl(access AccessModifier, name String, type_params List[TypeParameter], cases List[EnumCase], span SourceSpan),
-    TypeAliasDecl(access AccessModifier, name String, target TypeNode, span SourceSpan),
-    IntrinsicTypeDecl(access AccessModifier, name String, type_params List[TypeParameter], span SourceSpan),
-    ForeignTypeDecl(access AccessModifier, name String, cname Option[String], fields Option[List[Field]], span SourceSpan),
+    LetDecl(access AccessModifier, name String, is_mutable Bool, type_name Option[TypeNode], initializer Expr, span SourceSpan, name_span SourceSpan),
+    FunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, body Expr, span SourceSpan, name_span SourceSpan),
+    IntrinsicFunctionDecl(access AccessModifier, name String, type_params List[TypeParameter], params List[Param], return_type TypeNode, span SourceSpan, name_span SourceSpan),
+    ForeignFunctionDecl(access AccessModifier, name String, params List[Param], return_type TypeNode, span SourceSpan, name_span SourceSpan),
+    ForeignLetDecl(access AccessModifier, name String, is_mutable Bool, type_name TypeNode, span SourceSpan, name_span SourceSpan),
+    TypeStructDecl(access AccessModifier, name String, is_mutable_type Bool, type_params List[TypeParameter], fields List[Field], span SourceSpan, name_span SourceSpan),
+    TypeEnumDecl(access AccessModifier, name String, type_params List[TypeParameter], cases List[EnumCase], span SourceSpan, name_span SourceSpan),
+    TypeAliasDecl(access AccessModifier, name String, target TypeNode, span SourceSpan, name_span SourceSpan),
+    IntrinsicTypeDecl(access AccessModifier, name String, type_params List[TypeParameter], span SourceSpan, name_span SourceSpan),
+    ForeignTypeDecl(access AccessModifier, name String, cname Option[String], fields Option[List[Field]], span SourceSpan, name_span SourceSpan),
     FileUsingDecl(file_name String, span SourceSpan),
     ModuleUsingDecl(path_segments List[String], items List[UsingModuleItem], span SourceSpan),
-    TraitDecl(access AccessModifier, name String, type_params List[TypeParameter], parents List[TypeNode], members List[TraitMember], span SourceSpan),
+    TraitDecl(access AccessModifier, name String, type_params List[TypeParameter], parents List[TypeNode], members List[TraitMember], span SourceSpan, name_span SourceSpan),
     GivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
     GivenTraitDecl(target_type TypeNode, type_params List[TypeParameter], trait_type TypeNode, members List[GivenMember], span SourceSpan),
     IntrinsicGivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
+};
+
+/// Where a declaration's name is written -- see `Decl`.
+public let decl_name_span(decl Decl) SourceSpan = {
+    return when decl in {
+        .LetDecl(_, _, _, _, _, _, name_span) then name_span,
+        .FunctionDecl(_, _, _, _, _, _, _, name_span) then name_span,
+        .IntrinsicFunctionDecl(_, _, _, _, _, _, name_span) then name_span,
+        .ForeignFunctionDecl(_, _, _, _, _, name_span) then name_span,
+        .ForeignLetDecl(_, _, _, _, _, name_span) then name_span,
+        .TypeStructDecl(_, _, _, _, _, _, name_span) then name_span,
+        .TypeEnumDecl(_, _, _, _, _, name_span) then name_span,
+        .TypeAliasDecl(_, _, _, _, name_span) then name_span,
+        .IntrinsicTypeDecl(_, _, _, _, name_span) then name_span,
+        .ForeignTypeDecl(_, _, _, _, _, name_span) then name_span,
+        .FileUsingDecl(_, span) then span,
+        .ModuleUsingDecl(_, _, span) then span,
+        .TraitDecl(_, _, _, _, _, _, name_span) then name_span,
+        .GivenDecl(_, _, _, span) then span,
+        .GivenTraitDecl(_, _, _, _, span) then span,
+        .IntrinsicGivenDecl(_, _, _, span) then span,
+    };
 };
 
 public type UsingModuleItemKind {
@@ -309,6 +358,12 @@ public type InterpolatedStringPart {
 public type WhenArm(
     pattern PatternNode,
     body Expr,
+    /// Whether the compiler wrote this arm rather than the user: the wildcard
+    /// else of a lowered `if ... is` with no `else`. Such an arm exists only so
+    /// the `when` is exhaustive -- it has no type of its own to contribute, and
+    /// a mismatch reported against it is a complaint about a branch that is not
+    /// in the file.
+    synthetic Bool,
 );
 
 public type ExprPair(

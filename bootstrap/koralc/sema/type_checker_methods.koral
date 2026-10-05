@@ -326,14 +326,14 @@ given TypeChecker {
         };
     };
 
-    module_private push_ambiguous_trait_extension_method_diagnostic(self, base_type Type, method_name String) Void = {
+    module_private push_ambiguous_trait_extension_method_diagnostic(self, base_type Type, method_name String, span SourceSpan) Void = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Ambiguous method '");
         msg.push_string(method_name);
         msg.push_string("' for type '");
         msg.push_string(self.context().type_display_name(base_type));
         msg.push_string("' via trait extensions");
-        self.push_diagnostic(msg.to_string());
+        self.push_diagnostic(msg.to_string(), span);
     };
 
     module_private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
@@ -341,7 +341,7 @@ given TypeChecker {
     };
 
     module_private inject_trait_type_args_with_bindings(self, trait_type TypeNode, trait_name String, bindings Dict[String, Type]) Void = {
-        if trait_type is .Generic(_, args) then {
+        if trait_type is .Generic(_, args, span) then {
             // Create a child scope with trait type params instead of mutating global_scope
             // (Swift: withNewScope { defineGenericParameter(...) })
             if self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) is .Some(info) then {
@@ -583,14 +583,7 @@ given TypeChecker {
                                         .FilePrivate() then "file_private",
                                         _ then "module_private",
                                     };
-                                    self.storage.diagnostics.push(
-                                        make_diagnostic(
-                                            DiagnosticStage.Semantic(),
-                                            self.storage.file_path,
-                                            "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(inner_type))'"
-
-                                        , unknown_span())
-                                    );
+                                    self.push_diagnostic("Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(inner_type))'", unknown_span());
                                 };
                                 break;
                             };
@@ -615,14 +608,7 @@ given TypeChecker {
                                             .FilePrivate() then "file_private",
                                             _ then "module_private",
                                         };
-                                        self.storage.diagnostics.push(
-                                            make_diagnostic(
-                                                DiagnosticStage.Semantic(),
-                                                self.storage.file_path,
-                                                "Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(template_def_id))'"
-
-                                            , unknown_span())
-                                        );
+                                        self.push_diagnostic("Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(template_def_id))'", unknown_span());
                                     };
                                     break;
                                 };
@@ -1092,12 +1078,13 @@ given TypeChecker {
         inner_type Type,
         template GenericExtensionMethodTemplate,
         actual_type_args List[Type],
+        span SourceSpan,
     ) Option[Symbol] = {
         // A template declares the target's type parameters; the receiver must
         // carry exactly that many arguments. Swift checks this the same way in
         // `selectExtensionTemplate` (`ext.typeParams.count != extensionTypeArgCount`).
         if template.type_params.count() <> actual_type_args.count() then {
-            self.push_diagnostic("Type mismatch: expected \(template.type_params.count()) type arguments, got \(actual_type_args.count())");
+            self.push_diagnostic("Type mismatch: expected \(template.type_params.count()) type arguments, got \(actual_type_args.count())", span);
             return Option[Symbol].None();
         };
         let mutable bindings = Dict[String, Type].new();
@@ -1116,9 +1103,13 @@ given TypeChecker {
         for tp in template.type_params then {
             for constraint in tp.constraints then {
                 let bound_type = bindings.get(tp.name) or else Type.GenericParameter(tp.name);
-                if not self.enforce_bound_requirement(bound_type, constraint, tp.name, bindings) then {
-                    return Option[Symbol].None();
-                };
+                // An unmet bound is a report, not a lookup failure. The
+                // declaration's signature is still what it is, so the call is
+                // typed from it and any mistake INDEPENDENT of the bound is
+                // still worth saying -- `return text.count()` is wrong whether
+                // or not `text`'s element type was `ToString`. Aborting the
+                // lookup here invented a type for the call and swallowed those.
+                let _ = self.enforce_bound_requirement(bound_type, constraint, tp.name, bindings, span);
             };
         };
         for method_type_param in template.method.type_params then {
@@ -1179,7 +1170,7 @@ given TypeChecker {
             .Some(checked_symbols) then {
                 let mutable checked_index UInt = 0;
                 while checked_index < checked_symbols.count() then {
-                    let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown"), true);
+                    let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown", unknown_span()), true);
                     typed_params.push(TypedParam(
                         declared.name,
                         declared.is_mutable,
@@ -1219,7 +1210,7 @@ given TypeChecker {
         );
     };
 
-    module_private resolve_extension_template_signature(self, base_type Type, inner_type Type, method_name String) Option[Symbol] = {
+    module_private resolve_extension_template_signature(self, base_type Type, inner_type Type, method_name String, span SourceSpan) Option[Symbol] = {
         let template_key = self.generic_extension_lookup_key(inner_type);
         return when template_key in {
             .Some(key) then when self.storage.generic_templates.lookup_extension_method(
@@ -1233,6 +1224,7 @@ given TypeChecker {
                     inner_type,
                     template,
                     self.receiver_type_args(inner_type),
+                    span,
                 ),
                 .None() then Option[Symbol].None(),
             },
@@ -1245,6 +1237,7 @@ given TypeChecker {
         base_type Type,
         trait_name String,
         method_name String,
+        span SourceSpan,
     ) Option[Symbol] = {
         return when self.flattened_trait_tool_methods(trait_name) in {
             .Ok(methods) then when methods.get(method_name) in {
@@ -1287,7 +1280,7 @@ given TypeChecker {
                 .None() then Option[Symbol].None(),
             },
             .Error(error) then {
-                self.push_diagnostic(error.message());
+                self.push_diagnostic(error.message(), span);
                 return Option[Symbol].None();
             },
         };
@@ -1319,7 +1312,7 @@ given TypeChecker {
                     _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg.to_string());
+                    self.push_diagnostic(_rdmsg.to_string(), unknown_span());
                     normalized_base_type
                 },
                 .BorrowedReferenceType(_) then {
@@ -1327,7 +1320,7 @@ given TypeChecker {
                     _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg.to_string());
+                    self.push_diagnostic(_rdmsg.to_string(), unknown_span());
                     normalized_base_type
                 },
                 _ then Type.MutableReferenceType(self.box_type(inner_type)),
@@ -1340,7 +1333,7 @@ given TypeChecker {
                     _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg.to_string());
+                    self.push_diagnostic(_rdmsg.to_string(), unknown_span());
                     normalized_base_type
                 },
                 .BorrowedReferenceType(_) then {
@@ -1348,7 +1341,7 @@ given TypeChecker {
                     _rdmsg.push_string("Cannot call mutating method through read-only reference of type '");
                     _rdmsg.push_string(type_to_string(base_type));
                     _rdmsg.push_string("'");
-                    self.push_diagnostic(_rdmsg.to_string());
+                    self.push_diagnostic(_rdmsg.to_string(), unknown_span());
                     normalized_base_type
                 },
                 _ then Type.MutableBorrowedReferenceType(self.box_type(inner_type)),
@@ -1587,7 +1580,7 @@ given TypeChecker {
         return self.trait_is_ancestor_of(trait_b, trait_a, visited);
     };
 
-    module_private resolve_conformance_method_signature(self, receiver_type Type, method_name String) Option[Symbol] = {
+    module_private resolve_conformance_method_signature(self, receiver_type Type, method_name String, span SourceSpan) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
@@ -1659,7 +1652,7 @@ given TypeChecker {
                             msg.push_string("' and '");
                             msg.push_string(trait_name);
                             msg.push_string("'. Use explicit trait qualification (e.g., value.(TraitName).method())");
-                            self.push_diagnostic(msg.to_string());
+                            self.push_diagnostic(msg.to_string(), span);
                         };
                     } else {
                         first_match = Option[Symbol].Some(candidate);
@@ -1692,7 +1685,7 @@ given TypeChecker {
                                     msg.push_string("' and '");
                                     msg.push_string(trait_name);
                                     msg.push_string("'. Use explicit trait qualification (e.g., value.(TraitName).method())");
-                                    self.push_diagnostic(msg.to_string());
+                                    self.push_diagnostic(msg.to_string(), span);
                                 };
                             } else {
                                 first_match = Option[Symbol].Some(candidate);
@@ -1801,7 +1794,7 @@ given TypeChecker {
                 .Some(checked_symbols) then {
                     let mutable checked_index UInt = 0;
                     while checked_index < checked_symbols.count() then {
-                        let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown"), true);
+                        let declared = if checked_index < template.method.params.count() then template.method.params[checked_index] else TemplateParam("p", false, TypeNode.Identifier("Unknown", unknown_span()), true);
                         typed_params.push(TypedParam(
                             declared.name,
                             declared.is_mutable,
@@ -2360,7 +2353,7 @@ given TypeChecker {
             .Some(method) then Option[Symbol].Some(self.bind_static_declaration_signature(type_name, self.receiver_type_args(receiver_type), method)),
             .None() then when self.resolve_static_extension_template_signature(receiver_type, method_name) in {
                 .Some(method) then Option[Symbol].Some(method),
-                .None() then self.resolve_conformance_method_signature(receiver_type, method_name),
+                .None() then self.resolve_conformance_method_signature(receiver_type, method_name, unknown_span()),
             },
         };
     };
@@ -2792,7 +2785,7 @@ given TypeChecker {
         return out;
     };
 
-    module_private resolve_method_signature_unchecked(self, base_type Type, method_name String) Option[Symbol] = {
+    module_private resolve_method_signature_unchecked(self, base_type Type, method_name String, span SourceSpan) Option[Symbol] = {
         let mutable normalized_base_type = self.normalize_method_receiver_type(base_type);
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner,
@@ -2813,7 +2806,7 @@ given TypeChecker {
                             .Some(method) then { return Option[Symbol].Some(method);},
                             .None() then {},
                         };
-                        when self.resolve_trait_tool_method_signature(inner_type, cn, method_name) in {
+                        when self.resolve_trait_tool_method_signature(inner_type, cn, method_name, span) in {
                             .Some(method) then { return Option[Symbol].Some(method);},
                             .None() then {},
                         };
@@ -2827,7 +2820,7 @@ given TypeChecker {
                     .Some(method) then { return Option[Symbol].Some(method);},
                     .None() then {},
                 };
-                when self.resolve_trait_tool_method_signature(inner_type, trait_spelling, method_name) in {
+                when self.resolve_trait_tool_method_signature(inner_type, trait_spelling, method_name, span) in {
                     .Some(method) then { return Option[Symbol].Some(method);},
                     .None() then {},
                 };
@@ -2838,26 +2831,24 @@ given TypeChecker {
             _ then {},
         };
 
+        // The slot a lookup finds may have been contested by two declarations.
+        // That was reported when the second one registered -- the conflict
+        // exists whether or not anyone calls the method -- and restating it at
+        // every call site adds a line pointing at a place that cannot fix it.
+        // The call is typed from what the slot holds, as it would be for an
+        // uncontested name.
         let type_key = self.extension_template_key(inner_type);
         if self.lookup_method_signature(type_key, method_name) is .Some(raw_method) then {
-            if self.storage.method_table.has_conflict(type_key, method_name) and not self.storage.method_table.is_inherent(type_key, method_name) then {
-                self.push_ambiguous_trait_extension_method_diagnostic(inner_type, method_name);
-                return Option[Symbol].None();
-            };
             return Option[Symbol].Some(self.bind_direct_method_signature(base_type, method_name, raw_method));
         };
 
-        when self.resolve_extension_template_signature(normalized_base_type, inner_type, method_name) in {
+        when self.resolve_extension_template_signature(normalized_base_type, inner_type, method_name, span) in {
             .Some(method) then { return Option[Symbol].Some(method);},
             .None() then {},
         };
 
         let template_key = self.resolve_method_template_key(inner_type);
         if template_key is .Some(key) and self.lookup_method_signature(key, method_name) is .Some(raw_method) then {
-            if self.storage.method_table.has_conflict(key, method_name) and not self.storage.method_table.is_inherent(key, method_name) then {
-                self.push_ambiguous_trait_extension_method_diagnostic(inner_type, method_name);
-                return Option[Symbol].None();
-            };
             return Option[Symbol].Some(self.bind_direct_method_signature(base_type, method_name, raw_method));
         };
 
@@ -2867,7 +2858,7 @@ given TypeChecker {
             .None() then {},
         };
 
-        when self.resolve_conformance_method_signature(inner_type, method_name) in {
+        when self.resolve_conformance_method_signature(inner_type, method_name, span) in {
             .Some(method) then { return Option[Symbol].Some(method);},
             .None() then {},
         };
@@ -2885,8 +2876,16 @@ given TypeChecker {
         return Option[Symbol].None();
     };
 
+    /// Resolve a method signature without a source location to blame for a
+    /// constraint the receiver fails. Prefer `resolve_method_signature_at`
+    /// wherever a span is at hand -- a requirement that cannot point at the call
+    /// that demanded it cannot be acted on.
     module_private resolve_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
-        return self.resolve_method_signature_unchecked(base_type, method_name);
+        return self.resolve_method_signature_unchecked(base_type, method_name, unknown_span());
+    };
+
+    module_private resolve_method_signature_at(self, base_type Type, method_name String, span SourceSpan) Option[Symbol] = {
+        return self.resolve_method_signature_unchecked(base_type, method_name, span);
     };
 
     module_private resolve_method_param_types_with_method_type_args(self, base_type Type, method_name String, method_type_args List[Type]) List[Type] = {
@@ -3050,7 +3049,9 @@ given TypeChecker {
         message.push_string(context);
         message.push_string(": ");
         message.push_string(error.message());
-        self.push_diagnostic(message.to_string());
+        // Flattening a trait is declaration-level; there is no call site to
+        // point at. Said out loud rather than defaulted away.
+        self.push_diagnostic(message.to_string(), unknown_span());
     };
 
     module_private report_missing_trait_method_info(self, trait_name String, context String) Void = {
@@ -3059,7 +3060,7 @@ given TypeChecker {
         message.push_string(trait_name);
         message.push_string(" in ");
         message.push_string(context);
-        self.push_diagnostic(message.to_string());
+        self.push_diagnostic(message.to_string(), unknown_span());
     };
 
     // 从 trait registry 解析 qualified method call 的返回类型。

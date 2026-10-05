@@ -22,15 +22,19 @@ public enum LexerError: Error {
     span.start.column
   }
   
-  /// The error message without location information
+  /// The error message without location information.
+  ///
+  /// No category wrapper (`Invalid integer number: ...`). The specific message
+  /// already says what is wrong, and the wrapper made for doubled adjectives
+  /// (`Invalid integer number: Invalid digit '2' in ...`).
   public var messageWithoutLocation: String {
     switch self {
     case .invalidFloat(_, let msg):
-      return "Invalid float number: \(msg)"
+      return msg
     case .invalidInteger(_, let msg):
-      return "Invalid integer number: \(msg)"
+      return msg
     case .invalidString(_, let msg):
-      return "Invalid string: \(msg)"
+      return msg
     case .unexpectedCharacter(_, let msg):
       return "Unexpected character: \(msg)"
     case .unexpectedEndOfFile:
@@ -84,6 +88,12 @@ public enum ParserError: Error {
   case invalidAccessModifierOrder(span: SourceSpan, message: String)
   case invalidComparisonChain(span: SourceSpan, message: String)
   case defaultValuesRequireNamedParameter(span: SourceSpan)
+  /// A construct whose tokens are all valid but whose shape the language
+  /// rejects: a removed feature, a modifier in the wrong place, an ordering
+  /// rule. `unexpectedToken` reports a wrong *token* and so frames the message
+  /// as `Unexpected token: <got>, expected: <want>`. Here the tokens were fine
+  /// -- the construct is what is disallowed -- so the message stands alone.
+  case rejectedConstruct(span: SourceSpan, message: String)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -115,6 +125,7 @@ public enum ParserError: Error {
     case .invalidAccessModifierOrder(let span, _): return span
     case .invalidComparisonChain(let span, _): return span
     case .defaultValuesRequireNamedParameter(let span): return span
+    case .rejectedConstruct(let span, _): return span
     }
   }
   
@@ -189,6 +200,8 @@ public enum ParserError: Error {
       return message
     case .defaultValuesRequireNamedParameter:
       return "Default values are only allowed for named parameters (use 'name: Type = value' syntax)"
+    case .rejectedConstruct(_, let message):
+      return message
     }
   }
 }

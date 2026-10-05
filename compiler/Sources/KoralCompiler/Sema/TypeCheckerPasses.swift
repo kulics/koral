@@ -69,24 +69,28 @@ extension TypeChecker {
     returnType: Type,
     selfType: Type
   ) throws {
-    // Only accept: drop(self) — self is the receiver, type is SelfType
+    // Only accept: drop(self) — self is the receiver, type is SelfType.
+    // Each part of that signature is a separate requirement, so each gets its
+    // own sentence. Routing these through `invalidOperation` rendered them as
+    // `... between types  and `: the template wants two type names and these
+    // have none.
     guard params.count == 1 else {
-      throw SemanticError.invalidOperation(
-        op: "drop must have exactly one parameter", type1: "", type2: "")
+      throw SemanticError(.generic("drop must have exactly one parameter"))
     }
     let paramType = params[0].type
     let paramName = context.getName(params[0].defId) ?? ""
 
-    guard paramName == "self" && paramType == selfType else {
-      throw SemanticError.invalidOperation(
-        op: "drop parameter must be 'self'",
-        type1: paramType.description,
-        type2: selfType.description
-      )
+    if paramName != "self" {
+      throw SemanticError(
+        .generic("drop parameter must be named 'self', got '\(paramName)'"))
+    }
+    guard paramType == selfType else {
+      throw SemanticError(
+        .generic(
+          "drop parameter must have type '\(selfType)', got '\(paramType)'"))
     }
     if returnType != .void {
-      throw SemanticError.invalidOperation(
-        op: "drop must return Void", type1: returnType.description, type2: "")
+      throw SemanticError(.generic("drop must return Void"))
     }
   }
 
@@ -562,7 +566,7 @@ extension TypeChecker {
   /// Extracts symbol information from a global declaration.
   private func extractSymbolInfo(from decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo) -> (name: String, symbol: Symbol, type: Type?)? {
     switch decl {
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, _):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, _, _):
       // Skip generic functions for now
       if !typeParameters.isEmpty { return nil }
       
@@ -592,7 +596,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignFunctionDeclaration(let name, _, _, _, _):
+    case .foreignFunctionDeclaration(let name, _, _, _, _, _):
       if let defId = defIdMap.lookup(
           modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile),
          let funcType = defIdMap.getSymbolType(defId) {
@@ -605,7 +609,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalStructDeclaration(let name, let typeParameters, _, _, _, _):
+    case .globalStructDeclaration(let name, let typeParameters, _, _, _, _, _):
       // Skip generic structs for now
       if !typeParameters.isEmpty { return nil }
       
@@ -626,7 +630,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalEnumDeclaration(let name, let typeParameters, _, _, _):
+    case .globalEnumDeclaration(let name, let typeParameters, _, _, _, _):
       // Skip generic enums for now
       if !typeParameters.isEmpty { return nil }
       
@@ -647,7 +651,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, _, _, let access, _):
+    case .foreignTypeDeclaration(let name, _, _, let access, _, _):
       let type = access == .file_private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -668,7 +672,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalVariableDeclaration(let name, _, _, _, _, _):
+    case .globalVariableDeclaration(let name, _, _, _, _, _, _):
       if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
          let varType = defIdMap.getSymbolType(defId) {
         let symbol = Symbol(
@@ -679,7 +683,7 @@ extension TypeChecker {
         return (name, symbol, nil)
       }
       return nil
-    case .foreignLetDeclaration(let name, _, _, _, _):
+    case .foreignLetDeclaration(let name, _, _, _, _, _):
       if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
          let varType = defIdMap.getSymbolType(defId) {
         let symbol = Symbol(
@@ -744,13 +748,13 @@ extension TypeChecker {
 
   private func decomposeGenericGivenTypeNode(_ typeNode: TypeNode) throws -> (baseName: String, args: [TypeNode]) {
     switch typeNode {
-    case .generic(let base, let typeArgs):
+    case .generic(let base, let typeArgs, _):
       return (base, typeArgs)
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       return (mutable ? "MutPtr" : "Ptr", [inner])
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       return (mutable ? "MutRef" : "Ref", [inner])
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       return (mutable ? "MutWeakRef" : "WeakRef", [inner])
     default:
       throw SemanticError.invalidOperation(
@@ -795,11 +799,11 @@ extension TypeChecker {
 
   private func modifierBaseName(for typeNode: TypeNode) -> String? {
     switch typeNode {
-    case .reference(_, let mutable):
+    case .reference(_, let mutable, _):
       return mutable ? "MutRef" : "Ref"
-    case .pointer(_, let mutable):
+    case .pointer(_, let mutable, _):
       return mutable ? "MutPtr" : "Ptr"
-    case .weakReference(_, let mutable):
+    case .weakReference(_, let mutable, _):
       return mutable ? "MutWeakRef" : "WeakRef"
     default:
       return nil
@@ -819,10 +823,10 @@ extension TypeChecker {
 
       return
       
-    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
       self.currentSpan = span
       if let existing = traits[name], existing.modulePath == currentModulePath {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
       
       // Check for method-level type parameter conflicts with trait-level type parameters
@@ -863,7 +867,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
       self.currentSpan = span
       // For private types, allow same name in different files
       let isPrivate = (access == .file_private)
@@ -871,10 +875,10 @@ extension TypeChecker {
         if !isPrivate,
            defIdMap.hasGenericEnumTemplate(name: name, modulePath: currentModulePath)
             || (!isStdLib && stdLibTypes.contains(name)) {
-          throw SemanticError.duplicateDefinition(name, span: span)
+          throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
       } else if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
       
       if !typeParameters.isEmpty {
@@ -913,7 +917,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span, let nameSpan):
       self.currentSpan = span
       try validateValueTypeFieldMutability(
         typeName: name,
@@ -930,10 +934,10 @@ extension TypeChecker {
         if !isPrivate,
            defIdMap.hasGenericStructTemplate(name: name, modulePath: currentModulePath)
             || (!isStdLib && stdLibTypes.contains(name)) {
-          throw SemanticError.duplicateDefinition(name, span: span)
+          throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
       } else if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
       
       if !typeParameters.isEmpty {
@@ -972,11 +976,11 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
       let kind: TypeDefKind = fields == nil ? .opaque : .structure
       let defId = getOrAllocateTypeDefId(
@@ -998,7 +1002,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span):
+    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span, _):
       self.currentSpan = span
       // For generic functions, we just note that they exist
       // The full template will be registered in pass 2
@@ -1026,7 +1030,7 @@ extension TypeChecker {
       // The methods will be registered in pass 2
       if !typeParams.isEmpty {
         // Generic given - base type should already be registered
-        if case .generic(let baseName, _) = typeNode {
+        if case .generic(let baseName, _, _) = typeNode {
           // Verify the base type exists (struct or enum template)
           if currentScope.lookupGenericStructTemplate(baseName) == nil &&
              currentScope.lookupGenericEnumTemplate(baseName) == nil {
@@ -1041,12 +1045,12 @@ extension TypeChecker {
       // Trait-conformance given declaration does not define a new type;
       // type/method validation is performed in pass 2/3.
       if !typeParams.isEmpty {
-        if case .generic(_, _) = typeNode {
+        if case .generic(_, _, _) = typeNode {
           // validated later
         }
       }
       
-    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span, let nameSpan):
       self.currentSpan = span
       
       // Module rule check: intrinsic declarations are only allowed in standard library
@@ -1055,7 +1059,7 @@ extension TypeChecker {
       }
       
       if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
       
       if !typeParameters.isEmpty {
@@ -1109,7 +1113,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span, _):
       self.currentSpan = span
       
       // Module rule check: intrinsic declarations are only allowed in standard library
@@ -1131,7 +1135,7 @@ extension TypeChecker {
       // Handled in pass 2 (signature) and pass 3 (body)
       break
 
-    case .typeAliasDeclaration(let name, let targetType, let access, let span):
+    case .typeAliasDeclaration(let name, let targetType, let access, let span, _):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       
@@ -1201,7 +1205,7 @@ extension TypeChecker {
             )
           }
           for (i, arg) in traitArgNodes.enumerated() {
-            guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+            guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
               throw SemanticError.invalidOperation(
                 op: "generic given specialization not supported",
                 type1: String(describing: arg),
@@ -1261,7 +1265,7 @@ extension TypeChecker {
           }
         }
         for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+          guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
             throw SemanticError.invalidOperation(
               op: "generic given specialization not supported", type1: String(describing: arg),
               type2: "")
@@ -1507,7 +1511,7 @@ extension TypeChecker {
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
         }
         for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+          guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
             throw SemanticError.invalidOperation(
               op: "generic given specialization not supported", type1: String(describing: arg), type2: "")
           }
@@ -1625,7 +1629,7 @@ extension TypeChecker {
 
         if !typeParams.isEmpty {
           let baseName: String
-          if case .generic(let name, _) = typeNode {
+          if case .generic(let name, _, _) = typeNode {
             baseName = name
           } else {
             baseName = modifierBaseName(for: typeNode) ?? ""
@@ -1670,9 +1674,11 @@ extension TypeChecker {
               if !existingSources.contains(method.defId) {
                 // If another trait already provides this method, it's ambiguous
                 if existingConcrete.contains(method.name) && !existingSources.isEmpty {
-                  throw SemanticError(.generic(
+                  // The conflict is one problem among several the file may
+                  // have; stopping here would skip every later declaration.
+                  try handleError(SemanticError(.generic(
                     "Ambiguous method '\(method.name)' for type '\(typeName)' via trait extensions"
-                  ), span: span)
+                  ), span: span))
                 }
                 extensionMethodTraitSources[methodOwnerKey]![method.name]!.append(method.defId)
               }
@@ -1698,13 +1704,13 @@ extension TypeChecker {
         // Generic intrinsic given - register method signatures
         let baseName: String
         switch typeNode {
-        case .generic(let name, _):
+        case .generic(let name, _, _):
           baseName = name
-        case .pointer(_, let mutable):
+        case .pointer(_, let mutable, _):
           baseName = mutable ? "MutPtr" : "Ptr"
-        case .reference(_, let mutable):
+        case .reference(_, let mutable, _):
           baseName = mutable ? "MutRef" : "Ref"
-        case .weakReference(_, let mutable):
+        case .weakReference(_, let mutable, _):
           baseName = mutable ? "MutWeakRef" : "WeakRef"
         default:
           throw SemanticError.invalidOperation(
@@ -1788,7 +1794,7 @@ extension TypeChecker {
         }
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span, let nameSpan):
       self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
@@ -1832,7 +1838,7 @@ extension TypeChecker {
       }
       // Generic structs are handled in pass 3
 
-    case .foreignTypeDeclaration(let name, let cname, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, let cname, let fields, let access, let span, _):
       self.currentSpan = span
       guard let fields else {
         break
@@ -1878,7 +1884,7 @@ extension TypeChecker {
         }
       }
       
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
       self.currentSpan = span
       // Resolve non-generic enum types so function signatures can reference them
       if typeParameters.isEmpty {
@@ -1920,7 +1926,7 @@ extension TypeChecker {
       }
       // Generic enums are handled in pass 3
       
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span, _):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       // Register function signature so it can be called from methods defined earlier
@@ -1968,7 +1974,7 @@ extension TypeChecker {
             span: span
           )
 
-        let dummyBody = ExpressionNode.booleanLiteral(false)
+        let dummyBody = ExpressionNode.booleanLiteral(false, span: .unknown)
         let template = GenericFunctionTemplate(
           defId: defId,
           typeParameters: genericTypeParameters,
@@ -1983,11 +1989,11 @@ extension TypeChecker {
       }
       // Generic functions are fully checked in pass 3
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
       let returnType = try resolveTypeNode(returnTypeNode)
@@ -2002,8 +2008,8 @@ extension TypeChecker {
       try validateSignatureTypeVisibility(
         symbolName: name,
         symbolAccess: access,
-        signatureTypes: params.map(\.type) + [returnType],
-        span: span
+        signatureTypes: params.map { $0.type } + [returnType],
+        span: nameSpan
       )
       let functionType = Type.function(parameters: params, returns: returnType)
       if isPrivate {
@@ -2012,7 +2018,7 @@ extension TypeChecker {
         currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span, _):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       // Register intrinsic function signature so it can be called from methods defined earlier
@@ -2040,7 +2046,7 @@ extension TypeChecker {
             packageID: currentPackageID,
             span: span
           )
-        let dummyBody = ExpressionNode.booleanLiteral(false)
+        let dummyBody = ExpressionNode.booleanLiteral(false, span: .unknown)
         let template = GenericFunctionTemplate(
           defId: defId,
           typeParameters: genericTypeParameters,
@@ -2077,7 +2083,7 @@ extension TypeChecker {
 
       return nil
       
-    case .traitDeclaration(let name, let typeParameters, let superTraits, _, _, let span):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, _, _, let span, _):
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
       try withNewScope {
@@ -2099,7 +2105,7 @@ extension TypeChecker {
           // accepted without them -- bootstrap's `validate_trait_parent_arity`
           // returns early on `actual_count == 0` for the same spelling, and the
           // two compilers must agree.
-          if case .generic(_, let args) = parent {
+          if case .generic(_, let args, _) = parent {
             let traitInfo = traits[constraint.baseName]
             let expectedCount = traitInfo?.typeParameters.count ?? 0
             if expectedCount != args.count {
@@ -2126,7 +2132,7 @@ extension TypeChecker {
       return nil
 
     case .globalEnumDeclaration(
-      let name, let typeParameters, let cases, let access, let span):
+      let name, let typeParameters, let cases, let access, let span, _):
       self.currentSpan = span
 
       if !typeParameters.isEmpty {
@@ -2165,13 +2171,13 @@ extension TypeChecker {
       return .globalEnumDeclaration(
         identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access), cases: enumCases)
 
-    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, let access, let span):
+    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, let access, let span, let nameSpan):
       self.currentSpan = span
       // For private variables, allow same name in different files
       let isPrivate = (access == .file_private)
 
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
       // Resolve expected type: explicit annotation or nil for inference
@@ -2179,7 +2185,7 @@ extension TypeChecker {
       if let type = expectedType {
         try assertNotOpaqueType(type, span: span)
         try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
-        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
+        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
       }
 
       // Type-check the initializer, passing expected type for inference/coercion
@@ -2199,7 +2205,7 @@ extension TypeChecker {
       let type: Type
       if let expectedType = expectedType {
         type = expectedType
-        if typedValue.type != .never && typedValue.type != type {
+        if typedValue.type != .never && typedValue.type != .error && typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
         }
@@ -2207,7 +2213,7 @@ extension TypeChecker {
         type = typedValue.type
         try assertNotOpaqueType(type, span: span)
         try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
-        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
+        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
       }
 
       if isPrivate {
@@ -2224,7 +2230,7 @@ extension TypeChecker {
         kind: isMut ? .MutableValue : .Value
       )
 
-    case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       let type: Type
@@ -2257,16 +2263,17 @@ extension TypeChecker {
       }
       return .foreignType(identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access))
 
-    case .foreignLetDeclaration(let name, let typeNode, let mutable, let access, let span):
+    case .foreignLetDeclaration(let name, let typeNode, let mutable, let access, let span, let nameSpan):
       self.currentSpan = span
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
       try assertNoBorrowedReferenceType(type, context: "foreign global type", span: span)
-      try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
+      // Both messages name the SYMBOL, so both point at its name.
+      try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
 
       let isPrivate = (access == .file_private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
       if isPrivate {
@@ -2291,7 +2298,7 @@ extension TypeChecker {
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
-      let span):
+      let span, let nameSpan):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       let declaredDefId = declaredDefIdForCurrentGlobal(name: name, access: access)
@@ -2311,7 +2318,7 @@ extension TypeChecker {
              sourceFile: currentSourceFile,
              expectedDefId: declaredDefId
            ) {
-          throw SemanticError.duplicateDefinition(name, span: span)
+          throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
       } else if let existingTemplateDefId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access),
                 isFunctionDefConflictingInCurrentDecl(
@@ -2320,7 +2327,7 @@ extension TypeChecker {
                   sourceFile: currentSourceFile,
                   expectedDefId: declaredDefId
                 ) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
       if !genericTypeParameters.isEmpty {
@@ -2342,7 +2349,7 @@ extension TypeChecker {
           parameters: parameters,
           returnType: returnTypeNode,
           body: ExpressionNode.call(
-            callee: .identifier("panic"), arguments: [CallArg(expression: .stringLiteral("recursion"))])
+            callee: .identifier("panic", span: .unknown), arguments: [CallArg(expression: .stringLiteral("recursion", span: .unknown))], span: .unknown)
         )
         currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
 
@@ -2365,8 +2372,8 @@ extension TypeChecker {
           try validateSignatureTypeVisibility(
             symbolName: name,
             symbolAccess: access,
-            signatureTypes: params.map(\.type) + [returnType],
-            span: span
+            signatureTypes: params.map { $0.type } + [returnType],
+            span: nameSpan
           )
 
           // Perform declaration-site checking
@@ -2401,8 +2408,8 @@ extension TypeChecker {
       try validateSignatureTypeVisibility(
         symbolName: name,
         symbolAccess: access,
-        signatureTypes: params.map(\.type) + [returnType],
-        span: span
+        signatureTypes: params.map { $0.type } + [returnType],
+        span: nameSpan
       )
 
       let functionType = Type.function(
@@ -2433,15 +2440,17 @@ extension TypeChecker {
       )
 
     case .foreignFunctionDeclaration(
-      let name, let parameters, let returnTypeNode, let access, let span):
+      let name, let parameters, let returnTypeNode, let access, let span, let nameSpan):
       self.currentSpan = span
 
       let returnType = try resolveTypeNode(returnTypeNode)
       try assertNoBorrowedReferenceType(returnType, context: "foreign function return type", span: span)
       if !isFfiCompatibleType(returnType) {
+        // The message names the TYPE, so it points at the type's spelling --
+        // `foreign let bad(x Bad) Int32;` blames `Bad`, not the declaration.
         throw SemanticError(
           .ffiIncompatibleType(type: returnType.description, reason: ffiTypeError(returnType)),
-          span: span
+          span: returnTypeNode.span
         )
       }
 
@@ -2451,7 +2460,7 @@ extension TypeChecker {
         if !isFfiCompatibleType(paramType) {
           throw SemanticError(
             .ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)),
-            span: span
+            span: param.type.span
           )
         }
         return makeLocalSymbol(
@@ -2470,7 +2479,7 @@ extension TypeChecker {
       return .foreignFunction(identifier: symbol, parameters: params)
 
     case .intrinsicFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
+      let name, let typeParameters, let parameters, let returnTypeNode, let access, let span, let nameSpan):
       self.currentSpan = span
       
       // Skip duplicate check for non-generic functions (already defined in Pass 2)
@@ -2480,11 +2489,11 @@ extension TypeChecker {
       }
       
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
-        throw SemanticError.duplicateDefinition(name, span: span)
+        throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
       // Create a dummy body for intrinsic representation
-      let dummyBody = ExpressionNode.booleanLiteral(false)
+      let dummyBody = ExpressionNode.booleanLiteral(false, span: .unknown)
 
       if !typeParameters.isEmpty {
         try withNewScope {
@@ -2615,7 +2624,7 @@ extension TypeChecker {
 
             if isTraitTarget {
               currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
-              if case .generic(_, let traitArgs) = typeNode {
+              if case .generic(_, let traitArgs, _) = typeNode {
                 genericTraitBounds["Self"] = [.trait(defId: .invalid, name: baseName, args: traitArgs)]
               }
             }
@@ -2859,7 +2868,7 @@ extension TypeChecker {
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
         }
         for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+          guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
             throw SemanticError.invalidOperation(
               op: "generic given specialization not supported", type1: String(describing: arg), type2: "")
           }
@@ -3254,7 +3263,7 @@ extension TypeChecker {
             if traitParam.named != implParam.named {
               if traitParam.named {
                 throw SemanticError(.generic(
-                  "Trait method '\(method.name)' requires named parameter at position \(i), but implementation uses positional parameter"
+                  "Trait method '\(method.name)' requires named parameter '\(traitParam.name)' at position \(i), but implementation uses positional parameter"
                 ), span: span)
               } else {
                 throw SemanticError(.generic(
@@ -3623,7 +3632,7 @@ extension TypeChecker {
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
         }
         for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+          guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
             throw SemanticError.invalidOperation(
               op: "generic given specialization not supported", type1: String(describing: arg),
               type2: "")
@@ -3740,7 +3749,7 @@ extension TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, trait: nil, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, _, let access, let span):
+      let name, let typeParameters, let parameters, _, let access, let span, _):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
@@ -3786,7 +3795,7 @@ extension TypeChecker {
         parameters: params
       )
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, let span):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, let span, _):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Pass 2 just returns the appropriate node

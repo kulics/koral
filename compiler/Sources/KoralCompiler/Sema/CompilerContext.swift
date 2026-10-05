@@ -266,6 +266,8 @@ public final class CompilerContext: @unchecked Sendable {
                 return requiresManagedNominalLayout(for: defId)
             }
             return false
+        case .error:
+            return false
         }
     }
 
@@ -352,6 +354,8 @@ public final class CompilerContext: @unchecked Sendable {
             if let defId = defIdMap.lookup(modulePath: [], name: layoutName) {
                 return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
             }
+            return []
+        case .error:
             return []
         }
     }
@@ -609,6 +613,8 @@ public final class CompilerContext: @unchecked Sendable {
             if typeArgs.isEmpty { return Type.spelling(tplDefId) }
             let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
             return "[\(argsStr)]\(Type.spelling(tplDefId))"
+        case .error:
+            return "?"
         }
     }
 
@@ -671,6 +677,8 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .traitObject(_, let typeArgs):
             return typeArgs.flatMap { freeTypeVariables(in: $0) }
+        case .error:
+            return []
         }
     }
 
@@ -727,6 +735,8 @@ public final class CompilerContext: @unchecked Sendable {
             if typeArgs.isEmpty { return "TO_\(Type.spelling(traitDefId))\(suffix)" }
             let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
             return "TO_\(Type.spelling(traitDefId))_\(argsKeys)\(suffix)"
+        case .error:
+            return "ERR"
         }
     }
 
@@ -818,6 +828,8 @@ public final class CompilerContext: @unchecked Sendable {
             return true
         case .traitObject(_, let typeArgs):
             return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
+        case .error:
+            return false
         }
     }
 }

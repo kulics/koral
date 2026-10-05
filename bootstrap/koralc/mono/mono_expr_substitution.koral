@@ -55,7 +55,7 @@ public let substitute_types_in_expression(
         },
     };
     mono.storage.current_recursion_depth -= 1;
-    return TypedExpr(new_kind, final_type);
+    return TypedExpr(new_kind, final_type, expr.span);
 };
 
 file_private let substitution_debug_expr_kind(kind TypedExprKind) String = {
@@ -364,7 +364,7 @@ file_private let box_each_type(types List[Type]) List[Type] = {
 };
 
 file_private let make_expected_type_placeholder_expr(t Type) TypedExpr = {
-    return TypedExpr(TypedExprKind.BoolLiteral(false), t);
+    return TypedExpr(TypedExprKind.BoolLiteral(false), t, unknown_span());
 };
 
 file_private let synthetic_args_from_expected_method_type(
@@ -1170,7 +1170,8 @@ file_private let substitute_expr_kind(
                                     .Some(candidate) then {
                                         new_callee = TypedExpr(
                                             TypedExprKind.Variable(Symbol(candidate.first, substitute_type(mono, candidate.second, substitution), identifier.kind)),
-                                            substitute_type(mono, candidate.second, substitution)
+                                            substitute_type(mono, candidate.second, substitution),
+                                            callee.span
                                         );
                                     },
                                     .None() then {},
@@ -1229,8 +1230,7 @@ file_private let substitute_expr_kind(
                                     resolved_method_type_args,
                                     dispatch_callsite,
                                 ),
-                                rebound_method_type,
-                            );
+                                rebound_method_type, adjusted_base.span);
                             new_callee = replacement_callee;
                         };
                     };
@@ -1332,8 +1332,7 @@ file_private let substitute_expr_kind(
                             let adjusted_base = align_method_reference_base_for_bound_method(mono, base, rebound_method);
                             new_callee = TypedExpr(
                                 TypedExprKind.MethodReference(adjusted_base, adjusted_base.expr_type, rebound_method, type_args, resolved_method_type_args, dispatch_callsite),
-                                rebound_method.symbol_type,
-                            );
+                                rebound_method.symbol_type, adjusted_base.span);
                         };
                     };
                 },
@@ -1400,8 +1399,7 @@ file_private let substitute_expr_kind(
                             .Some(instantiated_symbol) then {
                                 let callee = TypedExpr(
                                     TypedExprKind.Variable(instantiated_symbol),
-                                    instantiated_symbol.symbol_type
-                                );
+                                    instantiated_symbol.symbol_type, unknown_span());
                                 TypedExprKind.Call(callee, new_args)
                             },
                             .None() then {
@@ -1431,8 +1429,7 @@ file_private let substitute_expr_kind(
                             .Some(instantiated_symbol) then {
                                 let callee = TypedExpr(
                                     TypedExprKind.Variable(instantiated_symbol),
-                                    instantiated_symbol.symbol_type
-                                );
+                                    instantiated_symbol.symbol_type, unknown_span());
                                 TypedExprKind.Call(callee, new_args)
                             },
                             .None() then {
@@ -3341,21 +3338,21 @@ let align_method_reference_base_for_bound_method(
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type),
+                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span),
                         }
                     } else when effective_current_type in {
                         .MutableReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3363,7 +3360,7 @@ let align_method_reference_base_for_bound_method(
                         .BorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3371,7 +3368,7 @@ let align_method_reference_base_for_bound_method(
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3383,21 +3380,21 @@ let align_method_reference_base_for_bound_method(
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type),
-                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type),
+                            .ReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .BorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableBorrowedReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .WeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutableWeakReferenceType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .PointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            .MutablePointerType(_) then TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span),
+                            _ then TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span),
                         }
                     } else when effective_current_type in {
                         .ReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3405,7 +3402,7 @@ let align_method_reference_base_for_bound_method(
                         .MutableReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3416,12 +3413,12 @@ let align_method_reference_base_for_bound_method(
                 .BorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type)
+                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span)
                     } else when effective_current_type in {
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3432,7 +3429,7 @@ let align_method_reference_base_for_bound_method(
                 .MutableBorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type)
+                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span)
                     } else {
                         current_expr
                     }
@@ -3440,12 +3437,12 @@ let align_method_reference_base_for_bound_method(
                 .WeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type)
+                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span)
                     } else when effective_current_type in {
                         .MutableWeakReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner);
                             if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                TypedExpr(current_expr.expr_kind, expected_self_type)
+                                TypedExpr(current_expr.expr_kind, expected_self_type, current_expr.span)
                             } else {
                                 current_expr
                             }
@@ -3456,7 +3453,7 @@ let align_method_reference_base_for_bound_method(
                 .MutableWeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner);
                     if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type)
+                        TypedExpr(TypedExprKind.RefExpr(current_expr), expected_self_type, current_expr.span)
                     } else {
                         current_expr
                     }
@@ -3465,7 +3462,7 @@ let align_method_reference_base_for_bound_method(
                     .ReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -3473,7 +3470,7 @@ let align_method_reference_base_for_bound_method(
                     .MutableReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -3481,7 +3478,7 @@ let align_method_reference_base_for_bound_method(
                     .BorrowedReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -3489,7 +3486,7 @@ let align_method_reference_base_for_bound_method(
                     .MutableBorrowedReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -3497,7 +3494,7 @@ let align_method_reference_base_for_bound_method(
                     .WeakReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }
@@ -3505,7 +3502,7 @@ let align_method_reference_base_for_bound_method(
                     .MutableWeakReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner);
                         if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type)
+                            TypedExpr(TypedExprKind.DerefExpr(current_expr), expected_self_type, current_expr.span)
                         } else {
                             current_expr
                         }

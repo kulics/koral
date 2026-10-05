@@ -639,14 +639,7 @@ given TypeChecker {
 
     module_private lower_collection_literal_expr(self, elements List[Expr], expected Option[Type], scope Scope) TypedExpr = {
         if expected is .None() and elements.is_empty() then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
-                
-                , unknown_span())
-            );
+            self.push_diagnostic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.", unknown_span());
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -655,14 +648,7 @@ given TypeChecker {
             .None() then Option[Type].None(),
         };
         if expected is .Some(et) and elem_expected is .None() then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    self.collection_literal_target_error(et)
-                
-                , unknown_span())
-            );
+            self.push_diagnostic(self.collection_literal_target_error(et), unknown_span());
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -680,14 +666,7 @@ given TypeChecker {
             .None() then Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None()),
         };
         if expected is .Some(et) and kv_types.first is .None() then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Collection literals only support built-in [T]List, [T]Set, and [K, V]Dict"
-                
-                , unknown_span())
-            );
+            self.push_diagnostic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range", unknown_span());
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -727,27 +706,13 @@ given TypeChecker {
                 if self.extract_dict_kv_types(et).first is .Some(_) then {
                     return self.lower_dict_literal_from_typed(List[Pair[TypedExpr, TypedExpr]].new(), et);
                 };
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.collection_literal_target_error(et)
-                    
-                    , unknown_span())
-                );
+                self.push_diagnostic(self.collection_literal_target_error(et), unknown_span());
                 return self.empty_typed_block(Type.Unknown());
             },
             .None() then {},
         };
 
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation."
-            
-            , unknown_span())
-        );
+        self.push_diagnostic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.", unknown_span());
         return self.empty_typed_block(Type.Unknown());
     };
 
@@ -939,26 +904,23 @@ given TypeChecker {
                 iterator_type = maybe_iterator;
                 uses_iterator_method = true;
             } else {
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "Type \(type_to_string(iterable_type)) is not iterable"
-                    
-                    , expr_span(iterable))
-                );
+                // Blame the `for` itself, and leave the span to the ambient
+                // cursor: the type named here -- the result of `iterator()` --
+                // is not written at any one token of the statement. `type_to_string`
+                // would print `struct#N`; the reader gets the type's name.
+                self.push_diagnostic("Type \(self.context().type_display_name(iterable_type)) is not iterable: missing iterator() method and does not implement Iterator", unknown_span());
                 return self.empty_typed_block(Type.VoidType());
             };
         };
         if iter_item_type is not .Unknown() and iterator_type is not .Unknown() then {
             let mutable iterator_trait_args = List[Type].new();
             iterator_trait_args.push(iter_item_type);
-            self.enforce_explicit_generic_trait_conformance(iterator_type, "Iterator", iterator_trait_args);
+            self.enforce_explicit_generic_trait_conformance_with_note(iterator_type, "Iterator", iterator_trait_args, "for-in iterator result check", unknown_span());
             if uses_iterator_method then {
                 let mutable iterable_trait_args = List[Type].new();
                 iterable_trait_args.push(iter_item_type);
                 iterable_trait_args.push(iterator_type);
-                self.enforce_explicit_generic_trait_conformance(iterable_type, "Iterable", iterable_trait_args);
+                self.enforce_explicit_generic_trait_conformance_with_note(iterable_type, "Iterable", iterable_trait_args, "for-in iterable check", unknown_span());
             };
         };
         self.bind_for_binding_pattern(pattern, iter_item_type, for_scope);

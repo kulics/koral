@@ -42,11 +42,11 @@ extension Parser {
 
   private func calleeAllowsConstructorArgumentSyntax(_ callee: ExpressionNode) -> Bool {
     switch callee {
-    case .identifier(let name):
+    case .identifier(let name, _):
       return isValidTypeName(name)
-    case .genericInstantiation(let base, _):
+    case .genericInstantiation(let base, _, _):
       return isValidTypeName(base)
-    case .memberPath(_, let path):
+    case .memberPath(_, let path, _):
         return memberPathAllowsConstructorArgumentSyntax(path)
     default:
       return false
@@ -110,10 +110,10 @@ extension Parser {
   /// when `expr` is not a (possibly generic) type name.
   private func qualifiedPathBaseType(of expr: ExpressionNode) -> TypeNode? {
     switch expr {
-    case .identifier(let name):
-      return isValidTypeName(name) ? .identifier(name) : nil
-    case .genericInstantiation(let name, let typeArgs):
-      return .generic(base: name, args: typeArgs)
+    case .identifier(let name, let span):
+      return isValidTypeName(name) ? .identifier(name, span: span) : nil
+    case .genericInstantiation(let name, let typeArgs, let span):
+      return .generic(base: name, args: typeArgs, span: span)
     default:
       return nil
     }
@@ -157,7 +157,7 @@ extension Parser {
         throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
       }
       try match(.rightParen)
-      return .castExpression(type: targetType, expression: base)
+      return .castExpression(type: targetType, expression: base, span: SourceSpan(start: base.span.start, end: currentSpan.end))
     } catch {
       lexer.restoreState(savedLexer)
       currentToken = savedToken
@@ -174,8 +174,8 @@ extension Parser {
     do {
       let typeArgs = try parseTypeListInBrackets()
       switch base {
-      case .identifier(let name):
-        return .genericInstantiation(base: name, args: typeArgs)
+      case .identifier(let name, _):
+        return .genericInstantiation(base: name, args: typeArgs, span: SourceSpan(start: base.span.start, end: currentSpan.end))
       default:
         lexer.restoreState(savedLexer)
         currentToken = savedToken
@@ -203,7 +203,7 @@ extension Parser {
     while currentToken === .orKeyword {
       try match(.orKeyword)
       let right = try parseOptionFlowExpression()
-      left = .orExpression(left: left, right: right)
+      left = .orExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -214,19 +214,19 @@ extension Parser {
 
     while currentToken === .orKeyword {
       if lexer.peekNextToken() === .elseKeyword {
-        let startSpan = currentSpan
         try match(.orKeyword)
         try match(.elseKeyword)
         let defaultExpr = try parseAndExpression()
-        left = .orElseExpression(operand: left, defaultExpr: defaultExpr, span: startSpan)
+        left = .orElseExpression(operand: left, defaultExpr: defaultExpr,
+                                span: SourceSpan(start: left.span.start, end: defaultExpr.span.end))
         continue
       }
 
       if lexer.peekNextToken() === .returnKeyword {
-        let startSpan = currentSpan
+        let orSpan = currentSpan
         try match(.orKeyword)
         try match(.returnKeyword)
-        left = .orReturnExpression(operand: left, span: startSpan)
+        left = .orReturnExpression(operand: left, span: SourceSpan(start: left.span.start, end: orSpan.end))
         continue
       }
 
@@ -243,7 +243,7 @@ extension Parser {
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
       let right = try parseAndThenExpression()
-      left = .andExpression(left: left, right: right)
+      left = .andExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -253,11 +253,11 @@ extension Parser {
 
     while currentToken === .andKeyword {
       if lexer.peekNextToken() === .thenKeyword {
-        let startSpan = currentSpan
         try match(.andKeyword)
         try match(.thenKeyword)
         let transformExpr = try parseLogicalNotExpression()
-        left = .andThenExpression(operand: left, transformExpr: transformExpr, span: startSpan)
+        left = .andThenExpression(operand: left, transformExpr: transformExpr,
+                                  span: SourceSpan(start: left.span.start, end: transformExpr.span.end))
       } else {
         break
       }
@@ -268,9 +268,10 @@ extension Parser {
 
   private func parseLogicalNotExpression() throws -> ExpressionNode {
     if currentToken === .notKeyword {
+      let startSpan = currentSpan
       try match(.notKeyword)
       let expr = try parseIsExpression()
-      return .notExpression(expr)
+      return .notExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     return try parseIsExpression()
   }
@@ -284,18 +285,19 @@ extension Parser {
     let left = try parseRangeExpression()
 
     if currentToken === .isKeyword {
-      let startSpan = currentSpan
       try match(.isKeyword)
 
       // Check for `is not`
       if currentToken === .notKeyword {
         try match(.notKeyword)
           let pattern = try parseSinglePattern()
-        return .isNotExpression(subject: left, pattern: pattern, span: startSpan)
+        return .isNotExpression(subject: left, pattern: pattern,
+                                span: SourceSpan(start: left.span.start, end: pattern.span.end))
       }
 
       let pattern = try parseSinglePattern()
-      return .isExpression(subject: left, pattern: pattern, span: startSpan)
+      return .isExpression(subject: left, pattern: pattern,
+                           span: SourceSpan(start: left.span.start, end: pattern.span.end))
     }
 
     return left
@@ -308,7 +310,7 @@ extension Parser {
     while currentToken === .pipe {
       try match(.pipe)
       let right = try parseBitwiseXorExpression()
-      left = .bitwiseExpression(left: left, operator: .or, right: right)
+      left = .bitwiseExpression(left: left, operator: .or, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -318,7 +320,7 @@ extension Parser {
     while currentToken === .caret {
       try match(.caret)
       let right = try parseBitwiseAndExpression()
-      left = .bitwiseExpression(left: left, operator: .xor, right: right)
+      left = .bitwiseExpression(left: left, operator: .xor, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -328,7 +330,7 @@ extension Parser {
     while currentToken === .ampersand {
       try match(.ampersand)
       let right = try parseShiftExpression()
-      left = .bitwiseExpression(left: left, operator: .and, right: right)
+      left = .bitwiseExpression(left: left, operator: .and, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -339,17 +341,22 @@ extension Parser {
   private func parseRangeExpression() throws -> ExpressionNode {
     // Handle prefix range operators: ..b, ..<b, ..
     if currentToken === .range {
+      let opSpan = currentSpan
       try match(.range)
       if canStartRangeBound() {
         let right = try parseComparisonExpression()
-        return .rangeExpression(operator: .to, left: nil, right: right)
+        return .rangeExpression(operator: .to, left: nil, right: right,
+                                span: SourceSpan(start: opSpan.start, end: right.span.end))
       }
-      return .rangeExpression(operator: .full, left: nil, right: nil)
+      return .rangeExpression(operator: .full, left: nil, right: nil,
+                              span: SourceSpan(start: opSpan.start, end: opSpan.end))
     }
     if currentToken === .rangeLess {
+      let opSpan = currentSpan
       try match(.rangeLess)
       let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .toOpen, left: nil, right: right)
+      return .rangeExpression(operator: .toOpen, left: nil, right: right,
+                              span: SourceSpan(start: opSpan.start, end: right.span.end))
     }
     
     let left = try parseComparisonExpression()
@@ -360,24 +367,30 @@ extension Parser {
       try match(.range)
       if canStartRangeBound() {
         let right = try parseComparisonExpression()
-        return .rangeExpression(operator: .closed, left: left, right: right)
+        return .rangeExpression(operator: .closed, left: left, right: right,
+                                span: SourceSpan(start: left.span.start, end: right.span.end))
       }
-      return .rangeExpression(operator: .from, left: left, right: nil)
+      return .rangeExpression(operator: .from, left: left, right: nil,
+                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
     case .rangeLess:  // ..<
       try match(.rangeLess)
       let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .closedOpen, left: left, right: right)
+      return .rangeExpression(operator: .closedOpen, left: left, right: right,
+                              span: SourceSpan(start: left.span.start, end: right.span.end))
     case .lessRange:  // <..
       try match(.lessRange)
       if canStartRangeBound() {
         let right = try parseComparisonExpression()
-        return .rangeExpression(operator: .openClosed, left: left, right: right)
+        return .rangeExpression(operator: .openClosed, left: left, right: right,
+                                span: SourceSpan(start: left.span.start, end: right.span.end))
       }
-      return .rangeExpression(operator: .fromOpen, left: left, right: nil)
+      return .rangeExpression(operator: .fromOpen, left: left, right: nil,
+                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
     case .lessRangeLess:  // <..<
       try match(.lessRangeLess)
       let right = try parseComparisonExpression()
-      return .rangeExpression(operator: .open, left: left, right: right)
+      return .rangeExpression(operator: .open, left: left, right: right,
+                              span: SourceSpan(start: left.span.start, end: right.span.end))
     default:
       return left
     }
@@ -435,7 +448,8 @@ extension Parser {
       return .comparisonExpression(
         left: left,
         operator: tokenToComparisonOperator(op),
-        right: right
+        right: right,
+        span: SourceSpan(start: left.span.start, end: right.span.end)
       )
     }
 
@@ -448,7 +462,8 @@ extension Parser {
       return .comparisonExpression(
         left: left,
         operator: tokenToComparisonOperator(firstToken),
-        right: firstRight
+        right: firstRight,
+        span: SourceSpan(start: left.span.start, end: firstRight.span.end)
       )
     }
 
@@ -471,7 +486,8 @@ extension Parser {
       return .comparisonExpression(
         left: left,
         operator: operators[0],
-        right: firstRight
+        right: firstRight,
+        span: SourceSpan(start: left.span.start, end: firstRight.span.end)
       )
     }
 
@@ -485,7 +501,7 @@ extension Parser {
       try match(op)
       let right = try parseAdditiveExpression()
       let bitOp: BitwiseOperator = (op === .leftShift) ? .shiftLeft : .shiftRight
-      left = .bitwiseExpression(left: left, operator: bitOp, right: right)
+      left = .bitwiseExpression(left: left, operator: bitOp, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
@@ -503,7 +519,8 @@ extension Parser {
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
-        right: right
+        right: right,
+        span: SourceSpan(start: left.span.start, end: right.span.end)
       )
     }
     return left
@@ -520,7 +537,8 @@ extension Parser {
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
-        right: right
+        right: right,
+        span: SourceSpan(start: left.span.start, end: right.span.end)
       )
     }
     return left
@@ -543,26 +561,31 @@ extension Parser {
       return try forExpression()
     }
     if currentToken === .minus {
-      let _ = currentSpan
+      // The literal's span covers the leading minus as well.
+      let startSpan = currentSpan
       try match(.minus)
       switch currentToken {
       case .integer(let num):
         try match(.integer(num))
-        return .integerLiteral("-\(num)")
+        return .integerLiteral("-\(num)", span: startSpan)
       case .float(let num):
         try match(.float(num))
-        return .floatLiteral("-\(num)")
+        return .floatLiteral("-\(num)", span: startSpan)
       default:
         let expr = try parsePrefixExpression()
-        return .unaryMinusExpression(expr)
+        return .unaryMinusExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
       }
     }
     if currentToken === .tilde {
+      let startSpan = currentSpan
       try match(.tilde)
       let expr = try parsePrefixExpression()
-      return .bitwiseNotExpression(expr)
+      return .bitwiseNotExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     if currentToken === .ampersand {
+      // Anchored at the `&`, which is where the unsafe reference starts -- the
+      // construct a `cannot take &unsafe of ...` diagnostic is about.
+      let ampersandSpan = currentSpan
       try match(.ampersand)
       guard currentToken === .unsafeKeyword else {
         throw ParserError.unexpectedToken(
@@ -577,12 +600,13 @@ extension Parser {
         try match(.mutableKeyword)
       }
       let expr = try parsePrefixExpression()
-      return .ptrExpression(expr, mutable: mutable)
+      return .ptrExpression(expr, mutable: mutable, span: ampersandSpan)
     }
     if currentToken === .multiply {
+      let startSpan = currentSpan
       try match(.multiply)
       let expr = try parsePrefixExpression()
-      return .derefExpression(expr)
+      return .derefExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     return try parsePostfixExpression()
   }
@@ -604,7 +628,7 @@ extension Parser {
         let bareMethodTypeArgs = hasBareMethodTypeArguments()
         let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
 
-        if case .traitQualificationExpression(let qualifiedType, let traitType) = expr {
+        if case .traitQualificationExpression(let qualifiedType, let traitType, _) = expr {
           guard currentToken === .leftParen else {
             throw ParserError.unexpectedToken(
               span: currentSpan,
@@ -619,7 +643,8 @@ extension Parser {
               type: qualifiedType,
               trait: traitType,
               methodName: member,
-              arguments: arguments
+              arguments: arguments,
+              span: SourceSpan(start: expr.span.start, end: currentSpan.end)
             )
           } else {
             expr = .qualifiedGenericMethodCall(
@@ -627,7 +652,8 @@ extension Parser {
               trait: traitType,
               methodTypeArgs: methodTypeArgs,
               methodName: member,
-              arguments: arguments
+              arguments: arguments,
+              span: SourceSpan(start: expr.span.start, end: currentSpan.end)
             )
           }
           continue
@@ -638,28 +664,28 @@ extension Parser {
         if isValidTypeName(member) == false {
           // member is lowercase - could be a method or field
           // Check if base is a type identifier (uppercase) - this would be a static method call
-          if case .identifier(let baseName) = expr, isValidTypeName(baseName) {
+          if case .identifier(let baseName, _) = expr, isValidTypeName(baseName) {
             // This is TypeName.methodName - check for call
             if currentToken === .leftParen {
               let arguments = try parseCallArgumentsList()
               try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
               if methodTypeArgs.isEmpty {
-                expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments)
+                expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               } else {
-                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               }
               continue
             }
           }
           // Check if base is a generic instantiation: TypeName[T].methodName(...)
-          if case .genericInstantiation(let baseName, let typeArgs) = expr {
+          if case .genericInstantiation(let baseName, let typeArgs, _) = expr {
             if currentToken === .leftParen {
               let arguments = try parseCallArgumentsList()
               try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
               if methodTypeArgs.isEmpty {
-                expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments)
+                expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               } else {
-                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               }
               continue
             }
@@ -668,7 +694,7 @@ extension Parser {
           if !methodTypeArgs.isEmpty, currentToken === .leftParen {
             let arguments = try parseCallArgumentsList()
             try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
-            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
             continue
           }
 
@@ -691,7 +717,7 @@ extension Parser {
           if currentToken === .leftParen {
             let arguments = try parseCallArgumentsList()
             try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
-            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               continue
           }
         }
@@ -705,17 +731,17 @@ extension Parser {
         }
         
         // Regular member path
-        if case .memberPath(let base, let path) = expr {
-          expr = .memberPath(base: base, path: path + [member])
+        if case .memberPath(let base, let path, let pathSpan) = expr {
+          expr = .memberPath(base: base, path: path + [member], span: SourceSpan(start: pathSpan.start, end: currentSpan.end))
         } else {
-          expr = .memberPath(base: expr, path: [member])
+          expr = .memberPath(base: expr, path: [member], span: SourceSpan(start: expr.span.start, end: currentSpan.end))
         }
       } else if currentToken === .leftParen {
         // Rust-style qualified path `Type(Trait)`: the base must be a type name
         // and the parenthesized part must be a trait reference.
         if let qualifiedType = qualifiedPathBaseType(of: expr),
            let traitRef = try tryParseQualifiedTraitRef() {
-          expr = .traitQualificationExpression(type: qualifiedType, trait: traitRef)
+          expr = .traitQualificationExpression(type: qualifiedType, trait: traitRef, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
         } else if let castExpr = try tryParsePostfixCastSuffix(base: expr) {
           expr = castExpr
         } else {
@@ -738,7 +764,7 @@ extension Parser {
             } while true
           }
           try match(.rightBracket)
-          expr = .subscriptExpression(base: expr, arguments: args)
+          expr = .subscriptExpression(base: expr, arguments: args, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
         }
       } else {
         break
@@ -753,18 +779,27 @@ extension Parser {
   /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
   private func parseCallArgument() throws -> CallArg {
     if currentToken === .ellipsis {
-      try match(.ellipsis)
-      return CallArg(defaultFill: ())
+      // `...` is a removed language feature, so it is rejected HERE, at the
+      // token, as syntax. Letting it through to the type checker moved the
+      // complaint to whatever call the argument belonged to and relabelled it
+      // a semantic error; the reader was pointed at a callee instead of at the
+      // `...` they have to delete.
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "Default-fill '...' is not supported; use named parameter defaults instead")
     }
 
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
       let savedState = lexer.saveState()
       let savedToken = currentToken
+      // Anchored at the label: an argument-shape diagnostic is about the
+      // `label: value` pair as written, and the label is where it starts.
+      let labelSpan = currentSpan
       do {
         try match(.identifier(name))
         try match(.colon)
         let expr = try expression()
-        return CallArg(label: name, expression: expr)
+        return CallArg(label: name, expression: expr, span: labelSpan)
       } catch {
         lexer.restoreState(savedState)
         currentToken = savedToken
@@ -772,7 +807,7 @@ extension Parser {
     }
     // Parse as positional argument
     let expr = try expression()
-    return CallArg(label: nil, expression: expr)
+    return CallArg(label: nil, expression: expr, span: expr.span)
   }
   
   private func parseCall(_ callee: ExpressionNode) throws -> ExpressionNode {
@@ -798,45 +833,48 @@ extension Parser {
       try rejectNonConstructorCallSyntax(arguments: arguments, span: callee.span)
     }
 
-    return .call(callee: callee, arguments: arguments)
+    return .call(callee: callee, arguments: arguments, span: SourceSpan(start: callee.span.start, end: currentSpan.end))
   }
   
   // MARK: - Primary Term
   
   /// Parse term - primary expressions
   private func term() throws -> ExpressionNode {
+    // The term's own span: `match` advances past it, so `currentSpan` after the
+    // match is the NEXT token.
+    let startSpan = currentSpan
     switch currentToken {
     case .identifier(let name):
       try match(.identifier(name))
-      return .identifier(name)
+      return .identifier(name, span: startSpan)
     case .selfKeyword:
       try match(.selfKeyword)
-      return .identifier("self")
+      return .identifier("self", span: startSpan)
     case .integer(let num):
       try match(.integer(num))
-      return .integerLiteral(num)
+      return .integerLiteral(num, span: startSpan)
     case .durationLiteral(let value, let unit):
       try match(.durationLiteral(value: value, unit: unit))
-      return try buildDurationLiteralExpression(value: value, unit: unit, span: currentSpan)
+      return try buildDurationLiteralExpression(value: value, unit: unit, span: startSpan)
     case .float(let num):
       try match(.float(num))
-      return .floatLiteral(num)
+      return .floatLiteral(num, span: startSpan)
     case .string(let str):
       try match(.string(str))
-      return .stringLiteral(str)
+      return .stringLiteral(str, span: startSpan)
     case .rune(let str):
       try match(.rune(str))
-      return .runeLiteral(str)
+      return .runeLiteral(str, span: startSpan)
     case .interpolatedString(let parts):
       let span = currentSpan
       try match(.interpolatedString(parts: parts))
       return try parseInterpolatedString(parts, span: span)
     case .bool(let value):
       try match(.bool(value))
-      return .booleanLiteral(value)
+      return .booleanLiteral(value, span: startSpan)
     case .itKeyword:
       try match(.itKeyword)
-      return .identifier("it")
+      return .identifier("it", span: startSpan)
     case .leftBrace:
       return try blockExpression()
     case .leftParen:
@@ -983,7 +1021,7 @@ extension Parser {
         resultParts.append(.literal(value))
         index += 1
 
-      case .interpolationStart:
+      case .interpolationStart(let exprStart):
         containsInterpolation = true
         index += 1
         var exprSource = ""
@@ -1009,7 +1047,7 @@ extension Parser {
           throw ParserError.emptyInterpolationExpression(span: span)
         }
 
-        let expr = try parseInterpolatedExpression(exprSource)
+        let expr = try parseInterpolatedExpression(exprSource, start: exprStart)
         resultParts.append(.expression(expr))
 
         if case .interpolationEnd = parts[index] {
@@ -1022,14 +1060,17 @@ extension Parser {
     }
 
     if resultParts.count == 1, !containsInterpolation, case .literal(let str) = resultParts[0] {
-      return .stringLiteral(str)
+      return .stringLiteral(str, span: span)
     }
 
     return .interpolatedString(parts: resultParts, span: span)
   }
 
-  private func parseInterpolatedExpression(_ source: String) throws -> ExpressionNode {
-    let lexer = Lexer(input: source)
+  /// `start` is where `source` begins in the file. Without it the nested lexer
+  /// places every token at 1:1 and a diagnostic about the expression points at
+  /// the first line of the file.
+  private func parseInterpolatedExpression(_ source: String, start: SourceLocation) throws -> ExpressionNode {
+    let lexer = Lexer(input: source, start: start)
     let parser = Parser(lexer: lexer)
     parser.currentToken = try parser.lexer.getNextToken()
     let expr = try parser.expression()
@@ -1103,7 +1144,7 @@ extension Parser {
         
         // Check for named parameter syntax in lambda - not allowed
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Lambda parameters use 'name Type', not 'name: Type'")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Lambda parameters use 'name Type', not 'name: Type'")
         }
         
         // Check for optional type annotation
@@ -1153,8 +1194,11 @@ extension Parser {
       // Single untyped param without arrow - restore and parse as expression
       // This handles cases like (a) which could be just a parenthesized identifier
     } catch let error as ParserError {
-      if case .unexpectedToken(_, let got, _) = error,
-         got == "Lambda parameters use 'name Type', not 'name: Type'" {
+      // A rejected construct is a definite language violation, not evidence
+      // that this was never a lambda: re-reading the same tokens as an
+      // expression cannot make the construct legal. Propagate it instead of
+      // backtracking into a worse diagnostic.
+      if case .rejectedConstruct = error {
         throw error
       }
       if parameters.contains(where: { $0.type != nil }) || sawExplicitReturnType {
@@ -1176,7 +1220,7 @@ extension Parser {
         try match(.comma)
         let second = try expression()
         try match(.rightParen)
-        return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
+        return .call(callee: .identifier("Pair", span: first.span), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)], span: SourceSpan(start: first.span.start, end: currentSpan.end))
       }
       try match(.rightParen)
       return first
@@ -1230,14 +1274,16 @@ extension Parser {
       typeArgs: [],
       methodName: "new",
       arguments: [
-        CallArg(label: "seconds", expression: .integerLiteral(String(secs))),
-        CallArg(label: "nanoseconds", expression: .integerLiteral(String(nanos)))
-      ]
+        CallArg(label: "seconds", expression: .integerLiteral(String(secs), span: span)),
+        CallArg(label: "nanoseconds", expression: .integerLiteral(String(nanos), span: span))
+      ],
+      span: span
     )
 
     return .call(
-      callee: .memberPath(base: ctorCall, path: ["unwrap"]),
-      arguments: []
+      callee: .memberPath(base: ctorCall, path: ["unwrap"], span: span),
+      arguments: [],
+      span: span
     )
   }
 
@@ -1262,6 +1308,7 @@ extension Parser {
   
   /// Parse block expression
   private func blockExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
     try match(.leftBrace)
     var statements: [StatementNode] = []
     var tailExpression: ExpressionNode? = nil
@@ -1309,12 +1356,13 @@ extension Parser {
     }
     
     try match(.rightBrace)
-    return .blockExpression(statements: statements, tailExpression: tailExpression)
+    return .blockExpression(statements: statements, tailExpression: tailExpression, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
   
   // MARK: - Control Flow Expressions
 
   private func ifExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
     try match(.ifKeyword)
     let condition = try expression()
     try match(.thenKeyword)
@@ -1324,26 +1372,28 @@ extension Parser {
       try match(.elseKeyword)
       elseBranch = try expression()
     }
-    return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+    return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
   private func whileExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
     try match(.whileKeyword)
     let condition = try expression()
     try match(.thenKeyword)
     let body = try expression()
-    return .whileExpression(condition: condition, body: body)
+    return .whileExpression(condition: condition, body: body, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
   /// Parse for expression: for <pattern> in <iterable> then <body>
   private func forExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
     try match(.forKeyword)
     let pattern = try parseForBindingPattern()
     try match(.inKeyword)
     let iterable = try expression()
     try match(.thenKeyword)
     let body = try expression()
-    return .forExpression(pattern: pattern, iterable: iterable, body: body)
+    return .forExpression(pattern: pattern, iterable: iterable, body: body, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
   

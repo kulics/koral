@@ -58,14 +58,16 @@ given TypeChecker {
         if self.resolve_method_signature(lookup_type, member) is .Some(_) then {
             return false;
         };
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'"
-
-            , span)
-        );
+        // A method whose constraints failed is not registered, so the probe
+        // above cannot see that it exists -- but the constraint check has
+        // already named the real reason at this very place. Same for a field
+        // an access check just rejected. Speaking again would print
+        // `Member 'x' not found` underneath a message that already explains
+        // the failure.
+        if self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+            return false;
+        };
+        self.push_diagnostic("Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'", span);
         return true;
     };
 
@@ -77,26 +79,12 @@ given TypeChecker {
             .StructureType(def_id) then {
                 if self.context().is_foreign_struct(def_id) then {
                     let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee);
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            "foreign struct '\(type_name)' has no field '\(member)'"
- 
-                        , unknown_span())
-                    );
+                    self.push_diagnostic("foreign struct '\(type_name)' has no field '\(member)'", unknown_span());
                 };
             },
             .GenericStruct(_, _) then {},
             _ then {
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(pointer_type))'"
- 
-                    , unknown_span())
-                );
+                self.push_diagnostic("cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(pointer_type))'", unknown_span());
             },
         };
     };
@@ -105,14 +93,7 @@ given TypeChecker {
         if resolved is not .Unknown() or has_method then {
             return;
         };
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Invalid operation member access between types \(self.display_type_name(base_type)) and "
- 
-            , unknown_span())
-        );
+        self.push_diagnostic("Invalid operation member access between types \(self.display_type_name(base_type)) and ", unknown_span());
     };
 
     module_private expr_contains_or_return(self, expr Expr) Bool = {
@@ -290,7 +271,7 @@ given TypeChecker {
             .Some(method) then {
                 if self.is_method_accessible_from_current_context(method) then {
                     Option[Symbol].Some(method)
-                } else if self.resolve_conformance_method_signature(base_type, method_name) is .Some(_) then {
+                } else if self.resolve_conformance_method_signature(base_type, method_name, unknown_span()) is .Some(_) then {
                     Option[Symbol].Some(method)
                 } else {
                     Option[Symbol].None()
@@ -343,7 +324,7 @@ given TypeChecker {
             let is_upper = self.is_upper_first_char(name);
             let mutable fallback_type = if resolved_named_type_opt is .Some(t) then t else if fallback_type_opt is .Some(t) then t else Type.Unknown();
             if is_type_name then {
-                self.check_type_visibility(fallback_type, name, scope);
+                self.check_type_visibility(fallback_type, name, scope, span);
             };
             if not is_type_name and not is_upper then {
                 self.push_diagnostic_at_span("Undefined variable: \(name)", span);
@@ -376,8 +357,8 @@ given TypeChecker {
                                         when checker.check_symbol(info.module_path, trait_name, false) in {
                                             .Ok(_) then {},
                                             .Error(message) then {
-                                                self.push_diagnostic(message.message());
-                                                return make_typed_expr(TypedExprKind.Variable(normalized_sym), normalized_sym.symbol_type);
+                                                self.push_diagnostic(message.message(), span);
+                                                return make_typed_expr_at(TypedExprKind.Variable(normalized_sym), normalized_sym.symbol_type, span);
                                             },
                                         };
                                     };
@@ -391,9 +372,9 @@ given TypeChecker {
             };
         };
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
-            self.check_symbol_visibility(normalized_sym);
+            self.check_symbol_visibility(normalized_sym, span);
         };
-        return make_typed_expr(TypedExprKind.Variable(normalized_sym), normalized_sym.symbol_type);
+        return make_typed_expr_at(TypedExprKind.Variable(normalized_sym), normalized_sym.symbol_type, span);
     };
 
     module_private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
@@ -634,26 +615,12 @@ given TypeChecker {
                         .StructureType(def_id) then {
                             if self.context().is_foreign_struct(def_id) then {
                                 let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee);
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "foreign struct '\(type_name)' has no field '\(member)'"
- 
-                                    , expr_span(base))
-                                );
+                                self.push_diagnostic("foreign struct '\(type_name)' has no field '\(member)'", expr_span(base));
                             };
                         },
                         .GenericStruct(_, _) then {},
                         _ then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(typed_base.expr_type))'"
- 
-                                , expr_span(base))
-                            );
+                            self.push_diagnostic("cannot access member '\(member)' on pointer to non-struct type '\(self.display_type_name(typed_base.expr_type))'", expr_span(base));
                         },
                     };
                 };
@@ -694,14 +661,7 @@ given TypeChecker {
                                     .FilePrivate() then "file_private",
                                     _ then "module_private",
                                 };
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(typed_base.expr_type))'"
- 
-                                    , expr_span(base))
-                                );
+                                self.push_diagnostic("Cannot access \(access_label) field '\(member)' of type '\(self.context().get_name(def_id) or else self.context().type_display_name(typed_base.expr_type))'", expr_span(base));
                             };
                         };
                     };
@@ -712,14 +672,7 @@ given TypeChecker {
                         };
                         inaccessible_method_member = inaccessible_method;
                         if not inaccessible_method then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
- 
-                                , expr_span(base))
-                            );
+                            self.push_diagnostic("Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'", expr_span(base));
                         };
                     };
                     found
@@ -746,14 +699,7 @@ given TypeChecker {
                                             .FilePrivate() then "file_private",
                                             _ then "module_private",
                                         };
-                                        self.storage.diagnostics.push(
-                                            make_diagnostic(
-                                                DiagnosticStage.Semantic(),
-                                                self.storage.file_path,
-                                                "Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(tplDefId))'"
- 
-                                            , expr_span(base))
-                                        );
+                                        self.push_diagnostic("Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(tplDefId))'", expr_span(base));
                                     };
                                 };
                             };
@@ -764,14 +710,7 @@ given TypeChecker {
                                 };
                                 inaccessible_method_member = inaccessible_method;
                                 if not inaccessible_method then {
-                                    self.storage.diagnostics.push(
-                                        make_diagnostic(
-                                            DiagnosticStage.Semantic(),
-                                            self.storage.file_path,
-                                            "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(tplDefId, args)))'"
- 
-                                        , expr_span(base))
-                                    );
+                                    self.push_diagnostic("Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(tplDefId, args)))'", expr_span(base));
                                 };
                             };
                             found
@@ -1014,7 +953,9 @@ given TypeChecker {
         message.push_string(method_name);
         message.push_string("': ");
         message.push_string(error.message());
-        self.push_diagnostic(message.to_string());
+        // Flattening a trait is a declaration-level activity; there is no call
+        // site to point at. Said out loud rather than defaulted away.
+        self.push_diagnostic(message.to_string(), unknown_span());
     };
 
     module_private find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {

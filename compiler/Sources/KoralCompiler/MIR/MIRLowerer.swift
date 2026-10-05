@@ -310,7 +310,7 @@ final class MIRLowerer {
     traitTypeParamSubstitution: [String: Type]
   ) -> Type? {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
       if let substituted = traitTypeParamSubstitution[name] {
         return substituted
       }
@@ -318,28 +318,28 @@ final class MIRLowerer {
         return builtinType
       }
       return resolveNominalVTableType(named: name)
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
       }
       return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
       }
       return mutable ? .mutableWeakReference(inner: resolved) : .weakReference(inner: resolved)
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
       }
       return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap {
         resolveVTableTypeNode($0, traitTypeParamSubstitution: traitTypeParamSubstitution)
       }
       guard resolvedArgs.count == args.count else { return nil }
       return resolveGenericVTableType(named: base, args: resolvedArgs)
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       let resolvedParams = paramTypes.compactMap {
         resolveVTableTypeNode($0, traitTypeParamSubstitution: traitTypeParamSubstitution)
       }
@@ -1762,7 +1762,7 @@ private final class MIRFunctionBuilder {
 
   private func resolvePatternTypeNode(_ node: TypeNode, substitution: [String: Type]) -> Type? {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
       if let substituted = substitution[name] {
         return substituted
       }
@@ -1797,20 +1797,20 @@ private final class MIRFunctionBuilder {
         }
       }
       return nil
-    case .reference(let inner, let mutable):
+    case .reference(let inner, let mutable, _):
       return resolveWrappedPatternType(inner: inner, substitution: substitution) {
         mutable ? .mutableReference(inner: $0) : .reference(inner: $0)
       }
-    case .weakReference(let inner, let mutable):
+    case .weakReference(let inner, let mutable, _):
       return resolveWrappedPatternType(inner: inner, substitution: substitution) {
         mutable ? .mutableWeakReference(inner: $0) : .weakReference(inner: $0)
       }
-    case .pointer(let inner, let mutable):
+    case .pointer(let inner, let mutable, _):
       guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
         return nil
       }
       return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedArgs.count == args.count else { return nil }
       for global in program.globalNodes {
@@ -1841,7 +1841,7 @@ private final class MIRFunctionBuilder {
         }
       }
       return nil
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       let resolvedParams = paramTypes.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedParams.count == paramTypes.count,
             let resolvedReturn = resolvePatternTypeNode(returnType, substitution: substitution) else {
@@ -1859,11 +1859,11 @@ private final class MIRFunctionBuilder {
     substitution: [String: Type]
   ) -> Type? {
     switch node {
-    case .identifier(let name):
+    case .identifier(let name, _):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
       guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
       return .traitObject(traitDefId: program.traits[name]?.defId ?? .invalid, typeArgs: [])
-    case .generic(let base, let args):
+    case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
       guard resolvedArgs.count == args.count else { return nil }
       return .traitObject(traitDefId: program.traits[base]?.defId ?? .invalid, typeArgs: resolvedArgs)

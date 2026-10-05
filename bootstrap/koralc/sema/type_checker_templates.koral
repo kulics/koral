@@ -222,7 +222,7 @@ given TypeChecker {
 
     module_private resolve_template_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
-            .Identifier(name) then when bindings.get(name) in {
+            .Identifier(name, span) then when bindings.get(name) in {
                 .Some(bound) then bound,
                 .None() then {
                     // Check current_scope before falling back (Swift: currentScope.resolveType)
@@ -232,17 +232,17 @@ given TypeChecker {
                     self.resolve_type(node)
                 },
             },
-            .InferredSelf() then when bindings.get("Self") in {
+            .InferredSelf(span) then when bindings.get("Self") in {
                 .Some(bound) then bound,
                 .None() then Type.Unknown(),
             },
-            .Reference(inner, is_mutable) then {
+            .Reference(inner, is_mutable, span) then {
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
+                    .Identifier(name, span) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_reference_type(trait_ref_inner) else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
-                    .Generic(base, args) then {
+                    .Generic(base, args, span) then {
                         if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
@@ -262,22 +262,22 @@ given TypeChecker {
                     },
                 }
             },
-            .BorrowedReference(inner, is_mutable) then {
+            .BorrowedReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
             },
-            .Pointer(inner, is_mutable) then {
+            .Pointer(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
             },
-            .WeakReference(inner, is_mutable) then {
+            .WeakReference(inner, is_mutable, span) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when inner in {
-                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
+                    .Identifier(name, span) then if bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(name, self.storage.module_path) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name);
                         Option[Type].Some(if is_mutable then self.resolve_mutable_weak_reference_type(trait_ref_inner) else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
-                    .Generic(base, args) then {
+                    .Generic(base, args, span) then {
                         if self.storage.trait_registry.get_in_module(base, self.storage.module_path) is .Some(_) then {
                             let mutable resolved_args = List[Type].new();
                             for arg in args then {
@@ -297,7 +297,7 @@ given TypeChecker {
                     },
                 }
             },
-            .Generic(base, args) then {
+            .Generic(base, args, span) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
                     resolved_args.push(self.resolve_template_type_node_with_bindings(arg, bindings));
@@ -308,7 +308,7 @@ given TypeChecker {
                     Type.GenericStruct(self.storage.generic_templates.lookup_struct_def_id(base), resolved_args)
                 }
             },
-            .FunctionType(param_types, return_type) then {
+            .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for param_type in param_types then {
                     resolved_params.push(self.resolve_template_type_node_with_bindings(param_type, bindings));
@@ -578,9 +578,18 @@ given TypeChecker {
             // bare-name aliases this used to also write were pure collision
             // surface: two modules' `Plain` landed in one slot.
             self.context().register_method_param_specs(type_key, member.name, param_specs);
-            self.storage.method_table.register_with_source(type_key, member.name, method_symbol, source_def_id);
+            let made_ambiguous = self.storage.method_table.register_with_source(type_key, member.name, method_symbol, source_def_id);
             if mark_inherent then {
                 self.storage.method_table.mark_inherent(type_key, member.name);
+            };
+            // Two DISTINCT declarations reaching one slot is an ambiguity in the
+            // type's method table -- it exists whether or not anyone calls the
+            // method, so it is reported here rather than at a lookup. An INHERENT
+            // method owns the slot, so a trait conformance alongside `given T { }`
+            // is a coexistence, not a conflict; the flag is read after the
+            // inherent mark so both registration orders agree.
+            if made_ambiguous and not self.storage.method_table.is_inherent(type_key, member.name) then {
+                self.push_ambiguous_trait_extension_method_diagnostic(target_type, member.name, self.storage.current_span);
             };
         };
     };

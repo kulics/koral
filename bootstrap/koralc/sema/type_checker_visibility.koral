@@ -5,19 +5,12 @@ given TypeChecker {
         return left.start.line == right.start.line and left.start.column == right.start.column and left.end.line == right.end.line and left.end.column == right.end.column;
     };
 
-    module_private has_matching_last_diagnostic(self, message String, span SourceSpan) Bool = {
-        return when self.storage.diagnostics.last() in {
-            .Some(last_diag) then {
-                if last_diag.file_path <> self.storage.file_path or last_diag.message <> message then {
-                    return false;
-                };
-                when last_diag.span in {
-                    .Some(last_span) then self.spans_equal(last_span, span),
-                    .None() then false,
-                }
-            },
-            .None() then false,
-        };
+    /// Whether this exact problem has already been recorded anywhere in the run.
+    ///
+    /// Looking only at the head of the list is not enough: a repeat separated
+    /// from its original by another diagnostic is still a repeat.
+    module_private already_reported_diagnostic(self, message String, span SourceSpan) Bool = {
+        return self.storage.diagnostics.has_error(self.storage.file_path, message, span);
     };
 
     module_private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
@@ -36,7 +29,10 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    module_private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type]) String = {
+    /// `note` says WHY the trait is needed -- `(operator 'equals')`. It is
+    /// what tells the reader which construct demanded the trait; without it
+    /// the message names a requirement and leaves the cause unstated.
+    module_private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type], note String) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type ");
         msg.push_string(self.context().type_display_name(target_type));
@@ -54,6 +50,11 @@ given TypeChecker {
             msg.push_string("]");
         };
         msg.push_string(trait_name);
+        if not note.is_empty() then {
+            msg.push_string(" (");
+            msg.push_string(note);
+            msg.push_string(")");
+        };
         return msg.to_string();
     };
 
@@ -124,29 +125,30 @@ given TypeChecker {
         };
     };
 
-    module_private check_type_visibility(self, t Type, type_name String, scope Scope) Void = {
+    /// `span` is where the type is written. A message about the type belongs
+    /// at the spelling, not at whatever declaration happens to carry it.
+    module_private check_type_visibility(self, t Type, type_name String, scope Scope, span SourceSpan) Void = {
         if self.make_visibility_checker() is .Some(checker) then {
             let is_local_binding = scope.is_local_type_binding(type_name);
             let is_generic_param = scope.is_generic_param(type_name);
             when checker.check_type(t, type_name, self.context(), is_local_binding, is_generic_param) in {
                 .Ok(_) then {},
                 .Error(message) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message(), unknown_span())
-                    );
+                    self.push_diagnostic(message.message(), span);
                 },
             };
         };
     };
 
-    module_private check_symbol_visibility(self, sym Symbol) Void = {
+    /// `span` is where the symbol is USED. The message names the symbol and
+    /// tells the reader to import it -- pointing anywhere but the use leaves
+    /// them searching the file for the thing they must add a `using` for.
+    module_private check_symbol_visibility(self, sym Symbol, span SourceSpan) Void = {
         if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(sym.def_id) is .Some(module_path) then {
             when checker.check_symbol(module_path, self.context().symbol_name(sym), false) in {
                 .Ok(_) then {},
                 .Error(message) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message(), unknown_span())
-                    );
+                    self.push_diagnostic(message.message(), span);
                 },
             };
         };
@@ -268,7 +270,7 @@ given TypeChecker {
                         .Public() then "public",
                     };
                     let message = "\(symbol_text) symbol '\(symbol_name)' uses \(type_text) type '\(violation.first)' in its signature";
-                    if not self.has_matching_last_diagnostic(message, span) then {
+                    if not self.already_reported_diagnostic(message, span) then {
                         self.push_diagnostic_at_span(message, span);
                     };
                     return;
@@ -297,7 +299,7 @@ given TypeChecker {
 
         if not access_allowed then {
             let message = "Undefined type: \(template_name)";
-            if not self.has_matching_last_diagnostic(message, span) then {
+            if not self.already_reported_diagnostic(message, span) then {
                 self.push_diagnostic_at_span(message, span);
             };
             return false;
@@ -311,7 +313,7 @@ given TypeChecker {
             return when checker.check_symbol(module_path, template_name, false) in {
                 .Ok(_) then true,
                 .Error(message) then {
-                    if not self.has_matching_last_diagnostic(message.message(), span) then {
+                    if not self.already_reported_diagnostic(message.message(), span) then {
                         self.push_diagnostic_at_span(message.message(), span);
                     };
                     false
@@ -378,7 +380,7 @@ given TypeChecker {
                     .Public() then "public",
                 };
                 let message = "Cannot access \(access_label) method '\(method_name)'";
-                if not self.has_matching_last_diagnostic(message, span) then {
+                if not self.already_reported_diagnostic(message, span) then {
                     self.push_diagnostic_at_span(message, span);
                 };
                 true
@@ -387,7 +389,11 @@ given TypeChecker {
         };
     };
 
-    module_private ensure_struct_construction_access(self, type_name String, def_id DefId) Void = {
+    /// Whether every field of `def_id` is visible here, so the type may be
+    /// constructed directly. False means it may not, and the value that would
+    /// have been built has no type: the caller must poison the result, or the
+    /// next line of the program gets checked against a value that cannot exist.
+    module_private ensure_struct_construction_access(self, type_name String, def_id DefId, span SourceSpan) Bool = {
         when self.context().get_struct_fields(def_id) in {
             .Some(fields) then {
                 for field in fields then {
@@ -397,19 +403,16 @@ given TypeChecker {
                             .PackagePrivate() then "package_private",
                             _ then "module_private",
                         };
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead."
-                            , unknown_span())
-                        );
-                        return;
+                        self.push_diagnostic(
+                            "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead."
+                        , span);
+                        return false;
                     };
                 };
             },
             .None() then {},
         };
+        return true;
     };
 
     // 声明身份查找：用 `allocate_full` 注册时建的 (module, name, source_file) 键表，
@@ -718,22 +721,22 @@ given TypeChecker {
     /// Enforce one bound on one type argument. Dispatches on the bound's KIND,
     /// so consumers never string-match a bound's spelling. Shape bounds use
     /// their canonical name only to format the (unchanged) diagnostic.
-    module_private enforce_bound_requirement(self, bound_type Type, b Bound, param_name String, bindings Dict[String, Type]) Bool = {
+    module_private enforce_bound_requirement(self, bound_type Type, b Bound, param_name String, bindings Dict[String, Type], span SourceSpan) Bool = {
         return when b in {
             .Mutable() then {
                 if self.satisfies_mutable_constraint(bound_type) then {
                     true
                 } else {
-                    self.push_diagnostic(self.mutable_constraint_violation_message(bound_type, "checking constraint \(param_name): mutable"));
+                    self.push_diagnostic_at_span(self.mutable_constraint_violation_message(bound_type, "checking constraint \(param_name): mutable"), span);
                     false
                 }
             },
             .Trait(_, trait_name, _) then {
                 let trait_args = self.bound_trait_args_with_bindings(b, bindings);
                 if trait_args.is_empty() then {
-                    self.enforce_explicit_trait_requirement_with_context(bound_type, trait_name, param_name)
+                    self.enforce_explicit_trait_requirement_with_context(bound_type, trait_name, param_name, "", span)
                 } else {
-                    self.enforce_explicit_generic_trait_conformance(bound_type, trait_name, trait_args)
+                    self.enforce_explicit_generic_trait_conformance(bound_type, trait_name, trait_args, span)
                 }
             },
         };
@@ -896,7 +899,7 @@ given TypeChecker {
 
     module_private trait_type_args_with_bindings(self, trait_type TypeNode, bindings Dict[String, Type]) List[Type] = {
         return when trait_type in {
-            .Generic(_, trait_args) then {
+            .Generic(_, trait_args, span) then {
                 let mutable out = List[Type].new();
                 for arg in trait_args then {
                     out.push(self.resolve_type_with_bindings(arg, bindings));
@@ -1369,7 +1372,14 @@ given TypeChecker {
         };
     };
 
-    module_private enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
+    module_private enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args List[Type], span SourceSpan) Bool = {
+        return self.enforce_explicit_generic_trait_conformance_with_note(target_type, trait_name, trait_args, "", span);
+    };
+
+    /// `note` names the construct that demanded the trait --
+    /// `for-in iterator result check`, `operator 'add'`. Without it the message
+    /// states a requirement and leaves the cause unstated.
+    module_private enforce_explicit_generic_trait_conformance_with_note(self, target_type Type, trait_name String, trait_args List[Type], note String, span SourceSpan) Bool = {
         // Check generic parameter constraints first (like Swift's hasTraitBound)
         when target_type in {
             .GenericParameter(name) then {
@@ -1385,44 +1395,32 @@ given TypeChecker {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.trait_missing_constraint_message(bound_type, constraint_param, constraint)
-                    , unknown_span())
-                );
+                self.push_diagnostic(self.trait_missing_constraint_message(bound_type, constraint_param, constraint), span);
                 false
             },
             .MissingBlanketGiven(modifier_name) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name)
-                    , unknown_span())
-                );
+                self.push_diagnostic(self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name), span);
                 false
             },
             .MissingConformance() then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args);
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message, unknown_span()));
+                let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args, note);
+                self.push_diagnostic(message, span);
                 false
             },
         };
     };
 
-    module_private enforce_explicit_trait_requirement(self, target_type Type, trait_name String) Bool = {
-        return self.enforce_explicit_trait_requirement_with_context(target_type, trait_name, "");
+    module_private enforce_explicit_trait_requirement(self, target_type Type, trait_name String, span SourceSpan) Bool = {
+        return self.enforce_explicit_trait_requirement_with_context(target_type, trait_name, "", "", span);
     };
 
-    module_private enforce_mutable_constraint_for_call(self, target_type Type, function String) Bool = {
+    module_private enforce_mutable_constraint_for_call(self, target_type Type, function String, span SourceSpan) Bool = {
         let satisfied = when target_type in {
             .StructureType(def_id) then self.context().is_struct_mutable(def_id),
             // Identity: the template's DECLARATION decides mutability. There is
@@ -1435,7 +1433,7 @@ given TypeChecker {
         if not satisfied then {
             self.push_diagnostic_at_span(
                 "'\(function)' requires a 'type mutable' argument, but '\(type_to_string(target_type))' is not declared as 'type mutable'",
-                unknown_span()
+                span
             );
         };
         return satisfied;
@@ -1452,7 +1450,14 @@ given TypeChecker {
         return self.storage.constraint_enforcement_deferred;
     };
 
-    module_private enforce_explicit_trait_requirement_with_context(self, target_type Type, trait_name String, constraint_param String) Bool = {
+    /// `span` is where the requirement was asserted -- the call, the operator,
+    /// the generic argument. A requirement that cannot point at the thing that
+    /// demanded it cannot be acted on, so this is not optional.
+    /// `note` names the construct that demanded the trait -- `operator 'equals'`
+    /// -- and is printed with the message. `constraint_param` names a generic
+    /// parameter whose bound is unmet and takes the `(checking constraint ...)`
+    /// form instead. The two are different reasons and print differently.
+    module_private enforce_explicit_trait_requirement_with_context(self, target_type Type, trait_name String, constraint_param String, note String, span SourceSpan) Bool = {
         when target_type in {
             .Unknown() then { return true;},
             .TypeVar(_) then { return true;},
@@ -1484,40 +1489,22 @@ given TypeChecker {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.trait_requirement_missing_constraint_message(target_type, trait_name, bound_type, constraint)
-                    , unknown_span())
-                );
+                self.push_diagnostic(self.trait_requirement_missing_constraint_message(target_type, trait_name, bound_type, constraint), span);
                 false
             },
             .MissingBlanketGiven(modifier_name) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name)
-                    , unknown_span())
-                );
+                self.push_diagnostic(self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name), span);
                 false
             },
             .MissingConformance() then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                let message = if constraint_param.is_empty() then self.trait_missing_conformance_message(target_type, trait_name, List[Type].new()) else self.trait_missing_constraint_message(target_type, constraint_param, trait_name);
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        message
-                    , unknown_span())
-                );
+                let message = if constraint_param.is_empty() then self.trait_missing_conformance_message(target_type, trait_name, List[Type].new(), note) else self.trait_missing_constraint_message(target_type, constraint_param, trait_name);
+                self.push_diagnostic(message, span);
                 false
             },
         };

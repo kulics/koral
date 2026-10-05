@@ -1,0 +1,147 @@
+name: ci
+
+# The verification chain is fixed-order and must not be reordered -- see
+# docs/bootstrap-productization-plan.md. Each step is a different kind of
+# evidence:
+#
+#   1. the Swift suite        -- does the reference compiler still pass?
+#   2. host -> stage1         -- can the bootstrap compiler still be built?
+#   3. the stage1 suite       -- does that build pass?
+#   4. self-host + fixed point-- is it stable under its own output? (and does it
+#                               emit no dangling declarations?)
+#   5. the stage2 suite       -- does the self-hosted compiler still pass?
+#   6. the differential gate  -- do the two compilers AGREE?
+#
+# Step 6 is what has to hold before the Swift compiler can be deleted. Steps
+# 1-5 can all be green while the two compilers disagree -- a self-host fixed
+# point proves stability, not correctness. The oracle compares behaviour
+# (accept/reject, program stdout, exit code) rather than generated C, because
+# the two stamp DefIds into symbol names under different numbering rules and
+# the artifacts can never be byte-identical.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Swift
+        if: runner.os == 'Linux'
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          clang --version
+
+      # ------------------------------------------------------------------
+      # 1) Swift suite
+      # ------------------------------------------------------------------
+      - name: Build Swift compiler
+        run: swift build -c release --package-path compiler
+
+      - name: Build test runner
+        run: |
+          compiler/.build/release/koralc build \
+            --package-config tests/compiler-runner/koral.json \
+            --target-module compiler_runner \
+            -o bin/compiler-test-runner
+
+      - name: "1. Swift suite"
+        run: |
+          ./bin/compiler-test-runner/compiler_runner \
+            --compiler swift \
+            --swift-koralc compiler/.build/release/koralc \
+            --timeout 60 -j 4 \
+            --report-file /tmp/1-swift.log
+
+      # ------------------------------------------------------------------
+      # 2-3) host -> stage1, then the stage1 suite
+      # ------------------------------------------------------------------
+      - name: "2. host -> stage1"
+        run: |
+          compiler/.build/release/koralc build \
+            --package-config bootstrap/koral.json \
+            --target-module koralc \
+            -o bin/bootstrap
+
+      - name: "3. stage1 suite"
+        run: |
+          ./bin/compiler-test-runner/compiler_runner \
+            --compiler bootstrap \
+            --bootstrap-koralc bin/bootstrap/koralc \
+            --timeout 60 -j 4 \
+            --report-file /tmp/3-stage1.log
+
+      # ------------------------------------------------------------------
+      # 4) self-host two rounds + fixed point + dangling scan
+      # ------------------------------------------------------------------
+      - name: "4. self-host + fixed point"
+        run: |
+          set -euo pipefail
+          bin/bootstrap/koralc emit-c \
+            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s2
+          clang /tmp/s2/koralc.c std/koral_runtime.c -I std -o /tmp/s2/koralc -Wno-everything -O1
+
+          /tmp/s2/koralc emit-c \
+            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s3
+          clang /tmp/s3/koralc.c std/koral_runtime.c -I std -o /tmp/s3/koralc -Wno-everything -O1
+
+          /tmp/s3/koralc emit-c \
+            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s4
+
+          cmp /tmp/s3/koralc.c /tmp/s4/koralc.c
+          echo "FIXED POINT"
+
+          # A line that is a bare `name();` is a declaration with no definition
+          # -- the compiler emitted a call it never resolved.
+          dangling=$(grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' /tmp/s3/koralc.c || true)
+          echo "dangling=${dangling}"
+          test "${dangling}" = "0"
+
+      - name: "5. stage2 suite"
+        run: |
+          ./bin/compiler-test-runner/compiler_runner \
+            --compiler bootstrap \
+            --bootstrap-koralc /tmp/s2/koralc \
+            --timeout 60 -j 4 \
+            --report-file /tmp/5-stage2.log
+
+      # ------------------------------------------------------------------
+      # 6) the cross-compiler oracle
+      #
+      # Compiles and runs every case under BOTH compilers and requires them to
+      # behave identically. A single-sided regression -- one compiler drifting
+      # away from the other -- fails here even if each still passes its own
+      # suite against the hand-written `// EXPECT` comments.
+      # ------------------------------------------------------------------
+      - name: "6. cross-compiler oracle"
+        run: |
+          ./bin/compiler-test-runner/compiler_runner \
+            --compiler differential \
+            --swift-koralc compiler/.build/release/koralc \
+            --bootstrap-koralc bin/bootstrap/koralc \
+            --timeout 60 -j 4 \
+            --report-file /tmp/6-differential.log
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.os }}
+          path: /tmp/*.log
+          if-no-files-found: ignore

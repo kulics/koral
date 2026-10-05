@@ -286,6 +286,21 @@ public class TypeChecker {
   /// 当为 true 时，错误会被收集到 diagnosticCollector 中
   /// 当为 false 时，保持原有的抛出行为
   var collectErrors: Bool = false
+
+  /// How deep inside a speculative query we are. A query resolves a name only
+  /// to decide something -- "is this callee an enum constructor?" -- and every
+  /// name it fails to find is still resolved by a fallback outside the query.
+  /// Nothing inside one may report: the failure is the query's answer, not a
+  /// problem with the program. (rustc's `probe`, Swift's `withoutDiagnostics`.)
+  var speculativeQueryDepth: Int = 0
+
+  func beginSpeculativeQuery() {
+    speculativeQueryDepth += 1
+  }
+
+  func endSpeculativeQuery() {
+    speculativeQueryDepth -= 1
+  }
   
   /// 记录错误到诊断收集器
   /// - Parameters:
@@ -350,6 +365,12 @@ public class TypeChecker {
   ///   - isPrimary: 是否是主要错误
   /// - Throws: 如果 collectErrors 为 false，则抛出错误
   func handleError(_ error: SemanticError, isPrimary: Bool = true) throws {
+    if speculativeQueryDepth > 0 {
+      // The query is asking, not asserting. Either its caller has a fallback
+      // that makes this name fine, or it re-resolves outside the query and
+      // reports from there.
+      throw error
+    }
     if collectErrors {
       recordSemanticError(error, isPrimary: isPrimary)
     } else {
@@ -364,6 +385,9 @@ public class TypeChecker {
   ///   - isPrimary: 是否是主要错误
   /// - Throws: 如果 collectErrors 为 false，则抛出错误
   func handleError(_ message: String, at span: SourceSpan, isPrimary: Bool = true) throws {
+    if speculativeQueryDepth > 0 {
+      throw SemanticError(.generic(message), span: span)
+    }
     if collectErrors {
       recordError(message, at: span, isPrimary: isPrimary)
     } else {
@@ -371,6 +395,13 @@ public class TypeChecker {
     }
   }
   
+  /// A stand-in for an expression that failed to check. Its type is `.error`,
+  /// which unifies with nothing, so nothing built out of it goes on to complain
+  /// about the consequence of the failure rather than the failure itself.
+  func failedExpression() -> TypedExpressionNode {
+    .blockExpression(statements: [], tailExpression: nil, type: .error)
+  }
+
   /// 检查是否有收集到的错误
   var hasCollectedErrors: Bool {
     return diagnosticCollector.hasErrors()
@@ -991,6 +1022,8 @@ public class TypeChecker {
       return false
     case .traitObject:
       return false
+    case .error:
+      return false
     }
   }
 
@@ -1046,7 +1079,10 @@ public class TypeChecker {
   
   /// 检查类型的模块可见性
   /// 如果类型来自其它模块，必须通过当前文件的 using 声明显式导入
-  func checkTypeVisibility(type: Type, typeName: String) throws {
+  ///
+  /// `span` is where the type is written. A message about the type belongs at
+  /// the spelling, not at whatever declaration happens to carry it.
+  func checkTypeVisibility(type: Type, typeName: String, span: SourceSpan = .unknown) throws {
     // 局部类型绑定（如泛型替换、Self 绑定）不需要检查模块可见性
     let isLocalBinding = currentScope.isLocalTypeBinding(typeName)
     
@@ -1064,8 +1100,9 @@ public class TypeChecker {
         isGenericParameter: isGenericParameter
       )
     } catch let error as VisibilityError {
-      // 转换 VisibilityError 为 SemanticError
-      throw SemanticError(.generic(error.description), span: currentSpan)
+      // 转换 VisibilityError 为 SemanticError. A name used more than once
+      // without its module imported is a problem at every use.
+      try handleError(SemanticError(.generic(error.description), span: span.isKnown ? span : currentSpan))
     }
   }
 
@@ -1515,7 +1552,7 @@ public class TypeChecker {
       // Add parameters to new scope
       for param in params {
         if let name = context.getName(param.defId) {
-          try currentScope.defineLocal(name, defId: param.defId, line: currentLine)
+          try currentScope.defineLocal(name, defId: param.defId, span: currentSpan)
         }
       }
 
@@ -1525,7 +1562,7 @@ public class TypeChecker {
         typedBody = implicitDeref
       }
       typedBody = try coerceLiteral(typedBody, to: returnType)
-      if typedBody.type != .never && typedBody.type != returnType {
+      if typedBody.type != .never && typedBody.type != .error && typedBody.type != returnType {
         throw SemanticError.typeMismatch(
           expected: returnType.description, got: typedBody.type.description)
       }

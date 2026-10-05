@@ -199,22 +199,6 @@ file_private let print_usage() Void = {
     println("                            Default: -O1");
 };
 
-// Shared: lex + parse source text.
-// On error, prints a diagnostic and returns None.
-file_private let parse_source(file_path String, source String) Option[Program] = {
-    let tokens = lex_in_file(source, file_path) or else {
-        eprintln(it.message());
-        return Option[Program].None();
-    };
-
-    let program = parse_in_file(tokens, file_path) or else {
-        eprintln(it.message());
-        return Option[Program].None();
-    };
-
-    return Option[Program].Some(program);
-};
-
 // Shared: read file from disk.
 file_private let read_source(file_path String) Option[String] = {
     let source = read_text_file(file_path.into_path()) or else {
@@ -255,23 +239,10 @@ file_private let diagnostic_record_severity_label(severity DiagnosticSeverity) S
     };
 };
 
-file_private let strip_duplicate_cli_prefix(message String) String = {
-    when message.find(": error: ") in {
-        .Some(index) then {
-            let prefix = message.substring(0..<index);
-            if prefix.contains(":") then {
-                return message.substring(index + 9..);
-            };
-        },
-        .None() then {},
-    };
-    return message;
-};
-
 file_private let format_cli_diagnostic_record(record DiagnosticRecord, user_file_path String) String = {
     let diag = record.diagnostic;
     let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path;
-    let rendered_message = strip_duplicate_cli_prefix(diag.message);
+    let rendered_message = diag.detail;
     let mutable header = StringBuilder.new();
     when diag.span in {
         .Some(span) then if is_known_span(span) then header.push_string("\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)") else header.push_string("\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)"),
@@ -302,14 +273,6 @@ file_private let diagnostic_stage_label(stage DiagnosticStage) String = {
         .Parser() then "syntax error",
         .Semantic() then "error",
         .Other() then "error",
-    };
-};
-
-file_private let format_cli_diagnostic(diag DiagnosticError, user_file_path String) String = {
-    let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path;
-    return when diag.span in {
-        .Some(span) then if is_known_span(span) then "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_stage_label(diag.stage)): \(diag.message)" else "\(render_path): \(diagnostic_stage_label(diag.stage)): \(diag.message)",
-        .None() then "\(render_path): \(diagnostic_stage_label(diag.stage)): \(diag.message)",
     };
 };
 

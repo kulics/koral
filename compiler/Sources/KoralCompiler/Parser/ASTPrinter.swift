@@ -25,11 +25,11 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)UsingDeclaration: \(pathStr) { \(itemStr) }")
       }
 
-    case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
+    case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _, _):
       print("\(indent)GlobalVariableDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
-      print("\(indent)  Type: \(type ?? .identifier("(inferred)"))")
+      print("\(indent)  Type: \(type ?? .identifier("(inferred)", span: .unknown))")
       print("\(indent)  Mutable: \(mutable)")
       print("\(indent)  Value:")
       withIndent {
@@ -37,7 +37,7 @@ public func printAST(_ node: ASTNode) {
       }
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnType, let body, let access, _):
+      let name, let typeParameters, let parameters, let returnType, let body, let access, _, _):
       print("\(indent)GlobalFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -58,7 +58,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, _):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, _, _):
       print("\(indent)StructDeclaration \(name)")
       print("\(indent)  Access: \(access)")
       print("\(indent)  NominalMutable: \(isMutable)")
@@ -71,7 +71,7 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, _):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, _, _):
       print("\(indent)EnumDeclaration \(name)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
@@ -84,7 +84,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access, _):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access, _, _):
       print("\(indent)IntrinsicFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -96,7 +96,7 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, _):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, _, _):
       print("\(indent)ForeignFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -107,14 +107,14 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, _):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, _, _):
         print("\(indent)IntrinsicTypeDeclaration \(name)")
         print("\(indent)  Access: \(access)")
         if !typeParameters.isEmpty {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .foreignTypeDeclaration(let name, let cname, let fields, let access, _):
+    case .foreignTypeDeclaration(let name, let cname, let fields, let access, _, _):
         print("\(indent)ForeignTypeDeclaration \(name)")
         if let cname {
           print("\(indent)  CName: \(cname)")
@@ -125,7 +125,7 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  Field \(field.name): \(field.type)")
           }
         }
-    case .foreignLetDeclaration(let name, let type, let mutable, let access, _):
+    case .foreignLetDeclaration(let name, let type, let mutable, let access, _, _):
         let mutLabel = mutable ? "mutable " : ""
         print("\(indent)ForeignLetDeclaration \(mutLabel)\(name)")
         print("\(indent)  Access: \(access)")
@@ -180,7 +180,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, _):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, _, _):
       print("\(indent)TraitDeclaration: \(name)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
@@ -201,7 +201,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .typeAliasDeclaration(let name, let targetType, let access, _):
+    case .typeAliasDeclaration(let name, let targetType, let access, _, _):
       print("\(indent)TypeAliasDeclaration: \(name)")
       print("\(indent)  Access: \(access)")
       print("\(indent)  TargetType: \(targetType)")
@@ -304,7 +304,7 @@ public func printAST(_ node: ASTNode) {
       }
     case .booleanLiteral(let value):
       print("\(indent)BoolLiteral: \(value)")
-    case .castExpression(let type, let expr):
+    case .castExpression(let type, let expr, _):
       print("\(indent)CastExpression: (\(type))")
       withIndent {
         printExpression(expr)
@@ -337,7 +337,7 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)EmptyLiteral")
     case .identifier(let name):
       print("\(indent)Identifier: \(name)")
-    case .blockExpression(let statements, let tailExpression):
+    case .blockExpression(let statements, let tailExpression, _):
       print("\(indent)BlockExpression:")
       withIndent {
         for statement in statements {
@@ -350,14 +350,14 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
-    case .arithmeticExpression(let left, let op, let right):
+    case .arithmeticExpression(let left, let op, let right, _):
       print("\(indent)ArithmeticExpression:")
       withIndent {
         printExpression(left)
         print("\(indent)Operator: \(op)")
         printExpression(right)
       }
-    case .comparisonExpression(let left, let op, let right):
+    case .comparisonExpression(let left, let op, let right, _):
       print("\(indent)ComparisonExpression:")
       withIndent {
         printExpression(left)
@@ -377,7 +377,7 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
-    case .ifExpression(let condition, let thenBranch, let elseBranch):
+    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
       print("\(indent)IfExpression:")
       print("\(indent)  Condition:")
       withIndent {
@@ -408,7 +408,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
       print("\(indent)  Pattern: \(pattern)")
-    case .whileExpression(let condition, let body):
+    case .whileExpression(let condition, let body, _):
       print("\(indent)WhileExpression:")
       print("\(indent)  Condition:")
       withIndent {
@@ -431,7 +431,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
       print("\(indent)  Pattern: \(pattern)")
-    case .subscriptExpression(let base, let arguments):
+    case .subscriptExpression(let base, let arguments, _):
       print("\(indent)Subscript:")
       print("\(indent)  Base:")
       withIndent {
@@ -460,7 +460,7 @@ public func printAST(_ node: ASTNode) {
           }
       }
 
-    case .call(let callee, let arguments):
+    case .call(let callee, let arguments, _):
       print("\(indent)Call:")
       print("\(indent)  Callee:")
       withIndent {
@@ -478,25 +478,25 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
-    case .bitwiseExpression(let left, let op, let right):
+    case .bitwiseExpression(let left, let op, let right, _):
       print("\(indent)BitwiseExpression:")
       withIndent {
         printExpression(left)
         print("\(indent)Operator: \(op)")
         printExpression(right)
       }
-    case .bitwiseNotExpression(let operand):
+    case .bitwiseNotExpression(let operand, _):
       print("\(indent)BitwiseNotExpression:")
       withIndent {
         printExpression(operand)
       }
 
-    case .addressOfExpression(let expr, let mutable):
+    case .addressOfExpression(let expr, let mutable, _):
       print("\(indent)AddressOfExpression\(mutable ? " mutable" : ""):")
       withIndent {
         printExpression(expr)
       }
-    case .andExpression(let left, let right):
+    case .andExpression(let left, let right, _):
       print("\(indent)AndExpression:")
       withIndent {
         print("\(indent)Left:")
@@ -509,7 +509,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .orExpression(let left, let right):
+    case .orExpression(let left, let right, _):
       print("\(indent)OrExpression:")
       withIndent {
         print("\(indent)Left:")
@@ -522,40 +522,40 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .notExpression(let expr):
+    case .notExpression(let expr, _):
       print("\(indent)NotExpression:")
       withIndent {
         printExpression(expr)
       }
 
-    case .unaryMinusExpression(let expr):
+    case .unaryMinusExpression(let expr, _):
       print("\(indent)UnaryMinusExpression:")
       withIndent {
         printExpression(expr)
       }
 
-    case .derefExpression(let expr):
+    case .derefExpression(let expr, _):
       print("\(indent)DerefExpression:")
       withIndent {
         printExpression(expr)
       }
 
-    case .unsafeDerefExpression(let expr):
+    case .unsafeDerefExpression(let expr, _):
       print("\(indent)UnsafeDerefExpression:")
       withIndent {
         printExpression(expr)
       }
 
-    case .ptrExpression(let expr, let mutable):
+    case .ptrExpression(let expr, let mutable, _):
       print("\(indent)PtrExpression\(mutable ? " mutable" : ""):")
       withIndent {
         printExpression(expr)
       }
 
-    case .traitQualificationExpression(let type, let trait):
+    case .traitQualificationExpression(let type, let trait, _):
       print("\(indent)TraitQualificationExpression: \(type)(\(trait))")
 
-    case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
+    case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments, _):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
       print("\(indent)GenericMethodCall: .[\(typeArgsStr)]\(methodName)")
       print("\(indent)  Base:")
@@ -575,7 +575,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedMethodCall(let type, let trait, let methodName, let arguments):
+    case .qualifiedMethodCall(let type, let trait, let methodName, let arguments, _):
       print("\(indent)QualifiedMethodCall: \(type)(\(trait)).\(methodName)")
       print("\(indent)  Arguments:")
       withIndent {
@@ -590,7 +590,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedGenericMethodCall(let type, let trait, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let type, let trait, let methodTypeArgs, let methodName, let arguments, _):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
       print("\(indent)QualifiedGenericMethodCall: \(type)(\(trait)).\(methodName)[\(typeArgsStr)]")
       print("\(indent)  Arguments:")
@@ -606,11 +606,11 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .genericInstantiation(let base, let args):
+    case .genericInstantiation(let base, let args, _):
       print("\(indent)GenericInstantiation: \(base)")
       print("\(indent)  Args: \(args)")
       
-    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
+    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments, _):
       let typeArgsStr = typeArgs.isEmpty ? "" : "[\(typeArgs.map { "\($0)" }.joined(separator: ", "))]"
       print("\(indent)StaticMethodCall: \(typeArgsStr)\(typeName).\(methodName)")
       print("\(indent)  Arguments:")
@@ -626,7 +626,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
     
-    case .forExpression(let pattern, let iterable, let body):
+    case .forExpression(let pattern, let iterable, let body, _):
       print("\(indent)ForExpression:")
       print("\(indent)  Pattern: \(pattern.description)")
       print("\(indent)  Iterable:")
@@ -642,7 +642,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
     
-    case .rangeExpression(let op, let left, let right):
+    case .rangeExpression(let op, let left, let right, _):
       print("\(indent)RangeExpression: \(op)")
       if let l = left {
         print("\(indent)  Left:")
@@ -734,7 +734,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .memberPath(let base, let path):
+    case .memberPath(let base, let path, _):
       print("\(indent)MemberPath: .\(path.joined(separator: "."))")
       print("\(indent)  Base:")
       withIndent {

@@ -628,17 +628,17 @@ extension TypeChecker {
     switch node {
     case .inferredSelf:
       return true
-    case .identifier(let name):
+    case .identifier(let name, _):
       return name == "Self"
-    case .reference(let inner, _):
+    case .reference(let inner, _, _):
       return containsSelfType(inner)
-    case .pointer(let inner, _):
+    case .pointer(let inner, _, _):
       return containsSelfType(inner)
-    case .weakReference(let inner, _):
+    case .weakReference(let inner, _, _):
       return containsSelfType(inner)
-    case .generic(_, let args):
+    case .generic(_, let args, _):
       return args.contains { containsSelfType($0) }
-    case .functionType(let paramTypes, let returnType):
+    case .functionType(let paramTypes, let returnType, _):
       return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
     }
   }
@@ -647,7 +647,7 @@ extension TypeChecker {
     switch node {
     case .inferredSelf:
       return true
-    case .identifier(let name):
+    case .identifier(let name, _):
       return name == "Self"
     default:
       return false

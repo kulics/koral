@@ -298,7 +298,11 @@ given Parser {
 
 
         if self.current().kind is .KwIs() then {
-            let start = self.current();
+            // An expression's span covers the expression, and `x is P` begins
+            // at `x`. Anchoring at the `is` token instead starts the span
+            // mid-expression, and every diagnostic about the expression --
+            // "has no effect", a type mismatch -- then points at the operator
+            // rather than at the thing.
             self.advance();
             if self.current().kind is .KwNot() then {
                 self.advance();
@@ -362,6 +366,7 @@ given Parser {
         let mutable expr = self.parse_and() or return;
 
         while self.current().kind is .KwOr() then {
+            // Same as `is`: `x or return` begins at `x`, so the span does too.
             if self.next_is_else() then {
                 self.advance();
                 self.advance();
@@ -431,9 +436,10 @@ given Parser {
 
     module_private parse_trait_member(self, trait_name String) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public());
+        let name_token = self.current();
         let name = self.expect_identifier("trait member") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_function_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_function_name_error(name), name_token));
         };
         let type_params = self.parse_type_parameters() or return;
 
@@ -442,7 +448,7 @@ given Parser {
             _ then { return .Error(self.parser_error("Expected '(' in trait member declaration"));},
         };
 
-        let params = self.parse_param_list(trait_name + "." + name) or return;
+        let params = self.parse_param_list(trait_name + "." + name, false) or return;
 
         when self.current().kind in {
             .RParen() then { self.advance();},
@@ -463,9 +469,10 @@ given Parser {
 
     module_private parse_given_member(self, allow_body Bool) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.ModulePrivate());
+        let name_token = self.current();
         let name = self.expect_identifier("given member") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_function_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_function_name_error(name), name_token));
         };
         let type_params = self.parse_type_parameters() or return;
 
@@ -474,7 +481,7 @@ given Parser {
             _ then { return .Error(self.parser_error("Expected '(' in given member declaration"));},
         };
 
-        let params = self.parse_param_list(name) or return;
+        let params = self.parse_param_list(name, false) or return;
 
         when self.current().kind in {
             .RParen() then { self.advance();},
@@ -495,12 +502,11 @@ given Parser {
                 return .Error(self.parser_error("intrinsic given member cannot have a body"));
             };
             self.advance();
-            let expr = self.parse_expression_checked("given member body") or else {
-                let mutable message = StringBuilder.new();
-                message.push_string("parse given member body error: ");
-                message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it, unknown_span()).message);
-                return .Error(self.parser_error_at_current(message.to_string()));
-            };
+            // Propagate the nested failure as-is. Folding it into a new message
+            // would have to flatten a diagnostic that already has its own span
+            // and stage into a bare string, and the wrapper's location would
+            // then stand in for one that was more precise.
+            let expr = self.parse_expression_checked("given member body") or return;
             body = .Some(expr);
         };
 
@@ -523,13 +529,9 @@ given Parser {
                     return .Error(self.parser_error("Unexpected EOF in trait declaration"));
                 },
                 _ then {
-                    let member = self.parse_trait_member(trait_name) or else {
-                        let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it, unknown_span());
-                        let mutable message = StringBuilder.new();
-                        message.push_string("parse trait member error: ");
-                        message.push_string(nested.message);
-                        return .Error(self.parser_error_at(message.to_string(), self.current()));
-                    };
+                    // Propagate: the nested failure already has a span and a
+                    // message of its own (see the note in parse_given_member).
+                    let member = self.parse_trait_member(trait_name) or return;
                     let _ = self.require_semicolon() or return;
                     members.push(member);
                 },
@@ -555,13 +557,9 @@ given Parser {
                     return .Error(self.parser_error("Unexpected EOF in given declaration"));
                 },
                 _ then {
-                    let member = self.parse_given_member(allow_body) or else {
-                        let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it, unknown_span());
-                        let mutable message = StringBuilder.new();
-                        message.push_string("parse given member error: ");
-                        message.push_string(nested.message);
-                        return .Error(self.parser_error_at(message.to_string(), self.current()));
-                    };
+                    // Propagate: the nested failure already has a span and a
+                    // message of its own (see the note in parse_given_member).
+                    let member = self.parse_given_member(allow_body) or return;
                     let _ = self.require_semicolon() or return;
                     members.push(member);
                 },
@@ -652,7 +650,10 @@ given Parser {
             return .Error(self.parser_error("access modifier on using declaration is not supported"));
         };
         if is_foreign then {
-            return .Error(self.parser_error_at("Unexpected token: using", self.current()));
+            // The token the message names is `using`, and `self.advance()` above
+            // has already moved past it -- reporting at `current()` points at
+            // whatever follows. `start` is the `using` itself.
+            return .Error(self.parser_error_at("Unexpected token: using", start));
         };
         if is_intrinsic then {
             return .Error(self.parser_error("intrinsic using declaration is not supported"));
@@ -675,15 +676,19 @@ given Parser {
         let mutable path_segments = List[String].new();
         when self.current().kind in {
             .KwSelfType() then {
-                return .Error(self.parser_error_at("Unexpected token: Self", self.current()));
+                return .Error(self.unexpected_token_error_at("Self", "string literal for file merge, or module import like 'std::io { Reader }'", self.current()));
             },
             .Identifier(name) then {
+                // Anchor on the identifier itself: it is the segment that cannot
+                // start a module path. Reporting at the token AFTER the advance
+                // (the `.` in `Super.Sibling`) points one token too far right.
+                let name_token = self.current();
                 self.advance();
                 if self.current().kind is not .DoubleColon() and self.current().kind is not .LBrace() then {
-                    return .Error(self.parser_error_at("Unexpected token: Identifier(\(name))", self.current()));
+                    return .Error(self.unexpected_token_error_at("Identifier(\(name))", "string literal for file merge, or module import like 'std::io { Reader }'", name_token));
                 };
                 if not self.is_valid_module_segment_name(name) then {
-                    return .Error(self.parser_error_at_current(self.invalid_module_name_error(name)));
+                    return .Error(self.parser_error_at(self.invalid_module_name_error(name), name_token));
                 };
                 path_segments.push(module_file_name_to_identifier(name));
             },
@@ -694,9 +699,10 @@ given Parser {
 
         while self.current().kind is .DoubleColon() then {
             self.advance();
+            let segment_token = self.current();
             let segment = self.expect_identifier("module path segment") or return;
             if not self.is_valid_module_segment_name(segment) then {
-                return .Error(self.parser_error_at_current(self.invalid_module_name_error(segment)));
+                return .Error(self.parser_error_at(self.invalid_module_name_error(segment), segment_token));
             };
             path_segments.push(module_file_name_to_identifier(segment));
         };
@@ -708,9 +714,10 @@ given Parser {
     module_private parse_trait_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
+        let name_token = self.current();
         let name = self.expect_identifier("trait declaration") or return;
         if not self.is_upper_first(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_type_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_type_name_error(name), name_token));
         };
         let type_params = self.parse_type_parameters() or return;
 
@@ -741,7 +748,7 @@ given Parser {
         };
 
         let members = self.parse_trait_members(name) or return;
-        let base = Decl.TraitDecl(access, name, type_params, parents, members, self.span_from_start(start));
+        let base = Decl.TraitDecl(access, name, type_params, parents, members, self.span_from_start(start), self.token_span(name_token));
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
     };
 
@@ -846,6 +853,18 @@ given Parser {
 
 given Parser {
 
+    /// Whether an interpolation's token list holds an expression to parse.
+    /// An empty `\( )` still lexes to a bare end-of-input token, so counting
+    /// tokens is not enough -- only a real token means there is one.
+    file_private has_expression_tokens(self, tokens List[Token]) Bool = {
+        for t in tokens then {
+            if t.kind is not .Eof() then {
+                return true;
+            };
+        };
+        return false;
+    };
+
     module_private parse_interpolated_string_expr(self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[Expr] = {
         let mutable ast_parts = List[InterpolatedStringPart].new();
         let mutable literal_value = StringBuilder.new();
@@ -858,12 +877,15 @@ given Parser {
                     ast_parts.push(InterpolatedStringPart.Literal(part_value));
                 },
                 .ExpressionTokens(expr_tokens) then {
-                    let expr = self.parse_embedded_expression(expr_tokens) or else {
-                        let mutable message = StringBuilder.new();
-                        message.push_string("Invalid interpolation expression: ");
-                        message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it, span).message);
-                        return .Error(self.parser_error_at_current(message.to_string()));
+                    // An interpolation with no expression in it. The literal is
+                    // well formed; the expression is what is missing, so it is a
+                    // syntax complaint about the literal as a whole.
+                    if not self.has_expression_tokens(expr_tokens) then {
+                        return .Error(self.parser_error_at_span("empty interpolation expression", span));
                     };
+                    // Propagate: the nested failure already has a span and a
+                    // message of its own (see the note in parse_given_member).
+                    let expr = self.parse_embedded_expression(expr_tokens) or return;
                     ast_parts.push(InterpolatedStringPart.Expression(expr));
                     has_expression = true;
                 },
@@ -887,12 +909,9 @@ given Parser {
         };
 
         let mutable nested = Parser.new_in_file(token_list, self.file_path);
-        let expr = nested.parse_expression() or else {
-            let mutable message = StringBuilder.new();
-            message.push_string("parse failed: ");
-            message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it, unknown_span()).message);
-            return .Error(self.parser_error_at_current(message.to_string()));
-        };
+        // Propagate: the nested failure already has a span and a message of its
+        // own (see the note in parse_given_member).
+        let expr = nested.parse_expression() or return;
 
         if not nested.is_eof() then {
             return .Error(self.parser_error_at_current("trailing tokens in interpolation expression"));
@@ -1015,8 +1034,8 @@ public let parse(tokens List[Token]) Result[Program] = {
 
 public let parse_in_file(tokens List[Token], file_path String) Result[Program] = {
     let mutable parser = Parser.new_in_file(tokens, file_path);
-    return when parser.parse_program() in {
-        .Ok(program) then Result[Program].Ok(program),
-        .Error(error) then Result[Program].Error(wrap_error_as_diagnostic(DiagnosticStage.Parser(), file_path, error, unknown_span())),
-    };
+    // Pass the failure through untouched. It already carries its own stage and
+    // span; re-wrapping it as a fresh `Parser` diagnostic with `unknown_span()`
+    // threw the span away and flattened the message.
+    return parser.parse_program();
 };

@@ -44,6 +44,21 @@ module_private type mutable TypeCheckerStorage(
     /// Always points to the innermost scope. Type resolution walks up the scope chain.
     /// Initialized to global_scope in the constructor.
     mutable current_scope Scope,
+    /// Where the checker currently is, for a diagnostic that has no more
+    /// specific place to blame.
+    ///
+    /// A rule that finds a problem "while checking X" reports a problem AT X.
+    /// The walker records the construct it has entered, and a message that
+    /// arrives without a location inherits that one -- so a resolver several
+    /// calls deep (`resolve_type` does not know what asked it) still points at
+    /// the declaration or statement that is wrong. The alternative is threading
+    /// a span through every resolver in the compiler, and every call site
+    /// re-deciding which construct it is inside.
+    ///
+    /// Set on entry to a declaration, statement or expression and restored on
+    /// the way out. The innermost construct wins, which is what keeps a
+    /// statement from swallowing an expression's location.
+    mutable current_span SourceSpan,
 );
 
 public type mutable TypeChecker(module_private mutable storage TypeCheckerStorage);
@@ -235,7 +250,8 @@ given TypeChecker {
             Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus].new(),
             false,
             Dict[String, ConformanceWitness].new(),
-            global_scope
+            global_scope,
+            unknown_span()
         );
         return TypeChecker(s);
     };
@@ -305,8 +321,27 @@ given TypeChecker {
         self.storage.generic_trait_status_cache = Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus].new();
     };
 
-    module_private push_diagnostic(self, message String) Void = {
-        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message, unknown_span()));
+    /// Report at a source location. Every diagnostic needs one -- a message
+    /// with no span cannot be jumped to, and the CLI has nowhere to put it in
+    /// the `file:line:col: stage: message` envelope. There is no span-less
+    /// variant; if you think you have no span, `typed_expr_span` recovers one
+    /// from a typed expression and `expr_span` from an AST node.
+    /// Report a semantic diagnostic at a source location.
+    ///
+    /// The same problem at the same place is reported ONCE. A rule that runs
+    /// again for the same expression -- a second generic instantiation attempt,
+    /// a receiver rewrite, a re-check of the same binding -- must not multiply
+    /// its message.
+    module_private push_diagnostic(self, message String, span SourceSpan) Void = {
+        // A message that arrives without a location is a problem at whatever
+        // construct the walker is inside -- see `current_span`. A message that
+        // arrives with one keeps it: the call site knows better than the cursor
+        // which token is at fault.
+        let effective = if is_known_span(span) then span else self.storage.current_span;
+        if self.already_reported_diagnostic(message, effective) then {
+            return;
+        };
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message, effective));
     };
 
     module_private report_pass2_decl_consistency_error(self, decl_kind String, name String, detail String) Void = {
@@ -317,7 +352,10 @@ given TypeChecker {
         message.push_string(name);
         message.push_string("': ");
         message.push_string(detail);
-        self.push_diagnostic(message.to_string());
+        // Pass 2 works on declarations the collector already accepted; there is
+        // no source position at this level to blame. Said out loud rather than
+        // defaulted away.
+        self.push_diagnostic(message.to_string(), unknown_span());
     };
 
     module_private sema_progress_debug_enabled(self) Bool = {
@@ -488,19 +526,19 @@ given TypeChecker {
     module_private decl_debug_label(self, decl Decl) String = {
         let _ = self;
         return when decl in {
-            .LetDecl(_, name, _, _, _, _) then "let \(name)",
-            .FunctionDecl(_, name, _, _, _, _, _) then "fn \(name)",
-            .IntrinsicFunctionDecl(_, name, _, _, _, _) then "intrinsic fn \(name)",
-            .ForeignFunctionDecl(_, name, _, _, _) then "foreign fn \(name)",
-            .ForeignLetDecl(_, name, _, _, _) then "foreign let \(name)",
-            .TypeStructDecl(_, name, _, _, _, _) then "struct \(name)",
-            .TypeEnumDecl(_, name, _, _, _) then "enum \(name)",
-            .TypeAliasDecl(_, name, _, _) then "type \(name)",
-            .IntrinsicTypeDecl(_, name, _, _) then "intrinsic type \(name)",
-            .ForeignTypeDecl(_, name, _, _, _) then "foreign type \(name)",
+            .LetDecl(_, name, _, _, _, _, _) then "let \(name)",
+            .FunctionDecl(_, name, _, _, _, _, _, _) then "fn \(name)",
+            .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then "intrinsic fn \(name)",
+            .ForeignFunctionDecl(_, name, _, _, _, _) then "foreign fn \(name)",
+            .ForeignLetDecl(_, name, _, _, _, _) then "foreign let \(name)",
+            .TypeStructDecl(_, name, _, _, _, _, _) then "struct \(name)",
+            .TypeEnumDecl(_, name, _, _, _, _) then "enum \(name)",
+            .TypeAliasDecl(_, name, _, _, _) then "type \(name)",
+            .IntrinsicTypeDecl(_, name, _, _, _) then "intrinsic type \(name)",
+            .ForeignTypeDecl(_, name, _, _, _, _) then "foreign type \(name)",
             .FileUsingDecl(file_name, _) then "using file \(file_name)",
             .ModuleUsingDecl(_, _, _) then "using module",
-            .TraitDecl(_, name, _, _, _, _) then "trait \(name)",
+            .TraitDecl(_, name, _, _, _, _, _) then "trait \(name)",
             .GivenDecl(_, _, _, _) then "given",
             .GivenTraitDecl(_, _, _, _, _) then "given as trait",
             .IntrinsicGivenDecl(_, _, _, _) then "intrinsic given",
@@ -737,7 +775,7 @@ given TypeChecker {
     };
 
     module_private push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
-        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message, span));
+        self.push_diagnostic(message, span);
     };
 
     module_private push_expr_diagnostic(self, expr Expr, message String) Void = {
@@ -846,7 +884,16 @@ given TypeChecker {
         return self.storage.constraint_solver.fresh_literal_type_variable(kind, span);
     };
 
+    /// The span of a typed expression.
+    ///
+    /// The RECORDED span wins. The derivation below is a fallback for
+    /// construction sites that have not yet been migrated to
+    /// `make_typed_expr_at`: it only ever succeeds by borrowing a span from a
+    /// child, which is exactly the case the recorded span exists to fix.
     module_private typed_expr_span(self, expr TypedExpr) SourceSpan = {
+        if is_known_span(expr.span) then {
+            return expr.span;
+        };
         return when expr.expr_kind in {
             .Variable(symbol) then self.context().get_span(symbol.def_id) or else unknown_span(),
             .CastExpr(_, inner) then self.typed_expr_span(inner),
@@ -947,6 +994,52 @@ given TypeChecker {
             .ContinueStmt(span) then span,
             .DeferStmt(_, span) then span,
         };
+    };
+
+    /// The source location of a declaration.
+    ///
+    /// Every declaration carries its span; this just names which field that
+    /// is, so `check_decl` can record it as the place a diagnostic belongs to.
+    module_private decl_span(self, decl Decl) SourceSpan = {
+        return when decl in {
+            .LetDecl(_, _, _, _, _, span, _) then span,
+            .FunctionDecl(_, _, _, _, _, _, span, _) then span,
+            .IntrinsicFunctionDecl(_, _, _, _, _, span, _) then span,
+            .ForeignFunctionDecl(_, _, _, _, span, _) then span,
+            .ForeignLetDecl(_, _, _, _, span, _) then span,
+            .TypeStructDecl(_, _, _, _, _, span, _) then span,
+            .TypeEnumDecl(_, _, _, _, span, _) then span,
+            .TypeAliasDecl(_, _, _, span, _) then span,
+            .IntrinsicTypeDecl(_, _, _, span, _) then span,
+            .ForeignTypeDecl(_, _, _, _, span, _) then span,
+            .FileUsingDecl(_, span) then span,
+            .ModuleUsingDecl(_, _, span) then span,
+            .TraitDecl(_, _, _, _, _, span, _) then span,
+            .GivenDecl(_, _, _, span) then span,
+            .GivenTraitDecl(_, _, _, _, span) then span,
+            .IntrinsicGivenDecl(_, _, _, span) then span,
+        };
+    };
+
+    /// Record where the checker is while checking `span`, restoring the
+    /// enclosing location on the way out.
+    ///
+    /// The innermost construct always wins: a statement inside a declaration
+    /// blames the statement, and an expression inside the statement blames the
+    /// expression. Restoring is what keeps a nested check from leaving a stale
+    /// location behind for whatever is checked next.
+    ///
+    /// Returns the location to hand back to `leave_current_span`.
+    module_private enter_current_span(self, span SourceSpan) SourceSpan = {
+        let outer = self.storage.current_span;
+        if is_known_span(span) then {
+            self.storage.current_span = span;
+        };
+        return outer;
+    };
+
+    module_private leave_current_span(self, outer SourceSpan) Void = {
+        self.storage.current_span = outer;
     };
 
     module_private push_statement_diagnostic(self, stmt Statement, message String) Void = {
@@ -1605,8 +1698,8 @@ given TypeChecker {
     module_private decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
         let _ = self;
         return when decl in {
-            .LetDecl(_, _, _, _, _, _) then true,
-            .FunctionDecl(_, _, type_params, _, _, _, _) then type_params.is_empty(),
+            .LetDecl(_, _, _, _, _, _, _) then true,
+            .FunctionDecl(_, _, type_params, _, _, _, _, _) then type_params.is_empty(),
             .GivenDecl(_, type_params, members, _) then {
                 if not type_params.is_empty() then {
                     return false;
@@ -1682,7 +1775,7 @@ given TypeChecker {
         // when the owning declaration is visited before the trait file.
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, _, _, _) then {
+                .TraitDecl(_, _, _, _, _, _, _) then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
                     self.install_name_resolution_context();
@@ -1700,19 +1793,19 @@ given TypeChecker {
         // any other, is an error when nothing declares it.
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, parents, _, _) then {
+                .TraitDecl(_, _, _, parents, _, span, _) then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
                     self.install_name_resolution_context();
                     self.storage.package_id = pair.first.package_id;
-                    self.validate_trait_parent_existence(parents);
+                    self.validate_trait_parent_existence(parents, span);
                 },
                 _ then {},
             };
         };
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, _, _, _) then {},
+                .TraitDecl(_, _, _, _, _, _, _) then {},
                 _ then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
@@ -1754,8 +1847,8 @@ given TypeChecker {
             when pair.first.decl in {
                 _ then {
                     let skip_this_decl = if skip_decl_check then true else when pair.first.decl in {
-                        .FunctionDecl(_, _, _, _, _, _, _) then skip_function_decl_check,
-                        .LetDecl(_, _, _, _, _, _) then skip_let_decl_check,
+                        .FunctionDecl(_, _, _, _, _, _, _, _) then skip_function_decl_check,
+                        .LetDecl(_, _, _, _, _, _, _) then skip_let_decl_check,
                         .GivenDecl(_, _, _, _) then skip_given_decl_check,
                         .GivenTraitDecl(_, _, _, _, _) then skip_given_decl_check,
                         .IntrinsicGivenDecl(_, _, _, _) then skip_given_decl_check,
@@ -1827,7 +1920,7 @@ given TypeChecker {
                     },
                     .None() then Option[TypedDecl].None(),
                 };
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message(), unknown_span()));
+                self.push_diagnostic(e.message(), unknown_span());
                 self.storage.constraint_solver.clear_debug_state();
                 resolved_decl
             },
@@ -1901,13 +1994,13 @@ given TypeChecker {
     /// list.
     module_private trait_tool_target_name(self, target_type TypeNode, type_params List[TypeParameter]) Option[String] = {
         let candidate = when target_type in {
-            .Identifier(name) then {
+            .Identifier(name, span) then {
                 if not type_params.is_empty() then {
                     return Option[String].None();
                 };
                 name
             },
-            .Generic(base, args) then {
+            .Generic(base, args, span) then {
                 if args.count() <> type_params.count() then {
                     return Option[String].None();
                 };
@@ -1915,7 +2008,7 @@ given TypeChecker {
                 while index < args.count() then {
                     let expected_name = type_params[index].name;
                     let matches = when args[index] in {
-                        .Identifier(actual_name) then actual_name == expected_name,
+                        .Identifier(actual_name, span) then actual_name == expected_name,
                         _ then false,
                     };
                     if not matches then {
@@ -1941,37 +2034,30 @@ given TypeChecker {
         trait_name String,
         type_params List[TypeParameter],
         members List[GivenMember],
+        span SourceSpan,
     ) Bool = {
         let trait_info = when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(info) then info,
             .None() then {
-                self.push_diagnostic("Undefined trait: \(trait_name)");
+                self.push_diagnostic("Undefined trait: \(trait_name)", span);
                 return false;
             },
         };
         if trait_info.type_params.count() <> type_params.count() then {
-            self.storage.diagnostics.push(make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Type mismatch: expected \(trait_info.type_params.count()) generic params, got \(type_params.count())",
-            unknown_span()));
+            self.push_diagnostic("Type mismatch: expected \(trait_info.type_params.count()) generic params, got \(type_params.count())", span);
             return false;
         };
 
         let mutable seen_names = List[String].new();
         for member in members then {
             if self.string_list_contains(seen_names, member.name) then {
-                self.storage.diagnostics.push(make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    self.duplicate_definition_message(member.name),
-                unknown_span()));
+                self.push_diagnostic(self.duplicate_definition_message(member.name), span);
                 return false;
             };
             seen_names.push(member.name);
             for requirement in trait_info.methods then {
                 if requirement.name == member.name then {
-                    self.push_diagnostic("Trait entity method '\(member.name)' conflicts with requirement in trait '\(trait_name)'");
+                    self.push_diagnostic("Trait entity method '\(member.name)' conflicts with requirement in trait '\(trait_name)'", span);
                     return false;
                 };
             };
@@ -1981,11 +2067,7 @@ given TypeChecker {
         for block in existing_blocks then {
             for existing_method in block.methods then {
                 if self.string_list_contains(seen_names, existing_method.name) then {
-                    self.storage.diagnostics.push(make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        self.duplicate_definition_message(existing_method.name),
-                    unknown_span()));
+                    self.push_diagnostic(self.duplicate_definition_message(existing_method.name), span);
                     return false;
                 };
             };
@@ -2076,6 +2158,14 @@ given TypeChecker {
 
         let mutable result = Dict[String, TraitToolMethodEntry].new();
         for parent in trait_info.parent_traits then {
+            // An unresolved parent contributes no methods. Whether it should
+            // exist at all is the parent list's business --
+            // `validate_trait_parent_existence` has already named it -- and
+            // reporting it again from here repeats that line at every
+            // conformance site that mentions the child.
+            if not parent.def_id.is_valid() then {
+                continue;
+            };
             when self.flattened_trait_tool_methods_in_trait(parent.def_id, parent.name, visited) in {
                 .Ok(parent_methods) then {
                     for entry in parent_methods then {
@@ -2125,7 +2215,7 @@ given TypeChecker {
     module_private collect_signatures(self, program Program) Void = {
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, _, _, _) then self.collect_decl_signature(decl),
+                .TraitDecl(_, _, _, _, _, _, _) then self.collect_decl_signature(decl),
                 _ then {},
             };
         };
@@ -2134,13 +2224,13 @@ given TypeChecker {
         // any other, is an error when nothing declares it.
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, parents, _, _) then self.validate_trait_parent_existence(parents),
+                .TraitDecl(_, _, _, parents, _, span, _) then self.validate_trait_parent_existence(parents, span),
                 _ then {},
             };
         };
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, _, _, _) then {},
+                .TraitDecl(_, _, _, _, _, _, _) then {},
                 _ then self.collect_decl_signature(decl),
             };
         };
@@ -2204,7 +2294,11 @@ given TypeChecker {
 
     /// Reject parent trait names that no declaration binds. Runs after the
     /// trait sub-pass so a parent may be declared later in the file.
-    module_private validate_trait_parent_existence(self, parents List[TypeNode]) Void = {
+    ///
+    /// `span` is the trait declaration whose parent list is wrong -- this runs
+    /// outside `collect_decl_signature`, so the walker is not inside the trait
+    /// and the declaration has to be named.
+    module_private validate_trait_parent_existence(self, parents List[TypeNode], span SourceSpan) Void = {
         for parent in parents then {
             let pname = self.type_node_name(parent);
             let resolved = when self.storage.trait_registry.get_in_module(pname, self.storage.module_path) in {
@@ -2214,19 +2308,17 @@ given TypeChecker {
             when resolved in {
                 .Some(_) then {},
                 .None() then {
-                    self.storage.diagnostics.push(make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "Undefined trait: \(pname)"
-                    , unknown_span()));
+                    self.push_diagnostic("Undefined trait: \(pname)", span);
                 },
             };
         };
     };
 
     module_private collect_decl_signature(self, decl Decl) Void = {
+        let outer_span = self.enter_current_span(self.decl_span(decl));
+        defer { self.leave_current_span(outer_span); };
         when decl in {
-            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span) then {
+            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, _) then {
                 let mutable resolved_type = self.lookup_current_file_type_symbol(name) or else {
                     self.report_pass2_decl_consistency_error("struct declaration", name, "missing struct symbol");
                     return;
@@ -2296,7 +2388,7 @@ given TypeChecker {
                     return;
                 };
             },
-            .TypeEnumDecl(access, name, type_params, cases, span) then {
+            .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
                 let mutable resolved_type = self.lookup_current_file_type_symbol(name) or else {
                     self.report_pass2_decl_consistency_error("enum declaration", name, "missing enum symbol");
                     return;
@@ -2375,7 +2467,7 @@ given TypeChecker {
                     return;
                 };
             },
-            .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+            .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
                 if not type_params.is_empty() then {
                     let bindings = self.generic_type_param_bindings(type_params);
                     let mutable checked_param_types = List[Type].new();
@@ -2424,7 +2516,7 @@ given TypeChecker {
                 let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false);
                 context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs));
             },
-            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
+            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
                 if not type_params.is_empty() then {
                     // Generic intrinsic: only register template, defer type mutable resolution to instantiation (Swift alignment)
                     let bindings = self.generic_type_param_bindings(type_params);
@@ -2464,7 +2556,7 @@ given TypeChecker {
                     context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs));
                 };
             },
-            .ForeignFunctionDecl(access, name, params, return_type, span) then {
+            .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let mutable param_types = List[Type].new();
                 for p in params then {
@@ -2480,7 +2572,7 @@ given TypeChecker {
                 let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false);
                 context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)));
             },
-            .ForeignTypeDecl(access, name, cname, fields, span) then {
+            .ForeignTypeDecl(access, name, cname, fields, span, name_span) then {
                 if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
                     let mutable sf = List[StructField].new();
                     for f in raw_fields then {
@@ -2491,7 +2583,7 @@ given TypeChecker {
                     context.set_foreign_struct_fields(def_id, sf);
                 };
             },
-            .TypeAliasDecl(_, name, target, _) then {
+            .TypeAliasDecl(_, name, target, _, _) then {
                 let resolved_target = self.canonicalize_alias_type(self.resolve_type(target));
                 if self.lookup_current_file_def_id(name) is .Some(def_id) then {
                     let mutable context = self.context();
@@ -2506,7 +2598,7 @@ given TypeChecker {
                 } else {
                     when self.trait_tool_target_name(target_type, type_params) in {
                         .Some(trait_name) then {
-                            self.register_trait_tool_block(trait_name, type_params, members);
+                            self.register_trait_tool_block(trait_name, type_params, members, span);
                             // A NON-GENERIC `given Trait { ... }` stops here: its
                             // methods are copied onto each conformance and never
                             // need an extension template. A generic
@@ -2757,7 +2849,7 @@ given TypeChecker {
                     };
                 };
             },
-            .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
+            .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
                 let resolved = when type_name in {
                     .Some(tn) then self.resolve_type(tn),
                     .None() then Type.Unknown(),
@@ -2765,19 +2857,19 @@ given TypeChecker {
                 let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value();
                 let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable);
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
                 let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value();
                 let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable);
             },
-            .TraitDecl(access, name, type_params, parents, members, span) then {
+            .TraitDecl(access, name, type_params, parents, members, span, name_span) then {
                 // 在 signature 收集阶段注册完整 Trait（包含方法）,
                 // 确保跨模块 given 检查能读取到正确的 requirement 集合。
                 let mutable parent_constraints = List[ParentTraitConstraint].new();
                 for p in parents then {
                     let pname = self.type_node_name(p);
                     let type_arg_nodes = when p in {
-                        .Generic(_, args) then {
+                        .Generic(_, args, span) then {
                             let mutable nodes = List[TypeNode].new();
                             for arg in args then {
                                 nodes.push(arg);
@@ -2815,7 +2907,7 @@ given TypeChecker {
                 println("[sema-pass2-given] target=\(self.context().type_display_name(target_type)) member=\(m.name)");
             };
             if self.string_list_contains(seen_names, m.name) then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name), unknown_span()));
+                self.push_diagnostic(self.duplicate_definition_message(m.name), unknown_span());
                 continue;
             };
             seen_names.push(m.name);
@@ -2825,7 +2917,7 @@ given TypeChecker {
             };
             if should_register_as_inherent then {
                 if self.lookup_method_signature(type_key, m.name) is .Some(_) then {
-                    self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name), unknown_span()));
+                    self.push_diagnostic(self.duplicate_definition_message(m.name), unknown_span());
                     continue;
                 };
             };
@@ -2932,14 +3024,14 @@ given TypeChecker {
 
     module_private copy_type_node(self, type_node TypeNode) TypeNode = {
         return when type_node in {
-            .Identifier(name) then TypeNode.Identifier(name),
-            .Reference(inner, is_mutable) then TypeNode.Reference(self.copy_type_node_ref(inner), is_mutable),
-            .BorrowedReference(inner, is_mutable) then TypeNode.BorrowedReference(self.copy_type_node_ref(inner), is_mutable),
-            .Pointer(inner, is_mutable) then TypeNode.Pointer(self.copy_type_node_ref(inner), is_mutable),
-            .WeakReference(inner, is_mutable) then TypeNode.WeakReference(self.copy_type_node_ref(inner), is_mutable),
-            .Generic(base, args) then TypeNode.Generic(base, self.copy_type_node_ref_list(args)),
-            .InferredSelf() then TypeNode.InferredSelf(),
-            .FunctionType(param_types, return_type) then TypeNode.FunctionType(self.copy_type_node_ref_list(param_types), self.copy_type_node_ref(return_type)),
+            .Identifier(name, span) then TypeNode.Identifier(name, span),
+            .Reference(inner, is_mutable, span) then TypeNode.Reference(self.copy_type_node_ref(inner), is_mutable, span),
+            .BorrowedReference(inner, is_mutable, span) then TypeNode.BorrowedReference(self.copy_type_node_ref(inner), is_mutable, span),
+            .Pointer(inner, is_mutable, span) then TypeNode.Pointer(self.copy_type_node_ref(inner), is_mutable, span),
+            .WeakReference(inner, is_mutable, span) then TypeNode.WeakReference(self.copy_type_node_ref(inner), is_mutable, span),
+            .Generic(base, args, span) then TypeNode.Generic(base, self.copy_type_node_ref_list(args), span),
+            .InferredSelf(span) then TypeNode.InferredSelf(span),
+            .FunctionType(param_types, return_type, span) then TypeNode.FunctionType(self.copy_type_node_ref_list(param_types), self.copy_type_node_ref(return_type), span),
         };
     };
 
@@ -2993,9 +3085,9 @@ given TypeChecker {
     /// Lightweight type arg resolution for constraint bounds — no diagnostics on miss.
     module_private resolve_constraint_type_arg(self, node TypeNode, param_names List[String]) Type = {
         return when node in {
-            .Identifier(name) then self.resolve_constraint_identifier(name, param_names),
-            .Generic(base, args) then self.resolve_constraint_generic_type(base, args, param_names),
-            .Reference(inner, is_mutable) then self.resolve_constraint_ref_type(inner, is_mutable, param_names),
+            .Identifier(name, span) then self.resolve_constraint_identifier(name, param_names),
+            .Generic(base, args, span) then self.resolve_constraint_generic_type(base, args, param_names),
+            .Reference(inner, is_mutable, span) then self.resolve_constraint_ref_type(inner, is_mutable, param_names),
             _ then Type.Unknown(),
         };
     };

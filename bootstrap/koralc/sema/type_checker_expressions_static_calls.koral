@@ -162,38 +162,38 @@ given TypeChecker {
 
     module_private type_node_for_type(self, t Type) TypeNode = {
         return when t in {
-            .IntType() then TypeNode.Identifier("Int"),
-            .Int8Type() then TypeNode.Identifier("Int8"),
-            .Int16Type() then TypeNode.Identifier("Int16"),
-            .Int32Type() then TypeNode.Identifier("Int32"),
-            .Int64Type() then TypeNode.Identifier("Int64"),
-            .UIntType() then TypeNode.Identifier("UInt"),
-            .UInt8Type() then TypeNode.Identifier("UInt8"),
-            .UInt16Type() then TypeNode.Identifier("UInt16"),
-            .UInt32Type() then TypeNode.Identifier("UInt32"),
-            .UInt64Type() then TypeNode.Identifier("UInt64"),
-            .Float32Type() then TypeNode.Identifier("Float32"),
-            .Float64Type() then TypeNode.Identifier("Float64"),
-            .BoolType() then TypeNode.Identifier("Bool"),
-            .VoidType() then TypeNode.Identifier("Void"),
-            .NeverType() then TypeNode.Identifier("Never"),
-            .StructureType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t)),
-            .EnumType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t)),
-            .ReferenceType(inner) then TypeNode.Reference(self.type_node_for_type(inner), false),
-            .MutableReferenceType(inner) then TypeNode.Reference(self.type_node_for_type(inner), true),
-            .BorrowedReferenceType(inner) then TypeNode.BorrowedReference(self.type_node_for_type(inner), false),
-            .MutableBorrowedReferenceType(inner) then TypeNode.BorrowedReference(self.type_node_for_type(inner), true),
-            .PointerType(inner) then TypeNode.Pointer(self.type_node_for_type(inner), false),
-            .MutablePointerType(inner) then TypeNode.Pointer(self.type_node_for_type(inner), true),
-            .WeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), false),
-            .MutableWeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), true),
-            .GenericParameter(name) then TypeNode.Identifier(name),
+            .IntType() then TypeNode.Identifier("Int", unknown_span()),
+            .Int8Type() then TypeNode.Identifier("Int8", unknown_span()),
+            .Int16Type() then TypeNode.Identifier("Int16", unknown_span()),
+            .Int32Type() then TypeNode.Identifier("Int32", unknown_span()),
+            .Int64Type() then TypeNode.Identifier("Int64", unknown_span()),
+            .UIntType() then TypeNode.Identifier("UInt", unknown_span()),
+            .UInt8Type() then TypeNode.Identifier("UInt8", unknown_span()),
+            .UInt16Type() then TypeNode.Identifier("UInt16", unknown_span()),
+            .UInt32Type() then TypeNode.Identifier("UInt32", unknown_span()),
+            .UInt64Type() then TypeNode.Identifier("UInt64", unknown_span()),
+            .Float32Type() then TypeNode.Identifier("Float32", unknown_span()),
+            .Float64Type() then TypeNode.Identifier("Float64", unknown_span()),
+            .BoolType() then TypeNode.Identifier("Bool", unknown_span()),
+            .VoidType() then TypeNode.Identifier("Void", unknown_span()),
+            .NeverType() then TypeNode.Identifier("Never", unknown_span()),
+            .StructureType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t), unknown_span()),
+            .EnumType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t), unknown_span()),
+            .ReferenceType(inner) then TypeNode.Reference(self.type_node_for_type(inner), false, unknown_span()),
+            .MutableReferenceType(inner) then TypeNode.Reference(self.type_node_for_type(inner), true, unknown_span()),
+            .BorrowedReferenceType(inner) then TypeNode.BorrowedReference(self.type_node_for_type(inner), false, unknown_span()),
+            .MutableBorrowedReferenceType(inner) then TypeNode.BorrowedReference(self.type_node_for_type(inner), true, unknown_span()),
+            .PointerType(inner) then TypeNode.Pointer(self.type_node_for_type(inner), false, unknown_span()),
+            .MutablePointerType(inner) then TypeNode.Pointer(self.type_node_for_type(inner), true, unknown_span()),
+            .WeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), false, unknown_span()),
+            .MutableWeakReferenceType(inner) then TypeNode.WeakReference(self.type_node_for_type(inner), true, unknown_span()),
+            .GenericParameter(name) then TypeNode.Identifier(name, unknown_span()),
             .GenericStruct(tplDefId, type_args) then {
                 let mutable arg_nodes = List[TypeNode].new();
                 for arg in type_args then {
                     arg_nodes.push(self.type_node_for_type(arg));
                 };
-                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes)
+                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes, unknown_span())
             },
             .GenericEnum(tplDefId, type_args) then {
                 let mutable arg_nodes = List[TypeNode].new();
@@ -202,9 +202,9 @@ given TypeChecker {
                 };
                 // A TypeNode is syntax and carries a spelling; read it from the
                 // declaration. This is display/serialization, not identity.
-                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes)
+                TypeNode.Generic(def_id_spelling(tplDefId), arg_nodes, unknown_span())
             },
-            _ then TypeNode.Identifier(self.context().type_display_name(t)),
+            _ then TypeNode.Identifier(self.context().type_display_name(t), unknown_span()),
         };
     };
 
@@ -506,14 +506,7 @@ given TypeChecker {
             .None() then false,
         };
         if not inaccessible_method then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
-                
-                , self.typed_expr_span(typed_callee))
-            );
+            self.push_diagnostic("Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'", self.typed_expr_span(typed_callee));
         };
         return make_typed_expr(TypedExprKind.Call(typed_callee, typed_args), Type.Unknown());
     };
@@ -676,27 +669,24 @@ given TypeChecker {
         };
     };
 
-    module_private check_static_method_call_ref(self, type_name String, type_args List[TypeNode], method_name String, args List[Expr], expected Option[Type], scope Scope) TypedExpr = {
+    /// `span` is the TYPE NAME as written. Every complaint here is about that
+    /// name -- it is module-prefixed, it is not visible, it is not a type --
+    /// and falling back to the ambient cursor blamed whatever statement the
+    /// call happened to sit in.
+    module_private check_static_method_call_ref(self, type_name String, type_name_span SourceSpan, type_args List[TypeNode], method_name String, args List[Expr], expected Option[Type], scope Scope) TypedExpr = {
         let effective_type_name = type_name;
         let mutable call_args = List[Expr].new();
         for arg in args then {
             call_args.push(arg);
         };
         if type_name.contains(".") then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"
-                
-                , unknown_span())
-            );
+            self.push_diagnostic("Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }", type_name_span);
             return self.empty_typed_block(Type.Unknown());
         };
 
         let scoped_receiver_type_opt = self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope);
         if scoped_receiver_type_opt is .Some(receiver_type) then {
-            self.check_type_visibility(receiver_type, effective_type_name, scope);
+            self.check_type_visibility(receiver_type, effective_type_name, scope, type_name_span);
         };
 
         let mutable resolved_type_args = List[Type].new();
@@ -704,14 +694,7 @@ given TypeChecker {
             resolved_type_args.push(self.resolve_type_in_scope(ta, scope));
         };
         if scoped_receiver_type_opt is .None() and resolved_type_args.is_empty() then {
-            self.storage.diagnostics.push(
-                make_diagnostic(
-                    DiagnosticStage.Semantic(),
-                    self.storage.file_path,
-                    "Undefined type: \(effective_type_name)"
-                
-                , unknown_span())
-            );
+            self.push_diagnostic("Undefined type: \(effective_type_name)", type_name_span);
             return self.empty_typed_block(Type.Unknown());
         };
         let receiver_type_param_count = when self.storage.generic_templates.lookup_struct(effective_type_name) in {
@@ -803,7 +786,7 @@ given TypeChecker {
             .Some(sig) then {
                 if self.is_method_accessible_from_current_context(sig) then {
                     Option[Symbol].Some(sig)
-                } else if self.resolve_conformance_method_signature(declared_receiver_type, method_name) is .Some(_) then {
+                } else if self.resolve_conformance_method_signature(declared_receiver_type, method_name, unknown_span()) is .Some(_) then {
                     Option[Symbol].Some(sig)
                 } else {
                     let _ = self.reject_inaccessible_method_from_current_context(sig, method_name, unknown_span());
@@ -922,8 +905,8 @@ given TypeChecker {
                     make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
                 },
                 .Call(nested_callee, nested_args, _) then self.check_call_expr_ref(nested_callee, nested_args, .None(), scope),
-                .StaticMethodCall(nested_type_name, nested_type_args, nested_method_name, nested_args, _) then
-                self.check_static_method_call_ref(nested_type_name, nested_type_args, nested_method_name, nested_args, .None(), scope),
+                .StaticMethodCall(nested_type_name, nested_type_args, nested_method_name, nested_args, call_span) then
+                self.check_static_method_call_ref(nested_type_name, call_span, nested_type_args, nested_method_name, nested_args, .None(), scope),
                 .RangeExpr(op, left, right, _) then {
                     self.check_range_expr_ref(op, left, right, static_param_expected, scope)
                 },
@@ -1057,7 +1040,7 @@ given TypeChecker {
             if args.count() <> 1 then { return Option[TypedExpr].None();};
             let arg_expr = (args[0(UInt)]);
             let inner = self.check_expr_scoped_ref(arg_expr, .None(), scope);
-            if not self.enforce_mutable_constraint_for_call(inner.expr_type, "downgrade") then {
+            if not self.enforce_mutable_constraint_for_call(inner.expr_type, "downgrade", expr_span(arg_expr)) then {
                 return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeRef(inner, Type.Unknown())), Type.Unknown()));
             };
             let weak_type = Type.WeakReferenceType(inner.expr_type);
@@ -1192,7 +1175,9 @@ given TypeChecker {
                     .Some(t) then {
                         when t in {
                             .StructureType(def_id) then {
-                                self.ensure_struct_construction_access(name, def_id);
+                                if not self.ensure_struct_construction_access(name, def_id, expr_span(callee)) then {
+                                    return self.empty_typed_block(Type.Unknown());
+                                };
                             },
                             _ then {},
                         };
@@ -1372,14 +1357,7 @@ given TypeChecker {
                         .Some(parts) then {
                             let typed_receiver = self.check_child_expr_ref(parts.first, .None(), scope);
                             if self.has_explicit_std_drop_conformance(typed_receiver.expr_type) then {
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "compiler protocol method drop cannot be called explicitly"
-                                    
-                                    , expr_span(callee))
-                                );
+                                self.push_diagnostic("compiler protocol method drop cannot be called explicitly", expr_span(callee));
                                 return make_typed_expr(TypedExprKind.Call(typed_callee, List[TypedExpr].new()), Type.Unknown());
                             };
                         },
@@ -1634,14 +1612,7 @@ given TypeChecker {
             };
             if param_expected is .Some(expected_t) then {
                 if not self.same_expr_type(adjusted_arg.expr_type, expected_t) and not self.type_matches_expected_pattern(expected_t, adjusted_arg.expr_type) and not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(expected_t) and not self.is_unresolved_expr_type(adjusted_arg.expr_type) then {
-                    self.storage.diagnostics.push(
-                        make_diagnostic(
-                            DiagnosticStage.Semantic(),
-                            self.storage.file_path,
-                            self.format_call_type_mismatch_message(callee, call_args, expected_t, adjusted_arg.expr_type)
-                        
-                        , expr_span(callee))
-                    );
+                    self.push_diagnostic(self.format_call_type_mismatch_message(callee, call_args, expected_t, adjusted_arg.expr_type), expr_span(callee));
                 };
             };
             when typed_callee.expr_kind in {
@@ -1894,13 +1865,17 @@ given TypeChecker {
                     .TypeSymbol() then {
                         when ret_type in {
                             .StructureType(def_id) then {
-                                self.ensure_struct_construction_access(self.context().symbol_name(sym), def_id);
+                                if not self.ensure_struct_construction_access(self.context().symbol_name(sym), def_id, expr_span(callee)) then {
+                                    return self.empty_typed_block(Type.Unknown());
+                                };
                             },
                             // Identity: the template's DECLARATION, not its spelling.
                             .GenericStruct(template_def_id, _) then {
                                 when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
                                     .Some(template) then {
-                                        self.ensure_struct_construction_access(self.context().symbol_name(sym), template.def_id);
+                                        if not self.ensure_struct_construction_access(self.context().symbol_name(sym), template.def_id, expr_span(callee)) then {
+                                            return self.empty_typed_block(Type.Unknown());
+                                        };
                                     },
                                     .None() then {},
                                 };

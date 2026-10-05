@@ -81,9 +81,10 @@ given Parser {
                 break;
             };
 
+            let name_token = self.current();
             let name = self.expect_identifier("lambda parameter") or return;
             if not self.is_valid_value_name(name) then {
-                return .Error(self.parser_error_at_current(self.invalid_parameter_name_error(name)));
+                return .Error(self.parser_error_at(self.invalid_parameter_name_error(name), name_token));
             };
 
             if self.current().kind is .Colon() then {
@@ -455,7 +456,13 @@ given Parser {
         };
         when self.current().kind in {
             .RBrace() then { self.advance();},
-            _ then { return .Error(self.parser_error_at("Unexpected token: \(token_kind_description(self.current()))", self.current()));},
+            // An expression with no ';' is the block's value, so the block is
+            // over: say so. "Unexpected token" alone leaves the reader guessing
+            // whether a ';' or a '}' was wanted.
+            _ then {
+                let t = self.current();
+                return .Error(self.unexpected_token_error_at(token_kind_description(t), "'}'", t));
+            },
         };
 
         let span = self.span_from_start(start);
@@ -635,7 +642,7 @@ given Parser {
             return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", "when arm", t), t));
         };
 
-        return .Ok(WhenArm(pattern, body));
+        return .Ok(WhenArm(pattern, body, false));
     };
 
     module_private parse_when_arms(self) Result[List[WhenArm]] = {
@@ -658,7 +665,8 @@ given Parser {
                         },
                         .RBrace() then {},
                         _ then {
-                            return .Error(self.parser_error("Expected ',' or '}' after when arm"));
+                            let t = self.current();
+                            return .Error(self.unexpected_token_error_at(token_kind_description(t), "',' or '}' after when arm", t));
                         },
                     };
                 },
@@ -722,7 +730,7 @@ given Parser {
                 let name = self.expect_identifier("mutable pattern variable") or return;
                 if self.current().kind is .Identifier(type_name) and self.is_upper_first(type_name) then {
                     self.advance();
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, true, TypeNode.Identifier(type_name), self.span_from_start(start)));
+                    return .Ok(PatternNode.TraitObjectTypeBinding(name, true, TypeNode.Identifier(type_name, unknown_span()), self.span_from_start(start)));
                 };
                 if self.current().kind is .Star() then {
                     let mutable target_type = self.parse_type() or return;
@@ -828,17 +836,17 @@ given Parser {
                 let mutable parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start));
                 if self.current().kind is .Identifier(type_name) and self.is_upper_first(type_name) then {
                     self.advance();
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, false, TypeNode.Identifier(type_name), self.span_from_start(start)));
+                    return .Ok(PatternNode.TraitObjectTypeBinding(name, false, TypeNode.Identifier(type_name, unknown_span()), self.span_from_start(start)));
                 };
                 if self.current().kind is .Star() then {
                     let target_type = self.parse_type() or return;
                     return .Ok(PatternNode.TraitObjectTypeBinding(name, false, target_type, self.span_from_start(start)));
                 };
                 if self.is_upper_first(name) then {
-                    let mutable resolved_named_type = TypeNode.Identifier(name);
+                    let mutable resolved_named_type = TypeNode.Identifier(name, unknown_span());
                     if self.current().kind is .LBracket() then {
                         let type_args = self.parse_type_arg_list() or return;
-                        resolved_named_type = TypeNode.Generic(name, type_args);
+                        resolved_named_type = TypeNode.Generic(name, type_args, unknown_span());
                     };
                     if self.current().kind is not .LParen() then {
                         return .Ok(PatternNode.TraitObjectType(resolved_named_type, self.span_from_start(start)));
@@ -867,15 +875,18 @@ given Parser {
                     };
                 };
                 if not self.is_upper_first(name) and not self.is_valid_value_name(name) then {
-                    return .Error(self.parser_error_at_current(self.invalid_variable_name_error(name)));
+                    // `start` is the identifier token itself; the check runs after
+                    // parsing the rest of the pattern, so `current()` is long past it.
+                    return .Error(self.parser_error_at(self.invalid_variable_name_error(name), start));
                 };
                 node = parsed_pattern;
             },
             .Dot() then {
                 self.advance();
+                let case_name_token = self.current();
                 let case_name = self.expect_identifier("enum case pattern") or return;
                 if not self.is_upper_first(case_name) then {
-                    return .Error(self.parser_error_at_current(self.invalid_enum_case_name_error(case_name)));
+                    return .Error(self.parser_error_at(self.invalid_enum_case_name_error(case_name), case_name_token));
                 };
                 let mutable elements = List[PatternElement].new();
 
@@ -1033,7 +1044,7 @@ given Parser {
                 when self.current().kind in {
                     .Colon() then { self.advance();},
                     _ then {
-                        return .Error(self.parser_error("Expected ':' in dict literal entry"));
+                        return .Error(self.unexpected_token_error_at(token_text(self.current()), "':' in dict literal entry", self.current()));
                     },
                 };
                 let value = self.parse_expression() or else {
@@ -1133,9 +1144,10 @@ given Parser {
             self.advance();
         };
 
+        let name_token = self.current();
         let name = self.expect_identifier("for binding") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_variable_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_variable_name_error(name), name_token));
         };
 
         let mutable type_name = Option[TypeNode].None();
@@ -1402,20 +1414,6 @@ given Parser {
     module_private parse_dot_suffix(self, base Expr) Result[Expr] = {
         self.advance();
 
-
-        // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
-        if base is .IntegerLiteral(value, _) and self.current().kind is .IntegerLiteral(_) then {
-            if value.starts_with("0b") then {
-                return .Error(self.parser_error_at_current("0b literals do not support floating point"));
-            };
-            if value.starts_with("0o") then {
-                return .Error(self.parser_error_at_current("0o literals do not support floating point"));
-            };
-            if value.starts_with("0x") then {
-                return .Error(self.parser_error_at_current("0x literals do not support floating point"));
-            };
-        };
-
         let member = self.expect_identifier("member access") or return;
         self.parse_debug("dot suffix member=\(member)");
         let bare_method_type_args = self.has_bare_method_type_args();
@@ -1484,11 +1482,11 @@ given Parser {
         };
 
         if not method_type_args.is_empty() then {
-            return .Error(self.parser_error("Expected '(' after generic method name"));
+            return .Error(self.unexpected_token_error_at(token_text(self.current()), "'(' after generic method name", self.current()));
         };
 
         if bare_method_type_args then {
-            return .Error(self.parser_error("Expected '(' after generic method name"));
+            return .Error(self.unexpected_token_error_at(token_text(self.current()), "'(' after generic method name", self.current()));
         };
 
         let member_path = self.append_member_path_segment(base, member);

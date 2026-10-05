@@ -3,25 +3,26 @@
 public struct ExhaustivenessChecker {
     private let subjectType: Type
     private let patterns: [TypedPattern]
-    private let currentLine: Int
+    /// The `when` expression being checked. Used as-is -- this used to
+    /// synthesise `SourceSpan(line: currentLine, column: 1)`, hardcoding column
+    /// 1, which is why `Non-exhaustive match ...` pointed at the start of the
+    /// line rather than at the `when` that is actually missing a case.
+    private let currentSpan: SourceSpan
     private let context: CompilerContext
-    private var currentSpan: SourceSpan {
-        SourceSpan(location: SourceLocation(line: currentLine, column: 1))
-    }
-    
+
     /// Resolved enum cases for generic enum types
     private let resolvedEnumCases: [EnumCase]?
-    
+
     public init(
         subjectType: Type,
         patterns: [TypedPattern],
-        currentLine: Int,
+        span: SourceSpan,
         resolvedEnumCases: [EnumCase]? = nil,
         context: CompilerContext
     ) {
         self.subjectType = subjectType
         self.patterns = patterns
-        self.currentLine = currentLine
+        self.currentSpan = span
         self.resolvedEnumCases = resolvedEnumCases
         self.context = context
     }

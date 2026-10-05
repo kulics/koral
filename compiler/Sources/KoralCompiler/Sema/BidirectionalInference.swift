@@ -188,7 +188,7 @@ public class BidirectionalInference {
             return lookupType(name: "String") ?? stdNominalType(named: "String")
             
         // 变量引用
-        case .identifier(let name):
+        case .identifier(let name, _):
             if let type = lookupType(name: name) {
                 return type
             }
@@ -201,46 +201,46 @@ public class BidirectionalInference {
             return synthesizeLambda(params: params, returnType: returnType, body: body, span: lambdaSpan)
             
         // 函数调用
-        case .call(let callee, let args):
+        case .call(let callee, let args, _):
             return synthesizeCall(callee: callee, args: args.compactMap { $0.expression }, span: span)
             
         // 块表达式
-        case .blockExpression(let statements, let tailExpression):
+        case .blockExpression(let statements, let tailExpression, _):
             return synthesizeBlock(statements: statements, tailExpression: tailExpression, span: span)
             
         // 算术表达式
-        case .arithmeticExpression(let left, _, let right):
+        case .arithmeticExpression(let left, _, let right, _):
             let leftType = synthesize(left, span: span)
             let rightType = synthesize(right, span: span)
             addEqualConstraint(leftType, rightType, span: span)
             return leftType
             
         // 比较表达式
-        case .comparisonExpression(let left, _, let right):
+        case .comparisonExpression(let left, _, let right, _):
             let leftType = synthesize(left, span: span)
             let rightType = synthesize(right, span: span)
             addEqualConstraint(leftType, rightType, span: span)
             return .bool
             
         // 逻辑与
-        case .andExpression(let left, let right):
+        case .andExpression(let left, let right, _):
             let _ = check(left, expected: .bool, span: span)
             let _ = check(right, expected: .bool, span: span)
             return .bool
             
         // 逻辑或
-        case .orExpression(let left, let right):
+        case .orExpression(let left, let right, _):
             let _ = check(left, expected: .bool, span: span)
             let _ = check(right, expected: .bool, span: span)
             return .bool
             
         // 逻辑非
-        case .notExpression(let operand):
+        case .notExpression(let operand, _):
             let _ = check(operand, expected: .bool, span: span)
             return .bool
             
         // 条件表达式
-        case .ifExpression(let condition, let thenBranch, let elseBranch):
+        case .ifExpression(let condition, let thenBranch, let elseBranch, _):
             return synthesizeIf(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch, span: span)
             
         // 其他表达式类型暂时返回类型变量
@@ -510,28 +510,28 @@ public class BidirectionalInference {
     /// 解析类型节点
     private func resolveTypeNode(_ typeNode: TypeNode) -> Type {
         switch typeNode {
-        case .identifier(let name):
+        case .identifier(let name, _):
             return resolveSimpleType(name)
-        case .functionType(let params, let ret):
+        case .functionType(let params, let ret, _):
             let paramTypes = params.map { resolveTypeNode($0) }
             let retType = resolveTypeNode(ret)
             return .function(
                 parameters: paramTypes.map { Parameter(type: $0, kind: .byVal) },
                 returns: retType
             )
-        case .generic(let base, let args):
+        case .generic(let base, let args, _):
             let argTypes = args.map { resolveTypeNode($0) }
             // RESOLUTION: a TypeNode spelling is matched to its declaration once,
             // here (rustc_resolve). The `Type` then carries the DefId.
             return genericNominalType(named: base, args: argTypes)
-        case .reference(let inner, let mutable):
+        case .reference(let inner, let mutable, _):
             return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
-        case .pointer(let inner, let mutable):
+        case .pointer(let inner, let mutable, _):
             return mutable ? .mutablePointer(element: resolveTypeNode(inner)) : .pointer(element: resolveTypeNode(inner))
         case .inferredSelf:
             // Self 类型需要从上下文获取
             return .genericParameter(name: "Self")
-        case .weakReference(let inner, let mutable):
+        case .weakReference(let inner, let mutable, _):
             return mutable
                 ? .mutableWeakReference(inner: resolveTypeNode(inner))
                 : .weakReference(inner: resolveTypeNode(inner))

@@ -74,6 +74,12 @@ public class DiagnosticCollector {
         fixHint: String? = nil,
         isPrimary: Bool = true
     ) {
+        // The same message about the same place is one problem. A check that
+        // runs twice for one construct -- a type resolved through two paths --
+        // must not print the line twice.
+        if hasError(message: message, at: span, fileName: fileName) {
+            return
+        }
         diagnostics.append(Diagnostic(
             severity: .error,
             message: message,
@@ -84,6 +90,25 @@ public class DiagnosticCollector {
             isPrimary: isPrimary
         ))
         errorCount += 1
+    }
+
+    /// Whether this exact problem is already recorded. "Place" is the START of
+    /// the span, because that is all a diagnostic shows: `file:line:col`.
+    public func hasError(message: String, at span: SourceSpan, fileName: String) -> Bool {
+        for diagnostic in diagnostics {
+            guard diagnostic.severity == .error,
+                  diagnostic.fileName == fileName,
+                  diagnostic.message == message else { continue }
+            if !span.isKnown || !diagnostic.span.isKnown {
+                if !span.isKnown && !diagnostic.span.isKnown { return true }
+                continue
+            }
+            if diagnostic.span.start.line == span.start.line,
+               diagnostic.span.start.column == span.start.column {
+                return true
+            }
+        }
+        return false
     }
     
     /// 报告错误（使用 SourceLocation）
@@ -208,7 +233,33 @@ public class DiagnosticCollector {
     public func hasErrors() -> Bool {
         return errorCount > 0
     }
-    
+
+    /// Whether an error has already been recorded inside this span.
+    ///
+    /// A construct that has complained about itself has no reliable type left
+    /// to disagree about. `let x Int = { 1; }` is ONE mistake -- the `;` turned
+    /// the value into a statement -- and reporting the resulting `expected Int,
+    /// got Void` at the binding as well adds a line and no information.
+    public func hasError(in span: SourceSpan, fileName: String) -> Bool {
+        for diagnostic in diagnostics {
+            guard diagnostic.severity == .error, diagnostic.fileName == fileName else {
+                continue
+            }
+            let start = diagnostic.span.start
+            if !diagnostic.span.isKnown { continue }
+            let from = span.start
+            let to = span.end
+            // Ordered by (line, column) within a file.
+            let afterStart =
+                start.line > from.line || (start.line == from.line && start.column >= from.column)
+            let beforeEnd =
+                to.line == 0
+                || start.line < to.line || (start.line == to.line && start.column <= to.column)
+            if afterStart && beforeEnd { return true }
+        }
+        return false
+    }
+
     /// 是否有警告
     public func hasWarnings() -> Bool {
         return warningCount > 0
@@ -341,56 +392,29 @@ extension Diagnostic: CustomStringConvertible {
 }
 
 extension DiagnosticCollector: CustomStringConvertible {
+    // One line per diagnostic, and nothing else. A trailing `N errors generated.`
+    // summary used to follow; it broke the line-per-diagnostic invariant that
+    // makes this output parseable, and the bootstrap compiler never emitted it.
     public var description: String {
         var lines: [String] = []
-        
+
         for diagnostic in diagnostics {
             lines.append(diagnostic.description)
         }
-        
-        if errorCount > 0 || warningCount > 0 {
-            var summary = ""
-            if errorCount > 0 {
-                summary += "\(errorCount) error\(errorCount == 1 ? "" : "s")"
-            }
-            if warningCount > 0 {
-                if !summary.isEmpty { summary += ", " }
-                summary += "\(warningCount) warning\(warningCount == 1 ? "" : "s")"
-            }
-            lines.append(summary + " generated.")
-        }
-        
+
         return lines.joined(separator: "\n")
     }
-    
+
     /// 格式化所有诊断信息（带有源代码片段）
     /// - Parameter sourceManager: 源代码管理器
     /// - Returns: 格式化后的诊断消息
     public func formatWithSource(sourceManager: SourceManager?) -> String {
         var lines: [String] = []
-        
+
         for diagnostic in diagnostics {
             lines.append(diagnostic.formatWithSource(sourceManager: sourceManager))
         }
-        
-        if errorCount > 0 || warningCount > 0 {
-            var summary = ""
-            if errorCount > 0 {
-                let primaryCount = getPrimaryErrors().count
-                let secondaryCount = getSecondaryErrors().count
-                if secondaryCount > 0 {
-                    summary += "\(primaryCount) error\(primaryCount == 1 ? "" : "s") (\(secondaryCount) secondary)"
-                } else {
-                    summary += "\(errorCount) error\(errorCount == 1 ? "" : "s")"
-                }
-            }
-            if warningCount > 0 {
-                if !summary.isEmpty { summary += ", " }
-                summary += "\(warningCount) warning\(warningCount == 1 ? "" : "s")"
-            }
-            lines.append(summary + " generated.")
-        }
-        
+
         return lines.joined(separator: "\n")
     }
 }

@@ -225,6 +225,10 @@ public indirect enum Type: CustomStringConvertible {
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
   case traitObject(traitDefId: DefId, typeArgs: [Type])
+  /// The type of an expression that already failed to check. It is inert: it
+  /// unifies with nothing and with itself, so a construct built out of a broken
+  /// part does not go on to complain about the consequence of that breakage.
+  case error
 
   // MARK: - Context-Aware Accessors
 
@@ -350,6 +354,7 @@ public indirect enum Type: CustomStringConvertible {
     case .bool: return "Bool"
     case .void: return "Void"
     case .never: return "Never"
+    case .error: return "?"
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
       return "Func(\(paramTypes)) \(returns)"
@@ -545,6 +550,8 @@ public indirect enum Type: CustomStringConvertible {
       for arg in typeArgs {
         hasher.combine(arg.stableHashKey)
       }
+    case .error:
+      hasher.combine(32)
     }
     return hasher.state
   }
@@ -567,6 +574,7 @@ public indirect enum Type: CustomStringConvertible {
     case .bool: return "Bool"
     case .void: return "Void"
     case .never: return "Never"
+    case .error: return "?"
     case .function(let params, let returns):
       let paramStr = params.map { $0.type.stableKey }.joined(separator: ",")
       return "Fn(\(paramStr))->\(returns.stableKey)"
@@ -658,6 +666,8 @@ public indirect enum Type: CustomStringConvertible {
     case .typeVariable:
       return self  // 类型变量保持不变
     case .traitObject:
+      return self
+    case .error:
       return self
     }
   }
@@ -818,6 +828,12 @@ extension Type: Equatable, Hashable {
     case (.traitObject(let lDefId, let lArgs), .traitObject(let rDefId, let rArgs)):
       guard lArgs == rArgs else { return false }
       return lDefId == rDefId
+
+    // A failed expression agrees with itself and with nothing else, so a
+    // construct built out of two failures does not report a mismatch between
+    // them -- and one built out of one failure is caught by the `.error` guards.
+    case (.error, .error):
+      return true
 
     default:
       return false

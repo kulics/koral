@@ -64,6 +64,15 @@ given Parser {
         return self.parser_error_at(message.to_string(), self.current());
     };
 
+    /// Report a wrong TOKEN: say what was found and what the grammar wanted
+    /// there. A rejected construct -- tokens legal, the shape disallowed --
+    /// reports a bare sentence through `parser_error` instead, because
+    /// `Unexpected token: <sentence>, expected: ...` reads as if the sentence
+    /// were a token.
+    module_private unexpected_token_error_at(self, got String, expected String, token Token) DiagnosticError = {
+        return self.parser_error_at("Unexpected token: \(got), expected: \(expected)", token);
+    };
+
     /// Report a parse error anchored at the CURRENT token.
     ///
     /// Every parse error carries a source location -- Swift's always does, and a
@@ -72,6 +81,16 @@ given Parser {
     /// with no `file:line:col`.
     module_private parser_error_at_current(self, message String) DiagnosticError = {
         return self.parser_error_at(message.to_string(), self.current());
+    };
+
+    /// Report a parse error anchored at a SPAN the parser already consumed.
+    ///
+    /// `parser_error_at` blames a token, which is right for a wrong token. For
+    /// a failure inside a construct that has been read whole -- an
+    /// interpolation inside a string literal -- the cursor has moved past the
+    /// place the complaint is about.
+    module_private parser_error_at_span(self, message String, span SourceSpan) DiagnosticError = {
+        return make_diagnostic(DiagnosticStage.Parser(), self.file_path, message, span);
     };
 
     module_private previous_token(self) Option[Token] = {
@@ -595,13 +614,13 @@ given Parser {
 
         if is_foreign then {
             return when base in {
-                .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
-                .LetDecl(_, name, is_mutable, type_name, _, span) then
+                .FunctionDecl(_, name, _, params, return_type, _, span, name_span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span, name_span)),
+                .LetDecl(_, name, is_mutable, type_name, _, span, name_span) then
                 when type_name in {
-                    .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span)),
+                    .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span, name_span)),
                     .None() then Result[Decl].Error(self.parser_error_at_current("foreign let declaration requires explicit type")),
                 },
-                .TypeStructDecl(_, name, _, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
+                .TypeStructDecl(_, name, _, _, fields, span, name_span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span, name_span)),
                 .GivenDecl(_, _, _, _) then .Error(self.parser_error_at_current("foreign given declaration is not supported")),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_at_current("foreign given declaration is not supported")),
                 _ then .Error(self.parser_error_at_current("unsupported foreign declaration kind")),
@@ -610,10 +629,10 @@ given Parser {
 
         if is_intrinsic then {
             return when base in {
-                .FunctionDecl(_, name, type_params, params, return_type, _, span) then .Ok(Decl.IntrinsicFunctionDecl(access, name, type_params, params, return_type, span)),
+                .FunctionDecl(_, name, type_params, params, return_type, _, span, name_span) then .Ok(Decl.IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span)),
                 .GivenDecl(target_type, type_params, members, span) then .Ok(Decl.IntrinsicGivenDecl(target_type, type_params, members, span)),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_at_current("intrinsic given trait declaration is not supported")),
-                .TypeStructDecl(_, name, _, type_params, _, span) then .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, span)),
+                .TypeStructDecl(_, name, _, type_params, _, span, name_span) then .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, span, name_span)),
                 _ then .Error(self.parser_error_at_current("unsupported intrinsic declaration kind")),
             };
         };
@@ -704,6 +723,10 @@ given Parser {
     };
 
     module_private parse_type(self) Result[TypeNode] = {
+        // The type's span starts at its first token -- `?T` starts at the `?`,
+        // `*unsafe T` at the `*`, `List[Int]` at the name. A diagnostic that
+        // names the type points here.
+        let start = self.current();
         when self.current().kind in {
             .QuestionMark() then {
                 self.advance();
@@ -711,7 +734,7 @@ given Parser {
                     return .Error(self.parser_error("Weak reference syntax is '?T', not legacy '?*T'"));
                 };
                 let inner = self.parse_type() or return;
-                return .Ok(TypeNode.WeakReference(inner, false));
+                return .Ok(TypeNode.WeakReference(inner, false, self.span_from_start(start)));
             },
             .Star() then {
                 self.advance();
@@ -723,19 +746,22 @@ given Parser {
                         is_mutable = true;
                     };
                     let inner = self.parse_type() or return;
-                    return .Ok(TypeNode.Pointer(inner, is_mutable));
+                    return .Ok(TypeNode.Pointer(inner, is_mutable, self.span_from_start(start)));
                 };
-                let mutable is_mutable = false;
-                if self.current().kind is .KwMut() then {
-                    self.advance();
-                    is_mutable = true;
-                };
-                let inner = self.parse_type() or return;
-                return .Ok(TypeNode.Reference(inner, is_mutable));
+                // `*` is a raw pointer and nothing else. Managed references
+                // are gone from the language model, so `*T` is not a spelling
+                // of anything -- the reader is told what is left. The
+                // complaint is about the `*`, which is the token that no
+                // longer means what it used to.
+                return .Error(self.unexpected_token_error_at(
+                    "*",
+                    "managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'",
+                    start,
+                ));
             },
             .KwSelfType() then {
                 self.advance();
-                return .Ok(TypeNode.InferredSelf());
+                return .Ok(TypeNode.InferredSelf(self.span_from_start(start)));
             },
             .Identifier(module_or_name) then {
                 self.advance();
@@ -747,7 +773,7 @@ given Parser {
                             return .Error(self.parser_error_at_current("Function type must include a return type, e.g. Func(Int, String) Bool"));
                         };
                         let mutable return_type = self.parse_type() or return;
-                        return .Ok(TypeNode.FunctionType(param_types, return_type));
+                        return .Ok(TypeNode.FunctionType(param_types, return_type, self.span_from_start(start)));
                     };
                     if self.current().kind is .LBracket() then {
                         return .Error(self.parser_error_at_current("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"));
@@ -764,10 +790,10 @@ given Parser {
 
                 if self.current().kind is .LBracket() then {
                     let args = self.parse_type_arg_list() or return;
-                    return .Ok(TypeNode.Generic(module_or_name, args));
+                    return .Ok(TypeNode.Generic(module_or_name, args, self.span_from_start(start)));
                 };
 
-                return .Ok(TypeNode.Identifier(module_or_name));
+                return .Ok(TypeNode.Identifier(module_or_name, self.span_from_start(start)));
             },
             _ then {
                 return .Error(self.parser_error_at_current("Expected type identifier, got: \(token_kind_description(self.current()))"));
@@ -846,7 +872,10 @@ given Parser {
         return .Ok(params);
     };
 
-    module_private parse_param_list(self, func_name String) Result[List[Param]] = {
+    /// `reject_named_params` rejects `name: Type` parameters at the NAME, which
+    /// is the token that makes the parameter named. Checking after the list is
+    /// parsed reports at whatever follows the last parameter instead.
+    module_private parse_param_list(self, func_name String, reject_named_params Bool) Result[List[Param]] = {
         let mutable params = List[Param].new();
 
         while true then {
@@ -867,7 +896,7 @@ given Parser {
             // Check for self receiver
             if self.current().kind is .KwSelf() then {
                 self.advance();
-                let mutable self_type = TypeNode.InferredSelf();
+                let mutable self_type = TypeNode.InferredSelf(unknown_span());
                 if self.current().kind is .KwSelfType() then {
                     return .Error(self.parser_error_at_current("Invalid receiver parameter syntax: use 'self' only"));
                 };
@@ -876,9 +905,10 @@ given Parser {
                 };
                 params.push(Param("self", false, self_type, false));
             } else {
+                let name_token = self.current();
                 let name = self.expect_identifier("parameter") or return;
                 if not self.is_valid_value_name(name) then {
-                    return .Error(self.parser_error_at_current(self.invalid_parameter_name_error(name)));
+                    return .Error(self.parser_error_at(self.invalid_parameter_name_error(name), name_token));
                 };
 
                 // Check for colon - indicates named parameter
@@ -886,6 +916,9 @@ given Parser {
                 if self.current().kind is .Colon() then {
                     is_named = true;
                     self.advance();
+                    if reject_named_params then {
+                        return .Error(self.parser_error_at("Named parameters are not supported in foreign declarations", name_token));
+                    };
                 };
 
                 if not self.is_type_start() then {
@@ -958,13 +991,14 @@ given Parser {
             self.advance();
         };
 
+        let name_token = self.current();
         let name = self.expect_identifier("let declaration") or return;
         if self.current().kind is .LParen() then {
             if not self.is_valid_value_name(name) then {
-                return .Error(self.parser_error_at_current(self.invalid_function_name_error(name)));
+                return .Error(self.parser_error_at(self.invalid_function_name_error(name), name_token));
             };
         } else if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_variable_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_variable_name_error(name), name_token));
         };
         let type_params = self.parse_type_parameters() or return;
 
@@ -978,15 +1012,7 @@ given Parser {
             };
 
             self.advance();
-            let params = self.parse_param_list(name) or return;
-
-            if is_foreign then {
-                for p in params then {
-                    if p.named then {
-                        return .Error(self.parser_error_at_current("Named parameters are not supported in foreign declarations"));
-                    };
-                };
-            };
+            let params = self.parse_param_list(name, is_foreign) or return;
 
             when self.current().kind in {
                 .RParen() then {},
@@ -1011,7 +1037,7 @@ given Parser {
                 };
                 let _ = self.require_semicolon() or return;
                 let span = self.span_from_start(start);
-                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, Expr.Identifier("<intrinsic-body>", span), span);
+                let base = Decl.FunctionDecl(access, name, type_params, params, return_type, Expr.Identifier("<intrinsic-body>", span), span, self.token_span(name_token));
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             };
 
@@ -1024,7 +1050,7 @@ given Parser {
             self.advance();
             let body = self.parse_expression_checked("function body") or return;
             let _ = self.require_semicolon() or return;
-            let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start));
+            let base = Decl.FunctionDecl(access, name, type_params, params, return_type, body, self.span_from_start(start), self.token_span(name_token));
             return self.wrap_decl(access, is_foreign, is_intrinsic, base);
         };
 
@@ -1040,7 +1066,7 @@ given Parser {
             let mutable foreign_type = self.parse_type() or return;
             let _ = self.require_semicolon() or return;
             let span = self.span_from_start(start);
-            let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), Expr.Identifier("<foreign-init>", span), span);
+            let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), Expr.Identifier("<foreign-init>", span), span, self.token_span(name_token));
             return self.wrap_decl(access, is_foreign, is_intrinsic, base);
         };
 
@@ -1060,7 +1086,7 @@ given Parser {
         self.advance();
         let initializer = self.parse_expression_checked("let declaration initializer") or return;
         let _ = self.require_semicolon() or return;
-        let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start));
+        let base = Decl.LetDecl(access, name, is_mut, type_name, initializer, self.span_from_start(start), self.token_span(name_token));
         return self.wrap_decl(access, is_foreign, is_intrinsic, base);
     };
 
@@ -1082,9 +1108,10 @@ given Parser {
             };
         };
 
+        let name_token = self.current();
         let name = self.expect_identifier("type declaration") or return;
         if not self.is_upper_first(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_type_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_type_name_error(name), name_token));
         };
         let type_params = self.parse_type_parameters() or return;
 
@@ -1096,7 +1123,7 @@ given Parser {
                 self.advance();
                 let target = self.parse_type() or return;
                 self.consume_semicolon();
-                let base = Decl.TypeAliasDecl(access, name, target, self.span_from_start(start));
+                let base = Decl.TypeAliasDecl(access, name, target, self.span_from_start(start), self.token_span(name_token));
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .LParen() then {
@@ -1123,9 +1150,10 @@ given Parser {
                                 self.advance();
                             };
 
+                            let field_name_token = self.current();
                             let field_name = self.expect_identifier("field name") or return;
                             if not self.is_valid_value_name(field_name) then {
-                                return .Error(self.parser_error_at_current(self.invalid_field_name_error(field_name)));
+                                return .Error(self.parser_error_at(self.invalid_field_name_error(field_name), field_name_token));
                             };
 
                             // Check for colon - indicates named field
@@ -1184,9 +1212,9 @@ given Parser {
                 };
                 let _ = self.require_semicolon() or return;
                 if is_foreign then {
-                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start)));
+                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start), self.token_span(name_token)));
                 };
-                let base = Decl.TypeStructDecl(access, name, is_nominal_mutable, type_params, fields, self.span_from_start(start));
+                let base = Decl.TypeStructDecl(access, name, is_nominal_mutable, type_params, fields, self.span_from_start(start), self.token_span(name_token));
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .LBrace() then {
@@ -1198,7 +1226,7 @@ given Parser {
                     if self.current().kind is .RBrace() then {
                         self.advance();
                         let _ = self.require_semicolon() or return;
-                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)));
+                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start), self.token_span(name_token)));
                     };
                     return .Error(self.parser_error_at_current("foreign type must use an empty body: {}"));
                 };
@@ -1214,9 +1242,10 @@ given Parser {
                             return .Error(self.parser_error("Unexpected EOF in enum declaration"));
                         },
                         _ then {
+                            let case_name_token = self.current();
                             let case_name = self.expect_identifier("enum case") or return;
                             if not self.is_upper_first(case_name) then {
-                                return .Error(self.parser_error_at_current(self.invalid_enum_case_name_error(case_name)));
+                                return .Error(self.parser_error_at(self.invalid_enum_case_name_error(case_name), case_name_token));
                             };
                             let mutable case_fields = List[EnumCaseField].new();
 
@@ -1232,9 +1261,10 @@ given Parser {
                                             return .Error(self.parser_error("Unexpected EOF in enum payload"));
                                         },
                                         _ then {
+                                            let payload_name_token = self.current();
                                             let payload_name = self.expect_identifier("enum payload name") or return;
                                             if not self.is_valid_value_name(payload_name) then {
-                                                return .Error(self.parser_error_at_current(self.invalid_parameter_name_error(payload_name)));
+                                                return .Error(self.parser_error_at(self.invalid_parameter_name_error(payload_name), payload_name_token));
                                             };
                                             // Check for colon - indicates named field
                                             let mutable payload_named = false;
@@ -1299,7 +1329,7 @@ given Parser {
                     };
                 };
                 let _ = self.require_semicolon() or return;
-                let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start));
+                let base = Decl.TypeEnumDecl(access, name, type_params, cases, self.span_from_start(start), self.token_span(name_token));
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base);
             },
             .Semicolon() then {
@@ -1308,7 +1338,7 @@ given Parser {
                 };
                 if is_intrinsic then {
                     let _ = self.require_semicolon() or return;
-                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)));
+                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start), self.token_span(name_token)));
                 };
                 return .Error(self.parser_error("Expected '=', '(' or '{' after type name"));
             },
@@ -1317,7 +1347,7 @@ given Parser {
                     return .Error(self.parser_error_at_current("foreign type cannot be declared without a body"));
                 };
                 if is_intrinsic then {
-                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)));
+                    return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start), self.token_span(name_token)));
                 };
                 return .Error(self.parser_error("Expected '=', '(' or '{' after type name"));
             },
@@ -1338,9 +1368,10 @@ given Parser {
             self.advance();
         };
 
+        let name_token = self.current();
         let name = self.expect_identifier("let statement") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_variable_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_variable_name_error(name), name_token));
         };
 
         let mutable type_name = Option[TypeNode].None();
@@ -1406,9 +1437,10 @@ given Parser {
             self.advance();
         };
 
+        let name_token = self.current();
         let name = self.expect_identifier("pair let binding") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at_current(self.invalid_variable_name_error(name)));
+            return .Error(self.parser_error_at(self.invalid_variable_name_error(name), name_token));
         };
 
         let mutable type_name = Option[TypeNode].None();

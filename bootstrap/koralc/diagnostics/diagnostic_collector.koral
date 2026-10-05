@@ -24,9 +24,87 @@ given DiagnosticCollector {
         return DiagnosticCollector(List[DiagnosticError].new(), List[DiagnosticRecord].new());
     };
 
+    /// Record a diagnostic, unless the exact same problem is already recorded.
+    ///
+    /// The invariant lives here, not at the call sites: a checker that runs one
+    /// rule several times for the same construct must not multiply its message,
+    /// and there are too many push sites to rely on each remembering that.
     public push(self, diagnostic DiagnosticError) Void = {
+        when diagnostic.span in {
+            .Some(span) then {
+                if self.has_error(diagnostic.file_path, diagnostic.detail, span) then {
+                    return;
+                };
+            },
+            .None() then {
+                if self.has_error(diagnostic.file_path, diagnostic.detail, unknown_span()) then {
+                    return;
+                };
+            },
+        };
         self.items.push(diagnostic);
         self.records.push(DiagnosticRecord(DiagnosticSeverity.Error(), diagnostic, List[DiagnosticNote].new()));
+    };
+
+    /// Whether this exact problem is already recorded.
+    ///
+    /// The same message about the same place is one problem. A rule that runs
+    /// again for the same construct -- a second generic instantiation attempt,
+    /// a receiver rewrite, a re-check of the same binding -- must not multiply
+    /// its message. Both unlocated diagnostics count as the same place.
+    ///
+    /// "Place" is the START of the span, because that is all a diagnostic
+    /// shows: `file:line:col`. Two spans that start at the same token render
+    /// as the same line no matter how far each one runs on, so counting them
+    /// as two problems prints the same line twice. A whole expression and its
+    /// first sub-expression routinely share a start this way.
+    public has_error(self, file_path String, message String, span SourceSpan) Bool = {
+        for diag in self.items.iterator() then {
+            if diag.file_path <> file_path or diag.detail <> message then {
+                continue;
+            };
+            when diag.span in {
+                .Some(existing) then {
+                    if existing.start.line == span.start.line and existing.start.column == span.start.column then {
+                        return true;
+                    };
+                },
+                .None() then {
+                    if not is_known_span(span) then {
+                        return true;
+                    };
+                },
+            };
+        };
+        return false;
+    };
+
+    /// Whether anything at all is already recorded at this place.
+    ///
+    /// A reporter that exists only to name an otherwise unexplained failure --
+    /// "member not found" when the real reason is that a constraint or an
+    /// access check already objected -- must ask this before adding a line.
+    /// The two messages would render at the same `file:line:col`, and the
+    /// second tells the reader nothing the first did not.
+    public has_error_at(self, file_path String, span SourceSpan) Bool = {
+        for diag in self.items.iterator() then {
+            if diag.file_path <> file_path then {
+                continue;
+            };
+            when diag.span in {
+                .Some(existing) then {
+                    if existing.start.line == span.start.line and existing.start.column == span.start.column then {
+                        return true;
+                    };
+                },
+                .None() then {
+                    if not is_known_span(span) then {
+                        return true;
+                    };
+                },
+            };
+        };
+        return false;
     };
 
     public error(self, file_path String, message String) Void = {

@@ -13,6 +13,7 @@ public type RunnerConfig(
     compiler_bin Path,
     bootstrap_koralc Path,
     swift_koralc Path,
+    compare_diagnostics Bool,
     verbose Bool,
 );
 
@@ -78,4 +79,38 @@ public type RunSummary(
     infra_failed UInt,
     duration_ms Int64,
     exit_code Int,
+);
+
+/// One compiler's raw behaviour for one case: what it said, and what the
+/// program did.
+///
+/// This is deliberately NOT the pass/fail verdict. A verdict is relative to the
+/// hand-written `// EXPECT` comments; two compilers can both satisfy a substring
+/// assertion and still disagree about everything else the program printed. The
+/// differential oracle compares observations against EACH OTHER, which needs the
+/// raw text that the verdict path throws away.
+public type CaseObservation {
+    /// The harness broke -- this case says nothing about either compiler.
+    Infra(message String),
+    /// This side did not finish inside the harness limits (timeout, memory
+    /// ceiling). Compared for agreement only: a case that fails to finish under
+    /// one compiler and not the other is divergence whichever limit fired, and
+    /// comparing the two reasons would be noise.
+    DidNotFinish(reason String),
+    Observed(
+        label String,
+        /// Whether the compiler accepted the program and produced a binary.
+        accepted Bool,
+        /// Normalized stdout+stderr of the compile step.
+        compile_output String,
+        /// `Some` only when there was a binary and it was executed.
+        run Option[ProgramRun],
+    ),
+};
+
+/// What a compiled program did when it actually ran.
+public type ProgramRun(
+    exit_code Int,
+    /// Normalized stdout+stderr.
+    stdout String,
 );

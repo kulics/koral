@@ -213,6 +213,27 @@ given Lexer {
         return .None();
     };
 
+    /// A base-prefixed literal may not carry a fractional part.
+    ///
+    /// `0b101.1` is a malformed NUMBER, not a member access on `0b101`, so it is
+    /// reported here while the literal is still one token and blamed on the
+    /// literal. Which characters would have been the fraction's digits depends
+    /// on the base: `0x1.a` is a fraction attempt, `0b101.a` is a member access.
+    file_private reject_base_fraction(self, prefix String, start_line UInt, start_col UInt) Result[Void] = {
+        if self.peek() is .Some('.') then {
+            when self.peek_next() in {
+                .Some(next) then {
+                    let is_fraction_digit = if prefix == "0x" then Lexer.is_hex_digit(next) else next.is_ascii_digit();
+                    if is_fraction_digit then {
+                        return .Error(self.fail_at(start_line, start_col, "\(prefix) literals do not support floating point"));
+                    };
+                },
+                .None() then {},
+            };
+        };
+        return .Ok({});
+    };
+
     file_private read_number(self, start_line UInt, start_col UInt, first Rune) Result[Void] = {
         let mutable text = StringBuilder.new();
         text.push_rune(first);
@@ -238,6 +259,7 @@ given Lexer {
                                 return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0b")));
                             } else { break;};
                         };
+                        let _ = self.reject_base_fraction("0b", start_line, start_col) or return;
                         if digit_count == 0 then {
                             return .Error(self.fail_at(start_line, start_col, "0b literal must have at least one digit"));
                         };
@@ -261,6 +283,7 @@ given Lexer {
                                 return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0o")));
                             } else { break;};
                         };
+                        let _ = self.reject_base_fraction("0o", start_line, start_col) or return;
                         if digit_count == 0 then {
                             return .Error(self.fail_at(start_line, start_col, "0o literal must have at least one digit"));
                         };
@@ -284,6 +307,7 @@ given Lexer {
                                 return .Error(self.fail_at(start_line, start_col, self.invalid_digit_message(ch, "0x")));
                             } else { break;};
                         };
+                        let _ = self.reject_base_fraction("0x", start_line, start_col) or return;
                         if digit_count == 0 then {
                             return .Error(self.fail_at(start_line, start_col, "0x literal must have at least one digit"));
                         };
@@ -569,7 +593,7 @@ given Lexer {
                 pending_backslashes = 0(UInt);
             };
             if starts_interpolation then {
-                self.consume_interpolation_source(raw_content) or return;
+                self.consume_interpolation_source(raw_content, start_line, start_col) or return;
             };
         };
 
@@ -636,13 +660,17 @@ given Lexer {
         return .Ok(self.box_token_list(tokens));
     };
 
-    file_private consume_interpolation_source(self, raw_content StringBuilder) Result[Void] = {
+    /// `start_line`/`start_col` are where the enclosing string literal began.
+    /// A malformed interpolation is a defect in THAT literal, so its opening
+    /// quote is the place to blame -- reporting where the scan gave up points at
+    /// EOF, which tells the reader nothing about which literal is wrong.
+    file_private consume_interpolation_source(self, raw_content StringBuilder, start_line UInt, start_col UInt) Result[Void] = {
         let mutable depth UInt = 1;
         while self.peek() is .Some(cur) then {
             self.advance();
             raw_content.push_rune(cur);
             if cur == '\\' then {
-                return .Error(self.fail_at(self.line, self.column, "escape sequences are not allowed in string interpolation"));
+                return .Error(self.fail_at(start_line, start_col, "escape sequences are not allowed in string interpolation"));
             };
             if cur == '"' or cur == '\'' then {
                 let quote = cur;
@@ -651,7 +679,7 @@ given Lexer {
                     self.advance();
                     raw_content.push_rune(inner);
                     if inner == '\\' then {
-                        return .Error(self.fail_at(self.line, self.column, "escape sequences are not allowed in string interpolation"));
+                        return .Error(self.fail_at(start_line, start_col, "escape sequences are not allowed in string interpolation"));
                     };
                     if inner == quote then {
                         terminated = true;
@@ -659,7 +687,7 @@ given Lexer {
                     };
                 };
                 if not terminated then {
-                    return .Error(self.fail_at(self.line, self.column, "unterminated string interpolation"));
+                    return .Error(self.fail_at(start_line, start_col, "unterminated string interpolation"));
                 };
                 continue;
             };
@@ -674,7 +702,7 @@ given Lexer {
                 };
             };
         };
-        return .Error(self.fail_at(self.line, self.column, "unterminated string interpolation"));
+        return .Error(self.fail_at(start_line, start_col, "unterminated string interpolation"));
     };
 
     file_private leading_indent(self, line String) String = {
@@ -923,9 +951,11 @@ given Lexer {
                     if depth <> 0 then {
                         return .Error(self.fail_at(error_line, error_col, "unterminated string interpolation"));
                     };
-                    if expr_source.to_string().trim_ascii().is_empty() then {
-                        return .Error(self.fail_at(error_line, error_col, "empty interpolation expression"));
-                    };
+                    // An interpolation with nothing in it is NOT a lexical
+                    // defect: the literal is well formed and the EXPRESSION is
+                    // missing. Hand the (empty) token list on and let the
+                    // parser say so -- reporting it here labelled a syntax
+                    // complaint as a lexer error.
                     let expr_tokens = self.lex_interpolation_tokens(expr_source.to_string(), expr_start_line, expr_start_column, line_start_column) or return;
                     parts.push(InterpolatedStringTokenPart.ExpressionTokens(expr_tokens));
                     continue;
@@ -1130,8 +1160,12 @@ given Lexer {
             if Lexer.is_digit(ch) then {
                 when self.read_number(start_line, start_col, ch) in {
                     .Ok(_) then {},
+                    // Propagate. The failure already has its own span and
+                    // message; re-siting it through `fail(..., e.message())`
+                    // nested the whole rendered CLI line inside a fresh message,
+                    // so the location printed twice.
                     .Error(e) then {
-                        return self.fail(start_line, start_col, e.message());
+                        return .Error(e);
                     },
                 };
                 continue;
@@ -1147,7 +1181,7 @@ given Lexer {
                                         when self.read_multiline_string(start_line, start_col) in {
                                             .Ok(_) then {},
                                             .Error(e) then {
-                                                return self.fail(start_line, start_col, e.message());
+                                                return .Error(e);
                                             },
                                         };
                                         continue;
@@ -1163,7 +1197,7 @@ given Lexer {
                 when self.read_string(start_line, start_col) in {
                     .Ok(_) then {},
                     .Error(e) then {
-                        return self.fail(start_line, start_col, e.message());
+                        return .Error(e);
                     },
                 };
                 continue;
@@ -1190,7 +1224,7 @@ given Lexer {
                         when self.read_rune(start_line, start_col) in {
                             .Ok(_) then {},
                             .Error(e) then {
-                                return self.fail(start_line, start_col, e.message());
+                                return .Error(e);
                             },
                         };
                     } else {
@@ -1202,7 +1236,7 @@ given Lexer {
                     when self.read_rune(start_line, start_col) in {
                         .Ok(_) then {},
                         .Error(e) then {
-                            return self.fail(start_line, start_col, e.message());
+                            return .Error(e);
                         },
                     };
                 };
@@ -1231,7 +1265,7 @@ given Lexer {
                             continue;
                         },
                         .Error(e) then {
-                            return self.fail(start_line, start_col, e.message());
+                            return .Error(e);
                         },
                     };
                 };

@@ -768,7 +768,7 @@ given MIRLowerer {
 
     module_private resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
-            .Identifier(name) then when bindings.get(name) in {
+            .Identifier(name, span) then when bindings.get(name) in {
                 .Some(bound) then bound,
                 .None() then when name in {
                     "Int" then Type.IntType(),
@@ -790,23 +790,23 @@ given MIRLowerer {
                     _ then Type.GenericParameter(name),
                 },
             },
-            .Reference(inner, is_mutable) then {
+            .Reference(inner, is_mutable, _) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner)
             },
-            .BorrowedReference(inner, is_mutable) then {
+            .BorrowedReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
             },
-            .Pointer(inner, is_mutable) then {
+            .Pointer(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
             },
-            .WeakReference(inner, is_mutable) then {
+            .WeakReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
                 if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner)
             },
-            .Generic(base, args) then {
+            .Generic(base, args, span) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
                     resolved_args.push(self.resolve_trait_type_node_with_bindings(arg, bindings));
@@ -819,8 +819,8 @@ given MIRLowerer {
                     Type.GenericEnum(enum_def_id, resolved_args)
                 }
             },
-            .InferredSelf() then bindings.get("Self") or else Type.Unknown(),
-            .FunctionType(param_types, return_type) then {
+            .InferredSelf(span) then bindings.get("Self") or else Type.Unknown(),
+            .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for param_type in param_types then {
                     resolved_params.push(self.resolve_trait_type_node_with_bindings(param_type, bindings));

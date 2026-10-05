@@ -93,19 +93,19 @@ file_private let pattern_element_text(element PatternElement) String = {
 
 file_private let type_text(t TypeNode) String = {
     when t in {
-        .Identifier(name) then {
+        .Identifier(name, span) then {
             return name;
         },
-        .Reference(inner, is_mutable) then {
+        .Reference(inner, is_mutable, span) then {
             return if is_mutable then "ref mutable \(type_text(inner))" else "ref \(type_text(inner))";
         },
-        .Pointer(inner, is_mutable) then {
+        .Pointer(inner, is_mutable, span) then {
             return if is_mutable then "ptr mutable \(type_text(inner))" else "ptr \(type_text(inner))";
         },
-        .WeakReference(inner, is_mutable) then {
+        .WeakReference(inner, is_mutable, span) then {
             return if is_mutable then "weakref mutable \(type_text(inner))" else "weakref \(type_text(inner))";
         },
-        .Generic(base, args) then {
+        .Generic(base, args, span) then {
             let mutable out = StringBuilder.new();
             out.push_string(base);
             out.push_byte('[');
@@ -120,10 +120,10 @@ file_private let type_text(t TypeNode) String = {
             out.push_byte(']');
             return out.to_string();
         },
-        .InferredSelf() then {
+        .InferredSelf(span) then {
             return "Self";
         },
-        .FunctionType(param_types, return_type) then {
+        .FunctionType(param_types, return_type, span) then {
             let mutable out = StringBuilder.new();
             out.push_string("Func(");
             let mutable first = true;
@@ -139,7 +139,7 @@ file_private let type_text(t TypeNode) String = {
             out.push_string(type_text(return_type));
             return out.to_string();
         },
-        .BorrowedReference(inner, is_mutable) then {
+        .BorrowedReference(inner, is_mutable, span) then {
             return if is_mutable then "mutable \(type_text(inner))" else "* \(type_text(inner))";
         },
     };
@@ -666,7 +666,7 @@ file_private let for_binding_pattern_text(pattern ForBindingPattern) String = {
 file_private let print_decl(decl Decl, level UInt) Void = {
     let pad = indent(level);
     when decl in {
-        .LetDecl(access, name, is_mutable, type_name, initializer, _) then {
+        .LetDecl(access, name, is_mutable, type_name, initializer, _, _) then {
             let prefix = access_modifier_text(access);
             let type_str = when type_name in {
                 .Some(tn) then type_text(tn),
@@ -676,7 +676,7 @@ file_private let print_decl(decl Decl, level UInt) Void = {
             println("\(pad)LetDecl: \(prefix)\(name)\(type_note) (is_mutable=\(is_mutable))");
             print_expr(initializer, level + 1);
         },
-        .FunctionDecl(access, name, type_params, params, return_type, body, _) then {
+        .FunctionDecl(access, name, type_params, params, return_type, body, _, _) then {
             let prefix = access_modifier_text(access);
             let ret_note = " -> \(type_text(return_type))";
             println("\(pad)FunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)");
@@ -687,7 +687,7 @@ file_private let print_decl(decl Decl, level UInt) Void = {
             println("\(pad)  Body:");
             print_expr(body, level + 2);
         },
-        .IntrinsicFunctionDecl(access, name, type_params, params, return_type, _) then {
+        .IntrinsicFunctionDecl(access, name, type_params, params, return_type, _, _) then {
             let prefix = access_modifier_text(access);
             let ret_note = " -> \(type_text(return_type))";
             println("\(pad)IntrinsicFunctionDecl: \(prefix)\(name)\(type_params_note(type_params))\(ret_note)");
@@ -695,7 +695,7 @@ file_private let print_decl(decl Decl, level UInt) Void = {
                 println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))");
             };
         },
-        .ForeignFunctionDecl(access, name, params, return_type, _) then {
+        .ForeignFunctionDecl(access, name, params, return_type, _, _) then {
             let prefix = access_modifier_text(access);
             let ret_note = " -> \(type_text(return_type))";
             println("\(pad)ForeignFunctionDecl: \(prefix)\(name)\(ret_note)");
@@ -703,10 +703,10 @@ file_private let print_decl(decl Decl, level UInt) Void = {
                 println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))");
             };
         },
-        .ForeignLetDecl(access, name, is_mutable, type_name, _) then {
+        .ForeignLetDecl(access, name, is_mutable, type_name, _, _) then {
             println("\(pad)ForeignLetDecl: \(access_modifier_text(access))\(name): \(type_text(type_name)) (is_mutable=\(is_mutable))");
         },
-        .TypeStructDecl(access, name, is_mutable_type, type_params, fields, _) then {
+        .TypeStructDecl(access, name, is_mutable_type, type_params, fields, _, _) then {
             let mut_note = if is_mutable_type then "mutable " else "";
             println("\(pad)TypeStructDecl: \(access_modifier_text(access))\(mut_note)\(name)\(type_params_note(type_params))");
             for f in fields then {
@@ -714,7 +714,7 @@ file_private let print_decl(decl Decl, level UInt) Void = {
                 println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))");
             };
         },
-        .TypeEnumDecl(access, name, type_params, cases, _) then {
+        .TypeEnumDecl(access, name, type_params, cases, _, _) then {
             println("\(pad)TypeEnumDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))");
             for c in cases then {
                 println("\(pad)  Case: \(c.name)");
@@ -723,13 +723,13 @@ file_private let print_decl(decl Decl, level UInt) Void = {
                 };
             };
         },
-        .TypeAliasDecl(access, name, target, _) then {
+        .TypeAliasDecl(access, name, target, _, _) then {
             println("\(pad)TypeAliasDecl: \(access_modifier_text(access))\(name) = \(type_text(target))");
         },
-        .IntrinsicTypeDecl(access, name, type_params, _) then {
+        .IntrinsicTypeDecl(access, name, type_params, _, _) then {
             println("\(pad)IntrinsicTypeDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))");
         },
-        .ForeignTypeDecl(access, name, cname, fields, _) then {
+        .ForeignTypeDecl(access, name, cname, fields, _, _) then {
             let cnote = if cname is .Some(c) then " cname=\(c)" else "";
             println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(name)\(cnote)");
             if fields is .Some(field_list) then {
@@ -760,7 +760,7 @@ file_private let print_decl(decl Decl, level UInt) Void = {
             let item_list = item_texts.join_to_string(", ");
             println("\(pad)ModuleUsingDecl: \(path) { \(item_list) }");
         },
-        .TraitDecl(access, name, type_params, parents, members, _) then {
+        .TraitDecl(access, name, type_params, parents, members, _, _) then {
             let mutable parent_note = StringBuilder.new();
             if not parents.is_empty() then {
                 parent_note.push_string(" : ");

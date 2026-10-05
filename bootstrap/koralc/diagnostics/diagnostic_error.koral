@@ -8,7 +8,13 @@ public type DiagnosticStage {
 public type DiagnosticError(
     stage DiagnosticStage,
     file_path String,
-    message String,
+    /// The bare text: what went wrong, with no location and no stage.
+    ///
+    /// Named `detail` and not `message` because `message()` is also a method on
+    /// this type -- the `Error` trait's -- and it returns the rendered CLI line.
+    /// Sharing one name for both is how a diagnostic ended up nested inside
+    /// another one's message with its location printed twice.
+    detail String,
     span Option[SourceSpan],
 );
 
@@ -21,39 +27,20 @@ file_private let diagnostic_stage_text(stage DiagnosticStage) String = {
     };
 };
 
-file_private let normalized_diagnostic_message(stage DiagnosticStage, file_path String, rendered String) String = {
-    let mutable stage_prefix = StringBuilder.new();
-    stage_prefix.push_string(diagnostic_stage_text(stage));
-    stage_prefix.push_string(": ");
-    if rendered.starts_with(stage_prefix.to_string()) then {
-        return rendered.substring(stage_prefix.count()..);
-    };
-
-    if not file_path.is_empty() and rendered.starts_with(file_path) then {
-        let remainder = rendered.substring(file_path.count()..);
-        if remainder.starts_with(": ") then {
-            let candidate = remainder.substring(2..);
-            if candidate.starts_with(stage_prefix.to_string()) then {
-                return candidate.substring(stage_prefix.count()..);
-            };
-        };
-
-        let mutable location_stage_needle = StringBuilder.new();
-        location_stage_needle.push_string(": ");
-        location_stage_needle.push_string(diagnostic_stage_text(stage));
-        location_stage_needle.push_string(": ");
-        when remainder.find(location_stage_needle.to_string()) in {
-            .Some(idx) then {
-                return remainder.substring(idx + location_stage_needle.to_string().count()..);
-            },
-            .None() then {},
-        };
-    };
-
-    return rendered;
-};
-
 given DiagnosticError as Error {
+    /// The CLI line: `path:line:col: stage: message`.
+    ///
+    /// This is the one form a `Result`-escaped error can offer its consumer --
+    /// `Result.Error` holds `Error`, so a caller cannot ask a diagnostic for its
+    /// span and stage afterwards. That is why this is the rendered line and not
+    /// the bare message.
+    ///
+    /// The bare text is the `message` FIELD. Read that when COMPOSING one
+    /// diagnostic out of another. Reading `message()` there would nest this
+    /// whole envelope inside a new one and the CLI would print the location
+    /// twice -- which is exactly what used to happen, until two normalizing
+    /// hacks were invented to strip the doubled prefix back off. Both are gone;
+    /// nothing composes through `message()` any more.
     public message(self) String = {
         let mutable location = StringBuilder.new();
         location.push_string(self.file_path);
@@ -85,11 +72,13 @@ given DiagnosticError as Error {
             out.push_string(diagnostic_stage_text(self.stage));
             out.push_string(": ");
         };
-        out.push_string(self.message);
+        out.push_string(self.detail);
         return out.to_string();
     };
 };
 
+/// The bare text of an error: what went wrong, with no location and no stage.
+///
 /// Build a diagnostic. The span is an INPUT: the source location of the
 /// construct the diagnostic is about, supplied by the site that reports it.
 ///
@@ -98,11 +87,5 @@ given DiagnosticError as Error {
 /// one -- honest, and strictly better than pointing at wherever the message
 /// happened to spell out a pair of numbers.
 public let make_diagnostic(stage DiagnosticStage, file_path String, message String, span SourceSpan) DiagnosticError = {
-    return DiagnosticError(stage, file_path, message, if is_known_span(span) then Option[SourceSpan].Some(span) else Option[SourceSpan].None());
-};
-
-public let wrap_error_as_diagnostic(stage DiagnosticStage, file_path String, error Error, span SourceSpan) DiagnosticError = {
-    let rendered = error.message();
-    let message = normalized_diagnostic_message(stage, file_path, rendered);
     return DiagnosticError(stage, file_path, message, if is_known_span(span) then Option[SourceSpan].Some(span) else Option[SourceSpan].None());
 };

@@ -58,8 +58,51 @@ Useful flags:
 - `--timeout <sec>`: per-case timeout, default `120`
 - `--memory-limit <MB>`: post-exit peak RSS threshold, default `1024`; cases whose recorded peak RSS exceeds the limit are marked `memory_exceeded`
 - `--report-file <path>`: override the stable summary log path
+- `--compare-diagnostics`: with `--compiler differential`, also require the two compilers to say exactly the same thing
 
 `--filter` uses plain substring matching only. It does not accept regular expressions, so focused semantic reruns should pass exact case-name substrings one-by-one.
+
+## Cross-compiler oracle (`--compiler differential`)
+
+Each of the modes above checks one compiler against the `// EXPECT` comments in
+the case file — a hand-written oracle. This mode checks **the two compilers
+against each other**, which is what has to keep holding before the Swift
+compiler can be deleted:
+
+```bash
+./bin/compiler-test-runner/compiler_runner \
+  --compiler differential \
+  --swift-koralc compiler/.build/release/koralc \
+  --bootstrap-koralc bin/bootstrap/koralc \
+  --timeout 60 -j 8
+```
+
+Every case is compiled and run under both compilers. They must agree, in order
+of how damning the disagreement is:
+
+| | must agree on | failure type |
+|---|---|---|
+| 1 | both accept the program, or both reject it | `diverge_accept_reject` |
+| 2 | when accepted: program stdout, line for line, and exit code | `diverge_runtime` |
+| 3 | when rejected: the diagnostic text, verbatim | `diverge_diagnostic` |
+
+Layer 2 is **exact**, not the `// EXPECT` subsequence match: two compilers can
+both satisfy "output contains `show` then `base`" and still print entirely
+different things in between. Failures name the first line that differs and what
+each side said, rather than just reporting that the outputs differ.
+
+Layer 3 is behind `--compare-diagnostics`. It is off by default because the two
+compilers currently disagree on diagnostic text for a large slice of the corpus
+(210 of 566 cases as of 2026-10-03 — span columns, the `1 error generated.`
+trailer, stage prefixes, and some genuine wording differences). Diagnostic
+*wording* is already cross-checked another way: every `EXPECT-ERROR` case runs
+under both compilers and asserts the same substring. Turn the flag on to get the
+full inventory.
+
+The generated artifacts are deliberately **not** compared. The two compilers
+stamp DefIds into C symbol names under different numbering rules, so a textual
+diff of the generated C would be pure noise; behaviour is the thing to hold them
+to.
 
 ## Focused regression buckets
 

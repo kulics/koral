@@ -114,7 +114,7 @@ extension Monomorphizer {
     /// - Returns: The resolved concrete type
     internal func resolveTypeNode(_ node: TypeNode, substitution: [String: Type]) throws -> Type {
         switch node {
-        case .identifier(let name):
+        case .identifier(let name, _):
             // Check substitution map first
             if let substituted = substitution[name] {
                 // If the substituted type is a genericStruct, we need to instantiate it
@@ -171,15 +171,15 @@ extension Monomorphizer {
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
             
-        case .reference(let inner, mutable: let mutable):
+        case .reference(let inner, mutable: let mutable, span: _):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutableReference(inner: innerType) : .reference(inner: innerType)
 
-        case .pointer(let inner, mutable: let mutable):
+        case .pointer(let inner, mutable: let mutable, span: _):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutablePointer(element: innerType) : .pointer(element: innerType)
             
-        case .generic(let base, let args):
+        case .generic(let base, let args, _):
             // Look up generic template
             let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
             
@@ -210,14 +210,14 @@ extension Monomorphizer {
                 span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
             )
             
-        case .functionType(let paramTypes, let returnType):
+        case .functionType(let paramTypes, let returnType, _):
             // Resolve function type: [ParamType1, ParamType2, ..., ReturnType]Func
             let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0, substitution: substitution) }
             let resolvedReturnType = try resolveTypeNode(returnType, substitution: substitution)
             let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
             return .function(parameters: parameters, returns: resolvedReturnType)
             
-        case .weakReference(let inner, let mutable):
+        case .weakReference(let inner, let mutable, _):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutableWeakReference(inner: innerType) : .weakReference(inner: innerType)
         }
