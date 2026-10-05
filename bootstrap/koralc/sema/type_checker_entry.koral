@@ -1,4 +1,4 @@
-using std::os { env };
+using "std/os" { env };
 
 public let type_check(program Program, file_path String) BodyCheckerOutput = {
     let mutable collector = NameCollector.new_with_context(List[String].new(), file_path);
@@ -118,9 +118,201 @@ file_private let run_body_checker_pass(input BodyCheckerInput, retain_checked_te
     );
 };
 
+/// A name a `using` brings in cannot silently lose to a different declaration
+/// already under that spelling (§3.3). Either reading of the file is
+/// defensible, so the compiler refuses to pick one: `as` renames an explicit
+/// item, and an import-all has no item to rename so the reader switches to a
+/// list.
+///
+/// Read-only, and run over the whole unit at once rather than during import
+/// resolution -- the rule is about telling the reader, not about changing
+/// which binding wins.
+///
+/// What is NOT a clash: the same declaration arriving again. Several files of
+/// one module may each `using "std";` (§3.3.4 scopes a `using` to a file, not
+/// to a module), so a name only fights when TWO modules both declare it under
+/// one spelling that a single file now has.
+file_private let import_collision_message(name String, target List[String], is_import_all Bool) String = {
+    let module_path = target.join_to_string("::");
+    if is_import_all then {
+        return "Import of '\(name)' from '\(module_path)' collides with a name already in scope; an import-all cannot be renamed, so use an explicit list";
+    };
+    return "Import of '\(name)' from '\(module_path)' collides with a name already in scope; rename it with 'as'";
+};
+
+/// Can an `import` bring this declaration into another file at all (§3.3)?
+///
+/// `public` always, `package_private` only into the same package, and the two
+/// private levels never. A name that cannot be imported is not in the file's
+/// scope to begin with, so it cannot collide with anything -- reporting it
+/// would blame the reader for a rule they cannot act on.
+file_private let decl_importable(access AccessModifier, decl_package String, importer_package String) Bool = {
+    return when access in {
+        .Public() then true,
+        .PackagePrivate() then not decl_package.is_empty() and decl_package == importer_package,
+        .ModulePrivate() then false,
+        .FilePrivate() then false,
+    };
+};
+
+/// One import mapping `local` to `identity` in `file`.
+///
+/// A spelling has ONE owner. A second, DIFFERENT owner is the collision; the
+/// same declaration arriving again is not (several files of one module may each
+/// `using "std";` -- §3.3.4 scopes a `using` to a file, not to a module).
+///
+/// Read-only about which binding wins: this reports and then lets the existing
+/// registration decide what the name means.
+file_private let record_import_binding(
+    out List[DiagnosticError],
+    declared Dict[String, Dict[String, AccessModifier]],
+    owner Dict[String, Dict[String, Pair[List[String], String]]],
+    file String,
+    importer_module_key String,
+    local String,
+    identity Pair[List[String], String],
+    target List[String],
+    is_import_all Bool,
+    span SourceSpan,
+) Void = {
+    let mutable file_owners = owner.get(file) or else Dict[String, Pair[List[String], String]].new();
+
+    when file_owners.get(local) in {
+        .Some(prior) then {
+            if not string_list_eq(prior.first, identity.first) or prior.second <> identity.second then {
+                out.push(DiagnosticError(.Semantic(), file, import_collision_message(local, target, is_import_all), Option[SourceSpan].Some(span)));
+                file_owners.insert(local, identity);
+                owner.insert(file, file_owners);
+            };
+            return;
+        },
+        .None() then {},
+    };
+
+    // A declaration in THIS module owns the spelling too -- and unlike an
+    // import, its own level does not matter. `type Shared` here blocks the name
+    // whether or not anyone outside could have imported it.
+    let mine = declared.get(importer_module_key) or else Dict[String, AccessModifier].new();
+    if mine.get(local) is .Some(_) then {
+        out.push(DiagnosticError(.Semantic(), file, import_collision_message(local, target, is_import_all), Option[SourceSpan].Some(span)));
+    };
+
+    file_owners.insert(local, identity);
+    owner.insert(file, file_owners);
+};
+
+file_private let check_import_name_collisions(
+    import_graph ImportGraph,
+    loaded_nodes List[Pair[LoadedNode, List[String]]],
+) List[DiagnosticError] = {
+    let mutable out = List[DiagnosticError].new();
+
+    // module key -> name -> the level it is declared at
+    let mutable declared = Dict[String, Dict[String, AccessModifier]].new();
+    // module key -> the package that module belongs to
+    let mutable module_package = Dict[String, String].new();
+    // source file -> its module's key, and the package that file belongs to
+    let mutable file_module = Dict[String, String].new();
+    let mutable file_package = Dict[String, String].new();
+
+    for pair in loaded_nodes then {
+        let mkey = pair.second.join_to_string(".");
+        file_module.insert(pair.first.source_file, mkey);
+        file_package.insert(pair.first.source_file, pair.first.package_id);
+        module_package.insert(mkey, pair.first.package_id);
+        when decl_name(pair.first.decl) in {
+            .Some(name) then {
+                let mutable names = declared.get(mkey) or else Dict[String, AccessModifier].new();
+                when decl_access(pair.first.decl) in {
+                    .Some(access) then { names.insert(name, access); },
+                    .None() then {},
+                };
+                declared.insert(mkey, names);
+            },
+            .None() then {},
+        };
+    };
+
+    // source file -> local spelling -> the (target module, original name) that
+    // currently owns it. `(target, original)` names a declaration as precisely
+    // as its identity does: a module declares each spelling at most once.
+    let mutable owner = Dict[String, Dict[String, Pair[List[String], String]]].new();
+
+    // Batch imports first, then explicit items -- the same order the explicit
+    // import registration walks, so when both are involved the two compilers
+    // point at the same `using` line.
+    for edge in import_graph.edges then {
+        when edge.source_file in {
+            .Some(file) then {
+                let target_key = edge.target.join_to_string(".");
+                let mkey = file_module.get(file) or else { continue; };
+                let importer_package = file_package.get(file) or else "";
+                let their_package = module_package.get(target_key) or else "";
+                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new();
+
+                let mutable names = List[String].new();
+                for entry in theirs then {
+                    if decl_importable(entry.second, their_package, importer_package) then {
+                        names.push(entry.first);
+                    };
+                };
+                // Sorted so the report order cannot depend on hash iteration.
+                // Type names are uppercase and value names lowercase (the
+                // parser enforces it), so this also matches the type-before-
+                // value order of the registration pass.
+                names.sort();
+                for name in names then {
+                    record_import_binding(
+                        out, declared, owner, file, mkey, name,
+                        Pair[List[String], String](edge.target, name),
+                        edge.target, true, edge.span,
+                    );
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    for si in import_graph.symbol_imports then {
+        when si.source_file in {
+            .Some(file) then {
+                let target_key = si.target.join_to_string(".");
+                let mkey = file_module.get(file) or else { continue; };
+                let importer_package = file_package.get(file) or else "";
+                let their_package = module_package.get(target_key) or else "";
+                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new();
+
+                let access = theirs.get(si.original_symbol) or else { continue; };
+                if not decl_importable(access, their_package, importer_package) then {
+                    continue;
+                };
+                record_import_binding(
+                    out, declared, owner, file, mkey, si.symbol,
+                    Pair[List[String], String](si.target, si.original_symbol),
+                    si.target, false, si.span,
+                );
+            },
+            .None() then {},
+        };
+    };
+
+    return out;
+};
+
 file_private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String, retain_checked_template_bodies Bool) BodyCheckerOutput = {
     let name_input = NameCollectorInput(resolver_output, user_file_path);
     let name_pass = run_name_collector_pass(name_input);
+
+    // Unconditional: the name collector may already have failed (a duplicate
+    // definition is exactly what this rule is about), and a rule that only runs
+    // on success never fires on the case it exists for.
+    for diag in check_import_name_collisions(
+        resolver_output.import_graph,
+        resolver_output.loaded_nodes_with_path,
+    ) then {
+        name_pass.diagnostics.push(diag);
+    };
+
     if name_pass.output is .None() then {
         return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), Scope.new_root(), resolver_output.import_graph, MethodTable.new(), TraitRegistry.new(), Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(), Dict[String, ConformanceWitness].new(), name_pass.diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new());
     };
@@ -134,6 +326,13 @@ file_private let type_check_resolver_output(resolver_output ModuleResolverOutput
 
     let body_input = BodyCheckerInput(type_output, user_file_path);
     let output = run_body_checker_pass(body_input, retain_checked_template_bodies);
+
+    // The body checker returns its own collector; the name pass's diagnostics
+    // would otherwise be dropped whenever the name pass succeeded -- which is
+    // exactly when an import collision is still worth saying.
+    for record in name_pass.diagnostics.all_records() then {
+        output.diagnostics.push(record.diagnostic);
+    };
     return output;
 };
 

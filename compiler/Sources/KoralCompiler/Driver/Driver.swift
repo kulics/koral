@@ -174,7 +174,7 @@ public class Driver {
           options.entryFilePath = arg
           i += 1
         } else {
-          writeStderr("Unknown positional argument: \(arg)")
+          writeStderr("Error: Unknown positional argument: \(arg)")
           printUsage()
           exit(1)
         }
@@ -288,15 +288,9 @@ public class Driver {
   }
 
   private func sanitizeModuleArtifactName(_ moduleName: String) -> String {
-    moduleName.replacingOccurrences(of: "::", with: "__")
-  }
-
-  private func splitModuleName(_ moduleName: String) -> [String] {
     moduleName
-      .split(separator: ":")
-      .map(String.init)
-      .filter { !$0.isEmpty }
-      .map(moduleFileNameToIdentifier)
+      .replacingOccurrences(of: "::", with: "__")
+      .replacingOccurrences(of: "/", with: "__")
   }
 
   private func packageID(for kind: ResolvedPackageKind, packageName: String) -> String {
@@ -310,199 +304,169 @@ public class Driver {
     }
   }
 
-  private func isStdManifestModuleName(_ name: String) -> Bool {
-    name == "std" || name.hasPrefix("std::")
+  /// The default build target is the main module -- the one declared under the
+  /// `modules` key `"."`. A package with no main module has no default (§5.1);
+  /// the caller has to say which module it wants.
+  private func mainModuleFullName(of package: LoadedPackage) -> String? {
+    guard package.manifest.modules["."] != nil else { return nil }
+    return package.selfName
   }
 
-  private func isStdModulePath(_ pathSegments: [String]) -> Bool {
-    guard let first = pathSegments.first else {
-      return false
+  /// Turn a module full name written the way source writes it
+  /// (`package[/subpath]`) into the module it names, looked up in `root`'s
+  /// table -- a build target is named from the project's own point of view.
+  private func resolveTargetSpec(
+    named rawName: String,
+    root: LoadedPackage,
+    registry: PackageRegistry
+  ) throws -> ResolvedModuleSpec {
+    let parts = rawName.split(separator: "/").map(String.init)
+    guard let head = parts.first, isValidPackageOrSegmentName(head) else {
+      throw PackageManifestError.missingTargetModule(rawName)
     }
-    return moduleIdentifierToFileName(first) == "std"
-  }
-
-  private func manifestModuleName(for pathSegments: [String]) -> String {
-    pathSegments
-      .map(moduleIdentifierToFileName)
-      .joined(separator: "::")
-  }
-
-  private func manifestRootModuleName(in manifest: PackageManifest) -> String? {
-    if let defaultTargetModuleName = manifest.defaultTargetModuleName {
-      return defaultTargetModuleName
-    }
-
-    return manifest.modules.keys.sorted().first(where: { !$0.contains("::") })
-      ?? manifest.modules.keys.sorted().first
-  }
-
-  private func pushUniqueModuleName(_ candidate: String, into names: inout [String], seen: inout Set<String>) {
-    guard !seen.contains(candidate) else {
-      return
-    }
-    seen.insert(candidate)
-    names.append(candidate)
-  }
-
-  private func collectManifestRequiredModuleNames(
-    in manifest: PackageManifest,
-    seedNames: [String]
-  ) -> [String] {
-    var selected: [String] = []
-    var seen = Set<String>()
-    var pending: [String] = []
-
-    for seedName in seedNames {
-      guard manifest.modules[seedName] != nil, !seen.contains(seedName) else {
-        continue
-      }
-      seen.insert(seedName)
-      pending.append(seedName)
-    }
-
-    while let current = pending.popLast() {
-      selected.append(current)
-      guard let spec = manifest.modules[current] else {
-        continue
-      }
-      for dependency in spec.requires.reversed() where manifest.modules[dependency] != nil {
-        guard !seen.contains(dependency) else {
-          continue
-        }
-        seen.insert(dependency)
-        pending.append(dependency)
-      }
-    }
-
-    return selected.sorted()
-  }
-
-  private func collectNeededStdModuleNames(
-    in manifest: PackageManifest,
-    importGraph: ImportGraph,
-    extraSeedNames: [String]
-  ) -> [String] {
-    var seedNames: [String] = []
-    var seen = Set<String>()
-
-    if let rootModuleName = manifestRootModuleName(in: manifest) {
-      pushUniqueModuleName(rootModuleName, into: &seedNames, seen: &seen)
-    }
-
-    for seedName in extraSeedNames where manifest.modules[seedName] != nil {
-      pushUniqueModuleName(seedName, into: &seedNames, seen: &seen)
-    }
-
-    for edge in importGraph.edges where isStdModulePath(edge.target) {
-      let moduleName = manifestModuleName(for: edge.target)
-      guard manifest.modules[moduleName] != nil else {
-        continue
-      }
-      pushUniqueModuleName(moduleName, into: &seedNames, seen: &seen)
-    }
-
-    for symbolImport in importGraph.symbolImports where isStdModulePath(symbolImport.target) {
-      let moduleName = manifestModuleName(for: symbolImport.target)
-      guard manifest.modules[moduleName] != nil else {
-        continue
-      }
-      pushUniqueModuleName(moduleName, into: &seedNames, seen: &seen)
-    }
-
-    return collectManifestRequiredModuleNames(in: manifest, seedNames: seedNames)
-  }
-
-  private func filterManifest(_ manifest: PackageManifest, to moduleNames: [String]) -> PackageManifest {
-    var filteredModules: [String: PackageModuleConfig] = [:]
-    for moduleName in moduleNames {
-      guard let module = manifest.modules[moduleName] else {
-        continue
-      }
-      filteredModules[moduleName] = module
-    }
-
-    return PackageManifest(
-      manifestPath: manifest.manifestPath,
-      packageRoot: manifest.packageRoot,
-      name: manifest.name,
-      version: manifest.version,
-      defaultTargetModuleName: manifest.defaultTargetModuleName,
-      links: manifest.links,
-      modules: filteredModules,
-      dependencies: manifest.dependencies
-    )
-  }
-
-  private func defaultTargetModuleName(in manifest: PackageManifest) -> String? {
-    if let defaultTargetModuleName = manifest.defaultTargetModuleName {
-      if manifest.modules[defaultTargetModuleName] != nil {
-        return defaultTargetModuleName
-      }
-    }
-    if manifest.modules.count == 1 {
-      return manifest.modules.keys.first
-    }
-    return nil
-  }
-
-  private func loadManifestModules(
-    manifest: PackageManifest,
-    resolver: ModuleResolver
-  ) throws -> (
-    globalNodes: [GlobalNode],
-    nodeSourceInfoList: [GlobalNodeSourceInfo],
-    importGraph: ImportGraph,
-    rootModulePath: [String]?,
-    loadedModulePaths: [[String]],
-    linkedLibraries: [String]
-  ) {
-    var globalNodes: [GlobalNode] = []
-    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var importGraph = ImportGraph()
-    var rootModulePath: [String]?
-    var loadedModulePaths: [[String]] = []
-    var linkedLibraries: [String] = []
-
-    for moduleName in manifest.modules.keys.sorted() {
-      guard let spec = manifest.modules[moduleName] else { continue }
-      let compilationUnit = try resolver.resolveModule(
-        entryFile: spec.entryPath,
-        rootModulePath: spec.pathSegments,
+    guard let owner = registry.resolveName(head, from: root) else {
+      throw PackageManifestError.unknownPackageName(
+        name: head,
+        context: "--target-module",
+        known: registry.knownNames(for: root)
       )
-      let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-      for (node, sourceFile, modulePath) in nodesWithInfo {
-        globalNodes.append(node)
-        nodeSourceInfoList.append(
-          GlobalNodeSourceInfo(
-            sourceFile: sourceFile,
-            modulePath: modulePath,
-            packageID: "manifest:\(manifest.name)",
-            node: node
-          )
+    }
+    let subpath = parts.dropFirst().joined(separator: "/")
+    let key = subpath.isEmpty ? "." : subpath
+    guard let config = owner.manifest.modules[key] else {
+      if subpath.isEmpty {
+        // Naming the package root asks for the main module. Say that this
+        // package has none and what it does have -- stuffing the reason into
+        // the name yields a target name nobody wrote.
+        throw PackageManifestError.noMainModule(
+          packageName: owner.selfName,
+          declared: owner.manifest.modules.keys.sorted()
         )
       }
-      importGraph.merge(compilationUnit.importGraph)
-      registerModuleSources(from: compilationUnit.rootModule, displayPrefix: moduleName)
-      loadedModulePaths.append(spec.pathSegments)
-      linkedLibraries.append(contentsOf: manifest.links)
-      linkedLibraries.append(contentsOf: spec.links)
-      if rootModulePath == nil && !moduleName.contains("::") {
-        rootModulePath = spec.pathSegments
+      throw PackageManifestError.missingTargetModule(rawName)
+    }
+    let rootName = rootViewName(of: owner, registry: registry, root: root)
+    return makeResolvedModuleSpec(key: key, config: config, rootName: rootName, owner: owner)
+  }
+
+  /// The standard library's main module is the prelude: it is compiled in and
+  /// in scope in every non-std module without being named (see
+  /// `VisibilityChecker`, "std root is a compiler-provided prelude"). It is
+  /// therefore NOT part of the `using` graph -- it is the base the graph sits
+  /// on, which is what §6.4's "主模块是基础层" means.
+  private func loadPrelude(
+    registry: PackageRegistry,
+    resolver: ModuleResolver,
+    unit: CompilationUnit
+  ) throws {
+    guard let stdPackage = registry.stdPackage else { return }
+    guard let config = stdPackage.manifest.modules["."] else { return }
+    let spec = makeResolvedModuleSpec(key: ".", config: config, rootName: "std", owner: stdPackage)
+    guard unit.loadedModules[spec.fullName] == nil else { return }
+    do {
+      _ = try resolver.resolveModule(spec: spec, unit: unit)
+    } catch let error as ModuleError {
+      throw DiagnosticError(
+        stage: .other,
+        fileName: error.locationFile ?? spec.entryFile,
+        underlying: error,
+        sourceManager: sourceManager
+      )
+    }
+  }
+
+  /// Load the target module and everything its `using` statements reach. The
+  /// module graph is exactly those edges (§5.4) -- nothing is loaded that no
+  /// `using` asked for, and nothing that IS asked for is skipped.
+  private func loadCompilationUnit(
+    targetSpec: ResolvedModuleSpec,
+    registry: PackageRegistry,
+    root: LoadedPackage
+  ) throws -> (unit: CompilationUnit, resolver: ModuleResolver) {
+    let resolver = initializeModuleResolver()
+    resolver.registry = registry
+    resolver.rootPackage = root
+    let unit = CompilationUnit()
+    do {
+      try loadPrelude(registry: registry, resolver: resolver, unit: unit)
+      _ = try resolver.resolveModule(spec: targetSpec, unit: unit)
+    } catch let error as ModuleError {
+      throw DiagnosticError(
+        stage: error.stage,
+        fileName: error.locationFile ?? targetSpec.entryFile,
+        underlying: error,
+        sourceManager: sourceManager
+      )
+    }
+    return (unit, resolver)
+  }
+
+  /// `links` follow the code (§5.4): a module that needs `-lm` says so, and
+  /// anything that imports that module inherits the requirement.
+  private func linkedLibraries(in unit: CompilationUnit) -> [String] {
+    var result: [String] = []
+    for name in unit.loadOrder {
+      guard let spec = unit.loadedModules[name]?.spec else { continue }
+      result.append(contentsOf: spec.links)
+    }
+    return result
+  }
+
+  private func registerLoadedSources(unit: CompilationUnit) {
+    for name in unit.loadOrder {
+      guard let module = unit.loadedModules[name] else { continue }
+      let displayPrefix = module.spec?.fullName ?? module.path.joined(separator: "/")
+      registerModuleSources(from: module, displayPrefix: displayPrefix)
+    }
+  }
+
+  /// Split loaded nodes into standard-library and everything else, and give
+  /// each the package identity the later passes key visibility on.
+  private func collectNodes(from unit: CompilationUnit) -> (
+    stdGlobalNodes: [GlobalNode],
+    stdNodeSourceInfoList: [GlobalNodeSourceInfo],
+    userGlobalNodes: [GlobalNode],
+    userNodeSourceInfoList: [GlobalNodeSourceInfo]
+  ) {
+    var stdGlobalNodes: [GlobalNode] = []
+    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var userGlobalNodes: [GlobalNode] = []
+    var userNodeSourceInfoList: [GlobalNodeSourceInfo] = []
+
+    // Load order is discovery order. The symbol tables want an order that does
+    // not depend on which `using` happened to be seen first, so emit in
+    // MODULE-PATH order -- the same key the bootstrap compiler sorts by, since
+    // the two must build identical tables from identical input.
+    let orderedModules = unit.loadOrder.compactMap { unit.loadedModules[$0] }
+      .sorted { $0.pathString < $1.pathString }
+    for module in orderedModules {
+      // A module with no manifest behind it is a bare-file entry point, which
+      // is never part of the standard library.
+      let isStd: Bool
+      if let spec = module.spec, case .std = spec.packageKind {
+        isStd = true
+      } else {
+        isStd = false
+      }
+      let packageID = module.spec.map { packageID(for: $0.packageKind, packageName: $0.packageIdentity) }
+        ?? "single:unspecified"
+      for (node, sourceFile) in module.globalNodes {
+        let sourceInfo = GlobalNodeSourceInfo(
+          sourceFile: sourceFile,
+          modulePath: module.path,
+          packageID: packageID,
+          node: node
+        )
+        if isStd {
+          stdGlobalNodes.append(node)
+          stdNodeSourceInfoList.append(sourceInfo)
+        } else {
+          userGlobalNodes.append(node)
+          userNodeSourceInfoList.append(sourceInfo)
+        }
       }
     }
-
-    if rootModulePath == nil {
-      rootModulePath = loadedModulePaths.first
-    }
-
-    return (
-      globalNodes: globalNodes,
-      nodeSourceInfoList: nodeSourceInfoList,
-      importGraph: importGraph,
-      rootModulePath: rootModulePath,
-      loadedModulePaths: loadedModulePaths,
-      linkedLibraries: linkedLibraries
-    )
+    return (stdGlobalNodes, stdNodeSourceInfoList, userGlobalNodes, userNodeSourceInfoList)
   }
 
   private func process(mode: DriverCommand, options: InvocationOptions) throws {
@@ -537,63 +501,6 @@ public class Driver {
     )
   }
 
-  private func loadAllModules(
-    manifest: PackageManifest,
-    displayPrefixSelector: (String) -> String,
-    resolver: ModuleResolver
-  ) throws -> (
-    globalNodes: [GlobalNode],
-    nodeSourceInfoList: [GlobalNodeSourceInfo],
-    importGraph: ImportGraph,
-    loadedModulePaths: [[String]],
-    linkedLibraries: [String],
-    rootModulePath: [String]?
-  ) {
-    var globalNodes: [GlobalNode] = []
-    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var importGraph = ImportGraph()
-    var linkedLibraries: [String] = []
-    var rootModulePath: [String]?
-    var loadedModulePaths: [[String]] = []
-
-    for moduleName in manifest.modules.keys.sorted() {
-      guard let spec = manifest.modules[moduleName] else { continue }
-      let compilationUnit = try resolver.resolveModule(
-        entryFile: spec.entryPath,
-        rootModulePath: spec.pathSegments
-      )
-      let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-      for (node, sourceFile, modulePath) in nodesWithInfo {
-        globalNodes.append(node)
-        nodeSourceInfoList.append(
-          GlobalNodeSourceInfo(
-            sourceFile: sourceFile,
-            modulePath: modulePath,
-            packageID: "manifest:\(manifest.name)",
-            node: node
-          )
-        )
-      }
-      importGraph.merge(compilationUnit.importGraph)
-      registerModuleSources(from: compilationUnit.rootModule, displayPrefix: displayPrefixSelector(moduleName))
-      loadedModulePaths.append(spec.pathSegments)
-      linkedLibraries.append(contentsOf: manifest.links)
-      linkedLibraries.append(contentsOf: spec.links)
-      if rootModulePath == nil && !moduleName.contains("::") {
-        rootModulePath = spec.pathSegments
-      }
-    }
-
-    return (
-      globalNodes: globalNodes,
-      nodeSourceInfoList: nodeSourceInfoList,
-      importGraph: importGraph,
-      loadedModulePaths: loadedModulePaths,
-      linkedLibraries: linkedLibraries,
-      rootModulePath: rootModulePath
-    )
-  }
-
   private func processPackage(
     packageConfigPath: String,
     targetModuleName: String?,
@@ -604,19 +511,31 @@ public class Driver {
     stdConfigPath: String?
   ) throws {
     let packageConfigURL = URL(fileURLWithPath: packageConfigPath).standardized
-    let manifest = try loadPackageManifest(at: packageConfigURL.path)
-    guard let resolvedTargetModuleName = targetModuleName ?? defaultTargetModuleName(in: manifest) else {
-      throw PackageManifestError.missingTargetModule("<unspecified>")
-    }
     let resolvedStdConfigPath = noStd ? nil : (stdConfigPath ?? getStdManifestPath())
-    let packageGraph = try loadResolvedPackageGraph(
+    let registry = try loadPackageRegistry(
       rootManifestPath: packageConfigURL.path,
-      targetModuleName: resolvedTargetModuleName,
       stdManifestPath: resolvedStdConfigPath,
-      requiresRoot: requiresRoot
+      fetchRoot: requiresRoot
     )
+    guard let root = registry.rootPackage else {
+      throw PackageManifestError.fileNotFound(packageConfigURL.path)
+    }
 
-    let baseName = sanitizeModuleArtifactName(packageGraph.targetModuleName)
+    let targetFullName: String
+    if let targetModuleName {
+      targetFullName = targetModuleName
+    } else if let mainName = mainModuleFullName(of: root) {
+      targetFullName = mainName
+    } else {
+      // No main module means there is no default build target (§5.1). Name a
+      // placeholder and the reader is told a module called '<unspecified>' is
+      // missing; say what is actually missing instead.
+      throw PackageManifestError.message("Missing default target module; pass --target-module")
+    }
+    let targetSpec = try resolveTargetSpec(named: targetFullName, root: root, registry: registry)
+
+    let (unit, _) = try loadCompilationUnit(targetSpec: targetSpec, registry: registry, root: root)
+
     let packageRootURL = packageConfigURL.deletingLastPathComponent()
     let outputDirectory: URL
     if let outputDir {
@@ -625,123 +544,21 @@ public class Driver {
       outputDirectory = packageRootURL
     }
 
-    let resolver = initializeModuleResolver()
-    var stdGlobalNodes: [GlobalNode] = []
-    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var userGlobalNodes: [GlobalNode] = []
-    var userNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var mergedImportGraph = ImportGraph()
-    var extraLinkedLibraries: [String] = []
-    let stdSeedModuleNames = packageGraph.reachableModuleNames.filter(isStdManifestModuleName)
-    let moduleNamesToLoad = packageGraph.modulesByName.keys.sorted { lhs, rhs in
-      let lhsStd = packageGraph.modulesByName[lhs].map {
-        if case .std = $0.packageKind { return true }
-        return false
-      } ?? false
-      let rhsStd = packageGraph.modulesByName[rhs].map {
-        if case .std = $0.packageKind { return true }
-        return false
-      } ?? false
-      if lhsStd != rhsStd {
-        return lhsStd && !rhsStd
-      }
-      let lhsReachable = packageGraph.reachableModuleNames.contains(lhs)
-      let rhsReachable = packageGraph.reachableModuleNames.contains(rhs)
-      if lhsReachable != rhsReachable {
-        return lhsReachable && !rhsReachable
-      }
-      return lhs < rhs
-    }.filter { moduleName in
-      guard let spec = packageGraph.modulesByName[moduleName] else { return false }
-      switch spec.packageKind {
-      case .std:
-        return false
-      case .root, .dependency:
-        return packageGraph.reachableModuleNames.contains(moduleName)
-      }
-    }
-
-    for moduleName in moduleNamesToLoad {
-      guard let spec = packageGraph.modulesByName[moduleName] else { continue }
-      let isStdModule: Bool
-      switch spec.packageKind {
-      case .std:
-        isStdModule = true
-      case .root, .dependency:
-        isStdModule = false
-      }
-
-      do {
-        let currentPackageID = packageID(for: spec.packageKind, packageName: spec.packageName)
-        resolver.manifestModuleAliases = spec.visibleModuleAliases
-        defer { resolver.manifestModuleAliases = [] }
-        let compilationUnit = try resolver.resolveModule(
-          entryFile: spec.entryFile,
-          rootModulePath: spec.pathSegments,
-      )
-        let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-        for (node, sourceFile, modulePath) in nodesWithInfo {
-          let info = GlobalNodeSourceInfo(
-            sourceFile: sourceFile,
-            modulePath: modulePath,
-            packageID: currentPackageID,
-            node: node
-          )
-          if isStdModule {
-            stdGlobalNodes.append(node)
-            stdNodeSourceInfoList.append(info)
-          } else {
-            userGlobalNodes.append(node)
-            userNodeSourceInfoList.append(info)
-          }
-        }
-        mergedImportGraph.merge(compilationUnit.importGraph)
-        registerModuleSources(from: compilationUnit.rootModule, displayPrefix: moduleName)
-      } catch let error as ModuleError {
-        throw DiagnosticError(
-          stage: .other,
-          fileName: spec.entryFile,
-          underlying: error,
-          sourceManager: sourceManager
-        )
-      }
-
-      extraLinkedLibraries.append(contentsOf: spec.links)
-    }
-
-    if let resolvedStdConfigPath {
-      let stdManifest = try loadPackageManifest(at: resolvedStdConfigPath)
-      let neededStdModuleNames = collectNeededStdModuleNames(
-        in: stdManifest,
-        importGraph: mergedImportGraph,
-        extraSeedNames: stdSeedModuleNames
-      )
-      let filteredStdManifest = filterManifest(stdManifest, to: neededStdModuleNames)
-      let stdModules = try loadAllModules(
-        manifest: filteredStdManifest,
-        displayPrefixSelector: { $0 },
-        resolver: resolver
-      )
-      stdGlobalNodes = stdModules.globalNodes
-      stdNodeSourceInfoList = stdModules.nodeSourceInfoList
-      mergedImportGraph.merge(stdModules.importGraph)
-      extraLinkedLibraries.append(contentsOf: stdModules.linkedLibraries)
-    }
-
-    let allGlobalNodes = stdGlobalNodes + userGlobalNodes
-    let nodeSourceInfoList = stdNodeSourceInfoList + userNodeSourceInfoList
+    let baseName = sanitizeModuleArtifactName(targetFullName)
+    let parts = collectNodes(from: unit)
+    registerLoadedSources(unit: unit)
 
     try performCompilation(
       baseName: baseName,
       outputDirectory: outputDirectory,
       mode: mode,
       stdDisplayName: resolvedStdConfigPath ?? "std/koral.json",
-      userDisplayName: packageGraph.targetModuleName,
-      stdGlobalNodes: stdGlobalNodes,
-      allGlobalNodes: allGlobalNodes,
-      nodeSourceInfoList: nodeSourceInfoList,
-      importGraph: mergedImportGraph,
-      extraLinkedLibraries: extraLinkedLibraries
+      userDisplayName: targetFullName,
+      stdGlobalNodes: parts.stdGlobalNodes,
+      allGlobalNodes: parts.stdGlobalNodes + parts.userGlobalNodes,
+      nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
+      importGraph: unit.importGraph,
+      extraLinkedLibraries: linkedLibraries(in: unit)
     )
   }
 
@@ -754,53 +571,47 @@ public class Driver {
   ) throws {
     let entryURL = URL(fileURLWithPath: entryFilePath).standardized
     let resolver = initializeModuleResolver()
+    let unit = CompilationUnit()
 
-    let userCompilationUnit = try resolver.resolveModule(entryFile: entryURL.path)
-    let userNodesWithInfo = userCompilationUnit.getAllGlobalNodesWithSourceInfo()
-    var userGlobalNodes: [GlobalNode] = []
-    var userNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    for (node, sourceFile, modulePath) in userNodesWithInfo {
-      userGlobalNodes.append(node)
-      userNodeSourceInfoList.append(
-        GlobalNodeSourceInfo(
-          sourceFile: sourceFile,
-          modulePath: modulePath,
-          packageID: "single:\(entryURL.deletingLastPathComponent().path)",
-          node: node
-        )
-      )
-    }
-    registerModuleSources(
-      from: userCompilationUnit.rootModule,
-      displayPrefix: userCompilationUnit.rootModule.path.joined(separator: "::")
-    )
-
-    var stdGlobalNodes: [GlobalNode] = []
-    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var mergedImportGraph = userCompilationUnit.importGraph
-    var extraLinkedLibraries: [String] = []
-
+    // A bare file has no package of its own. The standard library is still
+    // nameable -- `using "std/io";` is a package import even here -- so the
+    // registry std brings with it is installed before the file is read.
     if !noStd, let resolvedStdConfigPath = stdConfigPath ?? getStdManifestPath() {
-      let stdManifest = try loadPackageManifest(at: resolvedStdConfigPath)
-      let neededStdModuleNames = collectNeededStdModuleNames(
-        in: stdManifest,
-        importGraph: mergedImportGraph,
-        extraSeedNames: []
+      let stdRegistry = try loadPackageRegistry(
+        rootManifestPath: resolvedStdConfigPath,
+        stdManifestPath: resolvedStdConfigPath,
+        fetchRoot: nil
       )
-      let filteredStdManifest = filterManifest(stdManifest, to: neededStdModuleNames)
-      let stdModules = try loadAllModules(
-        manifest: filteredStdManifest,
-        displayPrefixSelector: { $0 },
-        resolver: resolver
-      )
-      stdGlobalNodes = stdModules.globalNodes
-      stdNodeSourceInfoList = stdModules.nodeSourceInfoList
-      mergedImportGraph.merge(stdModules.importGraph)
-      extraLinkedLibraries.append(contentsOf: stdModules.linkedLibraries)
+      if let stdPackage = stdRegistry.stdPackage {
+        resolver.registry = stdRegistry
+        resolver.rootPackage = stdPackage
+      }
     }
 
-    let allGlobalNodes = stdGlobalNodes + userGlobalNodes
-    let nodeSourceInfoList = stdNodeSourceInfoList + userNodeSourceInfoList
+    let entryModule = ModuleInfo(
+      path: [moduleFileNameToIdentifier(entryURL.deletingPathExtension().lastPathComponent)],
+      entryFile: entryURL.path
+    )
+    if let registry = resolver.registry {
+      try loadPrelude(registry: registry, resolver: resolver, unit: unit)
+    }
+    unit.loadedModules[entryModule.pathString] = entryModule
+    unit.loadOrder.append(entryModule.pathString)
+
+    do {
+      try resolver.resolveSingleFile(into: entryModule, unit: unit)
+    } catch let error as ModuleError {
+      throw DiagnosticError(
+        stage: error.stage,
+        fileName: error.locationFile ?? entryURL.path,
+        underlying: error,
+        sourceManager: sourceManager
+      )
+    }
+
+    let parts = collectNodes(from: unit)
+    registerLoadedSources(unit: unit)
+
     let outputDirectory = outputDir.map { URL(fileURLWithPath: $0).standardized }
       ?? entryURL.deletingLastPathComponent()
     let baseName = entryURL.deletingPathExtension().lastPathComponent
@@ -811,11 +622,11 @@ public class Driver {
       mode: mode,
       stdDisplayName: stdConfigPath ?? "std/koral.json",
       userDisplayName: entryURL.path,
-      stdGlobalNodes: stdGlobalNodes,
-      allGlobalNodes: allGlobalNodes,
-      nodeSourceInfoList: nodeSourceInfoList,
-      importGraph: mergedImportGraph,
-      extraLinkedLibraries: extraLinkedLibraries
+      stdGlobalNodes: parts.stdGlobalNodes,
+      allGlobalNodes: parts.stdGlobalNodes + parts.userGlobalNodes,
+      nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
+      importGraph: unit.importGraph,
+      extraLinkedLibraries: linkedLibraries(in: unit)
     )
   }
 

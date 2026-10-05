@@ -294,6 +294,13 @@ public class TypeChecker {
   /// problem with the program. (rustc's `probe`, Swift's `withoutDiagnostics`.)
   var speculativeQueryDepth: Int = 0
 
+  /// Names an import has already bound in a file, for the §3.3 collision
+  /// check. Keyed `"\(name)@\(file)"` to the declaration the name came to
+  /// denote. Pass state on the checker because `TypeCheckerPasses` is an
+  /// extension and cannot hold stored properties.
+  var importedNameBindings: [String: DefId?] = [:]
+
+
   func beginSpeculativeQuery() {
     speculativeQueryDepth += 1
   }

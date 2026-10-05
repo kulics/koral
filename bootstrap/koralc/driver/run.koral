@@ -1,5 +1,5 @@
-using std::os { .. };
-using std::proc { .. };
+using "std/os";
+using "std/proc";
 
 file_private type InvocationOptions(
     command String,
@@ -97,46 +97,48 @@ public let run_driver() Int = {
         } else if arg == "--package-config" then {
             i += 1;
             if i >= argv.count() then {
-                eprintln("missing value for --package-config");
+                eprintln("Error: Missing path for --package-config option");
                 return 1;
             };
             package_config_path = Option[String].Some(argv[i]);
         } else if arg == "--target-module" then {
             i += 1;
             if i >= argv.count() then {
-                eprintln("missing value for --target-module");
+                eprintln("Error: Missing value for --target-module option");
                 return 1;
             };
             target_module_name = Option[String].Some(argv[i]);
         } else if arg == "--requires-root" then {
             i += 1;
             if i >= argv.count() then {
-                eprintln("missing value for --requires-root");
+                eprintln("Error: Missing path for --requires-root option");
                 return 1;
             };
             requires_root = Option[String].Some(argv[i]);
         } else if arg == "--std-config" then {
             i += 1;
             if i >= argv.count() then {
-                eprintln("missing value for --std-config");
+                eprintln("Error: Missing path for --std-config option");
                 return 1;
             };
             std_config_path = Option[String].Some(argv[i]);
         } else if arg == "-o" or arg == "--output" then {
             i += 1;
             if i >= argv.count() then {
-                eprintln("missing value for -o/--output");
+                eprintln("Error: Missing path for -o option");
                 return 1;
             };
             out_dir = Option[String].Some(argv[i]);
         } else if arg.starts_with("-") then {
-            eprintln("unknown argument: \(arg)");
+            eprintln("Error: Unknown argument: \(arg)");
+            print_usage();
             return 1;
         } else {
             if package_config_path is .None() and entry_file_path is .None() then {
                 entry_file_path = Option[String].Some(arg);
             } else {
-                eprintln("unexpected positional argument: \(arg)");
+                eprintln("Error: Unknown positional argument: \(arg)");
+                print_usage();
                 return 1;
             };
         };
@@ -156,12 +158,12 @@ public let run_driver() Int = {
     );
 
     if options.package_config_path is .None() and options.entry_file_path is .None() then {
-        eprintln("missing input file or --package-config");
+        eprintln("Error: Missing input file or --package-config");
         print_usage();
         return 1;
     };
     if options.package_config_path is .Some(_) and options.entry_file_path is .Some(_) then {
-        eprintln("cannot combine direct file input with --package-config");
+        eprintln("Error: Cannot combine direct file input with --package-config");
         print_usage();
         return 1;
     };
@@ -202,7 +204,7 @@ file_private let print_usage() Void = {
 // Shared: read file from disk.
 file_private let read_source(file_path String) Option[String] = {
     let source = read_text_file(file_path.into_path()) or else {
-        eprintln("failed to read file: \(file_path): \(it.message())");
+        eprintln("Error: Failed to read file: \(file_path)");
         return Option[String].None();
     };
     return Option[String].Some(source);
@@ -277,15 +279,23 @@ file_private let diagnostic_stage_label(stage DiagnosticStage) String = {
 };
 
 file_private let sanitize_module_artifact_name(module_name String) String = {
-    return module_name.replace_all("::", with: "__");
-};
-
-file_private let package_id_for_resolved_kind(kind ResolvedPackageKind) String = {
-    return when kind in {
-        .Root() then "root:user",
-        .Std() then "std:std",
-        .Dependency(key) then "dep:" + key,
+    let mutable out = StringBuilder.new();
+    let mutable i UInt = 0;
+    let mutable pending_sep = false;
+    while i < module_name.count() then {
+        let ch = module_name[i];
+        if ch == ':' or ch == '/' then {
+            if not pending_sep then {
+                out.push_string("__");
+                pending_sep = true;
+            };
+        } else {
+            out.push_byte(ch);
+            pending_sep = false;
+        };
+        i += 1;
     };
+    return out.to_string();
 };
 
 file_private let contains_string(values List[String], target String) Bool = {
@@ -304,145 +314,6 @@ file_private let contains_module_path(paths List[List[String]], target List[Stri
         };
     };
     return false;
-};
-
-file_private let is_std_manifest_module_name(name String) Bool = {
-    return name == "std" or name.starts_with("std::");
-};
-
-file_private let is_std_module_path(path_segments List[String]) Bool = {
-    if path_segments.is_empty() then {
-        return false;
-    };
-    return module_identifier_to_file_name(path_segments[0(UInt)]) == "std";
-};
-
-file_private let manifest_module_name_for_path(path_segments List[String]) String = {
-    let mutable parts = List[String].new();
-    for segment in path_segments then {
-        parts.push(module_identifier_to_file_name(segment));
-    };
-    return parts.join_to_string("::");
-};
-
-file_private let manifest_root_module_name(manifest PackageManifest) Option[String] = {
-    when manifest.default_target_module_name in {
-        .Some(name) then {
-            return Option[String].Some(name);
-        },
-        .None() then {},
-    };
-
-    let mutable iter = manifest.modules.iterator();
-    while iter.next() is .Some(entry) then {
-        if not entry.first.contains("::") then {
-            return Option[String].Some(entry.first);
-        };
-    };
-
-    return Option[String].None();
-};
-
-file_private let push_unique_module_name(names List[String], seen Set[String], candidate String) Void = {
-    if seen.contains(candidate) then {
-        return;
-    };
-    seen.insert(candidate);
-    names.push(candidate);
-};
-
-file_private let collect_manifest_required_module_names(manifest PackageManifest, seed_names List[String]) List[String] = {
-    let mutable selected = List[String].new();
-    let mutable seen = Set[String].new();
-    let mutable pending = List[String].new();
-
-    for seed_name in seed_names then {
-        if manifest.modules.get(seed_name) is .Some(_) and not seen.contains(seed_name) then {
-            seen.insert(seed_name);
-            pending.push(seed_name);
-        };
-    };
-
-    while not pending.is_empty() then {
-        let current = pending.pop() or else { continue;};
-        selected.push(current);
-
-        let spec = manifest.modules.get(current) or else { continue;};
-        let mutable index = spec.requires.count();
-        while index > 0(UInt) then {
-            index -= 1(UInt);
-            let dependency = spec.requires[index];
-            if manifest.modules.get(dependency) is .Some(_) and not seen.contains(dependency) then {
-                seen.insert(dependency);
-                pending.push(dependency);
-            };
-        };
-    };
-
-    selected.sort();
-    return selected;
-};
-
-file_private let collect_needed_std_module_names(
-    manifest PackageManifest,
-    graph ImportGraph,
-    extra_seed_names List[String],
-) List[String] = {
-    let mutable seeds = List[String].new();
-    let mutable seen = Set[String].new();
-
-    when manifest_root_module_name(manifest) in {
-        .Some(root_name) then push_unique_module_name(seeds, seen, root_name),
-        .None() then {},
-    };
-
-    for seed_name in extra_seed_names then {
-        if manifest.modules.get(seed_name) is .Some(_) then {
-            push_unique_module_name(seeds, seen, seed_name);
-        };
-    };
-
-    for edge in graph.edges then {
-        if is_std_module_path(edge.target) then {
-            let module_name = manifest_module_name_for_path(edge.target);
-            if manifest.modules.get(module_name) is .Some(_) then {
-                push_unique_module_name(seeds, seen, module_name);
-            };
-        };
-    };
-
-    for symbol_import in graph.symbol_imports then {
-        if is_std_module_path(symbol_import.target) then {
-            let module_name = manifest_module_name_for_path(symbol_import.target);
-            if manifest.modules.get(module_name) is .Some(_) then {
-                push_unique_module_name(seeds, seen, module_name);
-            };
-        };
-    };
-
-    return collect_manifest_required_module_names(manifest, seeds);
-};
-
-file_private let filter_manifest_modules(manifest PackageManifest, module_names List[String]) PackageManifest = {
-    let mutable filtered_modules = Dict[String, PackageModuleConfig].new();
-    for module_name in module_names then {
-        when manifest.modules.get(module_name) in {
-            .Some(spec) then {
-                filtered_modules.insert(module_name, spec);
-            },
-            .None() then {},
-        };
-    };
-
-    return PackageManifest(
-        manifest.manifest_path,
-        manifest.package_root,
-        manifest.name,
-        manifest.default_target_module_name,
-        manifest.links,
-        filtered_modules,
-        manifest.dependencies,
-    );
 };
 
 file_private let collect_unique_module_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
@@ -519,286 +390,208 @@ file_private let make_prepared_compilation(
     return PreparedCompilation(graph, display_name, artifact_base_name, linked_libraries, default_output_dir);
 };
 
-file_private let load_manifest_modules_into_prepared(
-    resolver ModuleResolver,
-    manifest PackageManifest,
-    package_kind ResolvedPackageKind,
-    std_root_module_name Option[String],
-    target_module_name Option[String],
-    default_output_dir Path,
-) Result[PreparedCompilation] = {
-    let mutable std_pairs = List[Pair[LoadedNode, List[String]]].new();
-    let mutable user_pairs = List[Pair[LoadedNode, List[String]]].new();
-    let mutable merged_graph = ImportGraph.new();
-    let mutable linked_libraries = List[String].new();
-    let mutable loaded_module_paths = List[List[String]].new();
-    let mutable all_parsed_defaults = Dict[String, String].new();
-    let mutable root_module_path = "";
-    let mutable display_name = manifest.manifest_path;
-    let mutable artifact_base_name = "main";
-    let package_id = package_id_for_resolved_kind(package_kind);
+/// The standard library's main module is the prelude: it is compiled in and in
+/// scope in every non-std module without being named. It is therefore NOT part
+/// of the `using` graph -- it is the base the graph sits on (§6.4's "主模块是基础层").
+file_private let load_prelude_into(resolver ModuleResolver, registry PackageRegistry, unit CompilationUnit) Result[Void] = {
+    when prelude_module_spec(registry) in {
+        .Some(spec) then {
+            let _ = resolver.resolve_module_spec(spec, unit) or return;
+        },
+        .None() then {},
+    };
+    return Result[Void].Ok({});
+};
 
-    let mutable iter = manifest.modules.iterator();
-    while iter.next() is .Some(entry) then {
-        let spec = entry.second;
-        if contains_module_path(loaded_module_paths, spec.path_segments) then {
-            continue;
-        };
-        let unit = resolver.resolve_module_with_path(spec.entry_path, Option[List[String]].Some(spec.path_segments)) or return;
-        let pairs = unit.collect_all_nodes_with_path();
-        let is_std = when package_kind in {
-            .Std() then true,
-            _ then false,
-        };
-        if is_std then {
-            for pair in pairs then {
-                std_pairs.push(Pair[LoadedNode, List[String]](
-                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
-                    pair.second,
-                ));
-            };
-        } else {
-            for pair in pairs then {
-                user_pairs.push(Pair[LoadedNode, List[String]](
-                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
-                    pair.second,
-                ));
-            };
-        };
-        merged_graph.merge(unit.import_graph());
-        for kv in unit.collect_parsed_defaults().iterator() then {
-            all_parsed_defaults.insert(kv.first, kv.second);
-        };
-        for pair in pairs then {
-            if not contains_module_path(loaded_module_paths, pair.second) then {
-                loaded_module_paths.push(pair.second);
-            };
-        };
-        for link in manifest.links then { linked_libraries.push(link);};
-        for link in spec.links then { linked_libraries.push(link);};
-        if root_module_path.is_empty() and not entry.first.contains("::") then {
-            root_module_path = spec.path_segments.join_to_string(".");
-        };
-        when target_module_name in {
-            .Some(target_name) then {
-                if entry.first == target_name then {
-                    display_name = target_name;
-                    artifact_base_name = sanitize_module_artifact_name(target_name);
-                    root_module_path = spec.path_segments.join_to_string(".");
-                };
-            },
-            .None() then {},
+/// Load the target module and everything its `using` statements reach. The
+/// module graph is exactly those edges (§5.4) -- nothing is loaded that no
+/// `using` asked for, and nothing that IS asked for is skipped.
+file_private let load_target_unit(
+    resolver ModuleResolver,
+    registry PackageRegistry,
+    root LoadedPackage,
+    target_spec ResolvedModuleSpec,
+) Result[CompilationUnit] = {
+    resolver.set_packages(registry, root);
+    let unit = CompilationUnit.empty();
+    load_prelude_into(resolver, registry, unit) or return;
+    let _ = resolver.resolve_module_spec(target_spec, unit) or return;
+    return Result[CompilationUnit].Ok(unit);
+};
+
+/// `links` follow the code (§5.4): a module that needs `-lm` says so, and
+/// anything that imports that module inherits the requirement.
+file_private let linked_libraries_of(resolver ModuleResolver) List[String] = {
+    let mutable out = List[String].new();
+    for spec in resolver.loaded_module_specs() then {
+        for link in spec.links then {
+            out.push(link);
         };
     };
+    return out;
+};
 
-    return Result[PreparedCompilation].Ok(make_prepared_compilation(
-        std_pairs,
-        user_pairs,
-        merged_graph,
-        display_name,
-        artifact_base_name,
-        linked_libraries,
-        default_output_dir,
-        root_module_path,
-        all_parsed_defaults,
-    ));
+/// Split loaded nodes into standard-library and everything else, emitting in
+/// full-name order so the tables do not depend on which `using` was seen first.
+file_private let split_pairs_by_package(
+    pairs List[Pair[LoadedNode, List[String]]],
+) Pair[List[Pair[LoadedNode, List[String]]], List[Pair[LoadedNode, List[String]]]] = {
+    let mutable std_pairs = List[Pair[LoadedNode, List[String]]].new();
+    let mutable user_pairs = List[Pair[LoadedNode, List[String]]].new();
+    for pair in pairs then {
+        if pair.first.package_id.starts_with("std:") then {
+            std_pairs.push(pair);
+        } else {
+            user_pairs.push(pair);
+        };
+    };
+    return Pair[List[Pair[LoadedNode, List[String]]], List[Pair[LoadedNode, List[String]]]](std_pairs, user_pairs);
+};
+
+/// Turn a module full name written the way source writes it
+/// (`package[/subpath]`) into the module it names, looked up in `root`'s table.
+file_private let resolve_target_spec(
+    raw_name String,
+    root LoadedPackage,
+    registry PackageRegistry,
+) Result[ResolvedModuleSpec] = {
+    let mutable head = raw_name;
+    let mutable subpath = "";
+    when raw_name.split_once("/") in {
+        .Some(pair) then {
+            head = pair.first;
+            subpath = pair.second;
+        },
+        .None() then {},
+    };
+    if head.is_empty() or not is_valid_package_or_segment_name(head) then {
+        return Result[ResolvedModuleSpec].Error(manifest_error_text(.MissingTargetModule(raw_name)));
+    };
+
+    let owner = registry.resolve_name(head, root) or else {
+        return Result[ResolvedModuleSpec].Error(manifest_error_text(.UnknownPackageName(head, "--target-module", registry.known_names(root))));
+    };
+    let key = if subpath.is_empty() then "." else subpath;
+    let config = owner.manifest.modules.get(key) or else {
+        if subpath.is_empty() then {
+            // Naming the package root asks for the main module. Say that this
+            // package has none and what it does have -- an undifferentiated
+            // "not found" hides which of the two readings failed.
+            return Result[ResolvedModuleSpec].Error(manifest_error_text(.NoMainModule(owner.self_name, declared_module_keys(owner.manifest))));
+        };
+        return Result[ResolvedModuleSpec].Error(manifest_error_text(.MissingTargetModule(raw_name)));
+    };
+    let root_name = root_view_name(owner, registry, root);
+    return Result[ResolvedModuleSpec].Ok(make_resolved_module_spec(key, config, root_name, owner));
 };
 
 file_private let prepare_package_compilation(options InvocationOptions) Result[PreparedCompilation] = {
     let package_config_path = options.package_config_path or else {
-        return Result[PreparedCompilation].Error("missing --package-config");
-    };
-    let manifest = load_package_manifest(package_config_path) or return;
-    let target_module_name = when options.target_module_name in {
-        .Some(name) then name,
-        .None() then default_target_module_name(manifest) or return,
+        return Result[PreparedCompilation].Error("Error: Missing input file or --package-config");
     };
     let resolved_std_manifest_path = if options.no_std then Option[String].None() else when options.std_config_path in {
         .Some(path) then Option[String].Some(path),
         .None() then find_std_manifest_path(),
     };
-    let package_graph = load_resolved_package_graph(
-        package_config_path,
-        target_module_name,
-        resolved_std_manifest_path,
-        options.requires_root,
-    ) or return;
-
-    let mutable resolver = ModuleResolver.new();
-    let mutable std_pairs = List[Pair[LoadedNode, List[String]]].new();
-    let mutable user_pairs = List[Pair[LoadedNode, List[String]]].new();
-    let mutable merged_graph = ImportGraph.new();
-    let mutable linked_libraries = List[String].new();
-    let mutable loaded_module_paths = List[List[String]].new();
-    let mutable all_parsed_defaults = Dict[String, String].new();
-    let mutable std_seed_module_names = List[String].new();
-
-    for module_name in package_graph.reachable_module_names then {
-        if is_std_manifest_module_name(module_name) then {
-            std_seed_module_names.push(module_name);
-        };
+    let registry = load_package_registry(package_config_path, resolved_std_manifest_path, options.requires_root) or return;
+    let root = registry.root_package or else {
+        return Result[PreparedCompilation].Error(manifest_error_text(.FileNotFound(package_config_path)));
     };
 
-    let mutable module_names_to_load = List[String].new();
-    let mutable all_module_names = List[String].new();
-    let mutable name_iter = package_graph.modules_by_name.iterator();
-    while name_iter.next() is .Some(entry) then {
-        all_module_names.push(entry.first);
+    // The default build target is the main module -- the one declared under the
+    // `modules` key `"."`. A package with no main module has no default (§5.1).
+    let mutable target_full_name = when options.target_module_name in {
+        .Some(name) then name,
+        .None() then "",
     };
-    all_module_names.sort();
-    for module_name in all_module_names then {
-        let spec = package_graph.modules_by_name.get(module_name) or else { continue;};
-        let include = when spec.package_kind in {
-            .Std() then false,
-            _ then contains_string(package_graph.reachable_module_names, module_name),
-        };
-        if include then {
-            module_names_to_load.push(module_name);
-        };
-    };
-
-    for module_name in module_names_to_load then {
-        let spec = package_graph.modules_by_name.get(module_name) or else {
-            return Result[PreparedCompilation].Error("Target module '\(module_name)' not found in resolved module graph");
-        };
-        if contains_module_path(loaded_module_paths, spec.path_segments) then {
-            continue;
-        };
-        resolver.set_manifest_module_aliases(spec.visible_module_aliases);
-        let unit = resolver.resolve_module_with_path(spec.entry_file, Option[List[String]].Some(spec.path_segments)) or return;
-        resolver.set_manifest_module_aliases(List[ResolvedModuleAliasRule].new());
-        let pairs = unit.collect_all_nodes_with_path();
-        let is_std = when spec.package_kind in {
-            .Std() then true,
-            _ then false,
-        };
-        let package_id = package_id_for_resolved_kind(spec.package_kind);
-        if is_std then {
-            for pair in pairs then {
-                std_pairs.push(Pair[LoadedNode, List[String]](
-                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
-                    pair.second,
-                ));
-            };
+    if target_full_name.is_empty() then {
+        // The default build target is the main module (§5.1). A package with
+        // no main module has no default -- the caller has to say which one.
+        if root.manifest.modules.get(".") is .Some(_) then {
+            target_full_name = root.self_name;
         } else {
-            for pair in pairs then {
-                user_pairs.push(Pair[LoadedNode, List[String]](
-                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
-                    pair.second,
-                ));
-            };
+            return Result[PreparedCompilation].Error(manifest_error_text(.Message("Missing default target module; pass --target-module")));
         };
-        merged_graph.merge(unit.import_graph());
-        for kv in unit.collect_parsed_defaults().iterator() then {
-            all_parsed_defaults.insert(kv.first, kv.second);
-        };
-        for pair in pairs then {
-            if not contains_module_path(loaded_module_paths, pair.second) then {
-                loaded_module_paths.push(pair.second);
-            };
-        };
-        for link in spec.links then { linked_libraries.push(link);};
     };
+    let target_spec = resolve_target_spec(target_full_name, root, registry) or return;
 
-    when resolved_std_manifest_path in {
-        .Some(std_manifest_path) then {
-            let std_manifest = load_package_manifest(std_manifest_path) or return;
-            let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, std_seed_module_names);
-            let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
-            let std_prepared = load_manifest_modules_into_prepared(
-                resolver,
-                filtered_std_manifest,
-                ResolvedPackageKind.Std(),
-                package_graph.std_root_module_name,
-                Option[String].None(),
-                std_manifest_path.into_path().dir_name(),
-            ) or return;
-            std_pairs = std_prepared.graph.loaded_nodes_with_path;
-            merged_graph.merge(std_prepared.graph.import_graph);
-            for link in std_prepared.linked_libraries then {
-                linked_libraries.push(link);
-            };
-            for kv in std_prepared.graph.parsed_defaults.iterator() then {
-                all_parsed_defaults.insert(kv.first, kv.second);
-            };
-        },
-        .None() then {},
-    };
+    let resolver = ModuleResolver.new();
+    let unit = load_target_unit(resolver, registry, root, target_spec) or return;
 
-    let target_spec = package_graph.modules_by_name.get(package_graph.target_module_name) or else {
-        return Result[PreparedCompilation].Error("Target module '\(package_graph.target_module_name)' not found in resolved module graph");
-    };
+    let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path_sorted());
+    let linked_libraries = linked_libraries_of(resolver);
     let default_output_dir = package_config_path.into_path().dir_name();
+
     return Result[PreparedCompilation].Ok(make_prepared_compilation(
-        std_pairs,
-        user_pairs,
-        merged_graph,
-        package_graph.target_module_name,
-        sanitize_module_artifact_name(package_graph.target_module_name),
+        pair_split.first,
+        pair_split.second,
+        unit.import_graph(),
+        target_full_name,
+        sanitize_module_artifact_name(target_full_name),
         linked_libraries,
         default_output_dir,
         target_spec.path_segments.join_to_string("."),
-        all_parsed_defaults,
+        unit.collect_parsed_defaults(),
     ));
 };
 
 file_private let prepare_single_file_compilation(options InvocationOptions) Result[PreparedCompilation] = {
     let entry_file_path = options.entry_file_path or else {
-        return Result[PreparedCompilation].Error("missing input file or --package-config");
+        return Result[PreparedCompilation].Error("Error: Missing input file or --package-config");
+    };
+    let absolute_entry = when absolute_path(entry_file_path.into_path()) in {
+        .Ok(p) then p.to_string(),
+        .Error(_) then entry_file_path,
     };
 
-    let mutable resolver = ModuleResolver.new();
-    let user_unit = resolver.resolve_module(entry_file_path) or return;
-    let mutable std_pairs = List[Pair[LoadedNode, List[String]]].new();
-    let mutable user_pairs = user_unit.collect_all_nodes_with_path();
-    let mutable merged_graph = user_unit.import_graph();
-    let mutable linked_libraries = List[String].new();
+    let resolver = ModuleResolver.new();
+    // Everything goes in ONE unit. The prelude and the file's own `using` may
+    // name the same module; two units would compile it twice.
+    let unit = CompilationUnit.empty();
 
+    // A bare file has no package of its own. The standard library is still
+    // nameable -- `using "std/io";` is a package import even here -- so the
+    // registry std brings with it is installed before the file is read.
     let resolved_std_manifest_path = if options.no_std then Option[String].None() else when options.std_config_path in {
         .Some(path) then Option[String].Some(path),
         .None() then find_std_manifest_path(),
     };
 
-    let mutable all_parsed_defaults = user_unit.collect_parsed_defaults();
-
     when resolved_std_manifest_path in {
         .Some(std_manifest_path) then {
-            let std_manifest = load_package_manifest(std_manifest_path) or return;
-            let needed_std_module_names = collect_needed_std_module_names(std_manifest, merged_graph, List[String].new());
-            let filtered_std_manifest = filter_manifest_modules(std_manifest, needed_std_module_names);
-            let std_prepared = load_manifest_modules_into_prepared(
-                resolver,
-                filtered_std_manifest,
-                ResolvedPackageKind.Std(),
-                Option[String].None(),
-                Option[String].None(),
-                std_manifest_path.into_path().dir_name(),
-            ) or return;
-            std_pairs = std_prepared.graph.loaded_nodes_with_path;
-            merged_graph.merge(std_prepared.graph.import_graph);
-            for link in std_prepared.linked_libraries then {
-                linked_libraries.push(link);
+            let registry = load_package_registry(std_manifest_path, Option[String].Some(std_manifest_path), Option[String].None()) or return;
+            let std_package = registry.std_package or else {
+                return Result[PreparedCompilation].Error("standard library not found");
             };
-            for kv in std_prepared.graph.parsed_defaults.iterator() then {
-                all_parsed_defaults.insert(kv.first, kv.second);
-            };
+            resolver.set_packages(registry, std_package);
+            load_prelude_into(resolver, registry, unit) or return;
         },
         .None() then {},
     };
 
-    let artifact_base_name = entry_file_path.into_path().with_ext_name("").base_name();
-    let display_name = entry_file_path;
-    let default_output_dir = entry_file_path.into_path().dir_name();
+    let stem = absolute_entry.into_path().with_ext_name("").base_name();
+    let root_module = ModuleInfo.named(
+        [module_file_name_to_identifier(stem)],
+        absolute_entry,
+        false,
+        stem,
+        "root:user",
+    );
+    unit.add_module(root_module);
+    resolver.resolve_single_file(root_module, unit) or return;
+
+    let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path());
+    let default_output_dir = absolute_entry.into_path().dir_name();
     return Result[PreparedCompilation].Ok(make_prepared_compilation(
-        std_pairs,
-        user_pairs,
-        merged_graph,
-        display_name,
-        artifact_base_name.to_string(),
-        linked_libraries,
+        pair_split.first,
+        pair_split.second,
+        unit.import_graph(),
+        entry_file_path,
+        sanitize_module_artifact_name(stem),
+        linked_libraries_of(resolver),
         default_output_dir,
-        user_unit.root_module().path_string(),
-        all_parsed_defaults,
+        root_module.path_string(),
+        unit.collect_parsed_defaults(),
     ));
 };
 

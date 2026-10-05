@@ -9,7 +9,13 @@ public type mutable NameCollector(
     mutable module_path List[String],
     mutable source_file String,
     mutable package_id String,
-    mutable std_type_names Set[String],
+    // Generic template names that belong to the standard library. The compiler
+    // builds std's containers and `Option` by name (`genericEnumType(template:
+    // "Option", ...)`), so a user template with one of those names would take
+    // the lang item out from under inference. Nothing else is reserved: two
+    // user modules may both declare `Box[T]`, and a non-generic `Duration` may
+    // share std's name freely -- both are pinned by cross-module tests.
+    mutable std_generic_template_names Set[String],
 );
 
 given NameCollector {
@@ -70,14 +76,16 @@ given NameCollector {
         return self.package_id == "std:std";
     };
 
-    file_private reserve_std_type_name_if_needed(self, name String, access AccessModifier) Bool = {
-        if self.is_std_package() then {
-            if access is not .FilePrivate() then {
-                self.std_type_names.insert(name);
-            };
+    /// Whether declaring this name would take one of std's generic templates.
+    file_private shadows_std_generic_template(self, name String, is_generic Bool) Bool = {
+        if not is_generic then {
             return false;
         };
-        return access is not .FilePrivate() and self.std_type_names.contains(name);
+        if self.is_std_package() then {
+            self.std_generic_template_names.insert(name);
+            return false;
+        };
+        return self.std_generic_template_names.contains(name);
     };
 
     /// Report at a source location. A name-collection diagnostic with no span
@@ -120,7 +128,7 @@ given NameCollector {
     file_private collect_decl(self, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
-                if self.reserve_std_type_name_if_needed(name, access) then {
+                if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
@@ -136,7 +144,7 @@ given NameCollector {
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
             .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
-                if self.reserve_std_type_name_if_needed(name, access) then {
+                if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
                     return;
                 };
@@ -272,8 +280,7 @@ given NameCollector {
                 self.global_scope.define(self.context, sym);
             },
             // Declarations that don't introduce names into the value/type namespace
-            .ModuleUsingDecl(_, _, _) then {},
-            .FileUsingDecl(_, _) then {},
+            .UsingDecl(_, _, _) then {},
             .GivenDecl(_, _, _, _) then {},
             .GivenTraitDecl(_, _, _, _, _) then {},
             .IntrinsicGivenDecl(_, _, _, _) then {},

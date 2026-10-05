@@ -569,65 +569,47 @@ given Parser {
         return .Ok(members);
     };
 
-    module_private parse_module_using_items(self) Result[List[UsingModuleItem]] = {
+    /// `{ Name, Other as Alias }` -- the filter on an import (§3.3).
+    /// Omitting the braces means "everything"; writing them empty means nothing,
+    /// which is not a thing to ask for (§7.4).
+    module_private parse_using_import_list(self, specifier String, is_file_merge Bool) Result[List[UsingModuleItem]] = {
+        let brace_token = self.current();
+        self.advance();
         let mutable items = List[UsingModuleItem].new();
-        let mutable saw_all_public = false;
 
-        if self.current().kind is .LBrace() then {
-            self.advance();
-        } else {
-            return .Error(self.parser_error("Expected '{' after module path in using declaration"));
-        };
+        while self.current().kind is not .RBrace() then {
+            if self.current().kind is .Range() then {
+                // `{ .. }` used to mean "everything". Omitting the list means
+                // that now (§3), so `..` is not a name anyone could import.
+                return .Error(self.parser_error_at(
+                    "\"..\" is not an import item; omit the list to import every visible member of \"\(specifier)\"",
+                    self.current(),
+                ));
+            };
+            let name_token = self.current();
+            let name = self.expect_identifier("import item") or return;
 
-        while true then {
-            when self.current().kind in {
-                .RBrace() then {
+            let alias = when self.current().kind in {
+                .KwAs() then {
                     self.advance();
-                    break;
-                },
-                .Range() then {
-                    if not items.is_empty() then {
-                        return .Error(self.parser_error("'..' must be the only item in a module import list"));
+                    let alias_name = self.expect_identifier("using alias") or return;
+                    let name_is_upper = self.is_upper_first(name);
+                    let alias_is_upper = self.is_upper_first(alias_name);
+                    if name_is_upper <> alias_is_upper then {
+                        if name_is_upper then {
+                            return .Error(self.parser_error_at("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase", name_token));
+                        };
+                        return .Error(self.parser_error_at("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase", name_token));
                     };
-                    self.advance();
-                    items.push(UsingModuleItem(UsingModuleItemKind.AllPublic(), Option[String].None(), Option[String].None()));
-                    saw_all_public = true;
+                    Option[String].Some(alias_name)
                 },
-                .Identifier(name) then {
-                    if saw_all_public then {
-                        return .Error(self.parser_error("'..' must not be combined with other imports"));
-                    };
-                    self.advance();
-                    let alias = when self.current().kind in {
-                        .KwAs() then {
-                            self.advance();
-                            let alias_name = self.expect_identifier("using alias") or return;
-                            let name_is_upper = self.is_upper_first(name);
-                            let alias_is_upper = self.is_upper_first(alias_name);
-                            if name_is_upper <> alias_is_upper then {
-                                if name_is_upper then {
-                                    return .Error(self.parser_error_at_current("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"));
-                                };
-                                return .Error(self.parser_error_at_current("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"));
-                            };
-                            Option[String].Some(alias_name)
-                        },
-                        _ then Option[String].None(),
-                    };
-                    items.push(UsingModuleItem(UsingModuleItemKind.Symbol(), Option[String].Some(name), alias));
-                },
-                _ then {
-                    return .Error(self.parser_error_at_current("Expected identifier for import item, got: \(token_kind_description(self.current()))"));
-                },
+                _ then Option[String].None(),
             };
 
+            items.push(UsingModuleItem(name, alias));
+
             when self.current().kind in {
-                .Comma() then {
-                    if saw_all_public then {
-                        return .Error(self.parser_error("'..' must not be combined with other imports"));
-                    };
-                    self.advance();
-                },
+                .Comma() then { self.advance(); },
                 .RBrace() then {},
                 _ then {
                     return .Error(self.parser_error("Expected ',' or '}' in using declaration"));
@@ -635,13 +617,66 @@ given Parser {
             };
         };
 
+        self.advance();
         if items.is_empty() then {
-            return .Error(self.parser_error("using declaration requires at least one import item"));
+            if is_file_merge then {
+                return .Error(self.parser_error_at("File merge '\(specifier)' takes no import list; it merges the whole file", brace_token));
+            };
+            return .Error(self.parser_error_at("import list cannot be empty; omit it to import every visible member of \"\(specifier)\"", brace_token));
         };
-
         return .Ok(items);
     };
 
+    /// A module's full name is `package[/subpath]`, lowercase identifier
+    /// segments (§2.1). `.` is not a spelling of anything in source -- it is
+    /// only how a manifest names a package's main module (§5.2).
+    module_private validate_module_specifier(self, specifier String, token Token) Result[Void] = {
+        if specifier == "." then {
+            return .Error(self.parser_error_at("write the package name itself for its main module; \".\" is only manifest notation", token));
+        };
+        // `split` drops empty segments, so `a//b` would look like `a/b`. Ask
+        // for the parts without losing them (§7.5 lists empty segments).
+        let mutable parts = List[String].new();
+        let mutable current = StringBuilder.new();
+        let mutable i UInt = 0;
+        while i < specifier.count() then {
+            let ch = specifier[i];
+            if ch == '/' then {
+                parts.push(current.to_string());
+                current = StringBuilder.new();
+            } else {
+                current.push_byte(ch);
+            };
+            i += 1;
+        };
+        parts.push(current.to_string());
+        for segment in parts then {
+            if segment.is_empty() then {
+                return .Error(self.parser_error_at("module name must be 'package[/subpath]' with lowercase identifier segments", token));
+            };
+            let first = segment[0(UInt)];
+            if first < 'a' or first > 'z' then {
+                return .Error(self.parser_error_at("module name must be 'package[/subpath]' with lowercase identifier segments", token));
+            };
+            for i in 0..<segment.count() then {
+                let ch = segment[i];
+                let is_lower = ch >= 'a' and ch <= 'z';
+                let is_digit = ch >= '0' and ch <= '9';
+                let is_underscore = ch == '_';
+                if not is_lower and not is_digit and not is_underscore then {
+                    return .Error(self.parser_error_at("module name must be 'package[/subpath]' with lowercase identifier segments", token));
+                };
+            };
+        };
+        return .Ok({});
+    };
+
+    /// Parse `using "<specifier>" ("{" items "}")?;`
+    ///
+    /// One form (§3). The specifier is a string; what it means is decided by
+    /// its shape: `./` or `../` is a file to merge, anything else is a module's
+    /// full name, `package[/subpath]`. The parser settles that here because
+    /// every rule about the specifier is a rule about its spelling.
     module_private parse_using_decl(self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current();
         self.advance();
@@ -659,56 +694,52 @@ given Parser {
             return .Error(self.parser_error("intrinsic using declaration is not supported"));
         };
 
-        // Check if the next token is a string literal → file-based using
+        let specifier_token = self.current();
+        let mutable specifier = "";
         when self.current().kind in {
-            .StringLiteral(file_name) then {
+            .StringLiteral(text) then {
+                specifier = text;
                 self.advance();
-
-                if self.current().kind is .KwAs() then {
-                    return .Error(self.parser_error("file merge syntax no longer supports aliases; declare a module in koral.json instead"));
-                };
-
-                return .Ok(Decl.FileUsingDecl(file_name, self.span_from_start(start)));
-            },
-            _ then {},
-        };
-
-        let mutable path_segments = List[String].new();
-        when self.current().kind in {
-            .KwSelfType() then {
-                return .Error(self.unexpected_token_error_at("Self", "string literal for file merge, or module import like 'std::io { Reader }'", self.current()));
-            },
-            .Identifier(name) then {
-                // Anchor on the identifier itself: it is the segment that cannot
-                // start a module path. Reporting at the token AFTER the advance
-                // (the `.` in `Super.Sibling`) points one token too far right.
-                let name_token = self.current();
-                self.advance();
-                if self.current().kind is not .DoubleColon() and self.current().kind is not .LBrace() then {
-                    return .Error(self.unexpected_token_error_at("Identifier(\(name))", "string literal for file merge, or module import like 'std::io { Reader }'", name_token));
-                };
-                if not self.is_valid_module_segment_name(name) then {
-                    return .Error(self.parser_error_at(self.invalid_module_name_error(name), name_token));
-                };
-                path_segments.push(module_file_name_to_identifier(name));
             },
             _ then {
-                return .Error(self.parser_error("using declaration requires a module path like std::io { Reader }"));
+                return .Error(self.unexpected_token_error_at(
+                    token_kind_description(self.current()),
+                    "a string literal: \"./file.koral\" to merge a file, or \"package[/subpath]\" to import a module",
+                    self.current(),
+                ));
             },
         };
 
-        while self.current().kind is .DoubleColon() then {
-            self.advance();
-            let segment_token = self.current();
-            let segment = self.expect_identifier("module path segment") or return;
-            if not self.is_valid_module_segment_name(segment) then {
-                return .Error(self.parser_error_at(self.invalid_module_name_error(segment), segment_token));
-            };
-            path_segments.push(module_file_name_to_identifier(segment));
+        if self.current().kind is .KwAs() then {
+            // `using "x" as Y;` was "merge this file and rename it". There is
+            // no whole-module alias any more (§3.3: a module name is not a
+            // namespace), so say where an alias does belong.
+            return .Error(self.parser_error_at(
+                "a module is not renamed; alias the names you import: using \"\(specifier)\" { Name as Alias }",
+                specifier_token,
+            ));
         };
 
-        let items = self.parse_module_using_items() or return;
-        return .Ok(Decl.ModuleUsingDecl(path_segments, items, self.span_from_start(start)));
+        let is_file_merge = specifier.starts_with("./") or specifier.starts_with("../");
+
+        let mutable items = Option[List[UsingModuleItem]].None();
+        if self.current().kind is .LBrace() then {
+            let parsed = self.parse_using_import_list(specifier, is_file_merge) or return;
+            items = Option[List[UsingModuleItem]].Some(parsed);
+        };
+
+        if is_file_merge then {
+            if items is .Some(_) then {
+                return .Error(self.parser_error_at("File merge '\(specifier)' takes no import list; it merges the whole file", specifier_token));
+            };
+            if not specifier.ends_with(".koral") then {
+                return .Error(self.parser_error_at("File merge path must end in '.koral'; write '\(specifier).koral'", specifier_token));
+            };
+        } else {
+            self.validate_module_specifier(specifier, specifier_token) or return;
+        };
+
+        return .Ok(Decl.UsingDecl(specifier, items, self.span_from_start(start)));
     };
 
     module_private parse_trait_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
@@ -829,16 +860,18 @@ given Parser {
             if self.is_eof() then {
                 break;
             };
+            let decl_start = self.current();
             let decl = self.parse_top_level_decl() or return;
             // Check that using declarations appear before other declarations.
             let is_using = when decl in {
-                .FileUsingDecl(_, _) then true,
-                .ModuleUsingDecl(_, _, _) then true,
+                .UsingDecl(_, _, _) then true,
                 _ then false,
             };
             if is_using then {
                 if has_non_using_decl then {
-                    return .Error(self.parser_error("Using declarations must appear before other declarations"));
+                    // Blame the `using` keyword, not whatever token happens to
+                    // follow the declaration -- that is the line to move.
+                    return .Error(self.parser_error_at("Using declarations must appear before other declarations", decl_start));
                 };
             } else {
                 has_non_using_decl = true;

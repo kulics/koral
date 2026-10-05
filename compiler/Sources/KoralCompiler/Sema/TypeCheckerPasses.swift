@@ -382,14 +382,34 @@ extension TypeChecker {
       guard let moduleInfo = moduleSymbols[targetKey] else { continue }
       let sourcePackageID = packageID(forSourceFile: sourceFile)
 
-      for (name, type) in moduleInfo.publicTypes {
+      for name in moduleInfo.publicTypes.keys.sorted() {
+        guard let type = moduleInfo.publicTypes[name] else { continue }
         guard canImportType(type, intoPackageID: sourcePackageID) else { continue }
+        try checkImportNameCollision(
+          name: name,
+          bound: nominalTypeId(type),
+          sourceFile: sourceFile,
+          fromModule: edge.target,
+          span: edge.span,
+          isImportAll: true,
+          isType: true
+        )
         if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
           try currentScope.definePrivateType(name, sourceFile: sourceFile, type: type)
         }
       }
-      for (name, symbol) in moduleInfo.publicSymbols {
+      for name in moduleInfo.publicSymbols.keys.sorted() {
+        guard let symbol = moduleInfo.publicSymbols[name] else { continue }
         guard canImportSymbol(symbol, intoPackageID: sourcePackageID) else { continue }
+        try checkImportNameCollision(
+          name: name,
+          bound: symbol.defId,
+          sourceFile: sourceFile,
+          fromModule: edge.target,
+          span: edge.span,
+          isImportAll: true,
+          isType: isTypeSymbol(symbol)
+        )
         try registerImportedSymbol(
           name: name,
           symbol: symbol,
@@ -409,13 +429,32 @@ extension TypeChecker {
       let sourcePackageID = packageID(forSourceFile: sourceFile)
 
       if let importedType = moduleInfo.publicTypes[originalName],
-         canImportType(importedType, intoPackageID: sourcePackageID),
-         currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
-        try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: importedType)
+         canImportType(importedType, intoPackageID: sourcePackageID) {
+        try checkImportNameCollision(
+          name: localName,
+          bound: nominalTypeId(importedType),
+          sourceFile: sourceFile,
+          fromModule: symbolImport.target,
+          span: symbolImport.span,
+          isImportAll: false,
+          isType: true
+        )
+        if currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
+          try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: importedType)
+        }
       }
 
       if let importedSymbol = moduleInfo.publicSymbols[originalName] {
         guard canImportSymbol(importedSymbol, intoPackageID: sourcePackageID) else { continue }
+        try checkImportNameCollision(
+          name: localName,
+          bound: importedSymbol.defId,
+          sourceFile: sourceFile,
+          fromModule: symbolImport.target,
+          span: symbolImport.span,
+          isImportAll: false,
+          isType: isTypeSymbol(importedSymbol)
+        )
         try registerImportedSymbol(
           name: localName,
           symbol: importedSymbol,
@@ -424,6 +463,82 @@ extension TypeChecker {
         )
       }
     }
+  }
+
+  private func isTypeSymbol(_ symbol: Symbol) -> Bool {
+    if case .type = symbol.kind { return true }
+    return false
+  }
+
+  private func nominalTypeId(_ t: Type) -> DefId? {
+    switch t {
+    case .structure(let id), .enum(let id), .opaque(let id): return id
+    default: return nil
+    }
+  }
+
+  /// A name a `using` brings in cannot silently lose to a DIFFERENT
+  /// declaration already under that spelling (§3.3).
+  ///
+  /// Read-only: this reports and then lets the existing registration decide
+  /// what the name means. Wiring the decision into registration is what made
+  /// earlier attempts destabilise -- the rule is about telling the reader,
+  /// not about changing which binding wins.
+  ///
+  /// Two things are NOT a clash:
+  /// - the same declaration arriving again. Several files of one module may
+  ///   each `using "std";` (§3.3.4 scopes a `using` to a file, not to a
+  ///   module), and those are all the same declarations;
+  /// - the unqualified global index, which is last-wins across modules and is
+  ///   not a binding any file can see. Only a declaration in THIS module, or
+  ///   another import in THIS FILE, owns the spelling.
+  private func checkImportNameCollision(
+    name: String,
+    bound: DefId?,
+    sourceFile: String,
+    fromModule: [String],
+    span: SourceSpan,
+    isImportAll: Bool,
+    isType: Bool
+  ) throws {
+    let key = "\(name)@\(sourceFile)"
+
+    if let prior = importedNameBindings[key] {
+      if prior != bound {
+        try reportImportCollision(name: name, fromModule: fromModule, sourceFile: sourceFile, span: span, isImportAll: isImportAll)
+        importedNameBindings[key] = bound
+      }
+      return
+    }
+
+    if let modulePath = nodeSourceInfoMap.values.first(where: {
+      isSameSourceFile($0.sourceFile, sourceFile)
+    })?.modulePath {
+      let declaredHere = isType
+        ? currentScope.lookupDeclaredType(inModule: modulePath, name: name)
+        : currentScope.lookupDeclared(inModule: modulePath, name: name)
+      if declaredHere != nil {
+        try reportImportCollision(name: name, fromModule: fromModule, sourceFile: sourceFile, span: span, isImportAll: isImportAll)
+      }
+    }
+    importedNameBindings[key] = bound
+  }
+
+  private func reportImportCollision(
+    name: String,
+    fromModule: [String],
+    sourceFile: String,
+    span: SourceSpan,
+    isImportAll: Bool
+  ) throws {
+    let modulePath = fromModule.joined(separator: "::")
+    let message: String
+    if isImportAll {
+      message = "Import of '\(name)' from '\(modulePath)' collides with a name already in scope; an import-all cannot be renamed, so use an explicit list"
+    } else {
+      message = "Import of '\(name)' from '\(modulePath)' collides with a name already in scope; rename it with 'as'"
+    }
+    try handleError(SemanticError(.generic(message), fileName: sourceFile, span: span))
   }
 
   private func packageID(forSourceFile sourceFile: String) -> String {

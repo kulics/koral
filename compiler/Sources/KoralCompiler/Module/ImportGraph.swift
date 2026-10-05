@@ -4,11 +4,15 @@ import Foundation
 ///
 /// 用于在可见性检查阶段判断符号是否可以直接访问。
 public struct ImportGraph {
-    /// 导入边：(源模块路径, 目标模块路径, 导入类型)
-    public private(set) var edges: [(source: [String], target: [String], kind: ImportKind, sourceFile: String?)]
-    
-    /// 符号导入：(导入发生的模块路径, 目标模块路径, 符号名称, 导入类型)
-    public private(set) var symbolImports: [(module: [String], target: [String], symbol: String, originalSymbol: String, kind: ImportKind, sourceFile: String?)]
+    /// 导入边：(源模块路径, 目标模块路径, 导入类型, 来源文件, `using` 的位置)
+    ///
+    /// `span` is where the `using` is written. A collision between an imported
+    /// name and something already in scope is reported there -- that is the
+    /// line the reader has to edit (§3.3).
+    public private(set) var edges: [(source: [String], target: [String], kind: ImportKind, sourceFile: String?, span: SourceSpan)]
+
+    /// 符号导入：(导入发生的模块路径, 目标模块路径, 符号名称, 导入类型, 来源文件, `using` 的位置)
+    public private(set) var symbolImports: [(module: [String], target: [String], symbol: String, originalSymbol: String, kind: ImportKind, sourceFile: String?, span: SourceSpan)]
     
     /// 创建空的导入图
     public init() {
@@ -29,8 +33,8 @@ public struct ImportGraph {
     ///   - to: 目标模块路径
     ///   - kind: 导入类型
     ///   - sourceFile: 若为 private using，则限定为该文件可见；nil 表示模块级可见
-    public mutating func addModuleImport(from: [String], to: [String], kind: ImportKind, sourceFile: String? = nil) {
-        edges.append((source: from, target: to, kind: kind, sourceFile: sourceFile))
+    public mutating func addModuleImport(from: [String], to: [String], kind: ImportKind, sourceFile: String? = nil, span: SourceSpan = .unknown) {
+        edges.append((source: from, target: to, kind: kind, sourceFile: sourceFile, span: span))
     }
     
     /// 添加符号导入（using module::path { Symbol }）
@@ -47,7 +51,8 @@ public struct ImportGraph {
         symbol: String,
         originalSymbol: String? = nil,
         kind: ImportKind,
-        sourceFile: String? = nil
+        sourceFile: String? = nil,
+        span: SourceSpan = .unknown
     ) {
         symbolImports.append((
             module: module,
@@ -55,7 +60,8 @@ public struct ImportGraph {
             symbol: symbol,
             originalSymbol: originalSymbol ?? symbol,
             kind: kind,
-            sourceFile: sourceFile
+            sourceFile: sourceFile,
+            span: span
         ))
     }
 

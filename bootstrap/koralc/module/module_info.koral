@@ -1,7 +1,7 @@
 // Module system data structures.
 // Mirrors compiler/Sources/KoralCompiler/Module/ModuleResolver.swift
 
-using std::os { .. };
+using "std/os";
 
 // ── ImportKind ────────────────────────────────────────────────────────────────
 
@@ -14,11 +14,15 @@ public type ImportKind {
 
 // ── ImportEdge ────────────────────────────────────────────────────────────────
 
+/// `span` is where the `using` is written. A collision between an imported
+/// name and something already in scope is reported there -- that is the line
+/// the reader has to edit (§3.3).
 public type ImportEdge(
     source List[String],
     target List[String],
     kind ImportKind,
     source_file Option[String],
+    span SourceSpan,
 );
 
 public type SymbolImportEdge(
@@ -28,6 +32,7 @@ public type SymbolImportEdge(
     original_symbol String,
     kind ImportKind,
     source_file Option[String],
+    span SourceSpan,
 );
 
 // ── ImportGraph ───────────────────────────────────────────────────────────────
@@ -50,8 +55,8 @@ given ImportGraph {
         );
     };
 
-    public add_module_import(self, from List[String], to List[String], kind ImportKind, source_file Option[String]) Void = {
-        self.edges.push(ImportEdge(from, to, kind, source_file));
+    public add_module_import(self, from List[String], to List[String], kind ImportKind, source_file Option[String], span SourceSpan) Void = {
+        self.edges.push(ImportEdge(from, to, kind, source_file, span));
     };
 
     public add_symbol_import(
@@ -62,8 +67,9 @@ given ImportGraph {
         kind ImportKind,
         source_file Option[String],
         original_symbol Option[String],
+        span SourceSpan,
     ) Void = {
-        let edge = SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file);
+        let edge = SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file, span);
         self.symbol_imports.push(edge);
         self.index_symbol_import(edge);
     };
@@ -167,6 +173,12 @@ module_private type mutable ModuleInfoStorage(
     path List[String],
     entry_file String,
     is_external Bool,
+    // Root-view full name (`std/io`, `game_utils`) -- the key the module is
+    // known by, and the sort key for emitting nodes. Load order is `using`
+    // discovery order; the symbol tables must not depend on it.
+    full_name String,
+    // "std:std" / "root:x" / "dependency:key", set from the owning package.
+    package_id String,
     mutable merged_submodules List[String],
     mutable global_nodes List[LoadedNode],
 );
@@ -174,11 +186,22 @@ module_private type mutable ModuleInfoStorage(
 public type mutable ModuleInfo(module_private mutable storage ModuleInfoStorage);
 
 given ModuleInfo {
-    public new(path List[String], entry_file String, is_external Bool) ModuleInfo = {
+    public new(path List[String], entry_file String, is_external Bool) ModuleInfo =
+        ModuleInfo.named(path, entry_file, is_external, join_path(path, "."), "");
+
+    public named(
+        path List[String],
+        entry_file String,
+        is_external Bool,
+        full_name String,
+        package_id String,
+    ) ModuleInfo = {
         let s = ModuleInfoStorage(
             path,
             entry_file,
             is_external,
+            full_name,
+            package_id,
             [],
             [],
         );
@@ -188,6 +211,8 @@ given ModuleInfo {
     public path(self) List[String] = self.storage.path;
     public entry_file(self) String = self.storage.entry_file;
     public is_external(self) Bool = self.storage.is_external;
+    public full_name(self) String = self.storage.full_name;
+    public package_id(self) String = self.storage.package_id;
     public merged_submodules(self) List[String] = self.storage.merged_submodules;
     public global_nodes(self) List[LoadedNode] = self.storage.global_nodes;
 
@@ -220,7 +245,7 @@ given ModuleInfo {
     };
 
     public add_node(self, decl Decl, source_file String) Void = {
-        self.storage.global_nodes.push(LoadedNode(decl, source_file, ""));
+        self.storage.global_nodes.push(LoadedNode(decl, source_file, self.storage.package_id));
     };
 };
 
@@ -248,11 +273,26 @@ given CompilationUnit {
         return CompilationUnit(s);
     };
 
+    /// A unit with no modules in it yet. Used when modules are loaded by
+    /// manifest spec rather than from a single entry file -- the first module
+    /// loaded is not privileged, so there is no root to pre-install.
+    public empty() CompilationUnit = {
+        let placeholder = ModuleInfo.new(List[String].new(), "", false);
+        let s = CompilationUnitStorage(
+            placeholder,
+            List[String].new(),
+            List[ModuleInfo].new(),
+            ImportGraph.new(),
+            Dict[String, String].new()
+        );
+        return CompilationUnit(s);
+    };
+
     public root_module(self) ModuleInfo = self.storage.root_module;
     public import_graph(self) ImportGraph = self.storage.import_graph;
 
-    public add_import_edge(self, from List[String], to List[String], kind ImportKind, source_file Option[String]) Void = {
-        self.storage.import_graph.add_module_import(from, to, kind, source_file);
+    public add_import_edge(self, from List[String], to List[String], kind ImportKind, source_file Option[String], span SourceSpan) Void = {
+        self.storage.import_graph.add_module_import(from, to, kind, source_file, span);
     };
 
     public add_symbol_import_edge(
@@ -263,8 +303,9 @@ given CompilationUnit {
         kind ImportKind,
         source_file Option[String],
         original_symbol Option[String],
+        span SourceSpan,
     ) Void = {
-        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file, original_symbol);
+        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file, original_symbol, span);
     };
 
     // 合并另一个编译单元的导入图（用于标准库合并）
@@ -284,13 +325,32 @@ given CompilationUnit {
         return self.storage.parsed_defaults;
     };
 
+    /// Insert a module keeping `loaded_modules` in MODULE-PATH order.
+    ///
+    /// Modules are discovered in `using` order, and which `using` is seen first
+    /// must not leak into the symbol tables. Keeping the collection ordered by
+    /// construction makes every later emission deterministic without a sort.
+    /// (A `sort_by` here would be the obvious spelling, but instantiating
+    /// `List.sort_by` for a mutable newtype wrapper overflows the compiler's
+    /// stack -- see docs/module-design-implementation.md.)
     public add_module(self, module ModuleInfo) Void = {
         let key = module.path_string();
         for p in self.storage.loaded_module_paths then {
             if p == key then { return;};
         };
-        self.storage.loaded_module_paths.push(key);
-        self.storage.loaded_modules.push(module);
+
+        let mutable insert_at = self.storage.loaded_modules.count();
+        let mutable i UInt = 0;
+        while i < self.storage.loaded_modules.count() then {
+            if self.storage.loaded_modules[i].path_string() > module.path_string() then {
+                insert_at = i;
+                break;
+            };
+            i += 1;
+        };
+
+        self.storage.loaded_module_paths.insert_at(insert_at, key);
+        self.storage.loaded_modules.insert_at(insert_at, module);
     };
 
     public has_module(self, path_string String) Bool = {
@@ -334,6 +394,14 @@ given CompilationUnit {
         };
         return result;
     };
+
+    /// Same, but emitted in FULL-NAME order.
+    ///
+    /// Modules get loaded in `using` discovery order, and which `using` is seen
+    /// first is not something a symbol table may depend on. Both compilers emit
+    /// by full name so the same program always yields the same tables.
+    public collect_all_nodes_with_path_sorted(self) List[Pair[LoadedNode, List[String]]] =
+        self.collect_all_nodes_with_path();
 
     public collect_nodes_with_path_for_module(self, path_string String) List[Pair[LoadedNode, List[String]]] = {
         let mutable result = List[Pair[LoadedNode, List[String]]].new();

@@ -283,12 +283,32 @@ public type Decl {
     TypeAliasDecl(access AccessModifier, name String, target TypeNode, span SourceSpan, name_span SourceSpan),
     IntrinsicTypeDecl(access AccessModifier, name String, type_params List[TypeParameter], span SourceSpan, name_span SourceSpan),
     ForeignTypeDecl(access AccessModifier, name String, cname Option[String], fields Option[List[Field]], span SourceSpan, name_span SourceSpan),
-    FileUsingDecl(file_name String, span SourceSpan),
-    ModuleUsingDecl(path_segments List[String], items List[UsingModuleItem], span SourceSpan),
+    UsingDecl(specifier String, items Option[List[UsingModuleItem]], span SourceSpan),
     TraitDecl(access AccessModifier, name String, type_params List[TypeParameter], parents List[TypeNode], members List[TraitMember], span SourceSpan, name_span SourceSpan),
     GivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
     GivenTraitDecl(target_type TypeNode, type_params List[TypeParameter], trait_type TypeNode, members List[GivenMember], span SourceSpan),
     IntrinsicGivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
+};
+
+/// The name a declaration binds, when it binds one at all.
+///
+/// `given` blocks and `using` bind nothing under their own name.
+public let decl_name(decl Decl) Option[String] = when decl in {
+    .LetDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    .FunctionDecl(_, name, _, _, _, _, _, _) then Option[String].Some(name),
+    .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    .ForeignFunctionDecl(_, name, _, _, _, _) then Option[String].Some(name),
+    .ForeignLetDecl(_, name, _, _, _, _) then Option[String].Some(name),
+    .TypeStructDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    .TypeEnumDecl(_, name, _, _, _, _) then Option[String].Some(name),
+    .TypeAliasDecl(_, name, _, _, _) then Option[String].Some(name),
+    .IntrinsicTypeDecl(_, name, _, _, _) then Option[String].Some(name),
+    .ForeignTypeDecl(_, name, _, _, _, _) then Option[String].Some(name),
+    .TraitDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    .UsingDecl(_, _, _) then Option[String].None(),
+    .GivenDecl(_, _, _, _) then Option[String].None(),
+    .GivenTraitDecl(_, _, _, _, _) then Option[String].None(),
+    .IntrinsicGivenDecl(_, _, _, _) then Option[String].None(),
 };
 
 /// Where a declaration's name is written -- see `Decl`.
@@ -304,8 +324,7 @@ public let decl_name_span(decl Decl) SourceSpan = {
         .TypeAliasDecl(_, _, _, _, name_span) then name_span,
         .IntrinsicTypeDecl(_, _, _, _, name_span) then name_span,
         .ForeignTypeDecl(_, _, _, _, _, name_span) then name_span,
-        .FileUsingDecl(_, span) then span,
-        .ModuleUsingDecl(_, _, span) then span,
+        .UsingDecl(_, _, span) then span,
         .TraitDecl(_, _, _, _, _, _, name_span) then name_span,
         .GivenDecl(_, _, _, span) then span,
         .GivenTraitDecl(_, _, _, _, span) then span,
@@ -313,14 +332,35 @@ public let decl_name_span(decl Decl) SourceSpan = {
     };
 };
 
-public type UsingModuleItemKind {
-    Symbol(),
-    AllPublic(),
+/// The access level a declaration is written with, when it binds a name.
+///
+/// Pairs with `decl_name`: `given` blocks and `using` bind nothing and so have
+/// no level. This is what an `import` consults to decide whether a name can be
+/// brought into another file at all (§3.3).
+public let decl_access(decl Decl) Option[AccessModifier] = when decl in {
+    .LetDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .FunctionDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .IntrinsicFunctionDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .ForeignFunctionDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .ForeignLetDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .TypeStructDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .TypeEnumDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .TypeAliasDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
+    .IntrinsicTypeDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
+    .ForeignTypeDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .TraitDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .UsingDecl(_, _, _) then Option[AccessModifier].None(),
+    .GivenDecl(_, _, _, _) then Option[AccessModifier].None(),
+    .GivenTraitDecl(_, _, _, _, _) then Option[AccessModifier].None(),
+    .IntrinsicGivenDecl(_, _, _, _) then Option[AccessModifier].None(),
 };
 
+/// One item of a `using` import list: `Name`, or `Name as Alias`.
+///
+/// There is no "everything" item -- `{ }` omitted already means that (§3), so
+/// `{ * }` / `{ .. }` have nothing to be a spelling of.
 public type UsingModuleItem(
-    kind UsingModuleItemKind,
-    name Option[String],
+    name String,
     alias Option[String],
 );
 

@@ -1134,152 +1134,168 @@ extension Parser {
   func isUsingDeclaration() -> Bool {
     currentToken === .usingKeyword
   }
-  
-  /// Parse using declaration
+
+  /// Parse `using "<specifier>" ("{" items "}")?;`
+  ///
+  /// One form (§3). The specifier is a string; what it means is decided by its
+  /// shape: `./` or `../` is a file to merge, anything else is a module's full
+  /// name, `package[/subpath]`. The parser settles that here because every
+  /// rule about the specifier is a rule about its spelling.
   func parseUsingDeclaration() throws -> UsingDeclaration {
     let startSpan = currentSpan
     try match(.usingKeyword)
-    
-    // Check if next token is a string literal → file-based using
-    if case .string(let fileName) = currentToken {
-      try match(currentToken)
 
-      if currentToken === .asKeyword {
+    guard case .string(let specifier) = currentToken else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "a string literal: \"./file.koral\" to merge a file, or \"package[/subpath]\" to import a module"
+      )
+    }
+    let specifierSpan = currentSpan
+    try match(currentToken)
+
+    if currentToken === .asKeyword {
+      // `using "x" as Y;` was "merge this file and rename it". There is no
+      // whole-module alias any more (§3.3: a module name is not a namespace),
+      // so say where an alias does belong rather than just "unexpected as".
+      throw ParserError.rejectedConstruct(
+        span: specifierSpan,
+        message: "a module is not renamed; alias the names you import: using \"\(specifier)\" { Name as Alias }"
+      )
+    }
+
+    let isFileMerge = specifier.hasPrefix("./") || specifier.hasPrefix("../")
+
+    var items: [UsingModuleItem]? = nil
+    if currentToken === .leftBrace {
+      let parsed = try parseUsingImportList(isFileMerge: isFileMerge, specifier: specifier)
+      items = parsed
+    }
+
+    if isFileMerge {
+      if items != nil {
         throw ParserError.rejectedConstruct(
-          span: currentSpan,
-          message: "file merge syntax no longer supports aliases; declare a module in koral.json instead"
+          span: specifierSpan,
+          message: "File merge '\(specifier)' takes no import list; it merges the whole file"
         )
       }
+      if !specifier.hasSuffix(".koral") {
+        throw ParserError.rejectedConstruct(
+          span: specifierSpan,
+          message: "File merge path must end in '.koral'; write '\(specifier).koral'"
+        )
+      }
+    } else {
+      try validateModuleSpecifier(specifier, span: specifierSpan)
+    }
 
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return UsingDeclaration(
-        kind: .fileMerge(path: fileName),
-        span: span
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return UsingDeclaration(specifier: specifier, items: items, span: span)
+  }
+
+  /// A module's full name is `package[/subpath]`, lowercase identifier
+  /// segments (§2.1). `.` is not a spelling of anything in source -- it is
+  /// only how a manifest names a package's main module (§5.2).
+  private func validateModuleSpecifier(_ specifier: String, span: SourceSpan) throws {
+    if specifier == "." {
+      throw ParserError.rejectedConstruct(
+        span: span,
+        message: "write the package name itself for its main module; \".\" is only manifest notation"
       )
     }
-
-    if case .identifier = currentToken, isModuleUsingDeclarationStart() {
-      let (modulePath, moduleItems) = try parseExplicitModuleUsing()
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return UsingDeclaration(
-        kind: .moduleImport(pathSegments: modulePath, items: moduleItems),
-        span: span
-      )
-    }
-
-    throw ParserError.unexpectedToken(
-      span: currentSpan,
-      got: currentToken.description,
-      expected: "string literal for file merge, or module import like 'std::io { Reader }'"
-    )
-  }
-
-  private func parseUsingAliasIfPresent() throws -> String? {
-    guard currentToken === .asKeyword else {
-      return nil
-    }
-    try match(.asKeyword)
-    guard case .identifier(let alias) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "using alias")
-    }
-    try match(currentToken)
-    return alias
-  }
-
-  private func isModuleUsingDeclarationStart() -> Bool {
-    let state = lexer.saveState()
-    let savedToken = currentToken
-    defer {
-      lexer.restoreState(state)
-      currentToken = savedToken
-    }
-
-    guard case .identifier = currentToken else {
-      return false
-    }
-
-    do {
-      let nextToken = try lexer.getNextToken()
-      return nextToken === .doubleColon || nextToken === .leftBrace
-    } catch {
-      return false
-    }
-  }
-
-  private func parseExplicitModuleUsing() throws -> ([String], [UsingModuleItem]) {
-    var pathSegments: [String] = []
-
-    guard case .identifier(let firstSegment) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "module path segment")
-    }
-    if !isValidModuleName(firstSegment) {
-      throw ParserError.invalidModuleName(span: currentSpan, name: firstSegment)
-    }
-    pathSegments.append(moduleFileNameToIdentifier(firstSegment))
-    try match(currentToken)
-
-    while currentToken === .doubleColon {
-      try match(.doubleColon)
-      guard case .identifier(let segment) = currentToken else {
-        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "module path segment")
+    // `split` drops empty segments, so `a//b` would look like `a/b`. Ask for
+    // the parts without losing them (§7.5 lists empty segments explicitly).
+    var segments: [String] = []
+    var current = ""
+    for ch in specifier {
+      if ch == "/" {
+        segments.append(current)
+        current = ""
+      } else {
+        current.append(ch)
       }
-      if !isValidModuleName(segment) {
-        throw ParserError.invalidModuleName(span: currentSpan, name: segment)
-      }
-      pathSegments.append(moduleFileNameToIdentifier(segment))
-      try match(currentToken)
     }
+    segments.append(current)
+    guard !segments.isEmpty else {
+      throw ParserError.rejectedConstruct(span: span, message: "module name must be 'package[/subpath]'")
+    }
+    for segment in segments {
+      guard let first = segment.first, first.isASCII, first.isLowercase else {
+        throw ParserError.rejectedConstruct(
+          span: span,
+          message: "module name must be 'package[/subpath]' with lowercase identifier segments"
+        )
+      }
+      for ch in segment {
+        guard ch.isASCII else {
+          throw ParserError.rejectedConstruct(
+            span: span,
+            message: "module name must be 'package[/subpath]' with lowercase identifier segments"
+          )
+        }
+        if ch.isLowercase || ch.isNumber || ch == "_" { continue }
+        throw ParserError.rejectedConstruct(
+          span: span,
+          message: "module name must be 'package[/subpath]' with lowercase identifier segments"
+        )
+      }
+    }
+  }
 
+  /// `{ Name, Other as Alias }` -- the filter on an import (§3.3).
+  /// Omitting the braces means "everything"; writing them empty means nothing,
+  /// which is not a thing to ask for (§7.4).
+  private func parseUsingImportList(isFileMerge: Bool, specifier: String) throws -> [UsingModuleItem] {
+    let braceSpan = currentSpan
     try match(.leftBrace)
     var items: [UsingModuleItem] = []
-    var sawAllPublic = false
 
     while currentToken !== .rightBrace {
       if currentToken === .range {
-        if !items.isEmpty {
-          throw ParserError.unexpectedToken(
-            span: currentSpan,
-            got: currentToken.description,
-            expected: "'..' must be the only item in a module import list"
-          )
-        }
-        try match(.range)
-        items.append(UsingModuleItem(kind: .allPublic))
-        sawAllPublic = true
-      } else {
-        guard case .identifier(let symbolName) = currentToken else {
-          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "import item")
+        // `{ .. }` used to mean "everything". Omitting the list means that now
+        // (§3), so `..` is not a name anyone could import -- point at it and
+        // say what replaces it (§8).
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "\"..\" is not an import item; omit the list to import every visible member of \"\(specifier)\""
+        )
+      }
+      guard case .identifier(let symbolName) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "import item")
+      }
+      let nameSpan = currentSpan
+      try match(currentToken)
+
+      var alias: String? = nil
+      if currentToken === .asKeyword {
+        try match(.asKeyword)
+        guard case .identifier(let aliasName) = currentToken else {
+          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "using alias")
         }
         try match(currentToken)
-        let alias = try parseUsingAliasIfPresent()
-        if let alias {
-          if isValidTypeName(symbolName) && !isValidTypeName(alias) {
-            throw ParserError.invalidUsingAliasCase(
-              span: currentSpan,
-              alias: alias,
-              referenced: symbolName,
-              expectedUppercase: true
-            )
-          }
-          if isValidVariableName(symbolName) && !isValidVariableName(alias) {
-            throw ParserError.invalidUsingAliasCase(
-              span: currentSpan,
-              alias: alias,
-              referenced: symbolName,
-              expectedUppercase: false
-            )
-          }
-        }
-        items.append(UsingModuleItem(kind: .symbol, name: symbolName, alias: alias))
-      }
-
-      if currentToken === .comma {
-        if sawAllPublic {
-          throw ParserError.rejectedConstruct(
-            span: currentSpan,
-            message: "'..' must not be combined with other imports"
+        if isValidTypeName(symbolName) && !isValidTypeName(aliasName) {
+          throw ParserError.invalidUsingAliasCase(
+            span: nameSpan,
+            alias: aliasName,
+            referenced: symbolName,
+            expectedUppercase: true
           )
         }
+        if isValidVariableName(symbolName) && !isValidVariableName(aliasName) {
+          throw ParserError.invalidUsingAliasCase(
+            span: nameSpan,
+            alias: aliasName,
+            referenced: symbolName,
+            expectedUppercase: false
+          )
+        }
+        alias = aliasName
+      }
+
+      items.append(UsingModuleItem(name: symbolName, alias: alias))
+
+      if currentToken === .comma {
         try match(.comma)
       } else {
         break
@@ -1288,12 +1304,18 @@ extension Parser {
 
     try match(.rightBrace)
     if items.isEmpty {
+      if isFileMerge {
+        throw ParserError.rejectedConstruct(
+          span: braceSpan,
+          message: "File merge '\(specifier)' takes no import list; it merges the whole file"
+        )
+      }
       throw ParserError.rejectedConstruct(
-        span: currentSpan,
-        message: "using declaration requires at least one import item"
+        span: braceSpan,
+        message: "import list cannot be empty; omit it to import every visible member of \"\(specifier)\""
       )
     }
-    return (pathSegments, items)
+    return items
   }
 
 }

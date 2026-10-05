@@ -991,7 +991,7 @@ public class DefIdMap {
     ///   1. the module's own declaration (its qualified key),
     ///   2. a symbol import (`using m { Box }`, or `using m { Box as B }` -- in
     ///      which case `spelling` is the alias and the edge names the original),
-    ///   3. a batch/module import (`using m { .. }`, `using m;`) bringing the
+    ///   3. a batch/module import (`using "m";`) bringing the
     ///      same spelling in from the imported module.
     ///
     /// The unqualified global index is NOT consulted here. It is last-wins

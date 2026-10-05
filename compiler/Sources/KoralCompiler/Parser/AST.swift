@@ -15,51 +15,42 @@ extension AccessModifier: CustomStringConvertible {
 
 // MARK: - Module System Types
 
-public enum UsingModuleItemKind {
-  case symbol
-  case allPublic
-}
-
+/// One item of a `using` import list: `Name`, or `Name as Alias`.
+///
+/// There is no "everything" item -- `{ }` omitted already means that (§3), so
+/// `{ * }` / `{ .. }` have nothing to be a spelling of.
 public struct UsingModuleItem {
-  public let kind: UsingModuleItemKind
-  public let name: String?
+  public let name: String
   public let alias: String?
 
-  public init(kind: UsingModuleItemKind, name: String? = nil, alias: String? = nil) {
-    self.kind = kind
+  public init(name: String, alias: String? = nil) {
     self.name = name
     self.alias = alias
   }
 }
 
-public enum UsingDeclarationKind {
-  case fileMerge(path: String)
-  case moduleImport(pathSegments: [String], items: [UsingModuleItem])
-}
-
-/// Using 声明 AST 节点
+/// `using "<specifier>" ("{" items "}")?;`
+///
+/// There is exactly one form. The specifier is a string, and what it means is
+/// decided by its SHAPE (§3.1): `./` or `../` makes it a file to merge in,
+/// anything else is the full name of a module, `package[/subpath]`.
+///
+/// `items == nil` means `{ }` was omitted -- "every visible member" (§3).
+/// A present-but-empty list is an error (§7.4) and never survives parsing.
 public struct UsingDeclaration {
-  public let kind: UsingDeclarationKind
+  public let specifier: String
+  public let items: [UsingModuleItem]?
   public let span: SourceSpan
 
-  public init(kind: UsingDeclarationKind, span: SourceSpan) {
-    self.kind = kind
+  public init(specifier: String, items: [UsingModuleItem]?, span: SourceSpan) {
+    self.specifier = specifier
+    self.items = items
     self.span = span
   }
 
-  public var filePath: String? {
-    guard case .fileMerge(let path) = kind else { return nil }
-    return path
-  }
-
-  public var modulePathSegments: [String] {
-    guard case .moduleImport(let pathSegments, _) = kind else { return [] }
-    return pathSegments
-  }
-
-  public var moduleItems: [UsingModuleItem] {
-    guard case .moduleImport(_, let items) = kind else { return [] }
-    return items
+  /// A specifier that names a file to merge, rather than a module (§3.1).
+  public var isFileMerge: Bool {
+    specifier.hasPrefix("./") || specifier.hasPrefix("../")
   }
 }
 

@@ -5107,7 +5107,7 @@ extension TypeChecker {
   func inferMemberPathExpression(baseExpr: ExpressionNode, path: [String]) throws -> TypedExpressionNode {
     if isModulePrefixedMemberPath(baseExpr: baseExpr, path: path) {
       throw SemanticError(
-        .generic("Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"),
+        .generic("Module-prefixed access is not supported; import the symbol explicitly with using \"package/subpath\" { Symbol }"),
         span: currentSpan
       )
     }
@@ -5848,7 +5848,7 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     if typeName.contains(".") {
       throw SemanticError(
-        .generic("Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"),
+        .generic("Module-prefixed access is not supported; import the symbol explicitly with using \"package/subpath\" { Symbol }"),
         span: currentSpan
       )
     }

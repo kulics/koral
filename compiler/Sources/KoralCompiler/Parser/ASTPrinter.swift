@@ -5,25 +5,15 @@ public func printAST(_ node: ASTNode) {
   func printGlobalNode(_ node: GlobalNode) {
     switch node {
     case .usingDeclaration(let decl):
-      switch decl.kind {
-      case .fileMerge(let path):
-        print("\(indent)UsingDeclaration: file \"\(path)\"")
-      case .moduleImport(let pathSegments, let items):
-        let pathStr = pathSegments.joined(separator: "::")
-        let itemStr = items.map { item in
-          switch item.kind {
-          case .allPublic:
-            return ".."
-          case .symbol:
-            let name = item.name ?? ""
-            if let alias = item.alias {
-              return "\(name) as \(alias)"
-            }
-            return name
-          }
+      let list: String
+      if let items = decl.items {
+        list = items.map { item in
+          item.alias.map { "\(item.name) as \($0)" } ?? item.name
         }.joined(separator: ", ")
-        print("\(indent)UsingDeclaration: \(pathStr) { \(itemStr) }")
+      } else {
+        list = "*"
       }
+      print("\(indent)UsingDeclaration: \(decl.specifier) { \(list) }")
 
     case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _, _):
       print("\(indent)GlobalVariableDeclaration:")

@@ -282,6 +282,18 @@ public class UnifiedScope {
   /// last, so a same-named `public let` in another module would shadow the
   /// local one. Looking the qualified key up first is what makes `alpha`'s
   /// `dup` resolve to `alpha`'s `dup` while checking `alpha`.
+  /// The declaration `module_path` itself makes for `name`, if any.
+  ///
+  /// Distinct from `lookup`: the unqualified index is last-wins across modules,
+  /// so it cannot answer "does THIS module declare this name?" -- which is the
+  /// question a `using` has to ask before it claims the spelling (§3.3).
+  public func lookupDeclared(inModule modulePath: [String], name: String) -> DefId? {
+    guard let map = defIdMap, !modulePath.isEmpty else {
+      return nil
+    }
+    return names[map.symbolKey(modulePath: modulePath, name: name)]
+  }
+
   private func bindingInCurrentModule(_ name: String) -> DefId? {
     guard let map = defIdMap, !map.currentModulePath.isEmpty else {
       return nil
@@ -336,7 +348,7 @@ public class UnifiedScope {
       edgeSourceFile == nil || edgeSourceFile == sourceFile
     }
     // A symbol import binds the spelling used HERE to the name used THERE:
-    // `using m { x }` both are `x`; `using m { x as y }` spells `y`, declares `x`.
+    // `using "m" { x }` both are `x`; `using "m" { x as y }` spells `y`, declares `x`.
     if let (target, original) = graph.resolveAliasedSymbol(
       alias: name,
       inModule: map.currentModulePath,
@@ -344,7 +356,7 @@ public class UnifiedScope {
     ), let defId = names[map.symbolKey(modulePath: target, name: original)] {
       return defId
     }
-    // A batch/module import (`using m { .. }`, `using m;`) creates no symbol
+    // A batch/module import (`using "m";`) creates no symbol
     // edge, so the spelling is the same in the imported module.
     for edge in graph.edges where edge.source == map.currentModulePath && visible(edgeSourceFile: edge.sourceFile) {
       if let defId = names[map.symbolKey(modulePath: edge.target, name: name)] {
@@ -531,6 +543,17 @@ public class UnifiedScope {
     if !modulePath.isEmpty {
       typeNames[typeKey(name, modulePath: modulePath)] = defId
     }
+  }
+
+  /// The type `module_path` itself declares under `name`, if any.
+  ///
+  /// The type table has its own module-qualified key (see `defineScopedType`),
+  /// so this is the type-side twin of `lookupDeclared`.
+  public func lookupDeclaredType(inModule modulePath: [String], name: String) -> DefId? {
+    guard !modulePath.isEmpty else {
+      return nil
+    }
+    return typeNames[typeKey(name, modulePath: modulePath)]
   }
 
   private func typeInCurrentModule(_ name: String) -> DefId? {
