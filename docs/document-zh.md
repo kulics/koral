@@ -72,26 +72,26 @@ c.value = 5;      // ok: Counter 是 `type mutable` 且 `value` 是 mutable 字�
     ```
 2.  **构建 manifest 声明的目标模块**：
     ```bash
-    koralc build --package-config koral.json --target-module app::main;
+    koralc build --package-config koral.json --target-module app;
     ```
 3.  **仅做类型检查**：
     ```bash
-    koralc check --package-config koral.json --target-module app::main;
+    koralc check --package-config koral.json --target-module app;
     ```
 4.  **编译并运行**：用 `run` 一步完成编译与执行。
     ```bash
-    koralc run --package-config koral.json --target-module app::main;
+    koralc run --package-config koral.json --target-module app;
     ```
 5.  **仅生成 C**：用 `emit-c` 生成 C 源码。
     ```bash
-    koralc emit-c --package-config koral.json --target-module app::main -o out;
+    koralc emit-c --package-config koral.json --target-module app -o out;
     ```
 
 常用选项：
 
 - `-o, --output <dir>`：输出目录
 - `--package-config <path>`：从包 manifest 构建
-- `--target-module <name>`：选择 manifest 中的目标模块
+- `--target-module <全名>`：选择目标模块（`包名[/子路径]`）；缺省是主模块
 - `--requires-root <path>`：manifest 构建的依赖根目录
 - `--std-config <path>`：显式指定 std 的 manifest 路径
 - `--no-std`：不加载 `std/koral.json` 声明的模块
@@ -2190,65 +2190,114 @@ let p = Point.origin();
 
 ### 模块与可见性
 
-Koral 提供强大的模块系统，用于跨多个文件和目录组织代码。
+Koral 提供两层组织单位，用来把代码分到多个文件和目录里：
 
-#### 模块概念
+| 概念 | 是什么 | 稳定身份 | 例子 |
+| --- | --- | --- | --- |
+| **package** | 外部可使用单元：一份 `koral.json`、一个版本、一组依赖 | `source` | `httpr`、`std` |
+| **module** | 包内的构建单元：一个入口文件 + 若干合并文件 | `(source, 子路径)` | `httpr/conn`、`std/io` |
 
-Koral 中的**模块**是声明在 `koral.json`（标准库则是 `std/koral.json`）中的显式构建单元。模块由入口文件，加上经 `using "path"` 合并进来的所有文件组成。
+**模块全名 = `包名[/子路径]`**，源码里一律写全名。主模块是子路径为空的那个，
+它的全名就是包名本身。主模块不是「根」——它与子模块平级，没有 re-export 语义。
 
-- **目标模块**：由 `--target-module` 选定的模块
-- **同级模块**：同一包内由 manifest 声明的另一个模块
-- **外部模块**：来自 std 或其他包依赖的模块
-- 顶层 manifest 的 `entry`：默认目标模块名，例如 `app::main`
+#### manifest
 
-入口文件名约束：
+一份 `koral.json` 四个字段：
 
-- 模块入口文件名（不含扩展名）必须以小写字母开头。
-- 其余字符只能是小写字母、数字或 `_`。
-- 源码层模块名来自 manifest，使用 `::` 分隔（例如 `app::models`、`std::io`）。
+```json
+{
+  "package": "httpr",
+  "version": "0.4.1",
+  "modules": {
+    ".":    { "entry": "client.koral",    "links": [] },
+    "conn": { "entry": "conn/conn.koral", "links": [] }
+  },
+  "dependencies": {
+    "slug": { "source": "path:../slug", "version": "^1.2" }
+  }
+}
+```
+
+- **`package`**：本包的源码名——自引用前缀，也是消费方的默认名。**它不是身份**，身份是 `source`。
+- **`version`**：版本。
+- **`modules`**：**包内名** → `{ entry, links }`。主模块的 key 是 `"."`，子模块写子路径（`"conn"`、`"compiler/parser"`）。
+  `entry` 是相对包根的入口文件。
+- **`dependencies`**：**源码名** → `{ source, version }`。`source` 是获取位置也是身份，不含 ref；
+  `version` 是 semver 约束。改名就是换 key，没有额外字段。
+
+没有顶层 `entry`（默认构建目标 = 主模块）、没有 `name`（与 `package` 重复）、
+没有 `requires`（模块图从 `using` 派生）、没有 `module_aliases`（改名即换 key）。
 
 #### Using 声明
 
-`using` 关键字用于文件合并和显式符号导入。所有 `using` 声明必须出现在文件开头，在任何其他声明之前。
+`using` 只有一种写法，specifier 是字符串；含义由它的**形状**决定：
+
+| specifier | 类别 |
+| --- | --- |
+| 以 `./` 或 `../` 开头 | **文件合并** |
+| 其它 | **模块导入** |
+
+所有 `using` 必须位于文件顶部，在任何其它顶层声明之前。同一模块在同一文件内只 `using` 一次。
 
 ##### 文件合并
 
-用字符串语法把另一个文件合并进当前模块作用域：
-
 ```koral
-using "utils";        // 把 utils.koral 合并进当前模块
-using "./helpers";    // 允许相对路径
-using "../shared/format";
+using "./helpers.koral";
+using "../shared/format.koral";
 ```
 
-文件合并规则：
+把目标文件的**顶层定义并入当前模块**。不是外部单元依赖、不是包导入、不是别名机制。
 
-1. 路径相对于当前文件所在目录解析。
-2. 字符串命名不带 `.koral` 后缀的源文件。
-3. 允许 `.`、`..` 这类相对片段。
-4. 文件合并不创建命名空间、别名或导出面。
-5. 合并进来的文件共享同一模块作用域，因此 `module_private` 声明在该模块的各文件间可见。
+1. 必须以 `./` 或 `../` 开头，且以 `.koral` 结尾；
+2. 按当前文件所在目录解析，允许中间出现 `.` / `..`；
+3. 不创建新的模块标识，不参与包 / 模块解析；
+4. 不允许与 `{ ... }` 连用（合并就是全部，无从挑选）；
+5. 合并进来的文件共享同一模块作用域，`module_private` 在该模块各文件间可见。
 
-##### 模块符号导入
-
-用显式花括号从其他模块导入可见符号：
+##### 模块导入
 
 ```koral
-using std::io { Reader };
-using std::json { parse, Value };
-using std::io { Reader as IoReader, Writer };
-using std::io { .. };
+using "std/io";                        // 全部可见成员
+using "std/io" { Reader, Writer };     // 只带一部分
+using "std/io" { Reader as IoReader }; // 逐项别名
 ```
 
-说明：
+1. `{ ... }` 省略即「全部可见成员」；出现则不能为空（`{ .. }` / `{ * }` 不再是写法）；
+2. 列表项是 `符号名` 或 `符号名 as 新名`，允许尾逗号；
+3. `as` 作用于每个被导入符号，不是模块——模块名不绑定为命名空间，
+   导入 `Reader` 后写 `Reader`，不写 `io.Reader`；
+4. 被导入的名字是文件局部绑定，不自动再导出；
+5. 同名冲突报错，用 `as` 消歧；import-all 与本模块定义重名时只能改成显式列表。
 
-1. `using module { symbol-list }` 导入对导入文件可见的符号：来自任意包的 `public`，以及导入方同包时的 `package_private`。
-2. `as` 作用于每个被导入符号，而不是模块本身。导入别名绑定的是原声明——不会创建新实体。
-3. `using module { .. }` 导入对导入文件可见的全部符号，且 `..` 必须单独出现。
-4. 被导入的名字是文件局部绑定，不会自动再导出。
-5. 模块合法性对照 manifest 的 `requires` 检查；编译器不从目录结构推断模块。
-6. 非 `std` 包会自动获得 `std`；不要在应用/测试包的 manifest 里手动列出 `std`。
-7. 模块导入从不把模块名绑定为命名空间对象。用 `using std::io { Reader }` 导入 `Reader` 后写 `Reader`，而不是 `std.io.Reader` 或 `io.Reader`。
+#### 解析
+
+`using "X"` 切在第一个 `/`：
+
+```
+head = 第一段      （无 "/" 时 head = 整串）
+tail = 其余        （无 "/" 时 tail = ""）
+```
+
+`head` 必须是已注册包名——**本包的 `package`、各依赖的源码名、保留名 `std`**；
+否则报「未知包名」。然后在该包的 `modules` 里查**包内名**：`tail` 为空查 `"."`，否则查 `tail`。
+
+> **每个包用自己的表解析自己的源码**：编译 `httpr` 的文件时用 `httpr` 自己的 `package`
+> 与 `dependencies`，与消费方给它起什么名字无关。所以 `dep_utils` 自己写
+> `using "dep_utils/…"`，消费方写 `using "game_utils/…"`，落到同一个包。
+
+模块图由各模块 `using` 语句的并集派生——**没有 `requires`，一处真相**。
+由它得到构建排序、可达性；模块图必须无环；`links` 沿模块图传递。
+
+**`std` 主模块是 prelude**：对非 `std` 模块，它是编译器隐式编进来并放进作用域的，
+不需要写 `using`。其余模块（含 `std/io`、`std/time`）一律要显式导入。
+`using "std";` 仍然合法——它是 `std` 子模块文件取得 prelude 的方式。
+
+#### 入口文件名约束
+
+- 模块入口文件名（不含扩展名）必须以小写字母开头；
+- 其余字符只能是小写字母、数字或 `_`；
+- 模块全名的每一段沿用语言标识符规则（小写开头，字母数字下划线），且不得是保留字；
+- 包名是**单段**标识符，不含 `/`、不含 `.`；`/` 只用于分子路径，所以第一个 `/` 就是包 / 模块边界。
 
 #### 访问修饰符
 
@@ -2281,46 +2330,32 @@ Koral 提供四个访问级别控制符号可见性：
 ```
 my_project/
 ├── koral.json;
-├── main.koral           # app::main 入口;
-├── utils.koral          # 合并进 app::main;
+├── main.koral           # 主模块（"."）入口;
+├── utils.koral          # 合并进主模块;
 ├── models/
-│   ├── models.koral     # app::models 入口;
-│   └── user.koral       # 合并进 app::models;
+│   ├── models.koral     # "models" 入口;
+│   └── user.koral       # 合并进 "models";
 └── services/
-    └── services.koral   # app::services 入口;
+    └── services.koral   # "services" 入口;
 ```
 
 ```json
 {
-  "name": "MyProject",
+  "package": "app",
   "version": "0.1.0",
-  "entry": "app::main",
   "modules": {
-    "app::main": {
-      "entry": "main.koral",
-      "requires": ["app::models", "app::services"],
-      "links": [];
-    },
-    "app::models": {
-      "entry": "models/models.koral",
-      "requires": [],
-      "links": [];
-    },
-    "app::services": {
-      "entry": "services/services.koral",
-      "requires": ["app::models"],
-      "links": [];
-    }
+    ".":        { "entry": "main.koral",              "links": [] },
+    "models":   { "entry": "models/models.koral",     "links": [] },
+    "services": { "entry": "services/services.koral", "links": [] }
   }
 }
 ```
 
 ```koral
 // main.koral
-using "utils";
-using app::models { User };
-using app::services { authenticate };
-using std { .. };
+using "./utils.koral";
+using "app/models" { User };
+using "app/services" { authenticate };
 
 public let main() Void = {
     let user = User.new("Alice");
@@ -2373,11 +2408,7 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 ```json
 {
   "modules": {
-    "app::main": {
-      "entry": "main.koral",
-      "requires": [],
-      "links": ["m"];
-    }
+    ".": { "entry": "main.koral", "links": ["m"] }
   }
 }
 ```

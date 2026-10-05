@@ -1,6 +1,6 @@
 # Koral 模块与导入设计
 
-状态：提案
+状态：已实施（模块与导入部分，见 [module-design-implementation.md](module-design-implementation.md)）
 
 ## 0. 一句话
 
@@ -299,6 +299,36 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 
 > **没有「依赖但不 import」的场景**：Koral 模块导入的就是符号，不 import 就用不上。
 > 若日后出现（例如只为拉入 `links`），再加一个显式字段——那是新增能力，不是补漏。
+>
+> **唯一的例外是 `std` 主模块（prelude，见 §5.4.1）**——它是编译器提供的基座，
+> 不是从 `using` 派生出来的边。
+
+#### 5.4.1 `std` 主模块是 prelude
+
+**`std` 的主模块对非 `std` 模块是隐式 prelude**：编译器把它编进来并放进作用域，
+不需要写 `using`。其余模块——包括 `std/io`、`std/time`——一律要显式导入。
+
+这是刻意的，不是实现走样：
+
+- `println`、`Duration`、`List` 这些是每个程序都要的基座；
+- 要求 445 个文件各写一行 `using "std";` 不增加任何信息；
+- §6.4 的依赖图把主模块画成「基础层」，与 prelude 读法一致。
+
+规则边界：
+
+| | 是否在作用域里 |
+| --- | --- |
+| `std` 主模块的符号（`println`、`Duration`…） | ✅ 非 `std` 模块隐式可见 |
+| `std/io`、`std/time` 等子模块的符号 | ❌ 必须显式 `using` |
+| `std` 子模块文件用 `std` 主模块的符号 | ❌ 要写 `using "std";`（它们自己就是 `std` 的一部分） |
+
+`using "std";` 仍然合法，就是第三行那个用法。
+
+> **证据**（实现时的取证，记录下来免得再走一遍）：`println` 不写 `using` 能用
+> ⇒ `std` 主模块进了作用域；`DateTime` 不写 `using` 报 `Undefined type`，
+> 写了 `using "std/os" { .. }` 但没 import `std/time` 时报
+> `Import it explicitly with using Std::Time { DateTime }`
+> ⇒ **载入 ≠ 进作用域**，导入才进作用域。两条合起来只能是 prelude。
 
 ### 5.5 `koral.lock`：整棵依赖树
 
@@ -454,6 +484,8 @@ using "koral";                        // ✗ 该包没有主模块
 
 **子模块依赖主模块，主模块不依赖任何子模块**（主模块的 `using` 不指向任何子模块），所以 `using "std";` 不会拉进 IO / 网络等重模块。这张图是**从各模块的 `using` 派生**出来的，不是手写的。
 
+主模块同时是 **prelude**（§5.4.1）：非 `std` 模块不用写 `using "std";` 就能看到它。
+
 `std` 是 **保留包名**（无 `.`、不写进 `dependencies`、随工具链分发于 `KORAL_HOME/std/`），其余规则与普通包完全一致。
 
 ### 6.5 消费方
@@ -513,9 +545,9 @@ using "std";
 
 13. 包名不是合法标识符（含 `/`、大小写、数字开头、是保留字）；
 14. `modules` 的 key 既不是 `.` 也不是合法子路径；
-15. 同一模块 key 重复；
+15. ~~同一模块 key 重复~~ —— **不是可检查的错误条件**，与 17 同因。`modules` 也是 JSON 对象，键天然唯一，解析器根本看不见重复键；而 key 只允许 `.` 与小写标识段 `/` 连接，两个不同的合法 key 必然是两个不同的模块，不存在别名（`io/` 会被 14 当非法 key 拒掉，不是 `io` 的另一种拼写）。真正可查的是 14；
 16. **`entry` 文件被两个模块声明**，或不在包根内、或不存在；
-17. 同一源码名被两个依赖声明（key 重复）；
+17. ~~同一源码名被两个依赖声明（key 重复）~~ —— **不是可检查的错误条件**。`dependencies` 是 JSON 对象，键天然唯一；解析器根本看不见重复键。§4 歧义表的「包名 vs 包名 | ❌ | key 在本工程内唯一」说的就是这件事，两条原本重复。真正要防的是 18（一个 `source` 两个 key），那条可查；
 18. **一个 `source` 被两个 key 声明**（同一模块会有两种拼写）；
 19. **`dependencies` 的 key 等于本包的 `package`**（自引用与依赖撞车）；
 20. **`dependencies` 的 key 或 `package` 占用保留名 `std`**；

@@ -72,19 +72,19 @@ You can compile either a single source file directly or a manifest-declared modu
     ```
 2.  **Build a manifest-declared target module**:
     ```bash
-    koralc build --package-config koral.json --target-module app::main;
+    koralc build --package-config koral.json --target-module app;
     ```
 3.  **Type-check only**:
     ```bash
-    koralc check --package-config koral.json --target-module app::main;
+    koralc check --package-config koral.json --target-module app;
     ```
 4.  **Compile and run**: Use the `run` command to compile and execute in one step.
     ```bash
-    koralc run --package-config koral.json --target-module app::main;
+    koralc run --package-config koral.json --target-module app;
     ```
 5.  **Emit C only**: Use `emit-c` to generate C source.
     ```bash
-    koralc emit-c --package-config koral.json --target-module app::main -o out;
+    koralc emit-c --package-config koral.json --target-module app -o out;
     ```
 
 Common options:
@@ -2207,65 +2207,133 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 
 ### Modules and Visibility
 
-Koral provides a powerful module system for organizing code across multiple files and directories.
+Koral organizes code with two nested units:
 
-#### Module Concepts
+| Concept | What it is | Stable identity | Example |
+| --- | --- | --- | --- |
+| **package** | A reusable external unit: one `koral.json`, one version, one set of dependencies | `source` | `httpr`, `std` |
+| **module** | A build unit inside a package: one entry file plus the files merged into it | `(source, subpath)` | `httpr/conn`, `std/io` |
 
-A **module** in Koral is an explicit build unit declared in `koral.json` (or `std/koral.json` for the standard library). A module consists of its entry file plus any files merged into it via `using "path"`.
+**A module's full name is `package[/subpath]`**, and source always writes the full
+name. The main module is the one with an empty subpath, so its full name IS the
+package name. It is not a "root": it sits beside its submodules with no
+re-export semantics.
 
-- **Target module**: The module selected by `--target-module`
-- **Peer module**: Another manifest-declared module in the same package
-- **External module**: A module coming from std or another package dependency
-- Top-level manifest `entry`: The default target module name, for example `app::main`
+#### Manifest
 
-Entry filename constraints:
+A `koral.json` has four fields:
 
-- Module entry file basename must start with a lowercase letter.
-- Remaining characters may only be lowercase letters, digits, or `_`.
-- Source-level module names come from the manifest and use `::` separators (for example, `app::models`, `std::io`).
+```json
+{
+  "package": "httpr",
+  "version": "0.4.1",
+  "modules": {
+    ".":    { "entry": "client.koral",    "links": [] },
+    "conn": { "entry": "conn/conn.koral", "links": [] }
+  },
+  "dependencies": {
+    "slug": { "source": "path:../slug", "version": "^1.2" }
+  }
+}
+```
+
+- **`package`** -- this package's source name: the self-reference prefix and the
+  default name a consumer uses. **It is not identity**; identity is `source`.
+- **`version`** -- the version.
+- **`modules`** -- **package-internal name** -> `{ entry, links }`. The main
+  module's key is `"."`; a submodule's key is its subpath (`"conn"`,
+  `"compiler/parser"`). `entry` is the entry file, relative to the package root.
+- **`dependencies`** -- **source name** -> `{ source, version }`. `source` is the
+  fetch location and the identity, and carries no ref; `version` is a semver
+  constraint. Renaming a dependency is changing its key -- there is no extra field.
+
+There is no top-level `entry` (the default build target IS the main module), no
+`name` (it duplicates `package`), no `requires` (the module graph comes from
+`using`), and no `module_aliases` (renaming is the dependency key).
 
 #### Using Declarations
 
-The `using` keyword is used for file merge and explicit symbol import. All `using` declarations must appear at the beginning of a file, before any other declarations.
+`using` has one form. The specifier is a string, and what it means follows from
+its **shape**:
+
+| Specifier | Meaning |
+| --- | --- |
+| starts with `./` or `../` | **file merge** |
+| anything else | **module import** |
+
+Every `using` must sit at the top of the file, before any other top-level
+declaration. A module is imported once per file.
 
 ##### File Merge
 
-Use string syntax to merge another file into the current module scope:
-
 ```koral
-using "utils";        // Merges utils.koral into current module
-using "./helpers";    // Relative paths are allowed
-using "../shared/format";
+using "./helpers.koral";
+using "../shared/format.koral";
 ```
 
-File merge rules:
+This merges the target file's **top-level definitions into the current module**.
+It is not an external-unit dependency, not a package import, not a submodule
+declaration, not an aliasing mechanism.
 
-1. The path is resolved relative to the current file's directory.
-2. The string names a source file without the `.koral` suffix.
-3. Relative segments such as `.` and `..` are allowed.
-4. File merge does not create a namespace, alias, or export surface.
-5. Merged files share the same module scope, so `module_private` declarations remain visible across files in that module.
+1. The specifier must start with `./` or `../` and end in `.koral`;
+2. It resolves against the directory of the current file, and `.` / `..` may appear;
+3. It creates no module identity and takes no part in package/module resolution;
+4. It may not be combined with `{ ... }` (a merge is the whole file; there is nothing to pick);
+5. Merged files share the module's scope, so `module_private` is visible across them.
 
-##### Module Symbol Import
-
-Import visible symbols from another module with explicit braces:
+##### Module Import
 
 ```koral
-using std::io { Reader };
-using std::json { parse, Value };
-using std::io { Reader as IoReader, Writer };
-using std::io { .. };
+using "std/io";                        // every visible member
+using "std/io" { Reader, Writer };     // only some
+using "std/io" { Reader as IoReader }; // per-name alias
 ```
 
-Notes:
+1. `{ ... }` omitted means "every visible member"; if written, it may not be empty
+   (`{ .. }` / `{ * }` are no longer spellings of anything);
+2. An item is `Name` or `Name as Alias`, trailing comma allowed;
+3. `as` renames one imported symbol, never the module -- a module name is not a
+   namespace, so after `using "std/io" { Reader };` you write `Reader`, not `io.Reader`;
+4. Imported names are file-local bindings and are not re-exported;
+5. A name collision is an error; `as` disambiguates. When an import-all collides
+   with a local declaration, switch to an explicit list.
 
-1. `using module { symbol-list }` imports symbols visible to the importing file: `public` from any package, and `package_private` when the importer is in the same package.
-2. `as` applies per imported symbol, not to the module itself. An import alias binds the original declaration — it does not create a new entity.
-3. `using module { .. }` imports all symbols visible to the importing file, and `..` must appear alone.
-4. Imported names are file-local bindings and are not re-exported automatically.
-5. Module legality is checked against manifest `requires`; the compiler does not infer modules from directory structure.
-6. Non-`std` packages get `std` automatically; do not list `std` manually in application/test package manifests.
-7. A module import never binds the module name as a namespace object. Import `Reader` with `using std::io { Reader }`, then write `Reader`, not `std.io.Reader` or `io.Reader`.
+#### Resolution
+
+`using "X"` splits at the first `/`:
+
+```
+head = the first segment   (no "/" -> head is the whole string)
+tail = the rest            (no "/" -> tail is "")
+```
+
+`head` must be a registered package name -- **this package's `package`, one of
+its `dependencies` keys, or the reserved `std`** -- otherwise "unknown package
+name". Then the package's `modules` is consulted for the **package-internal
+name**: `"."` when `tail` is empty, otherwise `tail`.
+
+> **Every package resolves its own source with its own table.** Compiling
+> `httpr`'s files uses `httpr`'s own `package` and `dependencies`, whatever the
+> consumer chose to call it. So `dep_utils` writes `using "dep_utils/…"` while
+> its consumer writes `using "game_utils/…"`, and both land on one package.
+
+The module graph is the union of the modules' `using` statements -- **there is no
+`requires`, one source of truth**. From it come build ordering and reachability;
+the graph must be acyclic; `links` propagate along it.
+
+**The `std` main module is the prelude.** For non-`std` modules the compiler
+brings it in and puts it in scope without being named. Every other module
+(including `std/io` and `std/time`) needs an explicit import. `using "std";` is
+still legal -- it is how `std`'s own submodule files get the prelude.
+
+#### Entry File Names
+
+- A module entry file's stem must start with a lowercase letter;
+- The rest may only be lowercase letters, digits or `_`;
+- Every segment of a module full name follows the language's identifier rules
+  (lowercase start, letters/digits/underscore) and may not be a reserved word;
+- A package name is a **single** identifier segment: no `/`, no `.`. `/` only
+  separates subpaths, so the first `/` is the package/module boundary.
 
 #### Access Modifiers
 
@@ -2298,46 +2366,32 @@ If a type has inaccessible `file_private`/`module_private`/`package_private` fie
 ```
 my_project/
 ├── koral.json;
-├── main.koral           # app::main entry;
-├── utils.koral          # merged into app::main;
+├── main.koral           # "." (main module) entry;
+├── utils.koral          # merged into the main module;
 ├── models/
-│   ├── models.koral     # app::models entry;
-│   └── user.koral       # merged into app::models;
+│   ├── models.koral     # "models" entry;
+│   └── user.koral       # merged into "models";
 └── services/
-    └── services.koral   # app::services entry;
+    └── services.koral   # "services" entry;
 ```
 
 ```json
 {
-  "name": "MyProject",
+  "package": "app",
   "version": "0.1.0",
-  "entry": "app::main",
   "modules": {
-    "app::main": {
-      "entry": "main.koral",
-      "requires": ["app::models", "app::services"],
-      "links": [];
-    },
-    "app::models": {
-      "entry": "models/models.koral",
-      "requires": [],
-      "links": [];
-    },
-    "app::services": {
-      "entry": "services/services.koral",
-      "requires": ["app::models"],
-      "links": [];
-    }
+    ".":        { "entry": "main.koral",           "links": [] },
+    "models":   { "entry": "models/models.koral",  "links": [] },
+    "services": { "entry": "services/services.koral", "links": [] }
   }
 }
 ```
 
 ```koral
 // main.koral
-using "utils";
-using app::models { User };
-using app::services { authenticate };
-using std { .. };
+using "./utils.koral";
+using "app/models" { User };
+using "app/services" { authenticate };
 
 public let main() Void = {
     let user = User.new("Alice");
@@ -2390,11 +2444,7 @@ Native libraries are declared in package or module `links` inside `koral.json` /
 ```json
 {
   "modules": {
-    "app::main": {
-      "entry": "main.koral",
-      "requires": [],
-      "links": ["m"];
-    }
+    ".": { "entry": "main.koral", "links": ["m"] }
   }
 }
 ```

@@ -1,36 +1,37 @@
-﻿// Koral Language Grammar (BNF)
+// Koral Language Grammar (BNF)
 // Updated to match current implementation (Lexer/Parser)
 
 <program> ::= <using-decl>* <global-decl>*
 
 // using 必须出现在其他全局声明之前
 
-<using-decl> ::= "using" <using-spec> ";"
-<using-spec> ::= <file-merge-spec>
-               | <module-using-spec>
+<using-decl> ::= "using" <string-literal> <import-list>? ";"
 
-<file-merge-spec> ::= <string-literal>
-// 说明：
-// 1) using "path"：把相对路径对应的 .koral 文件合并进当前模块
-// 2) 路径相对于当前文件所在目录解析，可包含 "." / ".."
-// 3) 文件合并不会创建子模块、别名或导出面
+// 一种写法（§3）。specifier 是字符串，含义由它的形状决定（§3.1）：
+//   "./..." 或 "../..." 开头 → 文件合并，目标必须以 .koral 结尾（§3.2）
+//   其它                    → 模块导入，写法是 包名[/子路径]（§3.3）
+//
+// 文件合并：把目标文件的顶层定义并入当前模块。不是外部单元依赖、不是包导入、
+// 不是子模块声明、不是别名机制；不允许与 <import-list> 连用（合并就是全部）。
+//
+// 模块导入：<import-list> 省略即「全部可见成员」；出现则不能为空（§7.4）。
+// 同一模块在同一文件内只 using 一次（§7.10）。
 
-<module-using-spec> ::= <module-name> "{" <module-import-list> "}"
-<module-name> ::= <identifier> ("::" <identifier>)*
+<import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"
 
-<module-import-list> ::= ".."
-                       | <module-import-item> ("," <module-import-item>)* ","?
-
-<module-import-item> ::= <identifier> <module-item-alias>?
-<module-item-alias> ::= "as" <identifier>
+<import-item> ::= <identifier> <import-alias>?
+<import-alias> ::= "as" <identifier>
 
 // 说明：
-// 1) using std::io { Reader }：从显式模块导入当前可见符号（public；同 package 时也可导入 package_private）
-// 2) using std::io { Reader as IoReader, Writer }：支持逐项别名
-// 3) using std::io { .. }：导入该模块全部当前可见符号
-// 4) ".." 必须单独出现，不能与其他导入项混用
-// 5) 模块名来自 package manifest（koral.json / std/koral.json），编译器不再从源码语法推断子模块树
-// 6) 顶层 manifest entry 表示默认目标模块名，不是源码文件路径
+// 1) using "std/io";                        导入 std/io 的全部可见成员
+// 2) using "std/io" { Reader, Writer };     只带一部分
+// 3) using "std/io" { Reader as IoReader }; 逐项别名（允许尾逗号）
+// 4) using "./helpers.koral";               文件合并
+// 5) 模块名不绑定为命名空间：导入 Reader 后写 Reader，不写 io.Reader
+// 6) 包名是单段小写标识符（§2.1），子路径用 / 分隔，全程无 "."
+//    manifest 里的 "." 只是记法（§5.2）——源码里主模块就写包名本身
+// 7) 模块的包内名写在 koral.json 的 modules 里；源码一律写全名
+// 8) `{ .. }` / `{ * }` 不再是写法：省略列表就是全部
 
 // ============================================================================
 // Global Declarations
