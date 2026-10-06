@@ -88,11 +88,43 @@ let main() Void = {
         "let f() Void = {\n    foo();\n    bar();\n};\n");
 
     // === Using declarations ===
+    // One spelling, classified by the specifier's SHAPE (module-design §3.1):
+    // `./` or `../` merges a file, anything else imports `package[/subpath]`.
+    // `{ .. }` is gone -- an omitted list already means every visible member.
     t.test("using", "using \"foo\"\n", "using \"foo\";\n");
-    t.test("module using", "using std::io{Reader as IoReader,Writer}\n", "using "std/io" { Reader as IoReader, Writer };\n");
-    t.test("module using all public", "using std::io{..}\n", "using "std/io";\n");
+    t.test("module using", "using \"std/io\"{Reader as IoReader,Writer}\n",
+        "using \"std/io\" { Reader as IoReader, Writer };\n");
+    t.test("module using all public", "using \"std/io\"\n", "using \"std/io\";\n");
+    t.test("file merge", "using \"./helpers.koral\"\n", "using \"./helpers.koral\";\n");
+    t.test("file merge parent", "using \"../shared/util.koral\"\n", "using \"../shared/util.koral\";\n");
 
     // === Type declarations ===
+    // `type` / `type mutable` are the two nominal forms the language has
+    // (grammar.bnf <type-decl>). `mutable` used to be a parse error here.
+    // Raw pointers are `*unsafe T` / `*unsafe mutable T` (grammar.bnf
+    // <type-prefix>). The managed `* T` / `*! T` spellings are gone.
+    t.test("raw pointer types", "let f(p *unsafe mutable Int, q *unsafe Int) Void={}\n",
+        "let f(p *unsafe mutable Int, q *unsafe Int) Void = {};\n");
+    t.test("type mutable", "type mutable Counter(mutable count Int)\n", "type mutable Counter(mutable count Int);\n");
+    t.test("generic type mutable", "type mutable Box[R Mark](value R)\n", "type mutable Box[R Mark](value R);\n");
+    // `mutable` in a generic PARAMETER constraint is a type-kind constraint
+    // keyword, not a type -- `[T mutable]`.
+    t.test("mutable constraint", "let f[T mutable](v T) Int=0\n", "let f[T mutable](v T) Int = 0;\n");
+    t.test("mutable and trait constraint", "let f[T mutable and Eq](v T) Int=0\n", "let f[T mutable and Eq](v T) Int = 0;\n");
+    // Named params are <func-param> form 2, and trait members follow the same
+    // rules -- so `name: Type` belongs there too.
+    t.test("named param", "let f(a: Int) Int=a\n", "let f(a: Int) Int = a;\n");
+    // Defaults are a LITERAL, never an expression (grammar.bnf <field>).
+    t.test("named field with default", "type P(x: Int=3)\n", "type P(x: Int = 3);\n");
+    t.test("named param with default", "let f(a: Int=3,b: Int=4) Int=a\n", "let f(a: Int = 3, b: Int = 4) Int = a;\n");
+    t.test("enum field with default", "type E { C(a: Int=2) };\n", "type E {\n    C(a: Int = 2),\n};\n");
+    // `-3` is not a literal default (the compiler rejects it the same way), and
+    // `1 + 2` never reaches the default at all -- both sides stop at the field
+    // name after the `+`.
+    t.test_error_contains("default must be a literal", "type P(x: Int=-3)\n", "literal default value");
+    t.test("trait named param", "trait T {\nm(self, a: Int) Int;\n}\n",
+        "trait T {\n    m(self, a: Int) Int;\n};\n");
+
     t.test("public type tuple", "public type Point(x Int,y Int)\n", "public type Point(x Int, y Int);\n");
 
     // === Trait and Given ===
@@ -153,14 +185,35 @@ let main() Void = {
 
     // === Rejected stale syntax ===
     t.test_error_contains("foreign using removed", "foreign using \"math\"\n", "expected primary expression");
-    t.test_error_contains("using file alias removed", "using \"foo\" as Bar\n", "file merge syntax no longer supports aliases");
-    t.test_error_contains("using all public must stand alone", "using std::io{..,Reader}\n", "'..' must be the only item in a module import list");
+    t.test_error_contains("using alias removed", "using \"foo\" as Bar\n", "takes no alias");
+    t.test_error_contains("using all public must stand alone", "using \"std/io\" { .., Reader }\n", "'..' is not an import item");
     t.test_error_contains("using after declaration", "let x=1\nusing \"foo\"\n", "using declarations must appear before other top-level declarations");
     t.test_error_contains("default fill rejected", "type Button(label String)\nlet make() Button=Button(...);\n", "Default-fill '...' is not supported");
-    t.test_error_contains("colon constructor field rejected", "type Point(x: Int)\n", "Constructor field declarations use 'name Type', not 'name: Type'");
+    // `name: Type` is a NAMED field -- a different declaration, not an
+    // alternate spelling (grammar.bnf <field>: "named field"). It used to be
+    // rejected here, which denied documented syntax.
+    t.test("named constructor field", "type Point(x: Int, y: Int)\n", "type Point(x: Int, y: Int);\n");
+    // Enum payload fields follow the same <variant-field> rule -- named fields
+    // and defaults both belong there.
+    t.test("named enum payload field", "type E { C(a: Int) };\n", "type E {\n    C(a: Int),\n};\n");
+    // <variant-list> is `("," <variant>)* ","?`, so the LAST variant may stand
+    // without a comma. Requiring one silently reformatted user code.
+    t.test("variant without trailing comma", "type E { A(), B() };\n", "type E {\n    A(),\n    B(),\n};\n");
+    t.test("single variant without comma", "type E { A() };\n", "type E {\n    A(),\n};\n");
+    // A comment inside a payload documents the field under it. Dropping it is
+    // a formatter deleting user prose -- `typed_ast.koral` keeps one there.
+    t.test("comment in enum payload", "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
+        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n");
+    t.test("positional constructor field", "type Point(x Int,y Int)\n", "type Point(x Int, y Int);\n");
+    t.test_error_contains("missing then rejected", "let main() Void = if 1 1;\n", "then");
     t.test_error_contains("legacy range form rejected", "let x=<...5\n", "expected primary expression");
-    t.test_error_contains("while value position rejected", "let x Void = while true then {}\n", "'while' can only be used as a statement");
-    t.test_error_contains("for value position rejected", "let x Void = for item in [1,2] then println(item)\n", "'for' can only be used as a statement");
+    // `while` and `for` always produce `Void`, so a `Void` binding IS their
+    // value position and the language accepts it (document.md: "while and for
+    // always produce Void"). These used to assert that the form is rejected --
+    // a rule the language does not have -- which is why they could sit red
+    // forever without anyone noticing: the harness did not compile at all.
+    t.test("while in Void binding", "let x Void = while true then {}\n", "let x Void = while true then {};\n");
+    t.test("for in Void binding", "let x Void = for item in [1,2] then println(item)\n", "let x Void = for item in [1, 2] then println(item);\n");
 
     t.summary();
 };

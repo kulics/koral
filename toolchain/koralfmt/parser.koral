@@ -13,6 +13,10 @@ public type CstType {
     Named(name Token),
     SelfType(kw Token),
     Mutable(inner CstType, kw Token),
+    // A bare `mutable` in a generic PARAMETER constraint (`[T mutable]`). It is
+    // a type-kind constraint keyword, not a type (grammar.bnf <trait-constraint>),
+    // so it carries no inner type.
+    ConstraintKeyword(kw Token),
     Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
     Function(func_kw Token, lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
     Ref(inner CstType, kw Token),
@@ -112,7 +116,16 @@ public type CstDictEntry(key CstExpr, colon Token, value CstExpr, comma Option[T
 public type CstLambdaParam(name Token, param_type Option[CstType], comma Option[Token]);
 
 // Enum variant field: Name(Type) as `fieldName FieldType` or `fieldName: FieldType`
-public type CstEnumField(name Token, colon Option[Token], field_type CstType, comma Option[Token]);
+// `comments` are the comment tokens that preceded the field in source. A
+// formatter that drops them is broken, and `typed_ast.koral` keeps one on its
+// identity slot -- so they travel with the field they document.
+public type CstEnumField(comments List[Token], name Token, colon Option[Token], field_type CstType, default_value Option[CstDefault], comma Option[Token]);
+
+// A named field's or parameter's `= <literal>` default (grammar.bnf <field>,
+// <func-param>, <variant-field>). The value is a LITERAL, never an expression:
+// number, bool, string, rune, `[]`, or a bare range -- so the tokens are kept
+// as written.
+public type CstDefault(eq Token, value_tokens List[Token]);
 
 // ============================================================================
 // CST Pattern Nodes
@@ -156,7 +169,7 @@ public type CstWhenArm(
 
 public type CstParam {
     SelfParam(kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]),
-    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, comma Option[Token]),
+    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
 };
 
 public type CstGenericParam(
@@ -214,6 +227,7 @@ public type CstStructField(
     name Token,
     colon Option[Token],
     field_type CstType,
+    default_value Option[CstDefault],
     comma Option[Token],
 );
 
@@ -254,6 +268,7 @@ public type CstDecl {
         vis Option[Token],
         modifiers List[Token],
         kw Token,
+        mut_kw Option[Token],
         generic_params Option[CstGenericParams],
         name Token,
         body CstTypeBody
@@ -312,7 +327,7 @@ public type CstTraitMethodParam {
     // self / *self / *self mutable
     SelfParam(kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]),
     // name Type
-    NamedParam(name Token, colon Option[Token], param_type CstType, comma Option[Token]),
+    NamedParam(name Token, colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
 };
 
 // ============================================================================
@@ -719,6 +734,34 @@ given CstParser {
     // Generic parameters: [T Any, U Eq]
     // ========================================================================
 
+    /// `<default-value-literal>`: number, bool, string, rune, `[]`, or a bare
+    /// range. Never an expression -- `1 + 2` and `-3` are not defaults.
+    file_private parse_default_value(self) Result[Option[CstDefault]] = {
+        if not self.check(.Eq()) then {
+            return .Ok(.None());
+        };
+        let eq = self.eat();
+        let mutable value_tokens = List[Token].new();
+        if self.check(.LBracket()) then {
+            value_tokens.push(self.eat());
+            if self.check(.RBracket()) then {
+                value_tokens.push(self.eat());
+            } else {
+                return .Error("Parse error: default value must be an empty collection '[]'");
+            };
+        } else {
+            when self.peek() in {
+                .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() then {
+                    value_tokens.push(self.eat());
+                },
+                _ then {
+                    return .Error("Parse error: expected a literal default value (number, bool, string, rune, [], or range)");
+                },
+            };
+        };
+        return .Ok(.Some(CstDefault(eq, value_tokens)));
+    };
+
     file_private parse_generic_params(self) Result[Option[CstGenericParams]] = {
         if not self.check(.LBracket()) then {
             return .Ok(.None());
@@ -734,10 +777,15 @@ given CstParser {
                 .Error(e) then { return .Error(e);},
             };
             let mutable constraints = List[CstType].new();
-            // Collect constraint types until comma or ]
+            // Collect constraints until comma or ]. `mutable` is a type-kind
+            // constraint keyword in this position, not a type.
             while not self.check(.Comma()) and not self.check(.RBracket()) and not self.is_eof() then {
                 if self.check(.KwAnd()) then {
                     self.eat();
+                    continue;
+                };
+                if self.check(.KwMut()) then {
+                    constraints.push(CstType.ConstraintKeyword(self.eat()));
                     continue;
                 };
                 let ct = when self.parse_type_node() in {
@@ -811,8 +859,12 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
+            let default_value = when self.parse_default_value() in {
+                .Ok(d) then d,
+                .Error(e) then { return .Error(e);},
+            };
             let comma = self.eat_comma();
-            params.push(.NamedParam(name, param_mut, colon, pt, comma));
+            params.push(.NamedParam(name, param_mut, colon, pt, default_value, comma));
             first = 0;
         };
         return .Ok(params);
@@ -2411,7 +2463,9 @@ given CstParser {
                 .Error(e) then { return .Error(e);},
             };
             if CstParser.item_is_using_decl(item) then {
-                if seen_non_using "then" { return .Error("Parse error: using declarations must appear before other top-level declarations"); };
+                if seen_non_using then {
+                    return .Error("Parse error: using declarations must appear before other top-level declarations");
+                };
             } else if CstParser.item_is_non_using_top_level_code(item) then {
                 seen_non_using = true;
             };
@@ -2487,53 +2541,53 @@ given CstParser {
         return .Ok({});
     };
 
-    file_private validate_module_using_tokens(self, tokens List[Token], start UInt) Result[Void] = {
+    /// The contents of a `StrLit` token, quotes stripped.
+    file_private using_specifier_text(self, token Token) String = {
+        let raw = when token in {
+            .StrLit(t) then t,
+            _ then "",
+        };
+        if raw.count() < 2(UInt) then {
+            return "";
+        };
+        return raw.substring(1(UInt)..<(raw.count() - 1(UInt)));
+    };
+
+    /// module-design §3.1: a specifier beginning `./` or `../` merges a file,
+    /// anything else imports `package[/subpath]`. The formatter checks SHAPE
+    /// only -- whether the package exists is the compiler's business.
+    file_private is_file_merge_specifier(self, spec String) Bool = {
+        return spec.starts_with("./") or spec.starts_with("../");
+    };
+
+    /// `<import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"`
+    /// `<import-item> ::= <identifier> ("as" <identifier>)?`
+    ///
+    /// `{ .. }` is no longer a spelling (§8) -- omitting the list already means
+    /// every visible member, so a list that is present has to name at least one.
+    file_private validate_import_list_tokens(self, tokens List[Token], start UInt) Result[Void] = {
         let mutable i = start;
-        if i >= tokens.count() or tokens[i] is not .Ident(_) then {
-            return .Error("Parse error: expected module import like 'std::io { Reader }'");
-        };
-        i += 1;
-
-        while i + 2 < tokens.count() then {
-            if tokens[i] is .Colon() and tokens[i + 1] is .Colon() and tokens[i + 2] is .Ident(_) then {
-                i += 3;
-                continue;
-            };
-            break;
-        };
-
         if i >= tokens.count() or tokens[i] is not .LBrace() then {
-            return .Error("Parse error: expected module import like 'std::io { Reader }'");
+            return .Error("Parse error: expected an import list like '{ Reader, Writer }'");
         };
         i += 1;
-
-        if i >= tokens.count() then {
-            return .Error("Parse error: expected import item or '..' in module import");
-        };
-
-        if tokens[i] is .Range() then {
-            i += 1;
-            if i >= tokens.count() or tokens[i] is not .RBrace() then {
-                return .Error("Parse error: '..' must be the only item in a module import list");
-            };
-            i += 1;
-            return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import");
-        };
-
         let mutable saw_item = false;
         while true then {
             if i >= tokens.count() then {
-                return .Error("Parse error: expected '}' in module import");
+                return .Error("Parse error: expected '}' in import list");
             };
             if tokens[i] is .RBrace() then {
                 if not saw_item then {
-                    return .Error("Parse error: expected import item or '..' in module import");
+                    return .Error("Parse error: import list cannot be empty; omit the list to import every visible member");
                 };
                 i += 1;
-                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import");
+                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after using declaration");
             };
             if tokens[i] is not .Ident(_) then {
-                return .Error("Parse error: expected import item or '..' in module import");
+                if tokens[i] is .Range() then {
+                    return .Error("Parse error: '..' is not an import item; omit the list to import every visible member");
+                };
+                return .Error("Parse error: expected an import item or '}' in import list");
             };
             saw_item = true;
             i += 1;
@@ -2541,13 +2595,13 @@ given CstParser {
             if i < tokens.count() and tokens[i] is .KwAs() then {
                 i += 1;
                 if i >= tokens.count() or tokens[i] is not .Ident(_) then {
-                    return .Error("Parse error: expected alias name after 'as'");
+                    return .Error("Parse error: expected an alias name after 'as'");
                 };
                 i += 1;
             };
 
             if i >= tokens.count() then {
-                return .Error("Parse error: expected ',' or '}' in module import list");
+                return .Error("Parse error: expected ',' or '}' in import list");
             };
             if tokens[i] is .Comma() then {
                 i += 1;
@@ -2555,9 +2609,9 @@ given CstParser {
             };
             if tokens[i] is .RBrace() then {
                 i += 1;
-                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import");
+                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after using declaration");
             };
-            return .Error("Parse error: expected ',' or '}' in module import list");
+            return .Error("Parse error: expected ',' or '}' in import list");
         };
 
         return .Ok({});
@@ -2567,24 +2621,31 @@ given CstParser {
         if tokens.count() == 0 or tokens[0] is not .KwUsing() then {
             return .Error("Parse error: expected 'using' declaration");
         };
-        if tokens.count() < 2 then {
-            return .Error("Parse error: expected string literal for file merge, or module import like 'std::io { Reader }'");
+        if tokens.count() < 2 or tokens[1] is not .StrLit(_) then {
+            return .Error("Parse error: expected a string literal after 'using', like 'using \"std/io\";' or 'using \"./file.koral\";'");
         };
 
-        when tokens[1] in {
-            .StrLit(_) then {
-                if tokens.count() > 2 and tokens[2] is .KwAs() then {
-                    return .Error("Parse error: file merge syntax no longer supports aliases");
-                };
-                return self.validate_using_trailing_tokens(tokens, 2, "Parse error: unexpected tokens after file merge using");
-            },
-            .Ident(_) then {
-                return self.validate_module_using_tokens(tokens, 1);
-            },
-            _ then {
-                return .Error("Parse error: expected string literal for file merge, or module import like 'std::io { Reader }'");
-            },
+        let spec = self.using_specifier_text(tokens[1]);
+        if tokens.count() > 2 and tokens[2] is .KwAs() then {
+            // Renaming a module is changing its key in `dependencies`, not an
+            // alias on the `using` (module-design §5.3). File merges never had
+            // aliases either -- merging is whole-file.
+            return .Error("Parse error: 'using' takes no alias; rename a dependency by changing its key, or name members in an import list with 'as'");
         };
+        if self.is_file_merge_specifier(spec) then {
+            if not spec.ends_with(".koral") then {
+                return .Error("Parse error: file merge path must end in '.koral'");
+            };
+            if tokens.count() > 2 and tokens[2] is .LBrace() then {
+                return .Error("Parse error: file merge takes no import list; it merges the whole file");
+            };
+            return self.validate_using_trailing_tokens(tokens, 2, "Parse error: unexpected tokens after file merge using");
+        };
+
+        if tokens.count() > 2 and tokens[2] is .LBrace() then {
+            return self.validate_import_list_tokens(tokens, 2);
+        };
+        return self.validate_using_trailing_tokens(tokens, 2, "Parse error: unexpected tokens after module import");
     };
 
     file_private parse_using_decl(self) Result[CstDecl] = {
@@ -2723,6 +2784,12 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e);},
         };
+        // `type` `mutable`? — the two nominal forms the language has
+        // (grammar.bnf `<type-decl>`). `mutable` applies to structs only.
+        let mutable mut_kw = Option[Token].None();
+        if self.check(.KwMut()) then {
+            mut_kw = .Some(self.eat());
+        };
         let name = when self.expect_ident("type name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e);},
@@ -2767,21 +2834,29 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e);},
                 };
+                // `name Type` (positional) and `name: Type` (named) are both
+                // <field> spellings (grammar.bnf). The colon slot is what the
+                // printer reads to keep the distinction.
+                let mutable field_colon = Option[Token].None();
                 if self.check(.Colon()) then {
-                    return .Error("Parse error: Constructor field declarations use 'name Type', not 'name: Type'");
+                    field_colon = .Some(self.eat());
                 };
                 let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e);},
                 };
+                let default_value = when self.parse_default_value() in {
+                    .Ok(d) then d,
+                    .Error(e) then { return .Error(e);},
+                };
                 let comma = self.eat_comma();
-                items.push(CstStructBodyItem.Field(CstStructField(field_mut, field_access, field_name, .None(), field_type, comma)));
+                items.push(CstStructBodyItem.Field(CstStructField(field_mut, field_access, field_name, field_colon, field_type, default_value, comma)));
             };
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
-            return .Ok(.Type(vis, mods, kw, gp, name,
+            return .Ok(.Type(vis, mods, kw, mut_kw, gp, name,
                 CstTypeBody.Struct(lp, items, rp)));
         };
 
@@ -2812,10 +2887,9 @@ given CstParser {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e);},
                 };
-                when self.expect(.Comma(), "','") in {
-                    .Ok(_) then {},
-                    .Error(e) then { return .Error(e);},
-                };
+                // <variant-list> is `("," <variant>)* ","?` (grammar.bnf), so a
+                // comma is required BETWEEN variants and optional after the last.
+                let _ = self.eat_comma();
                 let s = CstStmt.ExprStmt(expr, .None());
                 cases.push(CstItem.Stmt(s));
             };
@@ -2823,7 +2897,7 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
-            return .Ok(.Type(vis, mods, kw, gp, name,
+            return .Ok(.Type(vis, mods, kw, mut_kw, gp, name,
                 CstTypeBody.Enum(lb, cases, rb)));
         };
 
@@ -2837,12 +2911,12 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
-            return .Ok(.Type(vis, mods, kw, gp, name,
+            return .Ok(.Type(vis, mods, kw, mut_kw, gp, name,
                 CstTypeBody.Alias(eq, target)));
         };
 
         // Empty (foreign type)
-        return .Ok(.Type(vis, mods, kw, gp, name, CstTypeBody.Empty()));
+        return .Ok(.Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Empty()));
     };
 
     file_private parse_enum_variant_expr(self) Result[CstExpr] = {
@@ -2858,19 +2932,32 @@ given CstParser {
         if self.check(.LParen()) then {
             lp = .Some(self.eat());
             while not self.check(.RParen()) and not self.is_eof() then {
+                // A comment between payload fields is documentation on the
+                // field that follows it, not a field name. Keep it.
+                let mutable comments = List[Token].new();
+                while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+                    comments.push(self.eat());
+                };
                 let field_name = when self.expect_ident("enum field name") in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e);},
                 };
+                // `name Type` (positional) and `name: Type` (named) are both
+                // <variant-field> spellings (grammar.bnf).
+                let mutable field_colon = Option[Token].None();
                 if self.check(.Colon()) then {
-                    return .Error("Parse error: Enum payload field declarations use 'name Type', not 'name: Type'");
+                    field_colon = .Some(self.eat());
                 };
                 let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e);},
                 };
+                let default_value = when self.parse_default_value() in {
+                    .Ok(d) then d,
+                    .Error(e) then { return .Error(e);},
+                };
                 let comma = self.eat_comma();
-                fields.push(CstEnumField(field_name, .None(), field_type, comma));
+                fields.push(CstEnumField(comments, field_name, field_colon, field_type, default_value, comma));
             };
             rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -3010,20 +3097,28 @@ given CstParser {
                 first = 0;
                 continue;
             };
-            // name Type
+            // name Type          -- positional
+            // name: Type         -- named (called with a label)
+            // Trait members follow func-param (grammar.bnf <method-param-list>),
+            // so both forms and the optional `mutable` apply here too.
             let pname = when self.expect_ident("parameter name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
+            let mutable colon = Option[Token].None();
             if self.check(.Colon()) then {
-                return .Error("Parse error: Function parameters use 'name Type', not 'name: Type'");
+                colon = .Some(self.eat());
             };
             let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e);},
             };
+            let default_value = when self.parse_default_value() in {
+                .Ok(d) then d,
+                .Error(e) then { return .Error(e);},
+            };
             let comma = self.eat_comma();
-            params.push(.NamedParam(pname, .None(), pt, comma));
+            params.push(.NamedParam(pname, colon, pt, default_value, comma));
             first = 0;
         };
         let rp = when self.expect(.RParen(), "')'") in {

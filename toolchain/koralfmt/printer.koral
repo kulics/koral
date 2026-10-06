@@ -52,6 +52,7 @@ given Printer {
     file_private print_type(self, t CstType) Void = when t in {
         .Named(name) then self.write_token(name),
         .SelfType(kw) then self.write_token(kw),
+        .ConstraintKeyword(kw) then self.write_token(kw),
         .Mutable(inner, kw) then {
             when inner in {
                 .Ref(ref_inner, ref_kw) then {
@@ -528,17 +529,47 @@ given Printer {
         .EnumVariant(name, lp, fields, rp) then {
             self.write_token(name);
             if lp is .Some(l) then {
+                // A comment needs its own line, so a payload that carries one
+                // has to be laid out multi-line. Collapsing it would leave the
+                // comment spliced into the middle of an inline argument list.
+                let wrap = self.enum_variant_needs_multiline(fields);
                 self.write_token(l);
+                if wrap then { self.write_newline(); self.indent += 1;};
                 for i in 0..<fields.count() then {
                     let f = fields[i];
+                    for c in f.comments then {
+                        if not self.at_line_start then { self.write_newline();};
+                        self.write_token(c);
+                        self.write_newline();
+                    };
+                    if wrap and not self.at_line_start then { self.write_newline();};
                     self.write_token(f.name);
                     if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
                     self.print_type(f.field_type);
-                    if f.comma is .Some(c) then { self.write_token(c); self.write_space();};
+                    self.print_default_value(f.default_value);
+                    if wrap then {
+                        self.write(",");
+                    } else if f.comma is .Some(c) then {
+                        self.write_token(c);
+                        self.write_space();
+                    };
+                };
+                if wrap then {
+                    self.indent -= 1;
+                    self.write_newline();
                 };
                 if rp is .Some(r) then { self.write_token(r);};
             };
         },
+    };
+
+    file_private enum_variant_needs_multiline(self, fields List[CstEnumField]) Bool = {
+        for f in fields then {
+            if not f.comments.is_empty() then {
+                return true;
+            };
+        };
+        return false;
     };
 
     file_private print_call_args(self, args List[CstCallArg]) Void = {
@@ -887,8 +918,8 @@ given Printer {
             self.print_func_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body),
         .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret) then
             self.print_foreign_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret),
-        .Type(vis, mods, kw, gp, name, body) then
-            self.print_type_decl(vis, mods, kw, gp, name, body),
+        .Type(vis, mods, kw, mut_kw, gp, name, body) then
+            self.print_type_decl(vis, mods, kw, mut_kw, gp, name, body),
         .Trait(vis, kw, gp, name, supers, lb, members, rb) then
             self.print_trait_decl(vis, kw, gp, name, supers, lb, members, rb),
         .Given(vis, mods, kw, gp, target, as_kw, trait_type, lb, members, rb) then
@@ -934,7 +965,7 @@ given Printer {
                     .SelfParam(kw, mut_kw, ref_kw, comma) then {
                         self.print_self_param(kw, mut_kw, ref_kw, comma);
                     },
-                    .NamedParam(pname, colon, pt, comma) then {
+                    .NamedParam(pname, colon, pt, default_value, comma) then {
                         self.write_token(pname);
                         if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
                         self.print_type(pt);
@@ -1123,11 +1154,12 @@ given Printer {
                 self.print_self_param(kw, mut_kw, ref_kw, .None());
                 self.write(",");
             },
-            .NamedParam(name, mut_kw, colon, param_type, _) then {
+            .NamedParam(name, mut_kw, colon, param_type, default_value, _) then {
                 if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
                 self.write_token(name);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
                 self.print_type(param_type);
+                self.print_default_value(default_value);
                 self.write(",");
             },
         };
@@ -1180,11 +1212,12 @@ given Printer {
             .SelfParam(kw, mut_kw, ref_kw, comma) then {
                 self.print_self_param(kw, mut_kw, ref_kw, comma);
             },
-            .NamedParam(name, mut_kw, colon, param_type, comma) then {
+            .NamedParam(name, mut_kw, colon, param_type, default_value, comma) then {
                 if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
                 self.write_token(name);
                 if colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
                 self.print_type(param_type);
+                self.print_default_value(default_value);
                 if comma is .Some(c) then { self.write_token(c); self.write_space();};
             },
         };
@@ -1195,7 +1228,7 @@ given Printer {
     // ========================================================================
 
     file_private print_type_decl(self,
-        vis Option[Token], mods List[Token], kw Token,
+        vis Option[Token], mods List[Token], kw Token, mut_kw Option[Token],
         gp Option[CstGenericParams], name Token, body CstTypeBody
     ) Void = {
         if vis is .Some(v) then { self.write_token(v); self.write_space();};
@@ -1205,6 +1238,7 @@ given Printer {
         };
         self.write_token(kw);
         self.write_space();
+        if mut_kw is .Some(m) then { self.write_token(m); self.write_space();};
         self.write_token(name);
         if gp is .Some(g) then { self.print_generic_params(g);};
         when body in {
@@ -1212,7 +1246,7 @@ given Printer {
                 let field_count = self.count_struct_fields(items);
                 let wrap_fields = if not self.struct_items_are_simple(items) then true else {
                     if field_count > 0 then {
-                        let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, items);
+                        let decl_len = self.estimate_struct_decl_length(vis, mods, kw, mut_kw, gp, name, items);
                         (self.indent * 4) + decl_len > 90
                     } else false
                 };
@@ -1244,12 +1278,40 @@ given Printer {
         };
     };
 
+    file_private estimate_default_length(self, d Option[CstDefault]) UInt = {
+        return when d in {
+            .Some(default) then {
+                let mutable len UInt = 2;
+                for t in default.value_tokens then {
+                    len += t.to_string().count();
+                };
+                len
+            },
+            .None() then 0(UInt),
+        };
+    };
+
+    file_private print_default_value(self, d Option[CstDefault]) Void = {
+        when d in {
+            .Some(default) then {
+                self.write_space();
+                self.write_token(default.eq);
+                self.write_space();
+                for t in default.value_tokens then {
+                    self.write_token(t);
+                };
+            },
+            .None() then {},
+        };
+    };
+
     file_private print_struct_field(self, f CstStructField) Void = {
         if f.access is .Some(a) then { self.write_token(a); self.write_space();};
         if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space();};
         self.write_token(f.name);
         if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
         self.print_type(f.field_type);
+        self.print_default_value(f.default_value);
         if f.comma is .Some(c) then { self.write_token(c); self.write_space();};
     };
 
@@ -1259,6 +1321,7 @@ given Printer {
         self.write_token(f.name);
         if f.colon is .Some(c) then { self.write_token(c); self.write_space();} else { self.write_space();};
         self.print_type(f.field_type);
+        self.print_default_value(f.default_value);
         self.write(",");
     };
 
@@ -1648,7 +1711,7 @@ given Printer {
                             _ then true,
                         };
                     },
-                    .Type(_, _, _, _, _, body) then {
+                    .Type(_, _, _, _, _, _, body) then {
                         return when body in { .Empty() then true, _ then false };
                     },
                     .Var(_, _, _, _, _) then { return true;},
@@ -1759,7 +1822,8 @@ given Printer {
                 len += 2;
                 for i in 0..<fields.count() then {
                     if i > 0 then { len += 2;};
-                    len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(fields[i].field_type);
+                    for c in fields[i].comments then { len += c.to_string().count() + 1;};
+                len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(fields[i].field_type) + self.estimate_default_length(fields[i].default_value);
                 };
             };
             len
@@ -1769,6 +1833,7 @@ given Printer {
 
     file_private estimate_type_length(self, t CstType) UInt = when t in {
         .Named(name) then name.to_string().count(),
+        .ConstraintKeyword(kw) then kw.to_string().count(),
         .SelfType(_) then 4,
         .Mutable(inner, _) then when inner in {
             .Ref(ref_inner, _) then self.estimate_type_length(ref_inner) + 5,
@@ -1836,9 +1901,9 @@ given Printer {
                         if ref_kw is .Some(_) then { len += 4;};
                         if comma is .Some(_) then { len += 2;};
                     },
-                    .NamedParam(name, mut_kw, colon, param_type, comma) then {
+                    .NamedParam(name, mut_kw, colon, param_type, default_value, comma) then {
                         if mut_kw is .Some(_) then { len += 4;};
-                        len += name.to_string().count() + 1 + self.estimate_type_length(param_type);
+                        len += name.to_string().count() + 1 + self.estimate_type_length(param_type) + self.estimate_default_length(default_value);
                         if colon is .Some(_) then { len += 1;};
                         if comma is .Some(_) then { len += 2;};
                     },
@@ -1850,7 +1915,7 @@ given Printer {
     };
 
     file_private estimate_struct_decl_length(self,
-        vis Option[Token], mods List[Token], kw Token,
+        vis Option[Token], mods List[Token], kw Token, mut_kw Option[Token],
         gp Option[CstGenericParams], name Token,
         items List[CstStructBodyItem]
     ) UInt = {
@@ -1860,6 +1925,7 @@ given Printer {
             len += mod.to_string().count() + 1;
         };
         len += kw.to_string().count() + 1;
+        if mut_kw is .Some(m) then { len += m.to_string().count() + 1;};
         if gp is .Some(g) then {
             let gv = g;
             len += 2;
@@ -1880,7 +1946,7 @@ given Printer {
                 .Field(f) then {
                     if f.access is .Some(a) then { len += a.to_string().count() + 1;};
                     if f.mut_kw is .Some(mk) then { len += mk.to_string().count() + 1;};
-                    len += f.name.to_string().count() + 1 + self.estimate_type_length(f.field_type);
+                    len += f.name.to_string().count() + 1 + self.estimate_type_length(f.field_type) + self.estimate_default_length(f.default_value);
                     if f.colon is .Some(_) then { len += 1;};
                     if f.comma is .Some(_) then { len += 2;};
                 },
@@ -2020,7 +2086,7 @@ file_private let validate_type_body(body CstTypeBody) Result[Void] = when body i
 
 file_private let validate_decl(decl CstDecl) Result[Void] = when decl in {
     .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
-    .Type(_, _, _, _, _, body) then validate_type_body(body),
+    .Type(_, _, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, members, _) then validate_item_list(members),
     .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
     .Using(_) or .ForeignUsing(_, _) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _) or .GivenNot(_, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok({}),
