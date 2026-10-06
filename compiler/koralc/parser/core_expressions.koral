@@ -8,17 +8,16 @@
 // - parse_call_suffix, parse_subscript_suffix, parse_dot_suffix
 // - parse_postfix_suffixes, parse_call, parse_unary
 
-file_private type StaticDispatchReceiver(
-    type_name String,
-    type_args List[TypeNode],
-);
+file_private type StaticDispatchReceiver(type_name String, type_args List[TypeNode]);
 
 given Parser {
     module_private is_lambda_expression(self) Bool = {
         // Must start with (
         when self.current().kind in {
             .LParen() then {},
-            _ then { return false;},
+            _ then {
+                return false;
+            },
         };
 
         let mutable i = self.index + 1; // skip (
@@ -29,8 +28,12 @@ given Parser {
                 .RParen() then {
                     // () followed by optional type then ->
                     i += 1;
-                    if i >= self.tokens.count() then { return false;};
-                    if self.tokens[i].kind is .Arrow() then { return true;};
+                    if i >= self.tokens.count() then {
+                        return false;
+                    };
+                    if self.tokens[i].kind is .Arrow() then {
+                        return true;
+                    };
                     return self.lookahead_lambda_return_clause(i);
                 },
                 _ then {},
@@ -38,28 +41,48 @@ given Parser {
         };
 
         // Non-empty params: first token must be an identifier (param name)
-        if i >= self.tokens.count() then { return false;};
+        if i >= self.tokens.count() then {
+            return false;
+        };
         let mutable depth UInt = 1; // we already consumed the opening (
         i += 1; // skip first identifier
         while i < self.tokens.count() and depth > 0 then {
             when self.tokens[i].kind in {
-                .LParen() then { depth += 1;},
-                .LBracket() then { depth += 1;},
+                .LParen() then {
+                    depth += 1;
+                },
+                .LBracket() then {
+                    depth += 1;
+                },
                 .RParen() then {
                     depth -= 1;
-                    if depth == 0 then { break;};
+                    if depth == 0 then {
+                        break;
+                    };
                 },
-                .RBracket() then { if depth > 0 then { depth -= 1;};},
-                .Eof() then { return false;},
+                .RBracket() then {
+                    if depth > 0 then {
+                        depth -= 1;
+                    };
+                },
+                .Eof() then {
+                    return false;
+                },
                 _ then {},
             };
             i += 1;
         };
-        if depth > 0 then { return false;};
+        if depth > 0 then {
+            return false;
+        };
         i += 1; // skip ;
 
-        if i >= self.tokens.count() then { return false;};
-        if self.tokens[i].kind is .Arrow() then { return true;};
+        if i >= self.tokens.count() then {
+            return false;
+        };
+        if self.tokens[i].kind is .Arrow() then {
+            return true;
+        };
         return self.lookahead_lambda_return_clause(i);
     };
 
@@ -84,11 +107,20 @@ given Parser {
             let name_token = self.current();
             let name = self.expect_identifier("lambda parameter") or return;
             if not self.is_valid_value_name(name) then {
-                return .Error(self.parser_error_at(self.invalid_parameter_name_error(name), name_token));
+                return .Error(
+                    self.parser_error_at(
+                        self.invalid_parameter_name_error(name),
+                        name_token,
+                    ),
+                );
             };
 
             if self.current().kind is .Colon() then {
-                return .Error(self.parser_error("Lambda parameters use 'name Type', not 'name: Type'"));
+                return .Error(
+                    self.parser_error(
+                        "Lambda parameters use 'name Type', not 'name: Type'",
+                    ),
+                );
             };
 
             // Optional type annotation
@@ -101,20 +133,35 @@ given Parser {
             params.push(LambdaParam(name, type_ann));
 
             when self.current().kind in {
-                .Comma() then { self.advance();},
+                .Comma() then {
+                    self.advance();
+                },
                 .RParen() then {},
-                _ then { return .Error(self.parser_error("Expected ',' or ')' in lambda parameter list")); },
+                _ then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected ',' or ')' in lambda parameter list",
+                        ),
+                    );
+                },
             };
         };
 
         when self.current().kind in {
-            .RParen() then { self.advance();},
-            _ then { return .Error(self.parser_error("Expected ')' after lambda parameters"));},
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected ')' after lambda parameters"));
+            },
         };
 
         // Optional return type
         let mutable return_type = Option[TypeNode].None();
-        let has_arrow = when self.current().kind in { .Arrow() then true, _ then false };
+        let has_arrow = when self.current().kind in {
+            .Arrow() then true,
+            _ then false,
+        };
         if not has_arrow then {
             if self.is_type_start() then {
                 let t = self.parse_type() or return;
@@ -123,16 +170,27 @@ given Parser {
         };
 
         when self.current().kind in {
-            .Arrow() then { self.advance();},
-            _ then { return .Error(self.parser_error("Expected '->' in lambda expression"));},
+            .Arrow() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected '->' in lambda expression"));
+            },
         };
 
         let body = self.parse_expression() or return;
 
-        return .Ok(Expr.LambdaExpr(params, return_type, body, self.span_from_start(start)));
+        return .Ok(
+            Expr.LambdaExpr(params, return_type, body, self.span_from_start(start)),
+        );
     };
 
-    module_private build_duration_literal_expression(self, value String, unit String, span SourceSpan) Result[Expr] = {
+    module_private build_duration_literal_expression(
+        self,
+        value String,
+        unit String,
+        span SourceSpan,
+    ) Result[Expr] = {
         let mutable secs_expr = Expr.IntegerLiteral("0", span);
         let mutable nanos_expr = Expr.IntegerLiteral("0", span);
 
@@ -141,19 +199,61 @@ given Parser {
                 secs_expr = Expr.IntegerLiteral(value, span);
             },
             "ms" then {
-                secs_expr = Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Divide(), Expr.IntegerLiteral("1000", span), span);
-                nanos_expr = Expr.ArithmeticExpr(Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Remainder(), Expr.IntegerLiteral("1000", span), span), ArithmeticOperator.Multiply(), Expr.IntegerLiteral("1000000", span), span);
+                secs_expr = Expr.ArithmeticExpr(
+                    Expr.IntegerLiteral(value, span),
+                    ArithmeticOperator.Divide(),
+                    Expr.IntegerLiteral("1000", span),
+                    span,
+                );
+                nanos_expr = Expr.ArithmeticExpr(
+                    Expr.ArithmeticExpr(
+                        Expr.IntegerLiteral(value, span),
+                        ArithmeticOperator.Remainder(),
+                        Expr.IntegerLiteral("1000", span),
+                        span,
+                    ),
+                    ArithmeticOperator.Multiply(),
+                    Expr.IntegerLiteral("1000000", span),
+                    span,
+                );
             },
             "us" then {
-                secs_expr = Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Divide(), Expr.IntegerLiteral("1000000", span), span);
-                nanos_expr = Expr.ArithmeticExpr(Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Remainder(), Expr.IntegerLiteral("1000000", span), span), ArithmeticOperator.Multiply(), Expr.IntegerLiteral("1000", span), span);
+                secs_expr = Expr.ArithmeticExpr(
+                    Expr.IntegerLiteral(value, span),
+                    ArithmeticOperator.Divide(),
+                    Expr.IntegerLiteral("1000000", span),
+                    span,
+                );
+                nanos_expr = Expr.ArithmeticExpr(
+                    Expr.ArithmeticExpr(
+                        Expr.IntegerLiteral(value, span),
+                        ArithmeticOperator.Remainder(),
+                        Expr.IntegerLiteral("1000000", span),
+                        span,
+                    ),
+                    ArithmeticOperator.Multiply(),
+                    Expr.IntegerLiteral("1000", span),
+                    span,
+                );
             },
             "ns" then {
-                secs_expr = Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Divide(), Expr.IntegerLiteral("1000000000", span), span);
-                nanos_expr = Expr.ArithmeticExpr(Expr.IntegerLiteral(value, span), ArithmeticOperator.Remainder(), Expr.IntegerLiteral("1000000000", span), span);
+                secs_expr = Expr.ArithmeticExpr(
+                    Expr.IntegerLiteral(value, span),
+                    ArithmeticOperator.Divide(),
+                    Expr.IntegerLiteral("1000000000", span),
+                    span,
+                );
+                nanos_expr = Expr.ArithmeticExpr(
+                    Expr.IntegerLiteral(value, span),
+                    ArithmeticOperator.Remainder(),
+                    Expr.IntegerLiteral("1000000000", span),
+                    span,
+                );
             },
             _ then {
-                return .Error(self.parser_error_at_current("unsupported duration suffix: \(unit)"));
+                return .Error(
+                    self.parser_error_at_current("unsupported duration suffix: \(unit)"),
+                );
             },
         };
 
@@ -161,7 +261,13 @@ given Parser {
         args.push(Expr.NamedArgument("seconds", secs_expr, span));
         args.push(Expr.NamedArgument("nanoseconds", nanos_expr, span));
 
-        let ctor = Expr.StaticMethodCall("Duration", List[TypeNode].new(), "new", args, span);
+        let ctor = Expr.StaticMethodCall(
+            "Duration",
+            List[TypeNode].new(),
+            "new",
+            args,
+            span,
+        );
         let mutable unwrap_path = List[String].new();
         unwrap_path.push("unwrap");
         let callee = Expr.MemberPath(ctor, unwrap_path, span);
@@ -186,7 +292,11 @@ given Parser {
             },
             .DurationLiteral(value, unit) then {
                 self.advance();
-                return self.build_duration_literal_expression(value, unit, self.token_span(t));
+                return self.build_duration_literal_expression(
+                    value,
+                    unit,
+                    self.token_span(t),
+                );
             },
             .FloatLiteral(value) then {
                 self.advance();
@@ -194,12 +304,18 @@ given Parser {
             },
             .StringLiteral(value) then {
                 self.advance();
-                let parsed = self.parse_string_literal_expr(value, self.span_from_start(t)) or return;
+                let parsed = self.parse_string_literal_expr(
+                    value,
+                    self.span_from_start(t),
+                ) or return;
                 return .Ok(parsed);
             },
             .InterpolatedString(parts) then {
                 self.advance();
-                let parsed = self.parse_interpolated_string_expr(parts, self.span_from_start(t)) or return;
+                let parsed = self.parse_interpolated_string_expr(
+                    parts,
+                    self.span_from_start(t),
+                ) or return;
                 return .Ok(parsed);
             },
             .RuneLiteral(value) then {
@@ -245,14 +361,28 @@ given Parser {
                 self.advance(); // consume '.'
                 let member_name = self.expect_identifier("implicit member name") or return;
                 if self.current().kind is not .LParen() then {
-                    return .Error(self.parser_error("Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name"));
+                    return .Error(
+                        self.parser_error(
+                            "Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name",
+                        ),
+                    );
                 };
 
                 self.advance(); // consume '('
-                let call_args = self.parse_argument_list_until_rparen("implicit member call") or return;
+                let call_args = self.parse_argument_list_until_rparen(
+                    "implicit member call",
+                ) or return;
                 when self.current().kind in {
-                    .RParen() then { self.advance();},
-                    _ then { return .Error(self.parser_error("Expected ')' after implicit member call arguments"));},
+                    .RParen() then {
+                        self.advance();
+                    },
+                    _ then {
+                        return .Error(
+                            self.parser_error(
+                                "Expected ')' after implicit member call arguments",
+                            ),
+                        );
+                    },
                 };
                 return .Ok(Expr.ImplicitMemberExpr(member_name, call_args, span));
             },
@@ -261,20 +391,50 @@ given Parser {
                 self.advance();
                 if self.can_start_range_bound(self.current().kind) and true then {
                     let rhs = self.parse_comparison() or return;
-                    return .Ok(Expr.RangeExpr(RangeOperator.To(), Option[Expr].None(), Option[Expr].Some(rhs), self.span_from_start(t)));
+                    return .Ok(
+                        Expr.RangeExpr(
+                            RangeOperator.To(),
+                            Option[Expr].None(),
+                            Option[Expr].Some(rhs),
+                            self.span_from_start(t),
+                        ),
+                    );
                 };
-                return .Ok(Expr.RangeExpr(RangeOperator.Full(), Option[Expr].None(), Option[Expr].None(), self.span_from_start(t)));
+                return .Ok(
+                    Expr.RangeExpr(
+                        RangeOperator.Full(),
+                        Option[Expr].None(),
+                        Option[Expr].None(),
+                        self.span_from_start(t),
+                    ),
+                );
             },
             .RangeLess() then {
                 self.advance();
                 if not true then {
-                    return .Error(self.parser_error("Unexpected token: \(token_text(self.current()))"));
+                    return .Error(
+                        self.parser_error(
+                            "Unexpected token: \(token_text(self.current()))",
+                        ),
+                    );
                 };
                 let rhs = self.parse_comparison() or return;
-                return .Ok(Expr.RangeExpr(RangeOperator.ToOpen(), Option[Expr].None(), Option[Expr].Some(rhs), self.span_from_start(t)));
+                return .Ok(
+                    Expr.RangeExpr(
+                        RangeOperator.ToOpen(),
+                        Option[Expr].None(),
+                        Option[Expr].Some(rhs),
+                        self.span_from_start(t),
+                    ),
+                );
             },
             _ then {
-                return .Error(self.parser_error_at("Unexpected token: \(token_text(t)), expected: number, identifier, boolean literal, block expression, or collection literal", t));
+                return .Error(
+                    self.parser_error_at(
+                        "Unexpected token: \(token_text(t)), expected: number, identifier, boolean literal, block expression, or collection literal",
+                        t,
+                    ),
+                );
             },
         };
     };
@@ -283,11 +443,18 @@ given Parser {
         return self.parse_collection_or_dict_literal();
     };
 
-    module_private extract_static_dispatch_receiver(self, expr Expr) Option[StaticDispatchReceiver] = {
+    module_private extract_static_dispatch_receiver(
+        self,
+        expr Expr,
+    ) Option[StaticDispatchReceiver] = {
         return when expr in {
-            .Identifier(base_name, _) then if self.is_upper_first(base_name) then Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, List[TypeNode].new())) else Option[StaticDispatchReceiver].None(),
+            .Identifier(base_name, _) then if self.is_upper_first(base_name) then Option[StaticDispatchReceiver].Some(
+                StaticDispatchReceiver(base_name, List[TypeNode].new()),
+            ) else Option[StaticDispatchReceiver].None(),
             .GenericInstantiation(base_name, type_args, _) then {
-                Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, type_args))
+                Option[StaticDispatchReceiver].Some(
+                    StaticDispatchReceiver(base_name, type_args),
+                )
             },
             .MemberPath(base_expr, path, _) then {
                 if not path.is_empty() then {
@@ -303,14 +470,21 @@ given Parser {
                                 };
                             };
                             if all_upper then {
-                                return Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(qualified, List[TypeNode].new()));
+                                return Option[StaticDispatchReceiver].Some(
+                                    StaticDispatchReceiver(
+                                        qualified,
+                                        List[TypeNode].new(),
+                                    ),
+                                );
                             };
                         };
                     };
 
                     let last = path[path.count() - 1];
                     if self.is_upper_first(last) then {
-                        Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(last, List[TypeNode].new()))
+                        Option[StaticDispatchReceiver].Some(
+                            StaticDispatchReceiver(last, List[TypeNode].new()),
+                        )
                     } else {
                         Option[StaticDispatchReceiver].None()
                     };
@@ -322,7 +496,8 @@ given Parser {
     };
 
     module_private member_path_call_receiver_expr(self, base Expr, path List[String]) Expr = {
-        return if path.count() == 1 then base else {
+        return if path.count() == 1 then base
+        else {
             let mutable receiver_path = List[String].new();
             let mutable idx UInt = 0;
             while idx + 1 < path.count() then {
@@ -355,10 +530,15 @@ given Parser {
         when self.current().kind in {
             .Comma() then {
                 self.advance();
-                let second = self.parse_expression_checked("pair literal second element") or else {
+                let second = self.parse_expression_checked(
+                    "pair literal second element",
+                ) or else {
                     return .Error(it);
                 };
-                let has_rparen = when self.current().kind in { .RParen() then true, _ then false };
+                let has_rparen = when self.current().kind in {
+                    .RParen() then true,
+                    _ then false,
+                };
                 if not has_rparen then {
                     return .Error(self.parser_error("Expected ')'"));
                 };
@@ -374,12 +554,23 @@ given Parser {
                 let mutable trait_type = self.parse_type() or else {
                     return .Error(it);
                 };
-                let has_rparen = when self.current().kind in { .RParen() then true, _ then false };
+                let has_rparen = when self.current().kind in {
+                    .RParen() then true,
+                    _ then false,
+                };
                 if not has_rparen then {
-                    return .Error(self.parser_error("Expected ')' after trait qualification"));
+                    return .Error(
+                        self.parser_error("Expected ')' after trait qualification"),
+                    );
                 };
                 self.advance();
-                return .Ok(Expr.TraitQualificationExpr(first, trait_type, self.span_from_start(start)));
+                return .Ok(
+                    Expr.TraitQualificationExpr(
+                        first,
+                        trait_type,
+                        self.span_from_start(start),
+                    ),
+                );
             },
             .RParen() then {
                 self.advance();
@@ -394,8 +585,12 @@ given Parser {
     module_private parse_block_expression(self) Result[Expr] = {
         let start = self.current();
         when self.current().kind in {
-            .LBrace() then { self.advance();},
-            _ then { return .Error(self.parser_error("Expected '{' to start block"));},
+            .LBrace() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected '{' to start block"));
+            },
         };
 
         self.parse_debug("block begin");
@@ -414,35 +609,59 @@ given Parser {
                 },
                 _ then {
                     let stmt_start = self.current();
-                    let is_declaration_statement =
-                        self.current().kind is .KwLet()
-                        or self.current().kind is .KwReturn()
-                        or self.current().kind is .KwBreak()
-                        or self.current().kind is .KwContinue()
-                        or self.current().kind is .KwDefer();
+                    let is_declaration_statement = self.current().kind is .KwLet() or self.current(
+                    ).kind is .KwReturn() or self.current().kind is .KwBreak() or self.current(
+                    ).kind is .KwContinue() or self.current().kind is .KwDefer();
                     if is_declaration_statement then {
                         let before = self.index;
                         let parsed = self.parse_statement() or return;
                         if self.index == before then {
                             let t = self.current();
-                            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", "block", t), t));
+                            return .Error(
+                                self.parser_error_at(
+                                    self.format_progress_error(
+                                        "Parser made no progress in ",
+                                        "block",
+                                        t,
+                                    ),
+                                    t,
+                                ),
+                            );
                         };
                         statements.push(parsed);
                     } else {
                         let expr = self.parse_expression_checked("block expression") or return;
                         if self.is_assignment_operator() then {
                             let op = self.parse_assignment_operator() or else {
-                                return .Error(self.parser_error_at_current("Unknown assignment operator"));
+                                return .Error(
+                                    self.parser_error_at_current(
+                                        "Unknown assignment operator",
+                                    ),
+                                );
                             };
                             self.advance();
-                            let rhs = self.parse_expression_checked("assignment right-hand side") or return;
+                            let rhs = self.parse_expression_checked(
+                                "assignment right-hand side",
+                            ) or return;
                             let _ = self.require_semicolon() or return;
-                            statements.push(Statement.AssignmentStmt(expr, op, rhs, self.span_from_start(stmt_start)));
+                            statements.push(
+                                Statement.AssignmentStmt(
+                                    expr,
+                                    op,
+                                    rhs,
+                                    self.span_from_start(stmt_start),
+                                ),
+                            );
                         } else {
                             when self.current().kind in {
                                 .Semicolon() then {
                                     self.advance();
-                                    statements.push(Statement.ExprStmt(expr, self.span_from_start(stmt_start)));
+                                    statements.push(
+                                        Statement.ExprStmt(
+                                            expr,
+                                            self.span_from_start(stmt_start),
+                                        ),
+                                    );
                                 },
                                 _ then {
                                     tail_expression = Option[Expr].Some(expr);
@@ -455,13 +674,17 @@ given Parser {
             };
         };
         when self.current().kind in {
-            .RBrace() then { self.advance();},
+            .RBrace() then {
+                self.advance();
+            },
             // An expression with no ';' is the block's value, so the block is
             // over: say so. "Unexpected token" alone leaves the reader guessing
             // whether a ';' or a '}' was wanted.
             _ then {
                 let t = self.current();
-                return .Error(self.unexpected_token_error_at(token_kind_description(t), "'}'", t));
+                return .Error(
+                    self.unexpected_token_error_at(token_kind_description(t), "'}'", t),
+                );
             },
         };
 
@@ -475,14 +698,20 @@ given Parser {
 
         if self.current().kind is .Ellipsis() then {
             let _ = start;
-            return .Error(self.parser_error_at_current("Default-fill '...' is not supported; use named parameter defaults instead"));
+            return .Error(
+                self.parser_error_at_current(
+                    "Default-fill '...' is not supported; use named parameter defaults instead",
+                ),
+            );
         };
 
         when self.current_labeled_argument_name(true) in {
             .Some(label) then {
                 self.advance();
                 self.advance();
-                let expr = when self.parse_expression_checked("named \(context) argument") in {
+                let expr = when self.parse_expression_checked(
+                    "named \(context) argument",
+                ) in {
                     .Ok(parsed) then parsed,
                     .Error(inner) then {
                         self.restore_state(saved);
@@ -522,7 +751,10 @@ given Parser {
         return .Ok(PatternElement(Option[String].None(), pattern));
     };
 
-    module_private parse_argument_list_until_rparen(self, context String) Result[List[Expr]] = {
+    module_private parse_argument_list_until_rparen(
+        self,
+        context String,
+    ) Result[List[Expr]] = {
         let mutable args = List[Expr].new();
         if self.current().kind is .RParen() then {
             return .Ok(args);
@@ -546,12 +778,19 @@ given Parser {
         return .Ok(args);
     };
 
-    module_private reject_non_constructor_call_args(self, args List[Expr]) Result[List[Expr]] = {
+    module_private reject_non_constructor_call_args(
+        self,
+        args List[Expr],
+    ) Result[List[Expr]] = {
         for arg in args then {
             when arg in {
                 .NamedArgument(label, _, _) then {
                     if label == "..." then {
-                        return .Error(self.parser_error_at_current("Default-fill '...' is not supported; use named parameter defaults instead"));
+                        return .Error(
+                            self.parser_error_at_current(
+                                "Default-fill '...' is not supported; use named parameter defaults instead",
+                            ),
+                        );
                     };
                     // Named labels are now allowed for all calls (functions, methods, constructors)
                 },
@@ -565,12 +804,18 @@ given Parser {
         return when callee in {
             .Identifier(name, _) then self.is_upper_first(name),
             .GenericInstantiation(base, _, _) then self.is_upper_first(base),
-            .MemberPath(_, path, _) then if not path.is_empty() then self.is_upper_first(path[path.count() - 1]) else false,
+            .MemberPath(_, path, _) then if not path.is_empty() then self.is_upper_first(
+                path[path.count() - 1],
+            ) else false,
             _ then false,
         };
     };
 
-    module_private static_dispatch_allows_constructor_argument_syntax(self, receiver Option[StaticDispatchReceiver], member String) Bool = {
+    module_private static_dispatch_allows_constructor_argument_syntax(
+        self,
+        receiver Option[StaticDispatchReceiver],
+        member String,
+    ) Bool = {
         let _ = self;
         return self.is_upper_first(member) and receiver is .Some(_);
     };
@@ -622,7 +867,9 @@ given Parser {
                 return .Ok(t);
             },
             _ then {
-                return .Error(self.parser_error_at("Expected '{' to start \(context)", t));
+                return .Error(
+                    self.parser_error_at("Expected '{' to start \(context)", t),
+                );
             },
         };
     };
@@ -630,7 +877,9 @@ given Parser {
     module_private parse_when_arm(self) Result[WhenArm] = {
         let arm_start_index = self.index;
         let arm_start = self.current();
-        self.parse_debug("when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))");
+        self.parse_debug(
+            "when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))",
+        );
         let pattern = self.collect_pattern_until_then() or return;
 
         let _ = self.expect_kw_then("when arm") or return;
@@ -639,7 +888,16 @@ given Parser {
 
         if self.index == arm_start_index then {
             let t = self.current();
-            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", "when arm", t), t));
+            return .Error(
+                self.parser_error_at(
+                    self.format_progress_error(
+                        "Parser made no progress in ",
+                        "when arm",
+                        t,
+                    ),
+                    t,
+                ),
+            );
         };
 
         return .Ok(WhenArm(pattern, body, false));
@@ -654,7 +912,9 @@ given Parser {
                     break;
                 },
                 .Eof() then {
-                    return .Error(self.parser_error("Unexpected EOF in when expression"));
+                    return .Error(
+                        self.parser_error("Unexpected EOF in when expression"),
+                    );
                 },
                 _ then {
                     let arm = self.parse_when_arm() or return;
@@ -666,7 +926,13 @@ given Parser {
                         .RBrace() then {},
                         _ then {
                             let t = self.current();
-                            return .Error(self.unexpected_token_error_at(token_kind_description(t), "',' or '}' after when arm", t));
+                            return .Error(
+                                self.unexpected_token_error_at(
+                                    token_kind_description(t),
+                                    "',' or '}' after when arm",
+                                    t,
+                                ),
+                            );
                         },
                     };
                 },
@@ -679,7 +945,9 @@ given Parser {
         let saved = self.save_state();
         when self.current().kind in {
             .LParen() then {},
-            _ then { return Option[Expr].None();},
+            _ then {
+                return Option[Expr].None();
+            },
         };
 
         self.advance();
@@ -690,13 +958,17 @@ given Parser {
         };
 
         when self.current().kind in {
-            .RParen() then { self.advance();},
+            .RParen() then {
+                self.advance();
+            },
             _ then {
                 self.restore_state(saved);
                 return Option[Expr].None();
             },
         };
-        return Option[Expr].Some(Expr.CastExpr(cast_type, base, self.span_from_expr_start(base)));
+        return Option[Expr].Some(
+            Expr.CastExpr(cast_type, base, self.span_from_expr_start(base)),
+        );
     };
 
     module_private parse_pattern_primary(self, stop_on_in Bool) Result[PatternNode] = {
@@ -723,20 +995,41 @@ given Parser {
         when self.current().kind in {
             .Star() then {
                 let target_type = self.parse_type() or return;
-                node = PatternNode.TraitObjectType(target_type, self.span_from_start(start));
+                node = PatternNode.TraitObjectType(
+                    target_type,
+                    self.span_from_start(start),
+                );
             },
             .KwMut() then {
                 self.advance();
                 let name = self.expect_identifier("mutable pattern variable") or return;
-                if self.current().kind is .Identifier(type_name) and self.is_upper_first(type_name) then {
+                if self.current().kind is .Identifier(type_name) and self.is_upper_first(
+                    type_name,
+                ) then {
                     self.advance();
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, true, TypeNode.Identifier(type_name, unknown_span()), self.span_from_start(start)));
+                    return .Ok(
+                        PatternNode.TraitObjectTypeBinding(
+                            name,
+                            true,
+                            TypeNode.Identifier(type_name, unknown_span()),
+                            self.span_from_start(start),
+                        ),
+                    );
                 };
                 if self.current().kind is .Star() then {
                     let mutable target_type = self.parse_type() or return;
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, true, target_type, self.span_from_start(start)));
+                    return .Ok(
+                        PatternNode.TraitObjectTypeBinding(
+                            name,
+                            true,
+                            target_type,
+                            self.span_from_start(start),
+                        ),
+                    );
                 };
-                return .Ok(PatternNode.Variable(name, true, self.span_from_start(start)));
+                return .Ok(
+                    PatternNode.Variable(name, true, self.span_from_start(start)),
+                );
             },
             .KwTrue() then {
                 self.advance();
@@ -752,9 +1045,16 @@ given Parser {
                     self.advance();
                     v
                 } else {
-                    return .Error(self.parser_error("Expected integer literal after '-' in negative pattern"));
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer literal after '-' in negative pattern",
+                        ),
+                    );
                 };
-                node = PatternNode.NegativeIntegerLiteral(value, self.span_from_start(start));
+                node = PatternNode.NegativeIntegerLiteral(
+                    value,
+                    self.span_from_start(start),
+                );
             },
             .IntegerLiteral(value) then {
                 self.advance();
@@ -779,9 +1079,17 @@ given Parser {
                     self.advance();
                     if is_negative then "-\(v)" else v
                 } else {
-                    return .Error(self.parser_error("Expected integer literal after '>' in comparison pattern"));
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer literal after '>' in comparison pattern",
+                        ),
+                    );
                 };
-                node = PatternNode.ComparisonPattern(ComparisonPatternOperator.Greater(), value, self.span_from_start(start));
+                node = PatternNode.ComparisonPattern(
+                    ComparisonPatternOperator.Greater(),
+                    value,
+                    self.span_from_start(start),
+                );
             },
             .Less() then {
                 self.advance();
@@ -794,9 +1102,17 @@ given Parser {
                     self.advance();
                     if is_negative then "-\(v)" else v
                 } else {
-                    return .Error(self.parser_error("Expected integer literal after '<' in comparison pattern"));
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer literal after '<' in comparison pattern",
+                        ),
+                    );
                 };
-                node = PatternNode.ComparisonPattern(ComparisonPatternOperator.Less(), value, self.span_from_start(start));
+                node = PatternNode.ComparisonPattern(
+                    ComparisonPatternOperator.Less(),
+                    value,
+                    self.span_from_start(start),
+                );
             },
             .GreaterEqual() then {
                 self.advance();
@@ -809,9 +1125,17 @@ given Parser {
                     self.advance();
                     if is_negative then "-\(v)" else v
                 } else {
-                    return .Error(self.parser_error("Expected integer literal after '>=' in comparison pattern"));
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer literal after '>=' in comparison pattern",
+                        ),
+                    );
                 };
-                node = PatternNode.ComparisonPattern(ComparisonPatternOperator.GreaterEqual(), value, self.span_from_start(start));
+                node = PatternNode.ComparisonPattern(
+                    ComparisonPatternOperator.GreaterEqual(),
+                    value,
+                    self.span_from_start(start),
+                );
             },
             .LessEqual() then {
                 self.advance();
@@ -824,32 +1148,72 @@ given Parser {
                     self.advance();
                     if is_negative then "-\(v)" else v
                 } else {
-                    return .Error(self.parser_error("Expected integer literal after '<=' in comparison pattern"));
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer literal after '<=' in comparison pattern",
+                        ),
+                    );
                 };
-                node = PatternNode.ComparisonPattern(ComparisonPatternOperator.LessEqual(), value, self.span_from_start(start));
+                node = PatternNode.ComparisonPattern(
+                    ComparisonPatternOperator.LessEqual(),
+                    value,
+                    self.span_from_start(start),
+                );
             },
             .Identifier(name) then {
                 self.advance();
                 if name == "_" then {
                     return .Ok(PatternNode.Wildcard(self.span_from_start(start)));
                 };
-                let mutable parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start));
-                if self.current().kind is .Identifier(type_name) and self.is_upper_first(type_name) then {
+                let mutable parsed_pattern = PatternNode.Variable(
+                    name,
+                    false,
+                    self.span_from_start(start),
+                );
+                if self.current().kind is .Identifier(type_name) and self.is_upper_first(
+                    type_name,
+                ) then {
                     self.advance();
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, false, TypeNode.Identifier(type_name, unknown_span()), self.span_from_start(start)));
+                    return .Ok(
+                        PatternNode.TraitObjectTypeBinding(
+                            name,
+                            false,
+                            TypeNode.Identifier(type_name, unknown_span()),
+                            self.span_from_start(start),
+                        ),
+                    );
                 };
                 if self.current().kind is .Star() then {
                     let target_type = self.parse_type() or return;
-                    return .Ok(PatternNode.TraitObjectTypeBinding(name, false, target_type, self.span_from_start(start)));
+                    return .Ok(
+                        PatternNode.TraitObjectTypeBinding(
+                            name,
+                            false,
+                            target_type,
+                            self.span_from_start(start),
+                        ),
+                    );
                 };
                 if self.is_upper_first(name) then {
-                    let mutable resolved_named_type = TypeNode.Identifier(name, unknown_span());
+                    let mutable resolved_named_type = TypeNode.Identifier(
+                        name,
+                        unknown_span(),
+                    );
                     if self.current().kind is .LBracket() then {
                         let type_args = self.parse_type_arg_list() or return;
-                        resolved_named_type = TypeNode.Generic(name, type_args, unknown_span());
+                        resolved_named_type = TypeNode.Generic(
+                            name,
+                            type_args,
+                            unknown_span(),
+                        );
                     };
                     if self.current().kind is not .LParen() then {
-                        return .Ok(PatternNode.TraitObjectType(resolved_named_type, self.span_from_start(start)));
+                        return .Ok(
+                            PatternNode.TraitObjectType(
+                                resolved_named_type,
+                                self.span_from_start(start),
+                            ),
+                        );
                     };
                     if self.current().kind is .LParen() then {
                         self.advance();
@@ -867,17 +1231,34 @@ given Parser {
                                 };
                             };
                             when self.current().kind in {
-                                .RParen() then { self.advance();},
-                                _ then { return .Error(self.parser_error("Expected ')' in struct destructuring pattern"));},
+                                .RParen() then {
+                                    self.advance();
+                                },
+                                _ then {
+                                    return .Error(
+                                        self.parser_error(
+                                            "Expected ')' in struct destructuring pattern",
+                                        ),
+                                    );
+                                },
                             };
                         };
-                        parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start));
+                        parsed_pattern = PatternNode.StructPattern(
+                            name,
+                            elements,
+                            self.span_from_start(start),
+                        );
                     };
                 };
                 if not self.is_upper_first(name) and not self.is_valid_value_name(name) then {
                     // `start` is the identifier token itself; the check runs after
                     // parsing the rest of the pattern, so `current()` is long past it.
-                    return .Error(self.parser_error_at(self.invalid_variable_name_error(name), start));
+                    return .Error(
+                        self.parser_error_at(
+                            self.invalid_variable_name_error(name),
+                            start,
+                        ),
+                    );
                 };
                 node = parsed_pattern;
             },
@@ -886,11 +1267,20 @@ given Parser {
                 let case_name_token = self.current();
                 let case_name = self.expect_identifier("enum case pattern") or return;
                 if not self.is_upper_first(case_name) then {
-                    return .Error(self.parser_error_at(self.invalid_enum_case_name_error(case_name), case_name_token));
+                    return .Error(
+                        self.parser_error_at(
+                            self.invalid_enum_case_name_error(case_name),
+                            case_name_token,
+                        ),
+                    );
                 };
                 let mutable elements = List[PatternElement].new();
 
-                if not (self.current().kind is .LParen()) then { return .Error(self.parser_error("Expected '(' after enum case name"));};
+                if not (self.current().kind is .LParen()) then {
+                    return .Error(
+                        self.parser_error("Expected '(' after enum case name"),
+                    );
+                };
                 self.advance();
                 if self.current().kind is .RParen() then {
                     self.advance();
@@ -905,12 +1295,22 @@ given Parser {
                         };
                     };
                     when self.current().kind in {
-                        .RParen() then { self.advance();},
-                        _ then { return .Error(self.parser_error("Expected ')' in enum case pattern"));},
+                        .RParen() then {
+                            self.advance();
+                        },
+                        _ then {
+                            return .Error(
+                                self.parser_error("Expected ')' in enum case pattern"),
+                            );
+                        },
                     };
                 };
 
-                node = PatternNode.EnumCase(case_name, elements, self.span_from_start(start));
+                node = PatternNode.EnumCase(
+                    case_name,
+                    elements,
+                    self.span_from_start(start),
+                );
             },
             .LParen() then {
                 self.advance();
@@ -921,23 +1321,41 @@ given Parser {
                     self.advance();
                     let second = self.parse_pattern_or(stop_on_in) or return;
                     when self.current().kind in {
-                        .RParen() then { self.advance();},
-                        _ then { return .Error(self.parser_error("Expected ')' in pair pattern"));},
+                        .RParen() then {
+                            self.advance();
+                        },
+                        _ then {
+                            return .Error(
+                                self.parser_error("Expected ')' in pair pattern"),
+                            );
+                        },
                     };
                     let mutable elements = List[PatternElement].new();
                     elements.push(PatternElement(Option[String].None(), first));
                     elements.push(PatternElement(Option[String].None(), second));
-                    parsed_pattern = PatternNode.StructPattern("Pair", elements, self.span_from_start(start));
+                    parsed_pattern = PatternNode.StructPattern(
+                        "Pair",
+                        elements,
+                        self.span_from_start(start),
+                    );
                 } else {
                     when self.current().kind in {
-                        .RParen() then { self.advance();},
-                        _ then { return .Error(self.parser_error("Expected ')' in pattern"));},
+                        .RParen() then {
+                            self.advance();
+                        },
+                        _ then {
+                            return .Error(self.parser_error("Expected ')' in pattern"));
+                        },
                     };
                 };
                 node = parsed_pattern;
             },
             _ then {
-                return .Error(self.parser_error("Unexpected token in pattern: \(token_text(self.current()))"));
+                return .Error(
+                    self.parser_error(
+                        "Unexpected token in pattern: \(token_text(self.current()))",
+                    ),
+                );
             },
         };
         return .Ok(node);
@@ -972,9 +1390,19 @@ given Parser {
 
         while true then {
             when self.current().kind in {
-                .KwOr() then { self.advance();},
-                .Pipe() then { return .Error(self.parser_error("Pattern separator '|' is not supported; use 'or'"));},
-                _ then { break;},
+                .KwOr() then {
+                    self.advance();
+                },
+                .Pipe() then {
+                    return .Error(
+                        self.parser_error(
+                            "Pattern separator '|' is not supported; use 'or'",
+                        ),
+                    );
+                },
+                _ then {
+                    break;
+                },
             };
             let right = self.parse_pattern_and(stop_on_in) or return;
             left = PatternNode.OrPattern(left, right, self.span_from_start(start));
@@ -986,8 +1414,12 @@ given Parser {
     module_private collect_pattern_until_then(self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return;
         when self.current().kind in {
-            .KwThen() then { return .Ok(pattern);},
-            _ then { return .Error(self.parser_error("Expected 'then' after pattern"));},
+            .KwThen() then {
+                return .Ok(pattern);
+            },
+            _ then {
+                return .Error(self.parser_error("Expected 'then' after pattern"));
+            },
         };
     };
 
@@ -998,17 +1430,27 @@ given Parser {
     module_private collect_pattern_until_clause_end(self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return;
         when self.current().kind in {
-            .KwThen() then { return .Ok(pattern);},
-            .Semicolon() then { return .Ok(pattern);},
-            _ then { return .Error(self.parser_error("Expected ';' or 'then' after pattern"));},
+            .KwThen() then {
+                return .Ok(pattern);
+            },
+            .Semicolon() then {
+                return .Ok(pattern);
+            },
+            _ then {
+                return .Error(self.parser_error("Expected ';' or 'then' after pattern"));
+            },
         };
     };
 
     module_private collect_pattern_until_in(self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(true) or return;
         when self.current().kind in {
-            .KwIn() then { return .Ok(pattern);},
-            _ then { return .Error(self.parser_error("Expected 'in' after pattern"));},
+            .KwIn() then {
+                return .Ok(pattern);
+            },
+            _ then {
+                return .Error(self.parser_error("Expected 'in' after pattern"));
+            },
         };
     };
 
@@ -1042,9 +1484,17 @@ given Parser {
                     return .Error(it);
                 };
                 when self.current().kind in {
-                    .Colon() then { self.advance();},
+                    .Colon() then {
+                        self.advance();
+                    },
                     _ then {
-                        return .Error(self.unexpected_token_error_at(token_text(self.current()), "':' in dict literal entry", self.current()));
+                        return .Error(
+                            self.unexpected_token_error_at(
+                                token_text(self.current()),
+                                "':' in dict literal entry",
+                                self.current(),
+                            ),
+                        );
                     },
                 };
                 let value = self.parse_expression() or else {
@@ -1054,7 +1504,9 @@ given Parser {
             };
 
             when self.current().kind in {
-                .RBracket() then { self.advance();},
+                .RBracket() then {
+                    self.advance();
+                },
                 _ then {
                     return .Error(self.parser_error("Expected ']' after dict literal"));
                 },
@@ -1077,9 +1529,13 @@ given Parser {
         };
 
         when self.current().kind in {
-            .RBracket() then { self.advance();},
+            .RBracket() then {
+                self.advance();
+            },
             _ then {
-                return .Error(self.parser_error("Expected ']' after collection literal"));
+                return .Error(
+                    self.parser_error("Expected ']' after collection literal"),
+                );
             },
         };
         return .Ok(Expr.CollectionLiteral(elements, self.span_from_start(start)));
@@ -1135,7 +1591,15 @@ given Parser {
 
         if start.kind is .Identifier(name) and name == "_" then {
             self.advance();
-            return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)));
+            return .Ok(
+                PairBindingElement(
+                    "_",
+                    false,
+                    Option[TypeNode].None(),
+                    true,
+                    self.span_from_start(start),
+                ),
+            );
         };
 
         let mutable is_mut = false;
@@ -1147,7 +1611,9 @@ given Parser {
         let name_token = self.current();
         let name = self.expect_identifier("for binding") or return;
         if not self.is_valid_value_name(name) then {
-            return .Error(self.parser_error_at(self.invalid_variable_name_error(name), name_token));
+            return .Error(
+                self.parser_error_at(self.invalid_variable_name_error(name), name_token),
+            );
         };
 
         let mutable type_name = Option[TypeNode].None();
@@ -1159,7 +1625,11 @@ given Parser {
             },
         };
 
-        return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)));
+        return .Ok(
+            PairBindingElement(name, is_mut, type_name, false, self.span_from_start(
+                start,
+            )),
+        );
     };
 
     module_private parse_for_binding_pattern(self) Result[ForBindingPattern] = {
@@ -1177,7 +1647,9 @@ given Parser {
                 return .Error(self.parser_error("Expected ')' in for binding pattern"));
             };
             self.advance();
-            return .Ok(ForBindingPattern.Pair(first, second, self.span_from_start(start)));
+            return .Ok(
+                ForBindingPattern.Pair(first, second, self.span_from_start(start)),
+            );
         };
 
         let binding = self.parse_for_binding_element() or return;
@@ -1204,9 +1676,19 @@ given Parser {
         return when base in {
             .Identifier(name, _) then {
                 let type_args = self.parse_type_arg_list() or return;
-                .Ok(Expr.GenericInstantiation(name, type_args, self.span_from_expr_start(base)))
+                .Ok(
+                    Expr.GenericInstantiation(
+                        name,
+                        type_args,
+                        self.span_from_expr_start(base),
+                    ),
+                )
             },
-            _ then .Error(self.parser_error_at_current("generic application requires a type-like base expression")),
+            _ then .Error(
+                self.parser_error_at_current(
+                    "generic application requires a type-like base expression",
+                ),
+            ),
         };
     };
 
@@ -1301,60 +1783,110 @@ given Parser {
         self.advance();
         let args = self.parse_argument_list_until_rparen("call") or return;
         when self.current().kind in {
-            .RParen() then { self.advance();},
-            _ then { return .Error(self.parser_error("Expected ')' after call arguments"));},
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected ')' after call arguments"));
+            },
         };
         when base in {
             .MemberPath(receiver_base, path, _) then {
                 if path.is_empty() then {
                     when self.reject_non_constructor_call_args(args) in {
                         .Ok(_) then {},
-                        .Error(e) then { return .Error(e);},
+                        .Error(e) then {
+                            return .Error(e);
+                        },
                     };
                     return .Ok(Expr.Call(base, args, self.span_from_expr_start(base)));
                 };
                 let member = path[path.count() - 1];
-                let receiver_expr = self.member_path_call_receiver_expr(receiver_base, path);
-                let allows_constructor_args = self.static_dispatch_allows_constructor_argument_syntax(self.extract_static_dispatch_receiver(receiver_expr), member);
+                let receiver_expr = self.member_path_call_receiver_expr(
+                    receiver_base,
+                    path,
+                );
+                let allows_constructor_args = self.static_dispatch_allows_constructor_argument_syntax(
+                    self.extract_static_dispatch_receiver(receiver_expr),
+                    member,
+                );
                 return when receiver_expr in {
                     .Identifier(type_name, _) then {
                         if not allows_constructor_args then {
                             when self.reject_non_constructor_call_args(args) in {
                                 .Ok(_) then {},
-                                .Error(e) then { return .Error(e);},
+                                .Error(e) then {
+                                    return .Error(e);
+                                },
                             };
                         };
-                        let expr = if self.is_upper_first(type_name) and not self.is_upper_first(member) then Expr.StaticMethodCall(type_name, List[TypeNode].new(), member, args, self.span_from_expr_start(base)) else Expr.Call(base, args, self.span_from_expr_start(base));
+                        let expr = if self.is_upper_first(type_name) and not self.is_upper_first(
+                            member,
+                        ) then Expr.StaticMethodCall(
+                            type_name,
+                            List[TypeNode].new(),
+                            member,
+                            args,
+                            self.span_from_expr_start(base),
+                        ) else Expr.Call(base, args, self.span_from_expr_start(base));
                         Result[Expr].Ok(expr)
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
                         if not allows_constructor_args then {
                             when self.reject_non_constructor_call_args(args) in {
                                 .Ok(_) then {},
-                                .Error(e) then { return .Error(e);},
+                                .Error(e) then {
+                                    return .Error(e);
+                                },
                             };
                         };
-                        Result[Expr].Ok(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base)))
+                        Result[Expr].Ok(
+                            Expr.StaticMethodCall(
+                                type_name,
+                                type_args,
+                                member,
+                                args,
+                                self.span_from_expr_start(base),
+                            ),
+                        )
                     },
                     .MemberPath(_, _, _) then {
                         if not allows_constructor_args then {
                             when self.reject_non_constructor_call_args(args) in {
                                 .Ok(_) then {},
-                                .Error(e) then { return .Error(e);},
+                                .Error(e) then {
+                                    return .Error(e);
+                                },
                             };
                         };
-                        let expr = when self.extract_static_dispatch_receiver(receiver_expr) in {
-                            .Some(receiver) then Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base)),
-                            .None() then Expr.Call(base, args, self.span_from_expr_start(base)),
+                        let expr = when self.extract_static_dispatch_receiver(
+                            receiver_expr,
+                        ) in {
+                            .Some(receiver) then Expr.StaticMethodCall(
+                                receiver.type_name,
+                                receiver.type_args,
+                                member,
+                                args,
+                                self.span_from_expr_start(base),
+                            ),
+                            .None() then Expr.Call(
+                                base,
+                                args,
+                                self.span_from_expr_start(base),
+                            ),
                         };
                         Result[Expr].Ok(expr)
                     },
                     _ then {
                         when self.reject_non_constructor_call_args(args) in {
                             .Ok(_) then {},
-                            .Error(e) then { return .Error(e);},
+                            .Error(e) then {
+                                return .Error(e);
+                            },
                         };
-                        Result[Expr].Ok(Expr.Call(base, args, self.span_from_expr_start(base)))
+                        Result[Expr].Ok(
+                            Expr.Call(base, args, self.span_from_expr_start(base)),
+                        )
                     },
                 };
             },
@@ -1364,7 +1896,9 @@ given Parser {
         if not self.call_target_allows_constructor_argument_syntax(base) then {
             when self.reject_non_constructor_call_args(args) in {
                 .Ok(_) then {},
-                .Error(e) then { return .Error(e);},
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
         };
         return .Ok(Expr.Call(base, args, self.span_from_expr_start(base)));
@@ -1373,18 +1907,26 @@ given Parser {
     module_private parse_subscript_suffix(self, base Expr) Result[Expr] = {
         self.advance();
         if self.current().kind is .RBracket() then {
-            return .Error(self.parser_error("Subscript expression requires one index argument"));
+            return .Error(
+                self.parser_error("Subscript expression requires one index argument"),
+            );
         };
         let index = self.parse_expression_checked("subscript index") or else {
             return .Error(it);
         };
         if self.current().kind is .Comma() then {
-            return .Error(self.parser_error("Subscript expression supports exactly one index"));
+            return .Error(
+                self.parser_error("Subscript expression supports exactly one index"),
+            );
         };
         when self.current().kind in {
-            .RBracket() then { self.advance();},
+            .RBracket() then {
+                self.advance();
+            },
             _ then {
-                return .Error(self.parser_error("Expected ']' after subscript argument"));
+                return .Error(
+                    self.parser_error("Expected ']' after subscript argument"),
+                );
             },
         };
         let mutable args = List[Expr].new();
@@ -1425,20 +1967,58 @@ given Parser {
         when base in {
             .TraitQualificationExpr(qualified_base, trait_type, _) then {
                 when self.current().kind in {
-                    .LParen() then { self.advance();},
-                    _ then { return .Error(self.parser_error("Expected '(' after qualified method name"));},
+                    .LParen() then {
+                        self.advance();
+                    },
+                    _ then {
+                        return .Error(
+                            self.parser_error(
+                                "Expected '(' after qualified method name",
+                            ),
+                        );
+                    },
                 };
-                let args = self.parse_argument_list_until_rparen("qualified method call") or return;
+                let args = self.parse_argument_list_until_rparen(
+                    "qualified method call",
+                ) or return;
                 when self.current().kind in {
-                    .RParen() then { self.advance();},
-                    _ then { return .Error(self.parser_error("Expected ')' after qualified method call arguments"));},
+                    .RParen() then {
+                        self.advance();
+                    },
+                    _ then {
+                        return .Error(
+                            self.parser_error(
+                                "Expected ')' after qualified method call arguments",
+                            ),
+                        );
+                    },
                 };
                 when self.reject_non_constructor_call_args(args) in {
                     .Ok(_) then {},
-                    .Error(e) then { return .Error(e);},
+                    .Error(e) then {
+                        return .Error(e);
+                    },
                 };
 
-                return if method_type_args.is_empty() then .Ok(Expr.QualifiedMethodCall(qualified_base, trait_type, member, args, self.span_from_expr_start(base))) else .Ok(Expr.QualifiedGenericMethodCall(qualified_base, trait_type, method_type_args, member, args, self.span_from_expr_start(base)));
+                return if method_type_args.is_empty() then .Ok(
+                    Expr.QualifiedMethodCall(
+                        qualified_base,
+                        trait_type,
+                        member,
+                        args,
+                        self.span_from_expr_start(base),
+                    ),
+                )
+                else .Ok(
+                    Expr.QualifiedGenericMethodCall(
+                        qualified_base,
+                        trait_type,
+                        method_type_args,
+                        member,
+                        args,
+                        self.span_from_expr_start(base),
+                    ),
+                );
             },
             _ then {},
         };
@@ -1448,45 +2028,99 @@ given Parser {
             _ then false,
         };
         let static_receiver = self.extract_static_dispatch_receiver(base);
-        let allows_constructor_args = self.static_dispatch_allows_constructor_argument_syntax(static_receiver, member);
+        let allows_constructor_args = self.static_dispatch_allows_constructor_argument_syntax(
+            static_receiver,
+            member,
+        );
 
-        if has_lparen and static_receiver is .Some(receiver) and method_type_args.is_empty() and not self.is_upper_first(member) then {
-            self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)");
+        if has_lparen and static_receiver is .Some(receiver) and method_type_args.is_empty(
+        ) and not self.is_upper_first(member) then {
+            self.parse_debug(
+                "static dispatch receiver=\(receiver.type_name) member=\(member)",
+            );
             self.advance();
             let args = self.parse_argument_list_until_rparen("static method call") or return;
             when self.current().kind in {
-                .RParen() then { self.advance();},
-                _ then { return .Error(self.parser_error("Expected ')' after static method call arguments"));},
+                .RParen() then {
+                    self.advance();
+                },
+                _ then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected ')' after static method call arguments",
+                        ),
+                    );
+                },
             };
             if not allows_constructor_args then {
                 when self.reject_non_constructor_call_args(args) in {
                     .Ok(_) then {},
-                    .Error(e) then { return .Error(e);},
+                    .Error(e) then {
+                        return .Error(e);
+                    },
                 };
             };
-            return .Ok(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base)));
+            return .Ok(
+                Expr.StaticMethodCall(
+                    receiver.type_name,
+                    receiver.type_args,
+                    member,
+                    args,
+                    self.span_from_expr_start(base),
+                ),
+            );
         };
 
         if has_lparen and not method_type_args.is_empty() then {
             self.advance();
             let args = self.parse_argument_list_until_rparen("generic method call") or return;
             when self.current().kind in {
-                .RParen() then { self.advance();},
-                _ then { return .Error(self.parser_error("Expected ')' after generic method call arguments"));},
+                .RParen() then {
+                    self.advance();
+                },
+                _ then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected ')' after generic method call arguments",
+                        ),
+                    );
+                },
             };
             when self.reject_non_constructor_call_args(args) in {
                 .Ok(_) then {},
-                .Error(e) then { return .Error(e);},
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
-            return .Ok(Expr.GenericMethodCall(base, method_type_args, member, args, self.span_from_expr_start(base)));
+            return .Ok(
+                Expr.GenericMethodCall(
+                    base,
+                    method_type_args,
+                    member,
+                    args,
+                    self.span_from_expr_start(base),
+                ),
+            );
         };
 
         if not method_type_args.is_empty() then {
-            return .Error(self.unexpected_token_error_at(token_text(self.current()), "'(' after generic method name", self.current()));
+            return .Error(
+                self.unexpected_token_error_at(
+                    token_text(self.current()),
+                    "'(' after generic method name",
+                    self.current(),
+                ),
+            );
         };
 
         if bare_method_type_args then {
-            return .Error(self.unexpected_token_error_at(token_text(self.current()), "'(' after generic method name", self.current()));
+            return .Error(
+                self.unexpected_token_error_at(
+                    token_text(self.current()),
+                    "'(' after generic method name",
+                    self.current(),
+                ),
+            );
         };
 
         let member_path = self.append_member_path_segment(base, member);
@@ -1500,14 +2134,22 @@ given Parser {
         while true then {
             when self.current().kind in {
                 .LParen() then {
-                    if not self.should_continue_postfix_after_expression() then { break;};
+                    if not self.should_continue_postfix_after_expression() then {
+                        break;
+                    };
                     // Swift's postfix-`(` order (ParserExpressions.swift:734-742):
                     // qualified path `Type(Trait)` first, then a postfix cast,
                     // then an ordinary call. Trying the cast first makes
                     // `Num(Tag)` a cast of `Num` to `Tag`.
                     let qualified_expr = if self.qualified_path_base_is_type_name(expr) then {
                         when self.try_parse_qualified_trait_ref() in {
-                            .Some(trait_type) then Option[Expr].Some(Expr.TraitQualificationExpr(expr, trait_type, self.span_from_expr_start(expr))),
+                            .Some(trait_type) then Option[Expr].Some(
+                                Expr.TraitQualificationExpr(
+                                    expr,
+                                    trait_type,
+                                    self.span_from_expr_start(expr),
+                                ),
+                            ),
                             .None() then Option[Expr].None(),
                         }
                     } else {
@@ -1522,13 +2164,17 @@ given Parser {
                     };
                 },
                 .LBracket() then {
-                    if not self.should_continue_postfix_after_expression() then { break;};
+                    if not self.should_continue_postfix_after_expression() then {
+                        break;
+                    };
                     when expr in {
                         .Identifier(name, _) then {
                             if self.is_upper_first(name) then {
                                 expr = self.parse_postfix_generic_application(expr) or return;
                             } else {
-                                expr = when self.try_parse_postfix_generic_application(expr) in {
+                                expr = when self.try_parse_postfix_generic_application(
+                                    expr,
+                                ) in {
                                     .Some(generic_expr) then generic_expr,
                                     .None() then self.parse_subscript_suffix(expr) or return,
                                 };
@@ -1540,10 +2186,14 @@ given Parser {
                     };
                 },
                 .Dot() then {
-                    if not self.can_continue_dot_postfix() then { break;};
+                    if not self.can_continue_dot_postfix() then {
+                        break;
+                    };
                     expr = self.parse_dot_suffix(expr) or return;
                 },
-                _ then { break;},
+                _ then {
+                    break;
+                },
             };
         };
 
@@ -1560,14 +2210,22 @@ given Parser {
             let start = self.current();
             self.advance();
             let operand = self.parse_unary() or return;
-            return .Ok(Expr.Unary(UnaryOperator.Negate(), operand, self.span_from_start(start)));
+            return .Ok(
+                Expr.Unary(UnaryOperator.Negate(), operand, self.span_from_start(start)),
+            );
         };
 
         if self.current().kind is .Tilde() then {
             let start = self.current();
             self.advance();
             let operand = self.parse_unary() or return;
-            return .Ok(Expr.Unary(UnaryOperator.BitwiseNot(), operand, self.span_from_start(start)));
+            return .Ok(
+                Expr.Unary(
+                    UnaryOperator.BitwiseNot(),
+                    operand,
+                    self.span_from_start(start),
+                ),
+            );
         };
 
         if self.current().kind is .Star() then {
@@ -1583,14 +2241,22 @@ given Parser {
             if self.current().kind is .KwUnsafe() then {
                 self.advance();
                 let is_mutable = self.current().kind is .KwMut();
-                if is_mutable then { self.advance();};
+                if is_mutable then {
+                    self.advance();
+                };
                 let operand = self.parse_unary() or return;
-                return .Ok(Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)));
+                return .Ok(
+                    Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)),
+                );
             };
-            return .Error(self.parser_error_at("Managed address-of syntax is removed. Use '&unsafe expr' or '&unsafe mutable expr' for raw pointers.", start));
+            return .Error(
+                self.parser_error_at(
+                    "Managed address-of syntax is removed. Use '&unsafe expr' or '&unsafe mutable expr' for raw pointers.",
+                    start,
+                ),
+            );
         };
 
         return self.parse_call();
     };
-
 };

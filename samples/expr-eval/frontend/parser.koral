@@ -1,9 +1,6 @@
 // 表达式求值器 - 语法分析器
 
-public type mutable Parser(
-    tokens List[Token],
-    mutable pos UInt,
-);
+public type mutable Parser(tokens List[Token], mutable pos UInt);
 
 given Parser {
     public new(tokens List[Token]) Parser = Parser(tokens, 0);
@@ -39,15 +36,15 @@ given Parser {
     file_private check_comma(self) Bool = self.peek() is .Comma();
     file_private check_eof(self) Bool = self.peek() is .EOF();
 
-    file_private expect_right_paren(self) Result[Void] =
-        if self.check_right_paren() then {
-            self.advance();
-            .Ok({})
-        } else .Error("Parse error: expected ')', found \(self.peek().to_string())");
+    file_private expect_right_paren(self) Result[Void] = if self.check_right_paren() then {
+        self.advance();
+        .Ok({})
+    } else .Error("Parse error: expected ')', found \(self.peek().to_string())");
 
     public parse(self) Result[Expr] = {
         let expr = self.parse_expression() or return;
-        return if self.check_eof() then .Ok(expr) else .Error("Parse error: unexpected token \(self.peek().to_string())");
+        return if self.check_eof() then .Ok(expr)
+        else .Error("Parse error: unexpected token \(self.peek().to_string())");
     };
 
     file_private parse_expression(self) Result[Expr] = self.parse_assignment();
@@ -65,7 +62,8 @@ given Parser {
     file_private parse_additive(self) Result[Expr] = {
         let mutable left = self.parse_multiplicative() or return;
         while self.check_plus() or self.check_minus() then {
-            let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub();
+            let op = if self.check_plus() then BinaryOperator.Add()
+            else BinaryOperator.Sub();
             self.advance();
             let right = self.parse_multiplicative() or return;
             left = Expr.BinaryOp(op, left, right);
@@ -76,14 +74,15 @@ given Parser {
     file_private parse_multiplicative(self) Result[Expr] = {
         let mutable left = self.parse_power() or return;
         while self.check_star() or self.check_slash() or self.check_percent() then {
-            let op = if self.check_star() then BinaryOperator.Mul() else if self.check_slash() then BinaryOperator.Div() else BinaryOperator.Mod();
+            let op = if self.check_star() then BinaryOperator.Mul()
+            else if self.check_slash() then BinaryOperator.Div()
+            else BinaryOperator.Mod();
             self.advance();
             let right = self.parse_power() or return;
             left = Expr.BinaryOp(op, left, right);
         };
         return .Ok(left);
     };
-
 
     file_private parse_power(self) Result[Expr] = {
         let left = self.parse_unary() or return;
@@ -132,26 +131,25 @@ given Parser {
         return .Ok(args);
     };
 
-    file_private parse_primary(self) Result[Expr] =
-        when self.peek() in {
-            .IntLiteral(v) then {
-                self.advance();
-                .Ok(Expr.Number(Value.IntVal(v)))
-            },
-            .FloatLiteral(v) then {
-                self.advance();
-                .Ok(Expr.Number(Value.FloatVal(v)))
-            },
-            .Identifier(name) then {
-                self.advance();
-                .Ok(Expr.Variable(name))
-            },
-            .LeftParen() then {
-                self.advance();
-                let expr = self.parse_expression() or return;
-                let _ = self.expect_right_paren() or return;
-                .Ok(expr)
-            },
-            _ then .Error("Parse error: unexpected token \(self.peek().to_string())"),
-        };
+    file_private parse_primary(self) Result[Expr] = when self.peek() in {
+        .IntLiteral(v) then {
+            self.advance();
+            .Ok(Expr.Number(Value.IntVal(v)))
+        },
+        .FloatLiteral(v) then {
+            self.advance();
+            .Ok(Expr.Number(Value.FloatVal(v)))
+        },
+        .Identifier(name) then {
+            self.advance();
+            .Ok(Expr.Variable(name))
+        },
+        .LeftParen() then {
+            self.advance();
+            let expr = self.parse_expression() or return;
+            let _ = self.expect_right_paren() or return;
+            .Ok(expr)
+        },
+        _ then .Error("Parse error: unexpected token \(self.peek().to_string())"),
+    };
 };

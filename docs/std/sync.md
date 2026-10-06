@@ -80,6 +80,10 @@ given AtomicUInt as ToString {
     public to_string(self) String;
 };
 
+given[T Any] SendChannel[T] as Drop {};
+
+given[T Any] RecvChannel[T] as Drop {};
+
 given[T Any] SendChannel[T] {
     public send(self, value T) Result[Void];
     public try_send(self, value T) Result[Bool];
@@ -104,6 +108,8 @@ given[T Any] Lazy[T] {
     public is_initialized(self) Bool;
 };
 
+given Mutex as Drop {};
+
 given Mutex {
     public new() Mutex;
     public lock(self) Void;
@@ -111,6 +117,8 @@ given Mutex {
     public unlock(self) Void;
     public condvar(self) MutexCondvar;
 };
+
+given MutexCondvar as Drop {};
 
 given MutexCondvar {
     public wait(self) Void;
@@ -125,6 +133,8 @@ given Semaphore {
     public release(self) Void;
 };
 
+given SharedMutex as Drop {};
+
 given SharedMutex {
     public new() SharedMutex;
     public lock(self) Void;
@@ -135,6 +145,8 @@ given SharedMutex {
     public try_lock_shared(self) Bool;
     public condvar(self) SharedMutexCondvar;
 };
+
+given SharedMutexCondvar as Drop {};
 
 given SharedMutexCondvar {
     public wait(self) Void;

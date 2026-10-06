@@ -11,8 +11,8 @@
 // ── 推断模式 ──────────────────────────────────────────────────────────────────
 
 public type InferenceMode {
-    Synthesize(),// 合成模式：从表达式推断类型
-    Check(expected Type),// 检查模式：验证表达式匹配期望类型
+    Synthesize(), // 合成模式：从表达式推断类型
+    Check(expected Type), // 检查模式：验证表达式匹配期望类型
 };
 
 // ── TypeChecker 双向推断扩展 ──────────────────────────────────────────────────
@@ -62,7 +62,12 @@ given TypeChecker {
     };
 
     // 双向推断入口：根据是否有期望类型选择合成或检查模式。
-    module_private bidirectional_check(self, expr Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private bidirectional_check(
+        self,
+        expr Expr,
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
         return when expected in {
             .Some(et) then self.bidi_check_mode(expr, et, scope),
             .None() then self.bidi_synthesize_mode(expr, scope),
@@ -73,20 +78,33 @@ given TypeChecker {
     module_private bidi_synthesize_mode(self, expr Expr, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then {
-                let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Int(), unknown_span());
-                self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()));
+                let tv = self.fresh_literal_type_variable(
+                    LiteralDefaultKind.Int(),
+                    unknown_span(),
+                );
+                self.storage.constraint_solver.add_constraint(
+                    Constraint.DefaultInt(tv, unknown_span()),
+                );
                 make_typed_expr(TypedExprKind.IntegerLiteral(value), Type.TypeVar(tv))
             },
             .FloatLiteral(value, _) then {
-                let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Float(), unknown_span());
-                self.storage.constraint_solver.add_constraint(Constraint.DefaultFloat(tv, unknown_span()));
+                let tv = self.fresh_literal_type_variable(
+                    LiteralDefaultKind.Float(),
+                    unknown_span(),
+                );
+                self.storage.constraint_solver.add_constraint(
+                    Constraint.DefaultFloat(tv, unknown_span()),
+                );
                 make_typed_expr(TypedExprKind.FloatLiteral(value), Type.TypeVar(tv))
             },
             .BoolLiteral(value, _) then {
                 make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType())
             },
             .StringLiteral(value, _) then {
-                make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type())
+                make_typed_expr(
+                    TypedExprKind.StringLiteral(value),
+                    self.builtin_string_type(),
+                )
             },
             .RuneLiteral(value, _) then {
                 self.lower_rune_literal(value, Option[Type].None())
@@ -96,27 +114,59 @@ given TypeChecker {
     };
 
     // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
-    module_private typed_empty_literal(self, expected Type) TypedExpr = self.lower_empty_literal_expr(Option[Type].Some(expected));
+    module_private typed_empty_literal(self, expected Type) TypedExpr =
+        self.lower_empty_literal_expr(Option[Type].Some(expected));
 
-    module_private typed_dict_literal(self, entries List[ExprPair], expected Type, scope Scope) TypedExpr = {
+    module_private typed_dict_literal(
+        self,
+        entries List[ExprPair],
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
         return self.lower_dict_literal_expr(entries, Option[Type].Some(expected), scope);
     };
 
-    module_private typed_collection_literal(self, elements List[Expr], expected Type, scope Scope) TypedExpr = {
-        return self.lower_collection_literal_expr(elements, Option[Type].Some(expected), scope);
+    module_private typed_collection_literal(
+        self,
+        elements List[Expr],
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
+        return self.lower_collection_literal_expr(
+            elements,
+            Option[Type].Some(expected),
+            scope,
+        );
     };
 
-    module_private typed_block_expr(self, statements List[Statement], tail_expression Option[Expr], expected Type, scope Scope) TypedExpr = {
+    module_private typed_block_expr(
+        self,
+        statements List[Statement],
+        tail_expression Option[Expr],
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
         return self.check_block(statements, tail_expression, .Some(expected), scope);
     };
 
-    module_private typed_cast_expr(self, type_node TypeNode, inner Expr, scope Scope) TypedExpr = {
+    module_private typed_cast_expr(
+        self,
+        type_node TypeNode,
+        inner Expr,
+        scope Scope,
+    ) TypedExpr = {
         let target = self.resolve_type_in_scope(type_node, scope);
         let typed_inner = self.bidirectional_check(inner, .Some(target), scope);
         return make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target);
     };
 
-    module_private typed_float_literal(self, expr Expr, value String, expected Type, scope Scope) TypedExpr = {
+    module_private typed_float_literal(
+        self,
+        expr Expr,
+        value String,
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
         if self.is_float_type(expected) then {
             return make_typed_expr(TypedExprKind.FloatLiteral(value), expected);
         };
@@ -126,7 +176,13 @@ given TypeChecker {
         return self.bidi_synthesize_mode(expr, scope);
     };
 
-    module_private typed_integer_literal(self, expr Expr, value String, expected Type, scope Scope) TypedExpr = {
+    module_private typed_integer_literal(
+        self,
+        expr Expr,
+        value String,
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
         if self.is_numeric_type(expected) then {
             return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected);
         };
@@ -135,29 +191,69 @@ given TypeChecker {
 
     module_private bidi_check_mode(self, expr Expr, expected Type, scope Scope) TypedExpr = {
         return when expr in {
-            .IntegerLiteral(value, _) then self.typed_integer_literal(expr, value, expected, scope),
-            .FloatLiteral(value, _) then self.typed_float_literal(expr, value, expected, scope),
-            .CastExpr(type_node, inner, _) then self.typed_cast_expr(type_node, inner, scope),
+            .IntegerLiteral(value, _) then self.typed_integer_literal(
+                expr,
+                value,
+                expected,
+                scope,
+            ),
+            .FloatLiteral(value, _) then self.typed_float_literal(
+                expr,
+                value,
+                expected,
+                scope,
+            ),
+            .CastExpr(type_node, inner, _) then self.typed_cast_expr(
+                type_node,
+                inner,
+                scope,
+            ),
             .LambdaExpr(params, return_type, body, _) then {
-                let bidi_result = self.bidi_check_lambda(params, return_type, body, expected, scope);
+                let bidi_result = self.bidi_check_lambda(
+                    params,
+                    return_type,
+                    body,
+                    expected,
+                    scope,
+                );
                 let lambda_type = self.build_lambda_function_type(bidi_result);
                 make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
             },
-            .Block(statements, tail_expression, _) then self.typed_block_expr(statements, tail_expression, expected, scope),
-            .CollectionLiteral(elements, span) then self.typed_collection_literal(elements, expected, scope),
-            .DictLiteral(entries, span) then self.typed_dict_literal(entries, expected, scope),
+            .Block(statements, tail_expression, _) then self.typed_block_expr(
+                statements,
+                tail_expression,
+                expected,
+                scope,
+            ),
+            .CollectionLiteral(elements, span) then self.typed_collection_literal(
+                elements,
+                expected,
+                scope,
+            ),
+            .DictLiteral(entries, span) then self.typed_dict_literal(
+                entries,
+                expected,
+                scope,
+            ),
             .EmptyLiteral(span) then self.typed_empty_literal(expected),
             _ then self.bidi_check_mode_fallback(expr, expected, scope),
         };
     };
 
-    module_private bidi_check_mode_fallback(self, expr Expr, expected Type, scope Scope) TypedExpr = {
+    module_private bidi_check_mode_fallback(
+        self,
+        expr Expr,
+        expected Type,
+        scope Scope,
+    ) TypedExpr = {
         let checked = self.check_expr_scoped_ref(expr, .Some(expected), scope);
         let synth_type = checked.expr_type;
         if not self.same_expr_type(synth_type, expected) then {
-            if not self.is_unresolved_expr_type(synth_type) and not self.is_unresolved_expr_type(expected) then {
+            if not self.is_unresolved_expr_type(synth_type) and not self.is_unresolved_expr_type(
+                expected,
+            ) then {
                 self.storage.constraint_solver.add_constraint(
-                    Constraint.Equal(synth_type, expected, unknown_span())
+                    Constraint.Equal(synth_type, expected, unknown_span()),
                 );
             };
         };
@@ -174,7 +270,9 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         let fn_info = when expected in {
-            .FunctionType(fn_params, ret) then Option[Pair[List[Type], Type]].Some(Pair[List[Type], Type](param_entry_types(fn_params), ret)),
+            .FunctionType(fn_params, ret) then Option[Pair[List[Type], Type]].Some(
+                Pair[List[Type], Type](param_entry_types(fn_params), ret),
+            ),
             _ then Option[Pair[List[Type], Type]].None(),
         };
 
@@ -187,7 +285,8 @@ given TypeChecker {
                 .Some(ta) then self.resolve_type_in_scope(ta, scope),
                 .None() then Type.Unknown(),
             };
-            let mutable param_type = if annotated_type is .Unknown() and fn_info is .Some(info) and i < info.first.count() then (info.first[i]) else annotated_type;
+            let mutable param_type = if annotated_type is .Unknown() and fn_info is .Some(info) and i < info.first.count(
+            ) then (info.first[i]) else annotated_type;
             typed_params.push(TypedParam(p.name, false, param_type, false));
             let kind = SymbolKind.Variable(VariableKind.Value());
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable());
@@ -200,7 +299,8 @@ given TypeChecker {
             .Some(rt) then self.resolve_type_in_scope(rt, scope),
             .None() then Type.Unknown(),
         };
-        let mutable ret_type = if resolved_ret is .Unknown() and fn_info is .Some(info) then info.second else resolved_ret;
+        let mutable ret_type = if resolved_ret is .Unknown() and fn_info is .Some(info) then info.second
+        else resolved_ret;
 
         let prev_function_return_context = self.clone_function_return_context();
         let prev_in_loop = self.storage.in_loop;
@@ -213,33 +313,51 @@ given TypeChecker {
         self.storage.in_loop = false;
         self.storage.in_defer = false;
         let infer_return_type_from_block_returns = return_type is .None() and resolved_ret is .Unknown() and fn_info is .None() and body is .Block(_, _, _);
-        let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret_type) and body is .Block(_, _, _);
+        let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(
+            ret_type,
+        ) and body is .Block(_, _, _);
         if infer_return_type_from_block_returns then {
-            self.storage.function_return_context.expected_return_type = Option[Type].None();
-            self.storage.function_return_context.inferred_return_type = Option[Type].None();
+            self.storage.function_return_context.expected_return_type = Option[Type].None(
+            );
+            self.storage.function_return_context.inferred_return_type = Option[Type].None(
+            );
             self.storage.function_return_context.is_inferring = true;
         } else {
-            let lambda_return_type_for_body_check = if ret_type is .Unknown() then Type.VoidType() else ret_type;
-            self.storage.function_return_context.expected_return_type = Option[Type].Some(lambda_return_type_for_body_check);
-            self.storage.function_return_context.inferred_return_type = Option[Type].None();
+            let lambda_return_type_for_body_check = if ret_type is .Unknown() then Type.VoidType(
+            ) else ret_type;
+            self.storage.function_return_context.expected_return_type = Option[Type].Some(
+                lambda_return_type_for_body_check,
+            );
+            self.storage.function_return_context.inferred_return_type = Option[Type].None(
+            );
             self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns;
         };
-        let body_expected = if body is .Block(_, _, _) then Option[Type].None() else if ret_type is .Unknown() then Option[Type].None() else Option[Type].Some(ret_type);
+        let body_expected = if body is .Block(_, _, _) then Option[Type].None()
+        else if ret_type is .Unknown() then Option[Type].None()
+        else Option[Type].Some(ret_type);
         let typed_body = self.check_value_body_expr(body, body_expected, lambda_scope);
         let inferred_return_type = self.storage.function_return_context.inferred_return_type;
         self.validate_lambda_captures(typed_params, typed_body);
-        if not self.is_unresolved_expr_type(ret_type) and not self.contains_generic_parameter(ret_type) then {
+        if not self.is_unresolved_expr_type(ret_type) and not self.contains_generic_parameter(
+            ret_type,
+        ) then {
             self.validate_lambda_return_type(ret_type, typed_body);
         };
         let actual_ret = if self.is_unresolved_expr_type(ret_type) then {
-            if infer_return_type_from_block_returns then inferred_return_type or else Type.VoidType() else typed_body.expr_type
+            if infer_return_type_from_block_returns then inferred_return_type or else Type.VoidType(
+            ) else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and body is .Block(_, _, _) then {
             inferred_return_type or else typed_body.expr_type
-        } else if self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(typed_body.expr_type) then {
+        } else if self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(
+            typed_body.expr_type,
+        ) then {
             typed_body.expr_type
         } else ret_type;
 
-        return make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, typed_body), Type.Unknown());
+        return make_typed_expr(
+            TypedExprKind.LambdaExpr(typed_params, actual_ret, typed_body),
+            Type.Unknown(),
+        );
     };
 
     // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
@@ -253,27 +371,38 @@ given TypeChecker {
     };
 
     // 从 TypedParam 列表和返回类型构造 FunctionType。
-    module_private build_function_type_from_params(self, params List[TypedParam], ret Type) Type = {
+    module_private build_function_type_from_params(
+        self,
+        params List[TypedParam],
+        ret Type,
+    ) Type = {
         // 如果任何参数类型或返回类型是 Unknown，则返回 Unknown（无法构造完整的函数类型）
         let mutable has_unknown = false;
         when ret in {
-            .Unknown() then { has_unknown = true;},
+            .Unknown() then {
+                has_unknown = true;
+            },
             _ then {},
         };
         let mutable param_type_refs = List[Type].new();
         for p in params then {
             when p.param_type in {
-                .Unknown() then { has_unknown = true;},
+                .Unknown() then {
+                    has_unknown = true;
+                },
                 _ then {},
             };
             param_type_refs.push(p.param_type);
         };
-        if has_unknown then { return Type.Unknown();};
+        if has_unknown then {
+            return Type.Unknown();
+        };
         return make_function_type(param_type_refs, ret);
     };
 
     module_private collection_literal_target_error(self, t Type) String = {
-        return if self.is_std_type(t, "Dict") then "Collection literal without ':' cannot be inferred as Dict" else "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range";
+        return if self.is_std_type(t, "Dict") then "Collection literal without ':' cannot be inferred as Dict"
+        else "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range";
     };
 
     // 从集合类型中提取元素类型。
@@ -285,16 +414,23 @@ given TypeChecker {
             return Option[Type].None();
         };
         let args = self.std_type_arguments(t);
-        return if args.count() > 0(UInt) then Option[Type].Some(args[0(UInt)]) else Option[Type].None();
+        return if args.count() > 0(UInt) then Option[Type].Some(args[0(UInt)])
+        else Option[Type].None();
     };
 
     // 从 Dict 类型中提取 key/value 类型。
     // 例如 [K, V]Dict -> (Some(K), Some(V))。身份判定，同上。
     module_private extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
         if not self.is_std_type(t, "Dict") then {
-            return Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None());
+            return Pair[Option[Type], Option[Type]](
+                Option[Type].None(),
+                Option[Type].None(),
+            );
         };
         let args = self.std_type_arguments(t);
-        return if args.count() > 1(UInt) then Pair[Option[Type], Option[Type]](Option[Type].Some(args[0(UInt)]), Option[Type].Some(args[1(UInt)])) else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None());
+        return if args.count() > 1(UInt) then Pair[Option[Type], Option[Type]](
+            Option[Type].Some(args[0(UInt)]),
+            Option[Type].Some(args[1(UInt)]),
+        ) else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None());
     };
 };

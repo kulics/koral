@@ -217,6 +217,8 @@ given RegexFlag {
     public has(self, flag RegexFlag) Bool;
 };
 
+given Regex as Drop {};
+
 given Regex {
     public pattern(self) String;
     public group_count(self) UInt;

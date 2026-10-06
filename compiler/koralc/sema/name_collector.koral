@@ -20,11 +20,27 @@ public type mutable NameCollector(
 
 given NameCollector {
     public new() NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), List[String].new(), "", "", Set[String].new());
+        return NameCollector(
+            CompilerContext.new(),
+            Scope.new_root(),
+            DiagnosticCollector.new(),
+            List[String].new(),
+            "",
+            "",
+            Set[String].new(),
+        );
     };
 
     public new_with_context(module_path List[String], source_file String) NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file, "", Set[String].new());
+        return NameCollector(
+            CompilerContext.new(),
+            Scope.new_root(),
+            DiagnosticCollector.new(),
+            module_path,
+            source_file,
+            "",
+            Set[String].new(),
+        );
     };
 
     // Register all top-level names from a program.
@@ -36,7 +52,10 @@ given NameCollector {
 
     // Register all top-level names from a list of LoadedNodes (multi-module compilation).
     // Each node carries its own source_file; module_path is provided per-node via pairs.
-    public collect_loaded_nodes_with_path(self, pairs List[Pair[LoadedNode, List[String]]]) Void = {
+    public collect_loaded_nodes_with_path(
+        self,
+        pairs List[Pair[LoadedNode, List[String]]],
+    ) Void = {
         let saved_module_path = self.module_path;
         let saved_source_file = self.source_file;
         let saved_package_id = self.package_id;
@@ -51,16 +70,44 @@ given NameCollector {
         self.package_id = saved_package_id;
     };
 
-    file_private make_var_symbol(self, name String, is_mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
-        let kind = if is_mutable then SymbolKind.Variable(VariableKind.MutableValue()) else SymbolKind.Variable(VariableKind.Value());
+    file_private make_var_symbol(
+        self,
+        name String,
+        is_mutable Bool,
+        access AccessModifier,
+        span SourceSpan,
+    ) Symbol = {
+        let kind = if is_mutable then SymbolKind.Variable(VariableKind.MutableValue())
+        else SymbolKind.Variable(VariableKind.Value());
         let mutable context = self.context;
-        let def_id = context.allocate_full_in_package(name, DefKind.Variable(), self.module_path, self.source_file, self.package_id, access, span);
+        let def_id = context.allocate_full_in_package(
+            name,
+            DefKind.Variable(),
+            self.module_path,
+            self.source_file,
+            self.package_id,
+            access,
+            span,
+        );
         return Symbol(def_id, Type.Unknown(), kind);
     };
 
-    file_private make_fn_symbol(self, name String, access AccessModifier, span SourceSpan) Symbol = {
+    file_private make_fn_symbol(
+        self,
+        name String,
+        access AccessModifier,
+        span SourceSpan,
+    ) Symbol = {
         let mutable context = self.context;
-        let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span);
+        let def_id = context.allocate_full_in_package(
+            name,
+            DefKind.Function(),
+            self.module_path,
+            self.source_file,
+            self.package_id,
+            access,
+            span,
+        );
         return Symbol(def_id, Type.Unknown(), SymbolKind.Function());
     };
 
@@ -92,30 +139,48 @@ given NameCollector {
     /// cannot be jumped to, so every caller must say where the offending
     /// declaration is.
     file_private push_name_diagnostic(self, message String, span SourceSpan) Void = {
-        self.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message, span));
+        self.diagnostics.push(
+            make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message, span),
+        );
     };
 
-    file_private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
+    file_private has_conflicting_top_level_name(
+        self,
+        name String,
+        access AccessModifier,
+    ) Bool = {
         return self.has_existing_top_level_definition(name, access);
     };
 
-    file_private has_conflicting_top_level_type_name(self, name String, access AccessModifier) Bool = {
+    file_private has_conflicting_top_level_type_name(
+        self,
+        name String,
+        access AccessModifier,
+    ) Bool = {
         return self.has_existing_top_level_definition(name, access);
     };
 
-    file_private has_existing_top_level_definition(self, name String, access AccessModifier) Bool = {
+    file_private has_existing_top_level_definition(
+        self,
+        name String,
+        access AccessModifier,
+    ) Bool = {
         let mutable id UInt = 1;
         let next_def_id = self.context.next_def_id();
         while id < next_def_id then {
             let def_id = DefId(id);
             if self.context.get_name(def_id) is .Some(existing_name) and existing_name == name then {
-                let existing_module = self.context.get_module_path(def_id) or else List[String].new();
+                let existing_module = self.context.get_module_path(def_id) or else List[String].new(
+                );
                 if string_list_eq(existing_module, self.module_path) then {
                     if access is not .FilePrivate() then {
                         return true;
                     };
                     let existing_source = self.context.get_source_file(def_id);
-                    if source_file_matches(existing_source, Option[String].Some(self.source_file)) then {
+                    if source_file_matches(
+                        existing_source,
+                        Option[String].Some(self.source_file),
+                    ) then {
                         return true;
                     };
                 };
@@ -129,47 +194,97 @@ given NameCollector {
         when decl in {
             .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
-                let kind = if type_params.is_empty() then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.GenericTemplate(GenericTemplateKind.Structure());
+                let kind = if type_params.is_empty() then DefKind.TypeDef(
+                    TypeDefKind.Structure(),
+                ) else DefKind.GenericTemplate(GenericTemplateKind.Structure());
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    kind,
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 context.set_struct_mutable(def_id, is_mutable_type);
                 let t = Type.StructureType(def_id);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
             .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
-                let kind = if type_params.is_empty() then DefKind.TypeDef(TypeDefKind.Enum()) else DefKind.GenericTemplate(GenericTemplateKind.Enum());
+                let kind = if type_params.is_empty() then DefKind.TypeDef(
+                    TypeDefKind.Enum(),
+                ) else DefKind.GenericTemplate(GenericTemplateKind.Enum());
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    kind,
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let t = Type.EnumType(def_id);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
             .TypeAliasDecl(access, name, target, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, self.package_id, access, span);
-                self.global_scope.define_scoped_type(self.module_path, name, Type.StructureType(def_id));
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    DefKind.TypeDef(TypeDefKind.Structure()),
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
+                self.global_scope.define_scoped_type(
+                    self.module_path,
+                    name,
+                    Type.StructureType(def_id),
+                );
             },
             .IntrinsicTypeDecl(access, name, type_params, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 // Register intrinsic types as their dedicated enum cases (matching Swift compiler)
@@ -192,15 +307,30 @@ given NameCollector {
                     _ then {
                         // Unknown intrinsic type - allocate as OpaqueType
                         let mutable context = self.context;
-                        let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, self.package_id, access, span);
+                        let def_id = context.allocate_full_in_package(
+                            name,
+                            DefKind.TypeDef(TypeDefKind.Opaque()),
+                            self.module_path,
+                            self.source_file,
+                            self.package_id,
+                            access,
+                            span,
+                        );
                         Type.OpaqueType(def_id)
                     },
                 };
-                self.global_scope.define_scoped_type(self.module_path, name, intrinsic_type);
+                self.global_scope.define_scoped_type(
+                    self.module_path,
+                    name,
+                    intrinsic_type,
+                );
             },
             .ForeignTypeDecl(access, name, cname, fields, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let kind = when fields in {
@@ -208,7 +338,15 @@ given NameCollector {
                     .None() then DefKind.TypeDef(TypeDefKind.Opaque()),
                 };
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    kind,
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let t = when fields in {
                     .Some(_) then Type.StructureType(def_id),
                     .None() then Type.OpaqueType(def_id),
@@ -221,51 +359,103 @@ given NameCollector {
                     _ then Option[String].None(),
                 };
                 if self.has_existing_top_level_definition(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    DefKind.TypeDef(TypeDefKind.Trait()),
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let mutable trait_type_args = List[Type].new();
                 for type_param in type_params then {
                     trait_type_args.push(Type.GenericParameter(type_param.name));
                 };
-                self.global_scope.define_scoped_type(self.module_path, name, Type.TraitObject(def_id, trait_type_args));
+                self.global_scope.define_scoped_type(
+                    self.module_path,
+                    name,
+                    Type.TraitObject(def_id, trait_type_args),
+                );
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
-                let kind = if type_params.is_empty() then DefKind.Function() else DefKind.GenericTemplate(GenericTemplateKind.Function());
+                let kind = if type_params.is_empty() then DefKind.Function()
+                else DefKind.GenericTemplate(GenericTemplateKind.Function());
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    kind,
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    DefKind.Function(),
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
             .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let mutable context = self.context;
-                let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span);
+                let def_id = context.allocate_full_in_package(
+                    name,
+                    DefKind.Function(),
+                    self.module_path,
+                    self.source_file,
+                    self.package_id,
+                    access,
+                    span,
+                );
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
             .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let sym = self.make_var_symbol(name, is_mutable, access, span);
@@ -273,7 +463,10 @@ given NameCollector {
             },
             .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
-                    self.push_name_diagnostic(self.duplicate_definition_message(name), name_span);
+                    self.push_name_diagnostic(
+                        self.duplicate_definition_message(name),
+                        name_span,
+                    );
                     return;
                 };
                 let sym = self.make_var_symbol(name, is_mutable, access, span);

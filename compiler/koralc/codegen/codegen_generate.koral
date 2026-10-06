@@ -21,11 +21,13 @@ using "std/os";
 using "std/proc";
 
 file_private let codegen_function_trace_enabled() Bool = {
-    return if env("KORAL_DEBUG_CODEGEN_FUNCTIONS") is .Some(value) then value == "1" or value == "true" or value == "TRUE" else false;
+    return if env("KORAL_DEBUG_CODEGEN_FUNCTIONS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
+    else false;
 };
 
 file_private let codegen_step_trace_enabled() Bool = {
-    return if env("KORAL_DEBUG_CODEGEN_STEPS") is .Some(value) then value == "1" or value == "true" or value == "TRUE" else false;
+    return if env("KORAL_DEBUG_CODEGEN_STEPS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
+    else false;
 };
 
 file_private let trace_codegen_step(message String) Void = {
@@ -34,11 +36,7 @@ file_private let trace_codegen_step(message String) Void = {
     };
 };
 
-type ForeignFunctionPrototype(
-    name String,
-    params List[TypedParam],
-    return_type Type,
-);
+type ForeignFunctionPrototype(name String, params List[TypedParam], return_type Type);
 
 type ForeignDeclarations(
     empty_types List[String],
@@ -49,20 +47,36 @@ given CodeGen {
     public validate_mir_function(self, function MIRFunction) Void = {
         let mutable return_type = self.mir_function_return_type(function);
         if self.type_contains_generic(function.identifier.symbol_type) then {
-            panic(internal_compiler_error("Generic function symbol reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))"));
+            panic(
+                internal_compiler_error(
+                    "Generic function symbol reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))",
+                ),
+            );
         };
-        if self.type_contains_generic(return_type) or self.params_contain_generic(function.params) then {
-            panic(internal_compiler_error("Generic function signature reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))"));
+        if self.type_contains_generic(return_type) or self.params_contain_generic(
+            function.params,
+        ) then {
+            panic(
+                internal_compiler_error(
+                    "Generic function signature reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))",
+                ),
+            );
         };
         for local in function.locals then {
             if self.type_contains_generic(local.local_type) then {
-                panic(internal_compiler_error("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier)): \(local.name) :: \(self.context.type_display_name(local.local_type)) return=\(self.context.type_display_name(return_type)) symbol=\(self.context.type_display_name(function.identifier.symbol_type))"));
+                panic(
+                    internal_compiler_error(
+                        "Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier)): \(local.name) :: \(self.context.type_display_name(local.local_type)) return=\(self.context.type_display_name(return_type)) symbol=\(self.context.type_display_name(function.identifier.symbol_type))",
+                    ),
+                );
             };
         };
     };
 
     public validate_mir_functions(self, functions List[MIRFunction]) Void = {
-        for function in functions then { self.validate_mir_function(function);};
+        for function in functions then {
+            self.validate_mir_function(function);
+        };
     };
 
     module_private validate_codegen_inputs(self) Void = {
@@ -71,27 +85,49 @@ given CodeGen {
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(identifier, params, return_type) then {
-                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
-                        panic(internal_compiler_error("Generic foreign function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))"));
+                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(
+                        return_type,
+                    ) or self.params_contain_generic(params) then {
+                        panic(
+                            internal_compiler_error(
+                                "Generic foreign function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))",
+                            ),
+                        );
                     };
                 },
                 .ForeignGlobalVariable(identifier, _, decl_type) then {
                     if self.type_contains_generic(decl_type) then {
-                        panic(internal_compiler_error("Generic foreign global reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))"));
+                        panic(
+                            internal_compiler_error(
+                                "Generic foreign global reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))",
+                            ),
+                        );
                     };
                 },
                 .GlobalVariable(identifier, initializer_function, _, decl_type) then {
                     if self.type_contains_generic(decl_type) then {
-                        panic(internal_compiler_error("Generic global variable reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))"));
+                        panic(
+                            internal_compiler_error(
+                                "Generic global variable reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))",
+                            ),
+                        );
                     };
                     if self.type_contains_generic(initializer_function.symbol_type) then {
-                        panic(internal_compiler_error("Generic global initializer reached codegen: \(self.context.symbol_name(initializer_function)) :: \(self.context.type_display_name(initializer_function.symbol_type))"));
+                        panic(
+                            internal_compiler_error(
+                                "Generic global initializer reached codegen: \(self.context.symbol_name(initializer_function)) :: \(self.context.type_display_name(initializer_function.symbol_type))",
+                            ),
+                        );
                     };
                 },
                 .StructDeclaration(identifier, fields) then {
                     for field in fields then {
                         if self.type_contains_generic(field.field_type) then {
-                            panic(internal_compiler_error("Generic struct field reached codegen: \(self.context.symbol_name(identifier)).\(field.name) :: \(self.context.type_display_name(field.field_type))"));
+                            panic(
+                                internal_compiler_error(
+                                    "Generic struct field reached codegen: \(self.context.symbol_name(identifier)).\(field.name) :: \(self.context.type_display_name(field.field_type))",
+                                ),
+                            );
                         };
                     };
                 },
@@ -99,46 +135,83 @@ given CodeGen {
                     for case_info in cases then {
                         for field in case_info.fields then {
                             if self.type_contains_generic(field.field_type) then {
-                                panic(internal_compiler_error("Generic enum field reached codegen: \(self.context.symbol_name(identifier)).\(case_info.name).\(field.name) :: \(self.context.type_display_name(field.field_type))"));
+                                panic(
+                                    internal_compiler_error(
+                                        "Generic enum field reached codegen: \(self.context.symbol_name(identifier)).\(case_info.name).\(field.name) :: \(self.context.type_display_name(field.field_type))",
+                                    ),
+                                );
                             };
                         };
                     };
                 },
                 .Function(identifier, params, return_type, _) then {
-                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
-                        panic(internal_compiler_error("Generic MIR global function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))"));
+                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(
+                        return_type,
+                    ) or self.params_contain_generic(params) then {
+                        panic(
+                            internal_compiler_error(
+                                "Generic MIR global function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))",
+                            ),
+                        );
                     };
                 },
                 .Given(target_type, trait_name, trait_type_args, methods, _) then {
                     if self.type_contains_generic(target_type) then {
-                        let trait_label = when trait_name in { .Some(name) then name, .None() then "" };
-                        panic(internal_compiler_error("Generic given target reached codegen: \(trait_label) on \(self.context.type_display_name(target_type))"));
+                        let trait_label = when trait_name in {
+                            .Some(name) then name,
+                            .None() then "",
+                        };
+                        panic(
+                            internal_compiler_error(
+                                "Generic given target reached codegen: \(trait_label) on \(self.context.type_display_name(target_type))",
+                            ),
+                        );
                     };
                     for trait_arg in trait_type_args then {
                         if self.type_contains_generic(trait_arg) then {
-                            panic(internal_compiler_error("Generic given trait arg reached codegen: \(self.context.type_display_name(trait_arg))"));
+                            panic(
+                                internal_compiler_error(
+                                    "Generic given trait arg reached codegen: \(self.context.type_display_name(trait_arg))",
+                                ),
+                            );
                         };
                     };
                     for method in methods then {
                         if self.type_contains_generic(method.symbol_type) then {
-                            panic(internal_compiler_error("Generic given method symbol reached codegen: \(self.context.symbol_name(method)) :: \(self.context.type_display_name(method.symbol_type))"));
+                            panic(
+                                internal_compiler_error(
+                                    "Generic given method symbol reached codegen: \(self.context.symbol_name(method)) :: \(self.context.type_display_name(method.symbol_type))",
+                                ),
+                            );
                         };
                     };
                 },
                 .TraitVTable(vtable) then {
                     if self.type_contains_generic(vtable.concrete_type) then {
-                        panic(internal_compiler_error("Generic trait vtable concrete type reached codegen: \(self.context.type_display_name(vtable.concrete_type))"));
+                        panic(
+                            internal_compiler_error(
+                                "Generic trait vtable concrete type reached codegen: \(self.context.type_display_name(vtable.concrete_type))",
+                            ),
+                        );
                     };
                     for trait_arg in vtable.trait_type_args then {
                         if self.type_contains_generic(trait_arg) then {
-                            panic(internal_compiler_error("Generic trait vtable arg reached codegen: \(self.context.type_display_name(trait_arg))"));
+                            panic(
+                                internal_compiler_error(
+                                    "Generic trait vtable arg reached codegen: \(self.context.type_display_name(trait_arg))",
+                                ),
+                            );
                         };
                     };
                     for method in vtable.methods then {
                         when method.return_type in {
                             .Some(return_type) then {
                                 if self.type_contains_generic(return_type) then {
-                                    panic(internal_compiler_error("Generic trait vtable return reached codegen: \(method.name) :: \(self.context.type_display_name(return_type))"));
+                                    panic(
+                                        internal_compiler_error(
+                                            "Generic trait vtable return reached codegen: \(method.name) :: \(self.context.type_display_name(return_type))",
+                                        ),
+                                    );
                                 };
                             },
                             .None() then {},
@@ -147,7 +220,11 @@ given CodeGen {
                             when param.param_type in {
                                 .Some(param_type) then {
                                     if self.type_contains_generic(param_type) then {
-                                        panic(internal_compiler_error("Generic trait vtable param reached codegen: \(method.name).\(param.name) :: \(self.context.type_display_name(param_type))"));
+                                        panic(
+                                            internal_compiler_error(
+                                                "Generic trait vtable param reached codegen: \(method.name).\(param.name) :: \(self.context.type_display_name(param_type))",
+                                            ),
+                                        );
                                     };
                                 },
                                 .None() then {},
@@ -165,7 +242,9 @@ given CodeGen {
             .GenericStruct(_, type_args) then {
                 let mutable concrete = true;
                 for type_arg_ref in type_args then {
-                    if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(type_arg_ref) then {
+                    if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(
+                        type_arg_ref,
+                    ) then {
                         concrete = false;
                     };
                 };
@@ -174,7 +253,9 @@ given CodeGen {
             .GenericEnum(_, type_args) then {
                 let mutable concrete = true;
                 for type_arg_ref in type_args then {
-                    if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(type_arg_ref) then {
+                    if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(
+                        type_arg_ref,
+                    ) then {
                         concrete = false;
                     };
                 };
@@ -187,7 +268,9 @@ given CodeGen {
                             .Some(type_args) then {
                                 let mutable concrete = true;
                                 for type_arg in type_args then {
-                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(
+                                        type_arg,
+                                    ) then {
                                         concrete = false;
                                     };
                                 };
@@ -206,7 +289,9 @@ given CodeGen {
                             .Some(type_args) then {
                                 let mutable concrete = true;
                                 for type_arg in type_args then {
-                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(
+                                        type_arg,
+                                    ) then {
                                         concrete = false;
                                     };
                                 };
@@ -231,7 +316,11 @@ given CodeGen {
         return self.compose_method_c_name(type_c_name, "drop");
     };
 
-    module_private emitted_user_defined_drop_method_name(self, receiver_type Type, method_def_id DefId) String = {
+    module_private emitted_user_defined_drop_method_name(
+        self,
+        receiver_type Type,
+        method_def_id DefId,
+    ) String = {
         return when self.context.get_symbol(method_def_id) in {
             .Some(symbol) then self.callable_c_name(symbol),
             .None() then self.user_defined_drop_method_name(receiver_type),
@@ -251,10 +340,17 @@ given CodeGen {
             when global in {
                 .Given(target_type, _, _, methods, trait_def_id) then {
                     let is_drop_trait = self.is_std_drop_impl(trait_def_id);
-                    if is_drop_trait and self.is_concrete_nominal_instance(target_type) and self.user_defined_drop_type_key(target_type) == type_name then {
+                    if is_drop_trait and self.is_concrete_nominal_instance(target_type) and self.user_defined_drop_type_key(
+                        target_type,
+                    ) == type_name then {
                         for method in methods then {
                             if self.context.symbol_name(method) == "drop" then {
-                                return Option[String].Some(self.emitted_user_defined_drop_method_name(target_type, method.def_id));
+                                return Option[String].Some(
+                                    self.emitted_user_defined_drop_method_name(
+                                        target_type,
+                                        method.def_id,
+                                    ),
+                                );
                             };
                         };
                     };
@@ -272,8 +368,15 @@ given CodeGen {
                         if self.is_std_drop_impl(concrete.trait_conformance_def_id) then {
                             when concrete.owner_type in {
                                 .Some(owner_type) then {
-                                    if self.is_concrete_nominal_instance(owner_type) and self.user_defined_drop_type_key(owner_type) == type_name then {
-                                        return Option[String].Some(self.emitted_user_defined_drop_method_name(owner_type, def_id));
+                                    if self.is_concrete_nominal_instance(owner_type) and self.user_defined_drop_type_key(
+                                        owner_type,
+                                    ) == type_name then {
+                                        return Option[String].Some(
+                                            self.emitted_user_defined_drop_method_name(
+                                                owner_type,
+                                                def_id,
+                                            ),
+                                        );
                                     };
                                 },
                                 .None() then {},
@@ -310,7 +413,6 @@ given CodeGen {
 
         return Option[String].None();
     };
-
 
     // ── 主入口 ────────────────────────────────────────────────────────────────
 
@@ -353,7 +455,8 @@ given CodeGen {
         self.emit_c_main();
     };
 
-    public into_generated_string(self) String = self.emit_drop_thunk_definitions(self.buffer.into_string());
+    public into_generated_string(self) String =
+        self.emit_drop_thunk_definitions(self.buffer.into_string());
 
     public generate(self) String = {
         self.generate_into_buffer();
@@ -379,10 +482,14 @@ given CodeGen {
                     let name = self.c_identifier_for_symbol(identifier);
                     let mutable is_stdlib = false;
                     for sf in stdlib_functions then {
-                        if sf == name then { is_stdlib = true;};
+                        if sf == name then {
+                            is_stdlib = true;
+                        };
                     };
                     if not is_stdlib then {
-                        foreign_functions.push(ForeignFunctionPrototype(name, params, return_type));
+                        foreign_functions.push(
+                            ForeignFunctionPrototype(name, params, return_type),
+                        );
                     };
                 },
                 .ForeignGlobalVariable(_, _, _) then {},
@@ -390,8 +497,12 @@ given CodeGen {
                     when kind in {
                         .Global() then {
                             if self.context.symbol_name(identifier) == "main" then {
-                                self.user_main_function_name = Option[String].Some(self.callable_c_name(identifier));
-                                self.user_main_return_type = Option[Type].Some(return_type);
+                                self.user_main_function_name = Option[String].Some(
+                                    self.callable_c_name(identifier),
+                                );
+                                self.user_main_return_type = Option[Type].Some(
+                                    return_type,
+                                );
                             };
                         },
                         _ then {},
@@ -425,7 +536,9 @@ given CodeGen {
     ///
     /// Requirements: 3.8
     emit_foreign_types(self, foreign_declarations ForeignDeclarations) Void = {
-        if foreign_declarations.empty_types.is_empty() then { return;};
+        if foreign_declarations.empty_types.is_empty() then {
+            return;
+        };
 
         for name in foreign_declarations.empty_types then {
             self.buffer.push_string("typedef struct \(name) \(name);\n");
@@ -438,13 +551,21 @@ given CodeGen {
             when decl in {
                 .Structure(name, _, _, _) then {
                     self.buffer.push_string("struct \(name);\n");
-                    self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n");
-                    self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self);\n");
+                    self.buffer.push_string(
+                        "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n",
+                    );
+                    self.buffer.push_string(
+                        "void __koral_\(name)_drop(struct \(name)* self);\n",
+                    );
                 },
                 .Enum(name, _, _, _) then {
                     self.buffer.push_string("struct \(name);\n");
-                    self.buffer.push_string("struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n");
-                    self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self);\n");
+                    self.buffer.push_string(
+                        "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n",
+                    );
+                    self.buffer.push_string(
+                        "void __koral_\(name)_drop(struct \(name)* self);\n",
+                    );
                 },
                 .ForeignStructure(name, _, _) then {
                     self.buffer.push_string("struct \(name);\n");
@@ -454,17 +575,24 @@ given CodeGen {
         self.buffer.push_string("\n");
     };
 
-    emit_managed_nominal_wrapper_declarations(self, declarations List[TypeDeclaration]) Void = {
+    emit_managed_nominal_wrapper_declarations(
+        self,
+        declarations List[TypeDeclaration],
+    ) Void = {
         for decl in declarations then {
             when decl in {
                 .Structure(name, _, _, managed) then {
-                    if not managed then { continue;};
+                    if not managed then {
+                        continue;
+                    };
                     self.buffer.push_string("struct \(name) {\n");
                     self.buffer.push_string("    void* ptr;\n");
                     self.buffer.push_string("};\n\n");
                 },
                 .Enum(name, _, _, managed) then {
-                    if not managed then { continue;};
+                    if not managed then {
+                        continue;
+                    };
                     self.buffer.push_string("struct \(name) {\n");
                     self.buffer.push_string("    void* ptr;\n");
                     self.buffer.push_string("};\n\n");
@@ -506,7 +634,9 @@ given CodeGen {
     ///
     /// Requirements: 4.6, 4.7
     emit_foreign_functions(self, foreign_declarations ForeignDeclarations) Void = {
-        if foreign_declarations.functions.is_empty() then { return;};
+        if foreign_declarations.functions.is_empty() then {
+            return;
+        };
 
         for function in foreign_declarations.functions then {
             if self.type_is_never(function.return_type) then {
@@ -514,7 +644,9 @@ given CodeGen {
             };
             let mutable return_c_type = self.c_type_name(function.return_type);
             let params_str = self.build_param_type_list(function.params);
-            self.buffer.push_string("extern \(return_c_type) \(function.name)(\(params_str));\n");
+            self.buffer.push_string(
+                "extern \(return_c_type) \(function.name)(\(params_str));\n",
+            );
         };
         self.buffer.push_string("\n");
     };
@@ -535,8 +667,16 @@ given CodeGen {
         // Emit remaining declarations from globals (initializers, given methods).
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(initializer_function, emitted),
-                .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(identifier, params, return_type, emitted),
+                .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(
+                    initializer_function,
+                    emitted,
+                ),
+                .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(
+                    identifier,
+                    params,
+                    return_type,
+                    emitted,
+                ),
                 .Given(_, _, _, methods, _) then {
                     for method in methods then {
                         self.emit_symbol_function_declaration(method, emitted);
@@ -591,12 +731,12 @@ given CodeGen {
             emitted_count += 1;
             if codegen_function_trace_enabled() then {
                 eprintln(
-                    "codegen-fn \(emitted_count.to_string()) "
-                    + self.context.symbol_name(function.identifier)
-                    + " ctype=" + self.c_type_name_cache.count().to_string()
-                    + " cname=" + self.callable_c_name_cache.count().to_string()
-                    + " emitted=" + self.emitted_function_names.count().to_string()
-                    + " ownercache=" + self.current_owner_callable_c_name_cache.count().to_string()
+                    "codegen-fn \(emitted_count.to_string()) " + self.context.symbol_name(
+                        function.identifier,
+                    ) + " ctype=" + self.c_type_name_cache.count().to_string() + " cname=" + self.callable_c_name_cache.count(
+                    ).to_string() + " emitted=" + self.emitted_function_names.count().to_string(
+                    ) + " ownercache=" + self.current_owner_callable_c_name_cache.count().to_string(
+                    ),
                 );
             };
             self.emit_mir_global_function(function);
@@ -611,11 +751,19 @@ given CodeGen {
         emitted Set[String],
     ) Void = {
         let c_name = self.callable_c_name(identifier);
-        if emitted.contains(c_name) then { return;};
+        if emitted.contains(c_name) then {
+            return;
+        };
         emitted.insert(c_name);
-        if self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
+        if self.type_contains_generic(return_type) or self.params_contain_generic(
+            params,
+        ) then {
             let identifier_name = self.context.get_name(identifier.def_id) or else "";
-            panic(internal_compiler_error("Generic MIR function declaration reached codegen: \(identifier_name) :: \(self.context.type_display_name(identifier.symbol_type))"));
+            panic(
+                internal_compiler_error(
+                    "Generic MIR function declaration reached codegen: \(identifier_name) :: \(self.context.type_display_name(identifier.symbol_type))",
+                ),
+            );
         };
         if self.type_is_never(return_type) then {
             self.buffer.push_string("_Noreturn ");
@@ -625,15 +773,25 @@ given CodeGen {
         self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n");
     };
 
-    module_private emit_symbol_function_declaration(self, symbol Symbol, emitted Set[String]) Void = {
+    module_private emit_symbol_function_declaration(
+        self,
+        symbol Symbol,
+        emitted Set[String],
+    ) Void = {
         let c_name = self.callable_c_name(symbol);
-        if emitted.contains(c_name) then { return;};
+        if emitted.contains(c_name) then {
+            return;
+        };
         emitted.insert(c_name);
         let fn_type = symbol.symbol_type;
         let mutable return_type = self.function_type_return_type(fn_type);
         if self.type_contains_generic(return_type) then {
             let symbol_name = self.context.get_name(symbol.def_id) or else "";
-            panic(internal_compiler_error("Generic MIR function declaration reached codegen: \(symbol_name) :: \(self.context.type_display_name(symbol.symbol_type))"));
+            panic(
+                internal_compiler_error(
+                    "Generic MIR function declaration reached codegen: \(symbol_name) :: \(self.context.type_display_name(symbol.symbol_type))",
+                ),
+            );
         };
         if self.type_is_never(return_type) then {
             self.buffer.push_string("_Noreturn ");
@@ -655,10 +813,13 @@ given CodeGen {
             .None() then false,
         };
 
-        if not has_global_inits and not has_user_main then { return;};
+        if not has_global_inits and not has_user_main then {
+            return;
+        };
 
         self.buffer.push_string("\nint main(int argc, char** argv) {\n");
-        self.indent = StringBuilder.new(); self.indent.push_string("    ");
+        self.indent = StringBuilder.new();
+        self.indent.push_string("    ");
 
         self.add_indent();
         self.buffer.push_string("__koral_set_args((int32_t)argc, (uint8_t**)argv);\n");
@@ -713,7 +874,9 @@ given CodeGen {
     module_private has_mir_global_initializers(self) Bool = {
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(_, _, _, _) then { return true;},
+                .GlobalVariable(_, _, _, _) then {
+                    return true;
+                },
                 _ then {},
             };
         };
@@ -738,7 +901,9 @@ given CodeGen {
 
     /// 将 [TypedParam]List 转换为 C 参数声明字符串
     public build_param_list(self, params List[TypedParam]) String = {
-        if params.is_empty() then { return "void";};
+        if params.is_empty() then {
+            return "void";
+        };
 
         let mutable result = StringBuilder.new();
         let mutable first = true;
@@ -758,7 +923,9 @@ given CodeGen {
 
     // 只生成参数类型（不带参数名），用于函数声明
     public build_param_type_list(self, params List[TypedParam]) String = {
-        if params.is_empty() then { return "void";};
+        if params.is_empty() then {
+            return "void";
+        };
 
         let mutable result = StringBuilder.new();
         let mutable first = true;
@@ -776,7 +943,9 @@ given CodeGen {
     public build_param_type_list_from_function_type(self, fn_type Type) String = {
         return when fn_type in {
             .FunctionType(params, _) then {
-                if params.is_empty() then { return "void";};
+                if params.is_empty() then {
+                    return "void";
+                };
                 let mutable result = StringBuilder.new();
                 let mutable first = true;
                 let mutable index UInt = 0;
@@ -800,7 +969,9 @@ given CodeGen {
     ///
     /// Requirements: 13.2
     public type_contains_generic(self, t Type) Bool = {
-        return self.context.contains_generic_parameter(t) or type_mentions_unresolved_generic_placeholder(t);
+        return self.context.contains_generic_parameter(t) or type_mentions_unresolved_generic_placeholder(
+            t,
+        );
     };
 
     /// 仅检查类型本身是否仍包含未解析的泛型占位，不递归展开已定义类型。
@@ -816,7 +987,9 @@ given CodeGen {
     /// Requirements: 13.2
     params_contain_generic(self, params List[TypedParam]) Bool = {
         for p in params then {
-            if self.type_contains_generic(p.param_type) then { return true;};
+            if self.type_contains_generic(p.param_type) then {
+                return true;
+            };
         };
         return false;
     };

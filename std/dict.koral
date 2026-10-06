@@ -11,23 +11,28 @@
 // directly addressable by pointer — enabling */*subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
-module_private type DictBucket[K Hash, V Any](
-    tag UInt,
-    key K,
-    value V,
-);
+module_private type DictBucket[K Hash, V Any](tag UInt, key K, value V);
 
 // Bucket tag constants (inlined as 0(UInt), 1(UInt), 2(UInt))
 
-file_private let bucket_tag_ptr[K Hash, V Any](bucket_ptr *unsafe mutable DictBucket[K, V]) *unsafe mutable UInt =
+file_private let bucket_tag_ptr[K Hash, V Any](
+    bucket_ptr *unsafe mutable DictBucket[K, V],
+) *unsafe mutable UInt =
     bucket_ptr(UInt)(*unsafe mutable UInt);
 
-file_private let bucket_set_tag[K Hash, V Any](bucket_ptr *unsafe mutable DictBucket[K, V], tag UInt) Void = {
+file_private let bucket_set_tag[K Hash, V Any](
+    bucket_ptr *unsafe mutable DictBucket[K, V],
+    tag UInt,
+) Void = {
     let tag_ptr = bucket_tag_ptr(bucket_ptr);
     *tag_ptr = tag;
 };
 
-public type mutable Dict[K Hash, V Any](module_private mutable buckets *unsafe mutable DictBucket[K, V], module_private mutable size UInt, module_private mutable capacity UInt);
+public type mutable Dict[K Hash, V Any](
+    module_private mutable buckets *unsafe mutable DictBucket[K, V],
+    module_private mutable size UInt,
+    module_private mutable capacity UInt,
+);
 
 given[K Hash, V Any] Dict[K, V] as Drop {
 
@@ -41,7 +46,10 @@ given[K Hash, V Any] Dict[K, V] as Drop {
     };
 };
 
-public type mutable DictIterator[K Hash, V Any](module_private source Dict[K, V], module_private mutable index UInt);
+public type mutable DictIterator[K Hash, V Any](
+    module_private source Dict[K, V],
+    module_private mutable index UInt,
+);
 
 // ============================================================================
 // Dict Methods
@@ -300,25 +308,32 @@ given[K Hash, V Any] Dict[K, V] {
     // Builtin subscript helpers for d[key] syntax
     file_private __index_get(self, key K) V = {
         when self.get(key) in {
-            .Some(v) then { return v;},
-            .None() then { panic("Dict key not found");},
+            .Some(v) then {
+                return v;
+            },
+            .None() then {
+                panic("Dict key not found");
+            },
         };
     };
 
     file_private __index_set(self, key K, value V) Void = {
         when self.get(key) in {
-            .None() then { panic("Dict key not found");},
+            .None() then {
+                panic("Dict key not found");
+            },
             .Some(_) then {},
         };
         let final_idx = when self.find_slot(key) in {
-            .None() then { panic("Dict key not found");},
+            .None() then {
+                panic("Dict key not found");
+            },
             .Some(i) then i,
         };
         let bucket_ptr = self.buckets + final_idx;
         deinit_memory(bucket_ptr);
         init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value));
     };
-
 };
 
 given[K Hash, V Any] Dict[K, V] as Clone {
@@ -351,7 +366,9 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
             if bucket_ptr.tag == 1(UInt) then {
-                return Option[Pair[K, V]].Some(Pair[K, V](bucket_ptr.key, bucket_ptr.value));
+                return Option[Pair[K, V]].Some(
+                    Pair[K, V](bucket_ptr.key, bucket_ptr.value),
+                );
             };
         };
         return Option[Pair[K, V]].None();

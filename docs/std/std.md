@@ -139,6 +139,12 @@ public trait Drop {
 public trait Default {
     default() Self;
 };
+
+public trait Clone {
+    clone(self) Self;
+};
+
+public trait Pod {};
 ```
 
 ## Types
@@ -223,15 +229,22 @@ public intrinsic type Float32;
 public intrinsic type Float64;
 
 public type Range[T Ord] {
-    Closed(start T, end T),
-    ClosedOpen(start T, end T),
-    OpenClosed(start T, end T),
-    Open(start T, end T),
-    From(start T),
-    After(start T),
-    To(end T),
-    Until(end T),
-    Full(),
+    // Bound ranges (4 kinds)
+    Closed(start T, end T), // a..b   : start <= x <= end
+    ClosedOpen(start T, end T), // a..<b  : start <= x < end
+    OpenClosed(start T, end T), // a<..b  : start < x <= end
+    Open(start T, end T), // a<..<b : start < x < end
+
+    // From ranges (2 kinds)
+    From(start T), // a..    : start <= x <= max
+    After(start T), // a<..   : start < x <= max
+
+    // To ranges (2 kinds)
+    To(end T), // ..b    : min <= x <= end
+    Until(end T), // ..<b   : min <= x < end
+
+    // Full range (1 kind)
+    Full(), // ..     : min <= x <= max
 };
 
 public type SliceSpec;
@@ -263,10 +276,9 @@ public type mutable StringBytesIterator;
 
 public type mutable StringRunesIterator;
 
-public type Pair[T Any, U Any](
-    first T,
-    second U,
-);
+public type Pair[T Any, U Any](first T, second U);
+
+public type mutable Cell[T Any](mutable value T);
 ```
 
 ## Given Implementations
@@ -928,6 +940,8 @@ given Float64 as Bounded {
     public min_value() Self;
 };
 
+given[T Any] Deque[T] as Drop {};
+
 given[T Any] Deque[T] {
     public new() Self;
     public with_capacity(capacity UInt) Self;
@@ -946,6 +960,10 @@ given[T Any] Deque[T] {
     public retain(self, predicate Func(T) Bool) Void;
 };
 
+given[T Any] Deque[T] as Clone {
+    public clone(self) Self;
+};
+
 given[T Any] Deque[T] as Default {
     public default() Self;
 };
@@ -962,11 +980,12 @@ given[T Any] DequeIterator[T] as Iterator[T] {
     public next(self) Option[T];
 };
 
+given[K Hash, V Any] Dict[K, V] as Drop {};
+
 given[K Hash, V Any] Dict[K, V] {
     public new() Self;
     public with_capacity(capacity UInt) Self;
     public count(self) UInt;
-    public borrow_ptr(self) *unsafe DictBucket[K, V];
     public insert(self, key K, value V) Void;
     public try_insert(self, key K, value V) Bool;
     public insert_dict(self, other Dict[K, V]) Void;
@@ -979,6 +998,10 @@ given[K Hash, V Any] Dict[K, V] {
     public is_empty(self) Bool;
     public clear(self) Void;
     public retain(self, predicate Func(K, V) Bool) Void;
+};
+
+given[K Hash, V Any] Dict[K, V] as Clone {
+    public clone(self) Self;
 };
 
 given[K Hash, V Any] Dict[K, V] as Default {
@@ -1150,17 +1173,17 @@ given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
     public average(self) Option[T];
 };
 
+given[T Any] List[T] as Drop {};
+
 given[T Any] List[T] {
     public new() Self;
     public with_capacity(capacity UInt) Self;
     public count(self) UInt;
     public reserve(self, additional UInt) Void;
     public push(self, value T) Void;
-    public push_list(self, other List[T]) Void;
-    public push_sublist(self, other List[T], range Range[UInt]) Void;
+    public push_list(self, other List[T], span: Range[UInt] = ..) Void;
     public pop(self) Option[T];
-    public insert_list_at(self, index UInt, other List[T]) Void;
-    public insert_sublist_at(self, index UInt, other List[T], range Range[UInt]) Void;
+    public insert_list_at(self, index UInt, other List[T], span: Range[UInt] = ..) Void;
     public insert_at(self, index UInt, value T) Void;
     public remove_at(self, index UInt) Void;
     public take_at(self, index UInt) T;
@@ -1172,14 +1195,21 @@ given[T Any] List[T] {
     public fill(self, value T) Void;
     public map[U Any](self, fn Func(T) U) List[U];
     public reverse(self) Void;
-    public borrow_ptr(self) *unsafe T;
-    public borrow_mut_ptr(self) *unsafe mutable T;
     public slice_spec(self, range Range[UInt]) SliceSpec;
     public sublist(self, range Range[UInt]) List[T];
     public enumerate(self) EnumerateIterator[T, ListIterator[T]];
     public retain(self, predicate Func(T) Bool) Void;
     public sort_by[K Ord](self, key Func(T) K) Void;
     public binary_search_by[K Ord](self, key Func(T) K, target K) Pair[UInt, Bool];
+};
+
+given[T Pod] List[T] {
+    public borrow_ptr(self) *unsafe T;
+    public borrow_mut_ptr(self) *unsafe mutable T;
+};
+
+given[T Any] List[T] as Clone {
+    public clone(self) Self;
 };
 
 given[T Any] List[T] as Default {
@@ -1210,6 +1240,8 @@ given[T Any] ListIterator[T] as Iterator[T] {
 given[T Any] List[T] as Iterable[T, ListIterator[T]] {
     public iterator(self) ListIterator[T];
 };
+
+given[T Any] List[T] {};
 
 given[T Ord] List[T] {
     public binary_search(self, target T) Pair[UInt, Bool];
@@ -1542,6 +1574,10 @@ given Rune as ToString {
     public to_string(self) String;
 };
 
+given Rune as Pod {};
+
+given[T Hash] Set[T] as Drop {};
+
 given[T Hash] Set[T] {
     public new() Self;
     public with_capacity(capacity UInt) Self;
@@ -1561,6 +1597,10 @@ given[T Hash] Set[T] {
     public intersection(self, other Set[T]) Set[T];
     public difference(self, other Set[T]) Set[T];
     public symmetric_difference(self, other Set[T]) Set[T];
+};
+
+given[T Hash] Set[T] as Clone {
+    public clone(self) Self;
 };
 
 given[T Hash] Set[T] as Default {
@@ -1589,8 +1629,7 @@ given StringBuilder {
     public count(self) UInt;
     public is_empty(self) Bool;
     public push_byte(self, value UInt8) Void;
-    public push_string(self, other String) Void;
-    public push_substring(self, other String, range Range[UInt]) Void;
+    public push_string(self, other String, span: Range[UInt] = ..) Void;
     public push_rune(self, rune Rune) Void;
     public clear(self) Void;
     public to_string(self) String;
@@ -1879,6 +1918,36 @@ given[T Any] *unsafe mutable T as Hash {
     public hash(self) UInt;
 };
 
+given Bool as Pod {};
+
+given Int as Pod {};
+
+given Int8 as Pod {};
+
+given Int16 as Pod {};
+
+given Int32 as Pod {};
+
+given Int64 as Pod {};
+
+given UInt as Pod {};
+
+given UInt8 as Pod {};
+
+given UInt16 as Pod {};
+
+given UInt32 as Pod {};
+
+given UInt64 as Pod {};
+
+given Float32 as Pod {};
+
+given Float64 as Pod {};
+
+given[T Any] *unsafe T as Pod {};
+
+given[T Any] *unsafe mutable T as Pod {};
+
 given[T Eq, U Eq] Pair[T, U] as Eq {
     public equals(self, other Pair[T, U]) Bool;
 };
@@ -1889,6 +1958,11 @@ given[T Hash, U Hash] Pair[T, U] as Hash {
 
 given[T Ord, U Ord] Pair[T, U] as Ord {
     public compare(self, other Pair[T, U]) Int;
+};
+
+given[T Any] Cell[T] {
+    public get(self) T;
+    public set(self, value T) Void;
 };
 
 given Ord {

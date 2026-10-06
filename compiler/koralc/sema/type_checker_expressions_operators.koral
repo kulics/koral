@@ -1,6 +1,9 @@
 given TypeChecker {
 
-    module_private should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type Type) Bool = {
+    module_private should_use_trait_placeholder_for_eq_ord_receiver(
+        self,
+        receiver_type Type,
+    ) Bool = {
         return when receiver_type in {
             .GenericParameter(_) then true,
             .ReferenceType(_) then true,
@@ -13,7 +16,12 @@ given TypeChecker {
         };
     };
 
-    module_private method_symbol_matches_binary_call(self, method_symbol Symbol, base_type Type, rhs_type Type) Bool = {
+    module_private method_symbol_matches_binary_call(
+        self,
+        method_symbol Symbol,
+        base_type Type,
+        rhs_type Type,
+    ) Bool = {
         return when method_symbol.symbol_type in {
             .FunctionType(params, _) then {
                 if params.count() < 2(UInt) then {
@@ -21,26 +29,63 @@ given TypeChecker {
                 };
                 let mutable receiver_type = (params[0(UInt)]).param_type;
                 let mutable arg_type = (params[1(UInt)]).param_type;
-                let receiver_matches = self.same_expr_type(receiver_type, base_type) or self.type_matches_expected_pattern(receiver_type, base_type);
-                let arg_matches = self.same_expr_type(arg_type, rhs_type) or self.type_matches_expected_pattern(arg_type, rhs_type);
+                let receiver_matches = self.same_expr_type(receiver_type, base_type) or self.type_matches_expected_pattern(
+                    receiver_type,
+                    base_type,
+                );
+                let arg_matches = self.same_expr_type(arg_type, rhs_type) or self.type_matches_expected_pattern(
+                    arg_type,
+                    rhs_type,
+                );
                 return receiver_matches and arg_matches;
             },
             _ then true,
         };
     };
 
-    module_private make_binary_method_placeholder_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+    module_private make_binary_method_placeholder_symbol(
+        self,
+        base_type Type,
+        rhs_type Type,
+        method_name String,
+        fallback_return Type,
+    ) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function());
         let mutable param_types = List[Type].new();
         param_types.push(base_type);
         param_types.push(rhs_type);
-        return Symbol(def_id, make_function_type(self.to_type_ref_list(param_types), fallback_return), SymbolKind.Function());
+        return Symbol(
+            def_id,
+            make_function_type(self.to_type_ref_list(param_types), fallback_return),
+            SymbolKind.Function(),
+        );
     };
 
-    module_private resolved_or_placeholder_method_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+    module_private resolved_or_placeholder_method_symbol(
+        self,
+        base_type Type,
+        rhs_type Type,
+        method_name String,
+        fallback_return Type,
+    ) Symbol = {
         return when self.resolve_source_method_signature(base_type, method_name) in {
-            .Some(symbol) then if self.method_symbol_matches_binary_call(symbol, base_type, rhs_type) then symbol else self.make_binary_method_placeholder_symbol(base_type, rhs_type, method_name, fallback_return),
-            .None() then self.make_binary_method_placeholder_symbol(base_type, rhs_type, method_name, fallback_return),
+            .Some(symbol) then if self.method_symbol_matches_binary_call(
+                symbol,
+                base_type,
+                rhs_type,
+            ) then symbol
+            else self.make_binary_method_placeholder_symbol(
+                base_type,
+                rhs_type,
+                method_name,
+                fallback_return,
+            ),
+            .None() then self.make_binary_method_placeholder_symbol(
+                base_type,
+                rhs_type,
+                method_name,
+                fallback_return,
+            ),
         };
     };
 
@@ -52,13 +97,37 @@ given TypeChecker {
         };
     };
 
-    module_private check_arithmetic_expr_ref(self, left Expr, op ArithmeticOperator, right Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_arithmetic_expr_ref(
+        self,
+        left Expr,
+        op ArithmeticOperator,
+        right Expr,
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
 
         let initial_typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, expected, scope),
-            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
-            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, expected, scope),
+            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                expected,
+                scope,
+            ),
+            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                scope,
+            ),
+            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                expected,
+                scope,
+            ),
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
@@ -93,9 +162,26 @@ given TypeChecker {
         };
         let initial_typed_right = when right in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
-            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(inner_left, inner_op, inner_right, .Some(initial_typed_left.expr_type), scope),
-            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(inner_left, inner_op, inner_right, scope),
-            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(inner_left, inner_op, inner_right, .Some(initial_typed_left.expr_type), scope),
+            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                .Some(initial_typed_left.expr_type),
+                scope,
+            ),
+            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                scope,
+            ),
+            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                .Some(initial_typed_left.expr_type),
+                scope,
+            ),
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
@@ -126,18 +212,41 @@ given TypeChecker {
                 };
                 make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
             },
-            _ then self.check_expr_core_ref(right, .Some(initial_typed_left.expr_type), scope),
+            _ then self.check_expr_core_ref(
+                right,
+                .Some(initial_typed_left.expr_type),
+                scope,
+            ),
         };
         let mutable typed_left = initial_typed_left;
         let mutable typed_right = initial_typed_right;
-        let left_numeric = self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) or self.is_numeric_literal_expr(typed_left);
-        let right_numeric = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type) or self.is_numeric_literal_expr(typed_right);
-        if left_numeric and right_numeric and not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-            if self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) then {
-                typed_right = self.adapt_expr_to_expected_type_at(typed_right, Option[Type].Some(typed_left.expr_type), Option[SourceSpan].Some(expr_span(right)));
+        let left_numeric = self.is_numeric_type(typed_left.expr_type) or self.is_float_type(
+            typed_left.expr_type,
+        ) or self.is_numeric_literal_expr(typed_left);
+        let right_numeric = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(
+            typed_right.expr_type,
+        ) or self.is_numeric_literal_expr(typed_right);
+        if left_numeric and right_numeric and not self.same_expr_type(
+            typed_left.expr_type,
+            typed_right.expr_type,
+        ) then {
+            if self.is_numeric_type(typed_left.expr_type) or self.is_float_type(
+                typed_left.expr_type,
+            ) then {
+                typed_right = self.adapt_expr_to_expected_type_at(
+                    typed_right,
+                    Option[Type].Some(typed_left.expr_type),
+                    Option[SourceSpan].Some(expr_span(right)),
+                );
             };
-            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type)) then {
-                typed_left = self.adapt_expr_to_expected_type_at(typed_left, Option[Type].Some(typed_right.expr_type), Option[SourceSpan].Some(expr_span(left)));
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (self.is_numeric_type(
+                typed_right.expr_type,
+            ) or self.is_float_type(typed_right.expr_type)) then {
+                typed_left = self.adapt_expr_to_expected_type_at(
+                    typed_left,
+                    Option[Type].Some(typed_right.expr_type),
+                    Option[SourceSpan].Some(expr_span(left)),
+                );
             };
         };
         let left_raw_t = typed_left.expr_type;
@@ -145,7 +254,10 @@ given TypeChecker {
         let left_t = self.concretize_default_literal_type(left_raw_t);
         let right_t = self.concretize_default_literal_type(right_raw_t);
         if left_t is .NeverType() or right_t is .NeverType() then {
-            return make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), Type.NeverType());
+            return make_typed_expr(
+                TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                Type.NeverType(),
+            );
         };
         let mutable same_type = self.same_expr_type(left_t, right_t);
         let left_is_pointer = when left_t in {
@@ -158,7 +270,9 @@ given TypeChecker {
             .PointerType(_) then true,
             _ then false,
         };
-        let is_non_numeric_candidate = not left_is_pointer and not self.is_numeric_type(left_t) and not self.is_float_type(left_t) and left_t is not .VoidType() and left_t is not .NeverType() and when left_t in {
+        let is_non_numeric_candidate = not left_is_pointer and not self.is_numeric_type(
+            left_t,
+        ) and not self.is_float_type(left_t) and left_t is not .VoidType() and left_t is not .NeverType() and when left_t in {
             .TypeVar(_) then false,
             .Unknown() then false,
             _ then true,
@@ -180,20 +294,51 @@ given TypeChecker {
                 };
                 when unwrapped_left in {
                     .GenericParameter(_) then {
-                        if not self.generic_parameter_satisfies_trait_constraint(unwrapped_left, trait_name, trait_args) then {
+                        if not self.generic_parameter_satisfies_trait_constraint(
+                            unwrapped_left,
+                            trait_name,
+                            trait_args,
+                        ) then {
                             let type_name = self.context().type_display_name(left_t);
-                            let right_type_name = self.context().type_display_name(right_t);
-                            self.push_diagnostic("Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)", expr_span(left));
-                            return make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), Type.Unknown());
+                            let right_type_name = self.context().type_display_name(
+                                right_t,
+                            );
+                            self.push_diagnostic(
+                                "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)",
+                                expr_span(left),
+                            );
+                            return make_typed_expr(
+                                TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                                Type.Unknown(),
+                            );
                         };
-                        return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), unwrapped_left);
+                        return self.build_arithmetic_method_call(
+                            typed_left,
+                            typed_right,
+                            self.arithmetic_method_name(op),
+                            unwrapped_left,
+                        );
                     },
                     _ then {},
                 };
-                if not self.enforce_explicit_generic_trait_conformance_with_note(left_t, trait_name, trait_args, "operator '\(self.arithmetic_method_name(op))'", expr_span(left)) then {
-                    return make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), Type.Unknown());
+                if not self.enforce_explicit_generic_trait_conformance_with_note(
+                    left_t,
+                    trait_name,
+                    trait_args,
+                    "operator '\(self.arithmetic_method_name(op))'",
+                    expr_span(left),
+                ) then {
+                    return make_typed_expr(
+                        TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                        Type.Unknown(),
+                    );
                 };
-                return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), left_t);
+                return self.build_arithmetic_method_call(
+                    typed_left,
+                    typed_right,
+                    self.arithmetic_method_name(op),
+                    left_t,
+                );
             };
         };
         let result_t = when left_t in {
@@ -234,11 +379,21 @@ given TypeChecker {
             },
             _ then left_t,
         };
-        let result = make_typed_expr(TypedExprKind.ArithmeticExpr(typed_left, op, typed_right), result_t);
+        let result = make_typed_expr(
+            TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+            result_t,
+        );
         return result;
     };
 
-    module_private check_bitwise_expr_ref(self, left Expr, op BitwiseOperator, right Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_bitwise_expr_ref(
+        self,
+        left Expr,
+        op BitwiseOperator,
+        right Expr,
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
 
         let chain = self.collect_bitwise_chain(left, op, right);
         let operands = chain.first;
@@ -250,9 +405,16 @@ given TypeChecker {
         let mutable i UInt = 1;
         while i < operands.count() then {
             let next_operand = (operands[i]);
-            let typed_right = self.check_operand_expr_ref(next_operand, .Some(current.expr_type), scope);
+            let typed_right = self.check_operand_expr_ref(
+                next_operand,
+                .Some(current.expr_type),
+                scope,
+            );
             let op_i = ops[i - 1(UInt)];
-            current = make_typed_expr(TypedExprKind.BitwiseExpr(current, op_i, typed_right), current.expr_type);
+            current = make_typed_expr(
+                TypedExprKind.BitwiseExpr(current, op_i, typed_right),
+                current.expr_type,
+            );
             i += 1;
         };
 
@@ -300,21 +462,32 @@ given TypeChecker {
         };
     };
 
-    module_private validate_lambda_parameter_types(self, params List[LambdaParam], typed_params List[TypedParam]) Void = {
+    module_private validate_lambda_parameter_types(
+        self,
+        params List[LambdaParam],
+        typed_params List[TypedParam],
+    ) Void = {
         let mutable i UInt = 0;
         while i < params.count() and i < typed_params.count() then {
             let param = params[i];
             let typed_param = typed_params[i];
             if param.type_annotation is .None() then {
                 if typed_param.param_type is .Unknown() then {
-                    self.push_diagnostic("Cannot infer type for parameter '\(param.name)'", unknown_span());
+                    self.push_diagnostic(
+                        "Cannot infer type for parameter '\(param.name)'",
+                        unknown_span(),
+                    );
                 };
             };
             i += 1;
         };
     };
 
-    module_private validate_lambda_return_type(self, expected_ret Type, typed_body TypedExpr) Void = {
+    module_private validate_lambda_return_type(
+        self,
+        expected_ret Type,
+        typed_body TypedExpr,
+    ) Void = {
         if self.is_unresolved_expr_type(expected_ret) then {
             return;
         };
@@ -332,11 +505,15 @@ given TypeChecker {
         };
         self.push_typed_expr_diagnostic(
             typed_body,
-            "Type mismatch: expected \(self.display_type_name(expected_ret)), got \(self.display_type_name(typed_body.expr_type))"
+            "Type mismatch: expected \(self.display_type_name(expected_ret)), got \(self.display_type_name(typed_body.expr_type))",
         );
     };
 
-    module_private validate_lambda_captures(self, params List[TypedParam], body TypedExpr) Void = {
+    module_private validate_lambda_captures(
+        self,
+        params List[TypedParam],
+        body TypedExpr,
+    ) Void = {
         let mutable local_names = Set[String].new();
         for p in params then {
             local_names.insert(p.name);
@@ -346,7 +523,12 @@ given TypeChecker {
         self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids);
     };
 
-    module_private is_lambda_captured_symbol(self, symbol Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
+    module_private is_lambda_captured_symbol(
+        self,
+        symbol Symbol,
+        local_names Set[String],
+        local_ids Set[UInt],
+    ) Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -358,7 +540,8 @@ given TypeChecker {
         if local_names.contains(symbol_name) or local_ids.contains(symbol.def_id.id) then {
             return false;
         };
-        let module_path = self.context().get_module_path(symbol.def_id) or else List[String].new();
+        let module_path = self.context().get_module_path(symbol.def_id) or else List[String].new(
+        );
         let source_file = self.context().get_source_file(symbol.def_id) or else "";
         return module_path.is_empty() and source_file.is_empty();
     };
@@ -366,7 +549,12 @@ given TypeChecker {
     /// `span` is the USE of the captured variable inside the closure. The
     /// message names that variable, so it points at the capture, not at the
     /// statement or the closure that happens to contain it.
-    module_private report_mutable_lambda_capture(self, symbol Symbol, reported_ids Set[UInt], span SourceSpan) Void = {
+    module_private report_mutable_lambda_capture(
+        self,
+        symbol Symbol,
+        reported_ids Set[UInt],
+        span SourceSpan,
+    ) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return;
         };
@@ -374,18 +562,35 @@ given TypeChecker {
         // The second half is the ADVICE, and it is half the message: saying
         // only that the capture is illegal leaves the reader without a way to
         // write the program they meant.
-        self.push_diagnostic("Cannot capture mutable variable '\(self.context().symbol_name(symbol))'; hold the state in a Cell and capture the cell instead", span);
+        self.push_diagnostic(
+            "Cannot capture mutable variable '\(self.context().symbol_name(symbol))'; hold the state in a Cell and capture the cell instead",
+            span,
+        );
     };
 
-    module_private report_borrowed_lambda_capture(self, symbol Symbol, reported_ids Set[UInt], span SourceSpan) Void = {
-        if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(symbol.def_id.id) then {
+    module_private report_borrowed_lambda_capture(
+        self,
+        symbol Symbol,
+        reported_ids Set[UInt],
+        span SourceSpan,
+    ) Void = {
+        if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(
+            symbol.def_id.id,
+        ) then {
             return;
         };
         reported_ids.insert(symbol.def_id.id);
-        self.push_diagnostic("Cannot capture borrowed reference '\(self.context().symbol_name(symbol))'", span);
+        self.push_diagnostic(
+            "Cannot capture borrowed reference '\(self.context().symbol_name(symbol))'",
+            span,
+        );
     };
 
-    module_private collect_pattern_binding_names(self, pattern TypedPattern, names Set[String]) Void = {
+    module_private collect_pattern_binding_names(
+        self,
+        pattern TypedPattern,
+        names Set[String],
+    ) Void = {
         when pattern in {
             .Variable(symbol) then {
                 let symbol_name = self.context().symbol_name(symbol);
@@ -415,70 +620,160 @@ given TypeChecker {
         };
     };
 
-    module_private collect_lambda_param_names(self, params List[TypedParam], names Set[String]) Void = {
+    module_private collect_lambda_param_names(
+        self,
+        params List[TypedParam],
+        names Set[String],
+    ) Void = {
         for param in params then {
             names.insert(param.name);
         };
     };
 
-    module_private collect_pair_binding_name(self, binding PairBindingElement, names Set[String]) Void = {
+    module_private collect_pair_binding_name(
+        self,
+        binding PairBindingElement,
+        names Set[String],
+    ) Void = {
         if binding.is_discard or binding.name == "_" then {
             return;
         };
         names.insert(binding.name);
     };
 
-    module_private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids Set[UInt]) Void = {
+    module_private validate_lambda_captures_in_stmt(
+        self,
+        stmt TypedStatement,
+        local_names Set[String],
+        local_ids Set[UInt],
+        reported_ids Set[UInt],
+    ) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
-                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    value_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .PairLetStmt(_, _, _, value_ref, _) then {
-                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    value_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .AssignmentStmt(target_ref, value_ref, _) then {
-                self.validate_lambda_captures_in_expr(target_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    target_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    value_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .ExprStmt(expr_ref, _) then {
-                self.validate_lambda_captures_in_expr(expr_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    expr_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .IfStmt(condition_ref, then_ref, else_opt, _) then {
-                self.validate_lambda_captures_in_expr(condition_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(then_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    condition_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    then_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
                 when else_opt in {
                     .Some(else_ref) then {
-                        self.validate_lambda_captures_in_expr(else_ref, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            else_ref,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .None() then {},
                 };
             },
             .WhileStmt(condition_ref, body_ref, _) then {
-                self.validate_lambda_captures_in_expr(condition_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(body_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    condition_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    body_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .WhenStmt(subject_ref, arms, _) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    subject_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
                 for arm in arms then {
-                    self.validate_lambda_captures_in_expr(arm.body, local_names, local_ids, reported_ids);
+                    self.validate_lambda_captures_in_expr(
+                        arm.body,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
                 };
             },
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_ref) then {
-                        self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            value_ref,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .None() then {},
                 };
             },
             .DeferStmt(expr_ref, _) then {
-                self.validate_lambda_captures_in_expr(expr_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    expr_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             _ then {},
         };
     };
 
-    module_private validate_lambda_captures_in_expr(self, expr TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids Set[UInt]) Void = {
+    module_private validate_lambda_captures_in_expr(
+        self,
+        expr TypedExpr,
+        local_names Set[String],
+        local_ids Set[UInt],
+        reported_ids Set[UInt],
+    ) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -492,7 +787,12 @@ given TypeChecker {
                     nested_local_names.insert(name);
                 };
                 self.collect_lambda_param_names(params, nested_local_names);
-                self.validate_lambda_captures_in_expr(body_ref, nested_local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    body_ref,
+                    nested_local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .Block(statements, tail_expression) then {
                 let mutable block_local_names = Set[String].new();
@@ -506,154 +806,398 @@ given TypeChecker {
                 for stmt in statements then {
                     when stmt in {
                         .LetStmt(symbol, value_ref, _) then {
-                            self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids);
+                            self.validate_lambda_captures_in_expr(
+                                value_ref,
+                                block_local_names,
+                                block_local_ids,
+                                reported_ids,
+                            );
                             block_local_names.insert(self.context().symbol_name(symbol));
                             block_local_ids.insert(symbol.def_id.id);
                         },
                         .PairLetStmt(_, first_symbol, second_symbol, value_ref, _) then {
-                            self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids);
+                            self.validate_lambda_captures_in_expr(
+                                value_ref,
+                                block_local_names,
+                                block_local_ids,
+                                reported_ids,
+                            );
                             when first_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol));
+                                    block_local_names.insert(
+                                        self.context().symbol_name(symbol),
+                                    );
                                     block_local_ids.insert(symbol.def_id.id);
                                 },
                                 .None() then {},
                             };
                             when second_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol));
+                                    block_local_names.insert(
+                                        self.context().symbol_name(symbol),
+                                    );
                                     block_local_ids.insert(symbol.def_id.id);
                                 },
                                 .None() then {},
                             };
                         },
                         _ then {
-                            self.validate_lambda_captures_in_stmt(stmt, block_local_names, block_local_ids, reported_ids);
+                            self.validate_lambda_captures_in_stmt(
+                                stmt,
+                                block_local_names,
+                                block_local_ids,
+                                reported_ids,
+                            );
                         },
                     };
                 };
                 when tail_expression in {
-                    .Some(tail) then self.validate_lambda_captures_in_expr(tail, block_local_names, block_local_ids, reported_ids),
+                    .Some(tail) then self.validate_lambda_captures_in_expr(
+                        tail,
+                        block_local_names,
+                        block_local_ids,
+                        reported_ids,
+                    ),
                     .None() then {},
                 };
             },
             .Call(callee_ref, args) then {
-                self.validate_lambda_captures_in_expr(callee_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    callee_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
                 for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids);
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
                 };
             },
             .IntrinsicCall(node) then {
                 when node in {
                     .DowngradeRef(ref_expr, _) then {
-                        self.validate_lambda_captures_in_expr(ref_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            ref_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .UpgradeRef(weak_expr, _) then {
-                        self.validate_lambda_captures_in_expr(weak_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            weak_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-                        self.validate_lambda_captures_in_expr(out_handle, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(out_tid, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(closure, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(stack_size, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            out_handle,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            out_tid,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            closure,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            stack_size,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .AllocMemory(count_expr, _) then {
-                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            count_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .DeallocMemory(pointer_expr) then {
-                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            pointer_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .CopyMemory(dest_expr, source_expr, count_expr) then {
-                        self.validate_lambda_captures_in_expr(dest_expr, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(source_expr, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            dest_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            source_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            count_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .MoveMemory(dest_expr, source_expr, count_expr) then {
-                        self.validate_lambda_captures_in_expr(dest_expr, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(source_expr, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(count_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            dest_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            source_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            count_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .InitMemory(pointer_expr, value_expr) then {
-                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids);
-                        self.validate_lambda_captures_in_expr(value_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            pointer_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
+                        self.validate_lambda_captures_in_expr(
+                            value_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .DeinitMemory(pointer_expr) then {
-                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            pointer_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .TakeMemory(pointer_expr, _) then {
-                        self.validate_lambda_captures_in_expr(pointer_expr, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            pointer_expr,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .NullPtr(_) then {},
                 };
             },
             .MemberPath(base_ref, _) then {
-                self.validate_lambda_captures_in_expr(base_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    base_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .ArithmeticExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .ComparisonExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .BitwiseExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .AndExpr(left_ref, right_ref) then {
-                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .OrExpr(left_ref, right_ref) then {
-                self.validate_lambda_captures_in_expr(left_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(right_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .Unary(_, inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .RefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .PtrExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .DerefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .UnsafeDerefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .CastExpr(_, inner_ref) then {
-                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .IfExpr(cond_ref, then_ref, else_opt) then {
-                self.validate_lambda_captures_in_expr(cond_ref, local_names, local_ids, reported_ids);
-                self.validate_lambda_captures_in_expr(then_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    cond_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    then_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
                 when else_opt in {
                     .Some(else_ref) then {
-                        self.validate_lambda_captures_in_expr(else_ref, local_names, local_ids, reported_ids);
+                        self.validate_lambda_captures_in_expr(
+                            else_ref,
+                            local_names,
+                            local_ids,
+                            reported_ids,
+                        );
                     },
                     .None() then {},
                 };
             },
             .IsExpr(subject_ref, _, _) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    subject_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             .WhenExpr(subject_ref, arms) then {
-                self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids);
+                self.validate_lambda_captures_in_expr(
+                    subject_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
                 for arm in arms then {
                     let mutable arm_local_names = Set[String].new();
                     for name in local_names.iterator() then {
                         arm_local_names.insert(name);
                     };
                     self.collect_pattern_binding_names(arm.pattern, arm_local_names);
-                    self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids);
+                    self.validate_lambda_captures_in_expr(
+                        arm.body,
+                        arm_local_names,
+                        local_ids,
+                        reported_ids,
+                    );
                 };
             },
             .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
-                    self.validate_lambda_captures_in_expr(arg, local_names, local_ids, reported_ids);
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
                 };
             },
             _ then {},
@@ -710,18 +1254,34 @@ given TypeChecker {
         };
         when left_value_type in {
             .Some(left_inner) then {
-                let right_is_scalar_like = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type) or typed_right.expr_type is .BoolType() or self.is_numeric_literal_expr(typed_right);
+                let right_is_scalar_like = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(
+                    typed_right.expr_type,
+                ) or self.is_rune_type(typed_right.expr_type) or typed_right.expr_type is .BoolType() or self.is_numeric_literal_expr(
+                    typed_right,
+                );
                 if right_is_scalar_like then {
-                    typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(left_inner), .Some(left_span));
+                    typed_left = self.adapt_expr_to_expected_type_at(
+                        typed_left,
+                        .Some(left_inner),
+                        .Some(left_span),
+                    );
                 };
             },
             .None() then {},
         };
         when right_value_type in {
             .Some(right_inner) then {
-                let left_is_scalar_like = self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) or self.is_rune_type(typed_left.expr_type) or typed_left.expr_type is .BoolType() or self.is_numeric_literal_expr(typed_left);
+                let left_is_scalar_like = self.is_numeric_type(typed_left.expr_type) or self.is_float_type(
+                    typed_left.expr_type,
+                ) or self.is_rune_type(typed_left.expr_type) or typed_left.expr_type is .BoolType() or self.is_numeric_literal_expr(
+                    typed_left,
+                );
                 if left_is_scalar_like then {
-                    typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(right_inner), .Some(right_span));
+                    typed_right = self.adapt_expr_to_expected_type_at(
+                        typed_right,
+                        .Some(right_inner),
+                        .Some(right_span),
+                    );
                 };
             },
             .None() then {},
@@ -731,10 +1291,20 @@ given TypeChecker {
             when left_source in {
                 .Some(left_expr) then {
                     if self.is_null_ptr_call_expr(left_expr) and (typed_right.expr_type is .PointerType(_) or typed_right.expr_type is .MutablePointerType(_)) then {
-                        typed_left = self.check_expr_scoped_ref(left_expr, .Some(typed_right.expr_type), scope);
+                        typed_left = self.check_expr_scoped_ref(
+                            left_expr,
+                            .Some(typed_right.expr_type),
+                            scope,
+                        );
                     };
-                    if left_expr is .RuneLiteral(_, _) and (self.is_integer_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type)) then {
-                        typed_left = self.check_expr_scoped_ref(left_expr, .Some(typed_right.expr_type), scope);
+                    if left_expr is .RuneLiteral(_, _) and (self.is_integer_type(
+                        typed_right.expr_type,
+                    ) or self.is_rune_type(typed_right.expr_type)) then {
+                        typed_left = self.check_expr_scoped_ref(
+                            left_expr,
+                            .Some(typed_right.expr_type),
+                            scope,
+                        );
                     };
                 },
                 .None() then {},
@@ -742,24 +1312,45 @@ given TypeChecker {
             when right_source in {
                 .Some(right_expr) then {
                     if self.is_null_ptr_call_expr(right_expr) and (typed_left.expr_type is .PointerType(_) or typed_left.expr_type is .MutablePointerType(_)) then {
-                        typed_right = self.check_expr_scoped_ref(right_expr, .Some(typed_left.expr_type), scope);
+                        typed_right = self.check_expr_scoped_ref(
+                            right_expr,
+                            .Some(typed_left.expr_type),
+                            scope,
+                        );
                     };
                 },
                 .None() then {},
             };
             if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-                typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(typed_left.expr_type), Option[SourceSpan].Some(right_span));
+                typed_right = self.adapt_expr_to_expected_type_at(
+                    typed_right,
+                    .Some(typed_left.expr_type),
+                    Option[SourceSpan].Some(right_span),
+                );
             };
             if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-                typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(typed_right.expr_type), Option[SourceSpan].Some(left_span));
+                typed_left = self.adapt_expr_to_expected_type_at(
+                    typed_left,
+                    .Some(typed_right.expr_type),
+                    Option[SourceSpan].Some(left_span),
+                );
             };
         };
 
         return Pair[TypedExpr, TypedExpr](typed_left, typed_right);
     };
 
-    module_private build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr, span SourceSpan) TypedExpr = {
-        let mutable same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type);
+    module_private build_typed_comparison_expr(
+        self,
+        typed_left TypedExpr,
+        op ComparisonOperator,
+        typed_right TypedExpr,
+        span SourceSpan,
+    ) TypedExpr = {
+        let mutable same_type = self.same_expr_type(
+            typed_left.expr_type,
+            typed_right.expr_type,
+        );
         let is_eq_op = when op in {
             .Equal() then true,
             .NotEqual() then true,
@@ -773,29 +1364,60 @@ given TypeChecker {
             _ then false,
         };
 
-        if same_type and is_eq_op and not self.is_builtin_equality_comparable(typed_left.expr_type) then {
-            if not self.enforce_explicit_trait_requirement_with_context(typed_left.expr_type, "Eq", "", "operator 'equals'", span) then {
-                return make_typed_expr(TypedExprKind.ComparisonExpr(typed_left, op, typed_right), Type.BoolType());
+        if same_type and is_eq_op and not self.is_builtin_equality_comparable(
+            typed_left.expr_type,
+        ) then {
+            if not self.enforce_explicit_trait_requirement_with_context(
+                typed_left.expr_type,
+                "Eq",
+                "",
+                "operator 'equals'",
+                span,
+            ) then {
+                return make_typed_expr(
+                    TypedExprKind.ComparisonExpr(typed_left, op, typed_right),
+                    Type.BoolType(),
+                );
             };
             let equals_call = self.build_equals_call(typed_left, typed_right, span);
             let result = when op in {
-                .NotEqual() then make_typed_expr(TypedExprKind.Unary(UnaryOperator.Not(), equals_call), Type.BoolType()),
+                .NotEqual() then make_typed_expr(
+                    TypedExprKind.Unary(UnaryOperator.Not(), equals_call),
+                    Type.BoolType(),
+                ),
                 _ then equals_call,
             };
             return result;
         };
 
-        if same_type and is_ord_op and not self.is_builtin_ordering_comparable(typed_left.expr_type) then {
-            if not self.enforce_explicit_trait_requirement_with_context(typed_left.expr_type, "Ord", "", "operator 'compare'", span) then {
-                return make_typed_expr(TypedExprKind.ComparisonExpr(typed_left, op, typed_right), Type.BoolType());
+        if same_type and is_ord_op and not self.is_builtin_ordering_comparable(
+            typed_left.expr_type,
+        ) then {
+            if not self.enforce_explicit_trait_requirement_with_context(
+                typed_left.expr_type,
+                "Ord",
+                "",
+                "operator 'compare'",
+                span,
+            ) then {
+                return make_typed_expr(
+                    TypedExprKind.ComparisonExpr(typed_left, op, typed_right),
+                    Type.BoolType(),
+                );
             };
             let compare_call = self.build_compare_call(typed_left, typed_right, span);
             let zero = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType());
-            let result = make_typed_expr(TypedExprKind.ComparisonExpr(compare_call, op, zero), Type.BoolType());
+            let result = make_typed_expr(
+                TypedExprKind.ComparisonExpr(compare_call, op, zero),
+                Type.BoolType(),
+            );
             return result;
         };
 
-        return make_typed_expr(TypedExprKind.ComparisonExpr(typed_left, op, typed_right), Type.BoolType());
+        return make_typed_expr(
+            TypedExprKind.ComparisonExpr(typed_left, op, typed_right),
+            Type.BoolType(),
+        );
     };
 
     module_private lower_comparison_chain_step(
@@ -809,41 +1431,112 @@ given TypeChecker {
     ) TypedExpr = {
         let mutable right_source = (operands[index + 1(UInt)]);
         let right_source_ref = right_source;
-        let raw_right = self.check_expr_scoped_ref(right_source_ref, .Some(left_expr.expr_type), scope);
-        let normalized = self.normalize_comparison_operands(left_expr, left_source, raw_right, Option[Expr].Some(right_source_ref), scope);
+        let raw_right = self.check_expr_scoped_ref(
+            right_source_ref,
+            .Some(left_expr.expr_type),
+            scope,
+        );
+        let normalized = self.normalize_comparison_operands(
+            left_expr,
+            left_source,
+            raw_right,
+            Option[Expr].Some(right_source_ref),
+            scope,
+        );
 
         if index + 1(UInt) == operators.count() then {
-            return self.build_typed_comparison_expr(normalized.first, operators[index], normalized.second, when left_source in { .Some(e) then expr_span(e), .None() then self.typed_expr_span(left_expr) });
+            return self.build_typed_comparison_expr(
+                normalized.first,
+                operators[index],
+                normalized.second,
+                when left_source in {
+                    .Some(e) then expr_span(e),
+                    .None() then self.typed_expr_span(left_expr),
+                },
+            );
         };
 
-        let temp_symbol = self.make_expr_temp_symbol("__cmp_chain", normalized.second.expr_type, VariableKind.Value());
-        let temp_ref = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
-        let condition = self.build_typed_comparison_expr(normalized.first, operators[index], temp_ref, when left_source in { .Some(e) then expr_span(e), .None() then self.typed_expr_span(left_expr) });
-        let next = self.lower_comparison_chain_step(operands, operators, index + 1(UInt), temp_ref, Option[Expr].None(), scope);
+        let temp_symbol = self.make_expr_temp_symbol(
+            "__cmp_chain",
+            normalized.second.expr_type,
+            VariableKind.Value(),
+        );
+        let temp_ref = make_typed_expr(
+            TypedExprKind.Variable(temp_symbol),
+            temp_symbol.symbol_type,
+        );
+        let condition = self.build_typed_comparison_expr(
+            normalized.first,
+            operators[index],
+            temp_ref,
+            when left_source in {
+                .Some(e) then expr_span(e),
+                .None() then self.typed_expr_span(left_expr),
+            },
+        );
+        let next = self.lower_comparison_chain_step(
+            operands,
+            operators,
+            index + 1(UInt),
+            temp_ref,
+            Option[Expr].None(),
+            scope,
+        );
         let mutable block_statements = List[TypedStatement].new();
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, normalized.second, unknown_span()));
-        let else_false = make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType());
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, normalized.second, unknown_span()),
+        );
+        let else_false = make_typed_expr(
+            TypedExprKind.BoolLiteral(false),
+            Type.BoolType(),
+        );
         let if_expr = make_typed_expr(
             TypedExprKind.IfExpr(condition, next, Option[TypedExpr].Some(else_false)),
             Type.BoolType(),
         );
-        return make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].Some(if_expr)), Type.BoolType());
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(if_expr)),
+            Type.BoolType(),
+        );
     };
 
-    module_private check_comparison_chain_expr_ref(self, operands List[Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
-        if operands.is_empty() or operands.count() <> operators.count() + 1(UInt) or operators.count() < 2(UInt) then {
+    module_private check_comparison_chain_expr_ref(
+        self,
+        operands List[Expr],
+        operators List[ComparisonOperator],
+        scope Scope,
+    ) TypedExpr = {
+        if operands.is_empty() or operands.count() <> operators.count() + 1(UInt) or operators.count(
+        ) < 2(UInt) then {
             self.push_diagnostic_at_span("Invalid comparison chain", unknown_span());
             return self.empty_typed_block(Type.Unknown());
         };
         let mutable first_operand = (operands[0(UInt)]);
         let first_operand_ref = first_operand;
         let typed_left = self.check_expr_core_ref(first_operand_ref, .None(), scope);
-        return self.lower_comparison_chain_step(operands, operators, 0(UInt), typed_left, Option[Expr].Some(first_operand_ref), scope);
+        return self.lower_comparison_chain_step(
+            operands,
+            operators,
+            0(UInt),
+            typed_left,
+            Option[Expr].Some(first_operand_ref),
+            scope,
+        );
     };
 
-    module_private check_comparison_expr_ref(self, left Expr, op ComparisonOperator, right Expr, scope Scope) TypedExpr = {
+    module_private check_comparison_expr_ref(
+        self,
+        left Expr,
+        op ComparisonOperator,
+        right Expr,
+        scope Scope,
+    ) TypedExpr = {
         let typed_left = self.check_expr_core_ref(left, .None(), scope);
-        let typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope);
+        let typed_right = self.check_expr_scoped_ref(
+            right,
+            .Some(typed_left.expr_type),
+            scope,
+        );
         let normalized = self.normalize_comparison_operands(
             typed_left,
             Option[Expr].Some(left),
@@ -851,7 +1544,12 @@ given TypeChecker {
             Option[Expr].Some(right),
             scope,
         );
-        return self.build_typed_comparison_expr(normalized.first, op, normalized.second, expr_span(left));
+        return self.build_typed_comparison_expr(
+            normalized.first,
+            op,
+            normalized.second,
+            expr_span(left),
+        );
     };
 
     module_private is_builtin_equality_comparable(self, t Type) Bool = {
@@ -893,24 +1591,62 @@ given TypeChecker {
         };
     };
 
-    module_private build_equals_call(self, lhs TypedExpr, rhs TypedExpr, span SourceSpan) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "", "operator 'equals'", span) then {
-            return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown());
+    module_private build_equals_call(
+        self,
+        lhs TypedExpr,
+        rhs TypedExpr,
+        span SourceSpan,
+    ) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(
+            lhs.expr_type,
+            "Eq",
+            "",
+            "operator 'equals'",
+            span,
+        ) then {
+            return make_typed_expr(
+                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
+                Type.Unknown(),
+            );
         };
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
-            self.maybe_record_trait_method_instantiation(lhs.expr_type, "equals", List[Type].new());
-            let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "equals", Type.BoolType());
+            self.maybe_record_trait_method_instantiation(
+                lhs.expr_type,
+                "equals",
+                List[Type].new(),
+            );
+            let method_symbol = self.make_binary_method_placeholder_symbol(
+                lhs.expr_type,
+                rhs.expr_type,
+                "equals",
+                Type.BoolType(),
+            );
             let mutable args = List[TypedExpr].new();
             args.push(rhs);
             let callee = make_typed_expr(
-                TypedExprKind.TraitMethodPlaceholder(lhs, self.canonical_trait_object_type("Eq"), method_symbol, List[Type].new(), .None()),
+                TypedExprKind.TraitMethodPlaceholder(
+                    lhs,
+                    self.canonical_trait_object_type("Eq"),
+                    method_symbol,
+                    List[Type].new(),
+                    .None(),
+                ),
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.BoolType());
         };
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", List[Type].new());
+        self.maybe_record_extension_method_instantiation(
+            lhs.expr_type,
+            "equals",
+            List[Type].new(),
+        );
         let mutable ret_type = self.resolve_method_return_type(lhs.expr_type, "equals");
-        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "equals", ret_type);
+        let method_symbol = self.resolved_or_placeholder_method_symbol(
+            lhs.expr_type,
+            rhs.expr_type,
+            "equals",
+            ret_type,
+        );
         let mutable args = List[TypedExpr].new();
         args.push(rhs);
         let call_ret_type = when ret_type in {
@@ -918,30 +1654,75 @@ given TypeChecker {
             _ then ret_type,
         };
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(lhs, lhs.expr_type, method_symbol, List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(
+                lhs,
+                lhs.expr_type,
+                method_symbol,
+                List[Type].new(),
+                List[Type].new(),
+                .None(),
+            ),
             method_symbol.symbol_type,
         );
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
     };
 
-    module_private build_compare_call(self, lhs TypedExpr, rhs TypedExpr, span SourceSpan) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "", "operator 'compare'", span) then {
-            return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), Type.Unknown());
+    module_private build_compare_call(
+        self,
+        lhs TypedExpr,
+        rhs TypedExpr,
+        span SourceSpan,
+    ) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(
+            lhs.expr_type,
+            "Ord",
+            "",
+            "operator 'compare'",
+            span,
+        ) then {
+            return make_typed_expr(
+                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
+                Type.Unknown(),
+            );
         };
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
-            self.maybe_record_trait_method_instantiation(lhs.expr_type, "compare", List[Type].new());
-            let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "compare", Type.IntType());
+            self.maybe_record_trait_method_instantiation(
+                lhs.expr_type,
+                "compare",
+                List[Type].new(),
+            );
+            let method_symbol = self.make_binary_method_placeholder_symbol(
+                lhs.expr_type,
+                rhs.expr_type,
+                "compare",
+                Type.IntType(),
+            );
             let mutable args = List[TypedExpr].new();
             args.push(rhs);
             let callee = make_typed_expr(
-                TypedExprKind.TraitMethodPlaceholder(lhs, self.canonical_trait_object_type("Ord"), method_symbol, List[Type].new(), .None()),
+                TypedExprKind.TraitMethodPlaceholder(
+                    lhs,
+                    self.canonical_trait_object_type("Ord"),
+                    method_symbol,
+                    List[Type].new(),
+                    .None(),
+                ),
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.IntType());
         };
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", List[Type].new());
+        self.maybe_record_extension_method_instantiation(
+            lhs.expr_type,
+            "compare",
+            List[Type].new(),
+        );
         let mutable ret_type = self.resolve_method_return_type(lhs.expr_type, "compare");
-        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "compare", ret_type);
+        let method_symbol = self.resolved_or_placeholder_method_symbol(
+            lhs.expr_type,
+            rhs.expr_type,
+            "compare",
+            ret_type,
+        );
         let mutable args = List[TypedExpr].new();
         args.push(rhs);
         let call_ret_type = when ret_type in {
@@ -949,7 +1730,14 @@ given TypeChecker {
             _ then ret_type,
         };
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(lhs, lhs.expr_type, method_symbol, List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(
+                lhs,
+                lhs.expr_type,
+                method_symbol,
+                List[Type].new(),
+                List[Type].new(),
+                .None(),
+            ),
             method_symbol.symbol_type,
         );
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
@@ -985,17 +1773,44 @@ given TypeChecker {
         };
     };
 
-    module_private generic_parameter_satisfies_trait_constraint(self, t Type, trait_name String, trait_args List[Type]) Bool = {
+    module_private generic_parameter_satisfies_trait_constraint(
+        self,
+        t Type,
+        trait_name String,
+        trait_args List[Type],
+    ) Bool = {
         return when t in {
-            .GenericParameter(name) then self.generic_param_has_trait_bound(name, trait_name, trait_args),
+            .GenericParameter(name) then self.generic_param_has_trait_bound(
+                name,
+                trait_name,
+                trait_args,
+            ),
             _ then false,
         };
     };
 
-    module_private build_arithmetic_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new());
-        let mutable ret_type = self.resolve_method_return_type(lhs.expr_type, method_name);
-        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type);
+    module_private build_arithmetic_method_call(
+        self,
+        lhs TypedExpr,
+        rhs TypedExpr,
+        method_name String,
+        fallback_type Type,
+    ) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(
+            lhs.expr_type,
+            method_name,
+            List[Type].new(),
+        );
+        let mutable ret_type = self.resolve_method_return_type(
+            lhs.expr_type,
+            method_name,
+        );
+        let method_symbol = self.resolved_or_placeholder_method_symbol(
+            lhs.expr_type,
+            rhs.expr_type,
+            method_name,
+            ret_type,
+        );
         let mutable args = List[TypedExpr].new();
         args.push(rhs);
         let call_ret_type = when ret_type in {
@@ -1003,16 +1818,41 @@ given TypeChecker {
             _ then ret_type,
         };
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(lhs, lhs.expr_type, method_symbol, List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(
+                lhs,
+                lhs.expr_type,
+                method_symbol,
+                List[Type].new(),
+                List[Type].new(),
+                .None(),
+            ),
             method_symbol.symbol_type,
         );
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
     };
 
-    module_private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new());
-        let mutable ret_type = self.resolve_method_return_type(lhs.expr_type, method_name);
-        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type);
+    module_private build_binary_method_call(
+        self,
+        lhs TypedExpr,
+        rhs TypedExpr,
+        method_name String,
+        fallback_type Type,
+    ) TypedExpr = {
+        self.maybe_record_extension_method_instantiation(
+            lhs.expr_type,
+            method_name,
+            List[Type].new(),
+        );
+        let mutable ret_type = self.resolve_method_return_type(
+            lhs.expr_type,
+            method_name,
+        );
+        let method_symbol = self.resolved_or_placeholder_method_symbol(
+            lhs.expr_type,
+            rhs.expr_type,
+            method_name,
+            ret_type,
+        );
         let mutable args = List[TypedExpr].new();
         args.push(rhs);
         let call_ret_type = when ret_type in {
@@ -1020,33 +1860,77 @@ given TypeChecker {
             _ then ret_type,
         };
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(lhs, lhs.expr_type, method_symbol, List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(
+                lhs,
+                lhs.expr_type,
+                method_symbol,
+                List[Type].new(),
+                List[Type].new(),
+                .None(),
+            ),
             method_symbol.symbol_type,
         );
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
     };
 
-    module_private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        let call_expr = self.lower_receiver_method_call_expr(operand, method_name, List[TypedExpr].new());
+    module_private build_unary_method_call(
+        self,
+        operand TypedExpr,
+        method_name String,
+        fallback_type Type,
+    ) TypedExpr = {
+        let call_expr = self.lower_receiver_method_call_expr(
+            operand,
+            method_name,
+            List[TypedExpr].new(),
+        );
         return when call_expr.expr_type in {
             .Unknown() then make_typed_expr_ref(call_expr.expr_kind, fallback_type),
             _ then call_expr,
         };
     };
 
-    module_private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
+    module_private convert_interpolated_part_to_string(
+        self,
+        part InterpolatedStringPart,
+        scope Scope,
+    ) TypedExpr = {
         return when part in {
-            .Literal(value) then make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type()),
+            .Literal(value) then make_typed_expr(
+                TypedExprKind.StringLiteral(value),
+                self.builtin_string_type(),
+            ),
             .Expression(expr_ref) then {
                 let typed = self.check_expr_scoped_ref(expr_ref, .None(), scope);
                 when typed.expr_type in {
-                    _ then if self.is_string_type(typed.expr_type) then typed else {
-                        let _ = self.enforce_explicit_trait_requirement_with_context(typed.expr_type, "ToString", "", "operator 'to_string'", expr_span(expr_ref));
-                        self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", List[Type].new());
-                        let mutable ret_type = self.resolve_method_return_type(typed.expr_type, "to_string");
-                        let call_expr = self.lower_receiver_method_call_expr(typed, "to_string", List[TypedExpr].new());
+                    _ then if self.is_string_type(typed.expr_type) then typed
+                    else {
+                        let _ = self.enforce_explicit_trait_requirement_with_context(
+                            typed.expr_type,
+                            "ToString",
+                            "",
+                            "operator 'to_string'",
+                            expr_span(expr_ref),
+                        );
+                        self.maybe_record_extension_method_instantiation(
+                            typed.expr_type,
+                            "to_string",
+                            List[Type].new(),
+                        );
+                        let mutable ret_type = self.resolve_method_return_type(
+                            typed.expr_type,
+                            "to_string",
+                        );
+                        let call_expr = self.lower_receiver_method_call_expr(
+                            typed,
+                            "to_string",
+                            List[TypedExpr].new(),
+                        );
                         when call_expr.expr_type in {
-                            .Unknown() then make_typed_expr_ref(call_expr.expr_kind, self.builtin_string_type()),
+                            .Unknown() then make_typed_expr_ref(
+                                call_expr.expr_kind,
+                                self.builtin_string_type(),
+                            ),
                             _ then call_expr,
                         }
                     },
@@ -1055,9 +1939,16 @@ given TypeChecker {
         };
     };
 
-    module_private lower_interpolated_string(self, parts List[InterpolatedStringPart], scope Scope) TypedExpr = {
+    module_private lower_interpolated_string(
+        self,
+        parts List[InterpolatedStringPart],
+        scope Scope,
+    ) TypedExpr = {
         if parts.is_empty() then {
-            return make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type());
+            return make_typed_expr(
+                TypedExprKind.StringLiteral(""),
+                self.builtin_string_type(),
+            );
         };
         if parts.count() == 1(UInt) then {
             return self.convert_interpolated_part_to_string(parts[0(UInt)], scope);
@@ -1073,93 +1964,202 @@ given TypeChecker {
         for part in parts then {
             when part in {
                 .Literal(value) then {
-                    if value.is_empty() then { continue;};
+                    if value.is_empty() then {
+                        continue;
+                    };
                 },
                 _ then {},
             };
             let string_part = self.convert_interpolated_part_to_string(part, scope);
-            let part_symbol = self.make_expr_temp_symbol("__interp_part", string_part.expr_type, VariableKind.Value());
-            block_statements.push(TypedStatement.LetStmt(part_symbol, string_part, unknown_span()));
+            let part_symbol = self.make_expr_temp_symbol(
+                "__interp_part",
+                string_part.expr_type,
+                VariableKind.Value(),
+            );
+            block_statements.push(
+                TypedStatement.LetStmt(part_symbol, string_part, unknown_span()),
+            );
             part_symbols.push(part_symbol);
         };
         if part_symbols.is_empty() then {
             return make_typed_expr(TypedExprKind.StringLiteral(""), string_type);
         };
 
-        let first_part_var = make_typed_expr(TypedExprKind.Variable((part_symbols[0(UInt)])), (part_symbols[0(UInt)]).symbol_type);
-        let mutable total_expr = self.build_unary_method_call(first_part_var, "count", uint_type);
+        let first_part_var = make_typed_expr(
+            TypedExprKind.Variable((part_symbols[0(UInt)])),
+            (part_symbols[0(UInt)]).symbol_type,
+        );
+        let mutable total_expr = self.build_unary_method_call(
+            first_part_var,
+            "count",
+            uint_type,
+        );
         let mutable part_idx UInt = 1;
         while part_idx < part_symbols.count() then {
-            let part_var = make_typed_expr(TypedExprKind.Variable((part_symbols[part_idx])), (part_symbols[part_idx]).symbol_type);
+            let part_var = make_typed_expr(
+                TypedExprKind.Variable((part_symbols[part_idx])),
+                (part_symbols[part_idx]).symbol_type,
+            );
             let part_count = self.build_unary_method_call(part_var, "count", uint_type);
-            total_expr = make_typed_expr(TypedExprKind.ArithmeticExpr(total_expr, ArithmeticOperator.Add(), part_count), uint_type);
+            total_expr = make_typed_expr(
+                TypedExprKind.ArithmeticExpr(
+                    total_expr,
+                    ArithmeticOperator.Add(),
+                    part_count,
+                ),
+                uint_type,
+            );
             part_idx += 1;
         };
 
-        let total_symbol = self.make_expr_temp_symbol("__interp_total", uint_type, VariableKind.Value());
-        block_statements.push(TypedStatement.LetStmt(total_symbol, total_expr, unknown_span()));
+        let total_symbol = self.make_expr_temp_symbol(
+            "__interp_total",
+            uint_type,
+            VariableKind.Value(),
+        );
+        block_statements.push(
+            TypedStatement.LetStmt(total_symbol, total_expr, unknown_span()),
+        );
 
-        let total_var = make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type);
+        let total_var = make_typed_expr(
+            TypedExprKind.Variable(total_symbol),
+            total_symbol.symbol_type,
+        );
         let one_uint = make_typed_expr(TypedExprKind.IntegerLiteral("1"), uint_type);
         let cap_expr = make_typed_expr(
             TypedExprKind.ArithmeticExpr(total_var, ArithmeticOperator.Add(), one_uint),
             uint_type,
         );
         let alloc_expr = make_typed_expr(
-            TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(cap_expr, mut_byte_ptr_type)),
+            TypedExprKind.IntrinsicCall(
+                TypedIntrinsic.AllocMemory(cap_expr, mut_byte_ptr_type),
+            ),
             mut_byte_ptr_type,
         );
-        let data_symbol = self.make_expr_temp_symbol("__interp_data", mut_byte_ptr_type, VariableKind.Value());
-        block_statements.push(TypedStatement.LetStmt(data_symbol, alloc_expr, unknown_span()));
+        let data_symbol = self.make_expr_temp_symbol(
+            "__interp_data",
+            mut_byte_ptr_type,
+            VariableKind.Value(),
+        );
+        block_statements.push(
+            TypedStatement.LetStmt(data_symbol, alloc_expr, unknown_span()),
+        );
         let zero_uint = make_typed_expr(TypedExprKind.IntegerLiteral("0"), uint_type);
-        let offset_symbol = self.make_expr_temp_symbol("__interp_offset", uint_type, VariableKind.MutableValue());
-        block_statements.push(TypedStatement.LetStmt(offset_symbol, zero_uint, unknown_span()));
+        let offset_symbol = self.make_expr_temp_symbol(
+            "__interp_offset",
+            uint_type,
+            VariableKind.MutableValue(),
+        );
+        block_statements.push(
+            TypedStatement.LetStmt(offset_symbol, zero_uint, unknown_span()),
+        );
 
         for part_symbol in part_symbols then {
-            let part_var = make_typed_expr(TypedExprKind.Variable(part_symbol), part_symbol.symbol_type);
+            let part_var = make_typed_expr(
+                TypedExprKind.Variable(part_symbol),
+                part_symbol.symbol_type,
+            );
             let part_len_expr = self.build_unary_method_call(part_var, "count", uint_type);
-            let part_len_symbol = self.make_expr_temp_symbol("__interp_len", uint_type, VariableKind.Value());
-            block_statements.push(TypedStatement.LetStmt(part_len_symbol, part_len_expr, unknown_span()));
+            let part_len_symbol = self.make_expr_temp_symbol(
+                "__interp_len",
+                uint_type,
+                VariableKind.Value(),
+            );
+            block_statements.push(
+                TypedStatement.LetStmt(part_len_symbol, part_len_expr, unknown_span()),
+            );
 
-            let data_var = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type);
-            let offset_var = make_typed_expr(TypedExprKind.Variable(offset_symbol), offset_symbol.symbol_type);
-            let part_len_var = make_typed_expr(TypedExprKind.Variable(part_len_symbol), part_len_symbol.symbol_type);
+            let data_var = make_typed_expr(
+                TypedExprKind.Variable(data_symbol),
+                data_symbol.symbol_type,
+            );
+            let offset_var = make_typed_expr(
+                TypedExprKind.Variable(offset_symbol),
+                offset_symbol.symbol_type,
+            );
+            let part_len_var = make_typed_expr(
+                TypedExprKind.Variable(part_len_symbol),
+                part_len_symbol.symbol_type,
+            );
             let dest_expr = make_typed_expr(
-                TypedExprKind.ArithmeticExpr(data_var, ArithmeticOperator.Add(), offset_var),
+                TypedExprKind.ArithmeticExpr(
+                    data_var,
+                    ArithmeticOperator.Add(),
+                    offset_var,
+                ),
                 mut_byte_ptr_type,
             );
-            let source_expr = self.build_unary_method_call(part_var, "borrow_ptr", byte_ptr_type);
+            let source_expr = self.build_unary_method_call(
+                part_var,
+                "borrow_ptr",
+                byte_ptr_type,
+            );
             let copy_expr = make_typed_expr(
-                TypedExprKind.IntrinsicCall(TypedIntrinsic.CopyMemory(dest_expr, source_expr, part_len_var)),
+                TypedExprKind.IntrinsicCall(
+                    TypedIntrinsic.CopyMemory(dest_expr, source_expr, part_len_var),
+                ),
                 Type.VoidType(),
             );
             block_statements.push(TypedStatement.ExprStmt(copy_expr, unknown_span()));
             let offset_add = make_typed_expr(
-                TypedExprKind.ArithmeticExpr(offset_var, ArithmeticOperator.Add(), part_len_var),
+                TypedExprKind.ArithmeticExpr(
+                    offset_var,
+                    ArithmeticOperator.Add(),
+                    part_len_var,
+                ),
                 uint_type,
             );
-            let offset_target = make_typed_expr(TypedExprKind.Variable(offset_symbol), offset_symbol.symbol_type);
-            block_statements.push(TypedStatement.AssignmentStmt(offset_target, offset_add, unknown_span()));
+            let offset_target = make_typed_expr(
+                TypedExprKind.Variable(offset_symbol),
+                offset_symbol.symbol_type,
+            );
+            block_statements.push(
+                TypedStatement.AssignmentStmt(offset_target, offset_add, unknown_span()),
+            );
         };
 
-        let data_var = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type);
-        let end_total_var = make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type);
+        let data_var = make_typed_expr(
+            TypedExprKind.Variable(data_symbol),
+            data_symbol.symbol_type,
+        );
+        let end_total_var = make_typed_expr(
+            TypedExprKind.Variable(total_symbol),
+            total_symbol.symbol_type,
+        );
         let end_ptr_expr = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(data_var, ArithmeticOperator.Add(), end_total_var),
+            TypedExprKind.ArithmeticExpr(
+                data_var,
+                ArithmeticOperator.Add(),
+                end_total_var,
+            ),
             mut_byte_ptr_type,
         );
-        let zero_byte = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UInt8Type());
+        let zero_byte = make_typed_expr(
+            TypedExprKind.IntegerLiteral("0"),
+            Type.UInt8Type(),
+        );
         let init_expr = make_typed_expr(
-            TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(end_ptr_expr, zero_byte)),
+            TypedExprKind.IntrinsicCall(
+                TypedIntrinsic.InitMemory(end_ptr_expr, zero_byte),
+            ),
             Type.VoidType(),
         );
         block_statements.push(TypedStatement.ExprStmt(init_expr, unknown_span()));
 
-        let final_data = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type);
-        let final_total = make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type);
+        let final_data = make_typed_expr(
+            TypedExprKind.Variable(data_symbol),
+            data_symbol.symbol_type,
+        );
+        let final_total = make_typed_expr(
+            TypedExprKind.Variable(total_symbol),
+            total_symbol.symbol_type,
+        );
         let final_cap = make_typed_expr(
             TypedExprKind.ArithmeticExpr(
-                make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type),
+                make_typed_expr(
+                    TypedExprKind.Variable(total_symbol),
+                    total_symbol.symbol_type,
+                ),
                 ArithmeticOperator.Add(),
                 make_typed_expr(TypedExprKind.IntegerLiteral("1"), uint_type),
             ),
@@ -1168,8 +2168,15 @@ given TypeChecker {
         let mutable build_args = List[TypedExpr].new();
         build_args.push(final_data);
         build_args.push(final_total);
-        let built_string = self.lower_static_method_call_expr(string_type, "from_utf8_ptr_unchecked", build_args, string_type);
-        return make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].Some(built_string)), string_type);
+        let built_string = self.lower_static_method_call_expr(
+            string_type,
+            "from_utf8_ptr_unchecked",
+            build_args,
+            string_type,
+        );
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(built_string)),
+            string_type,
+        );
     };
-
 };

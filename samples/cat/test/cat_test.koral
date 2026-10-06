@@ -10,16 +10,9 @@ type TestResult {
     Fail(message String),
 };
 
-type TestCase(
-    name String,
-    result TestResult,
-);
+type TestCase(name String, result TestResult);
 
-type ProcessOutput(
-    stdout String,
-    stderr String,
-    exit_code Int,
-);
+type ProcessOutput(stdout String, stderr String, exit_code Int);
 
 let pass() TestResult = TestResult.Pass();
 let fail(msg String) TestResult = TestResult.Fail(msg);
@@ -41,8 +34,8 @@ let cleanup_temp_files(paths List[String]) Void = {
 };
 
 let run_cat(args List[String]) Result[ProcessOutput] = {
-    let cat_bin =
-        if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-cat/cat.exe" else "./bin/sample-cat/cat";
+    let cat_bin = if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-cat/cat.exe"
+    else "./bin/sample-cat/cat";
     let cmd = Command.new(cat_bin).args(args).set_stdin(IoRedirect.Null());
     let out = cmd.run_output() or return;
     let exit_code = out.status.code() or else 0;
@@ -79,10 +72,16 @@ let test_single_file() TestResult = {
     };
     defer cleanup_temp_file(path);
 
-    let out = run_cat([path]) or else { return fail("single file command failed");};
+    let out = run_cat([path]) or else {
+        return fail("single file command failed");
+    };
 
     if out.exit_code == 0 then {
-        return assert_eq(normalize_newlines(out.stdout), "Hello\nWorld\n", "single file output mismatch");
+        return assert_eq(
+            normalize_newlines(out.stdout),
+            "Hello\nWorld\n",
+            "single file output mismatch",
+        );
     };
     return fail("single file exit code is not 0");
 };
@@ -98,8 +97,14 @@ let test_multiple_files() TestResult = {
     };
     defer cleanup_temp_file(b);
 
-    let out = run_cat([a, b]) or else { return fail("multiple file command failed");};
-    return assert_eq(normalize_newlines(out.stdout), "A\nB\n", "multiple file concat mismatch");
+    let out = run_cat([a, b]) or else {
+        return fail("multiple file command failed");
+    };
+    return assert_eq(
+        normalize_newlines(out.stdout),
+        "A\nB\n",
+        "multiple file concat mismatch",
+    );
 };
 
 let test_number_all_lines() TestResult = {
@@ -108,7 +113,9 @@ let test_number_all_lines() TestResult = {
     };
     defer cleanup_temp_file(path);
 
-    let out = run_cat(["-n", path]) or else { return fail("-n command failed");};
+    let out = run_cat(["-n", path]) or else {
+        return fail("-n command failed");
+    };
 
     let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n";
     return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch");
@@ -120,7 +127,9 @@ let test_number_nonblank() TestResult = {
     };
     defer cleanup_temp_file(path);
 
-    let out = run_cat(["-b", path]) or else { return fail("-b command failed");};
+    let out = run_cat(["-b", path]) or else {
+        return fail("-b command failed");
+    };
 
     let expected = "     1\tLine 1\n\n     2\tLine 3\n";
     return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch");
@@ -132,7 +141,9 @@ let test_squeeze_blank() TestResult = {
     };
     defer cleanup_temp_file(path);
 
-    let out = run_cat(["-s", path]) or else { return fail("-s command failed");};
+    let out = run_cat(["-s", path]) or else {
+        return fail("-s command failed");
+    };
 
     return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch");
 };
@@ -143,10 +154,18 @@ let test_show_ends_tabs_all() TestResult = {
     };
     defer cleanup_temp_file(path);
 
-    let e1 = run_cat(["-E", path]) or else { return fail("-E command failed");};
-    let t1 = run_cat(["-T", path]) or else { return fail("-T command failed");};
-    let a1 = run_cat(["-A", path]) or else { return fail("-A command failed");};
-    let vet1 = run_cat(["-v", "-E", "-T", path]) or else { return fail("-vET command failed");};
+    let e1 = run_cat(["-E", path]) or else {
+        return fail("-E command failed");
+    };
+    let t1 = run_cat(["-T", path]) or else {
+        return fail("-T command failed");
+    };
+    let a1 = run_cat(["-A", path]) or else {
+        return fail("-A command failed");
+    };
+    let vet1 = run_cat(["-v", "-E", "-T", path]) or else {
+        return fail("-vET command failed");
+    };
 
     let e_out = normalize_newlines(e1.stdout);
     let t_out = normalize_newlines(t1.stdout);
@@ -159,22 +178,32 @@ let test_show_ends_tabs_all() TestResult = {
 };
 
 let test_invalid_option() TestResult = {
-    let out = run_cat(["--badopt"]) or else { return fail("invalid option command failed");};
+    let out = run_cat(["--badopt"]) or else {
+        return fail("invalid option command failed");
+    };
     let ok = out.exit_code <> 0 and out.stderr.contains("invalid option");
     return assert_true(ok, "invalid option not reported");
 };
 
 let test_missing_file() TestResult = {
-    let out = run_cat(["no_such_file_12345.txt"]) or else { return fail("missing file command failed");};
+    let out = run_cat(["no_such_file_12345.txt"]) or else {
+        return fail("missing file command failed");
+    };
     let ok = out.exit_code <> 0 and out.stderr.contains("no_such_file_12345.txt");
     return assert_true(ok, "missing file not reported");
 };
 
 let test_help_and_version() TestResult = {
-    let help = run_cat(["--help"]) or else { return fail("help command failed");};
-    let ver = run_cat(["--version"]) or else { return fail("version command failed");};
+    let help = run_cat(["--help"]) or else {
+        return fail("help command failed");
+    };
+    let ver = run_cat(["--version"]) or else {
+        return fail("version command failed");
+    };
 
-    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains("koral-cat");
+    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains(
+        "koral-cat",
+    );
     return assert_true(ok, "help/version output mismatch");
 };
 
@@ -203,7 +232,7 @@ let property_multifile_roundtrip() TestResult = {
                 return fail("property setup failed");
             };
 
-            expected.push_string(content);
+            expected.push_string(content.to_string());
             paths.push(path);
         };
 
@@ -211,7 +240,9 @@ let property_multifile_roundtrip() TestResult = {
             return fail("property execution failed");
         };
 
-        if out.exit_code <> 0 or normalize_newlines(out.stdout) <> normalize_newlines(expected.to_string()) then {
+        if out.exit_code <> 0 or normalize_newlines(out.stdout) <> normalize_newlines(
+            expected.to_string(),
+        ) then {
             return fail("property multifile roundtrip failed");
         };
     };
@@ -251,7 +282,9 @@ public let main() Int = {
     tests.push(run_case("unit: invalid option", test_invalid_option()));
     tests.push(run_case("unit: missing file", test_missing_file()));
     tests.push(run_case("unit: help/version", test_help_and_version()));
-    tests.push(run_case("property: multifile roundtrip", property_multifile_roundtrip()));
+    tests.push(
+        run_case("property: multifile roundtrip", property_multifile_roundtrip()),
+    );
 
     let mutable passed UInt = 0;
     let mutable failed UInt = 0;

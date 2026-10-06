@@ -88,8 +88,7 @@ given ModuleError as Error {
                 let declared_list = join_sorted(declared);
                 "Package '\(package_name)' has no main module; write its subpath instead; declared modules: \(declared_list)"
             },
-            .InvalidModuleSpecifier(specifier, _) then
-                "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
+            .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
         };
     };
 };
@@ -148,13 +147,19 @@ given ModuleResolver {
 
     /// Load a module declared in a manifest, and everything its `using`
     /// statements reach, into `unit`.
-    public resolve_module_spec(self, spec ResolvedModuleSpec, unit CompilationUnit) Result[ModuleInfo] = {
+    public resolve_module_spec(
+        self,
+        spec ResolvedModuleSpec,
+        unit CompilationUnit,
+    ) Result[ModuleInfo] = {
         // `CompilationUnit` keys modules by their dotted path, so that is the
         // key to look up by -- not the display full name. Two spellings for one
         // module means loading it twice.
         let unit_key = join_path(spec.path_segments, ".");
         when unit.get_module(unit_key) in {
-            .Some(existing) then { return Result[ModuleInfo].Ok(existing); },
+            .Some(existing) then {
+                return Result[ModuleInfo].Ok(existing);
+            },
             .None() then {},
         };
 
@@ -175,13 +180,20 @@ given ModuleResolver {
         self.storage.module_stack.pop();
         when outcome in {
             .Ok(_) then {},
-            .Error(e) then { return Result[ModuleInfo].Error(e); },
+            .Error(e) then {
+                return Result[ModuleInfo].Error(e);
+            },
         };
         return Result[ModuleInfo].Ok(module);
     };
 
     /// Parse and process a single file into a module.
-    file_private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) Result[Void] = {
+    file_private resolve_file(
+        self,
+        file String,
+        module ModuleInfo,
+        unit CompilationUnit,
+    ) Result[Void] = {
         let normalized_file = when absolute_path(file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
@@ -209,7 +221,15 @@ given ModuleResolver {
         for using_decl in pending then {
             when using_decl in {
                 .Module(specifier, using_span, items) then {
-                    when self.record_module_using(specifier, using_span, items, module, unit, normalized_file, imported_this_file) in {
+                    when self.record_module_using(
+                        specifier,
+                        using_span,
+                        items,
+                        module,
+                        unit,
+                        normalized_file,
+                        imported_this_file,
+                    ) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop();
@@ -218,7 +238,13 @@ given ModuleResolver {
                     };
                 },
                 .File(specifier, using_span) then {
-                    when self.resolve_file_merge(specifier, using_span, module, unit, normalized_file) in {
+                    when self.resolve_file_merge(
+                        specifier,
+                        using_span,
+                        module,
+                        unit,
+                        normalized_file,
+                    ) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop();
@@ -233,11 +259,18 @@ given ModuleResolver {
         return Result[Void].Ok({});
     };
 
-    file_private collect_pending_usings(self, normalized_file String, module ModuleInfo, unit CompilationUnit) Result[List[PendingUsing]] = {
+    file_private collect_pending_usings(
+        self,
+        normalized_file String,
+        module ModuleInfo,
+        unit CompilationUnit,
+    ) Result[List[PendingUsing]] = {
         module_debug("[module] read: begin");
 
         let source = read_text_file(normalized_file.into_path()) or else {
-            return Result[List[PendingUsing]].Error("Error: Failed to read file: \(normalized_file)");
+            return Result[List[PendingUsing]].Error(
+                "Error: Failed to read file: \(normalized_file)",
+            );
         };
         module_debug("[module] read: done");
         module_debug("[module] lex: begin");
@@ -275,7 +308,9 @@ given ModuleResolver {
         };
 
         module_debug("[module] decl-loop: done");
-        module_debug("[module] current module node count: \(module.global_nodes().count())");
+        module_debug(
+            "[module] current module node count: \(module.global_nodes().count())",
+        );
         return Result[List[PendingUsing]].Ok(pending);
     };
 
@@ -304,41 +339,60 @@ given ModuleResolver {
             .None() then {},
         };
         if head_name.is_empty() then {
-            return Result[ResolvedModuleSpec].Error(ModuleError.InvalidModuleSpecifier(specifier, specifier_span).render(module.entry_file()));
+            return Result[ResolvedModuleSpec].Error(
+                ModuleError.InvalidModuleSpecifier(specifier, specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
         };
 
         let registry = self.storage.registry or else {
-            return Result[ResolvedModuleSpec].Error(ModuleError.UnknownPackageName(head_name, [], specifier_span).render(module.entry_file()));
+            return Result[ResolvedModuleSpec].Error(
+                ModuleError.UnknownPackageName(head_name, [], specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
         };
         let owner = self.storage.root_package or else {
-            return Result[ResolvedModuleSpec].Error(ModuleError.UnknownPackageName(head_name, [], specifier_span).render(module.entry_file()));
+            return Result[ResolvedModuleSpec].Error(
+                ModuleError.UnknownPackageName(head_name, [], specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
         };
 
         let target_package = registry.resolve_name(head_name, owner) or else {
-            return Result[ResolvedModuleSpec].Error(ModuleError.UnknownPackageName(
-                head_name,
-                registry.known_names(owner),
-                specifier_span,
-            ).render(module.entry_file()));
+            return Result[ResolvedModuleSpec].Error(
+                ModuleError.UnknownPackageName(
+                    head_name,
+                    registry.known_names(owner),
+                    specifier_span,
+                ).render(module.entry_file()),
+            );
         };
 
         // The subpath is what the package calls the module: `"."` written as
         // nothing at all, otherwise the segments joined by `/`.
-        let key = if tail_segments.is_empty() then "." else tail_segments.join_to_string("/");
+        let key = if tail_segments.is_empty() then "."
+        else tail_segments.join_to_string("/");
         let config = target_package.manifest.modules.get(key) or else {
             if tail_segments.is_empty() then {
-                return Result[ResolvedModuleSpec].Error(ModuleError.NoMainModule(
+                return Result[ResolvedModuleSpec].Error(
+                    ModuleError.NoMainModule(
+                        target_package.self_name,
+                        declared_module_keys(target_package.manifest),
+                        specifier_span,
+                    ).render(module.entry_file()),
+                );
+            };
+            return Result[ResolvedModuleSpec].Error(
+                ModuleError.UnknownModule(
+                    head_name + "/" + tail_segments.join_to_string("/"),
                     target_package.self_name,
                     declared_module_keys(target_package.manifest),
                     specifier_span,
-                ).render(module.entry_file()));
-            };
-            return Result[ResolvedModuleSpec].Error(ModuleError.UnknownModule(
-                head_name + "/" + tail_segments.join_to_string("/"),
-                target_package.self_name,
-                declared_module_keys(target_package.manifest),
-                specifier_span,
-            ).render(module.entry_file()));
+                ).render(module.entry_file()),
+            );
         };
 
         let root_name = root_view_name(target_package, registry, owner);
@@ -357,7 +411,9 @@ given ModuleResolver {
                     };
                 };
                 cycle.push(spec.full_name);
-                return Result[ResolvedModuleSpec].Error(ModuleError.CircularDependency(cycle).render(module.entry_file()));
+                return Result[ResolvedModuleSpec].Error(
+                    ModuleError.CircularDependency(cycle).render(module.entry_file()),
+                );
             };
         };
 
@@ -377,7 +433,11 @@ given ModuleResolver {
     ) Result[Void] = {
         let spec = self.resolve_module_import(specifier, specifier_span, module, unit) or return;
         if imported_this_file.contains(spec.full_name) then {
-            return Result[Void].Error(ModuleError.DuplicateUsing(spec.full_name, specifier_span).render(module.entry_file()));
+            return Result[Void].Error(
+                ModuleError.DuplicateUsing(spec.full_name, specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
         };
         imported_this_file.insert(spec.full_name);
 
@@ -389,7 +449,13 @@ given ModuleResolver {
         when items in {
             .None() then {
                 // `{ }` omitted: every visible member of the module (§3).
-                unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file, specifier_span);
+                unit.add_import_edge(
+                    module.path(),
+                    target_path,
+                    ImportKind.BatchImport(),
+                    import_source_file,
+                    specifier_span,
+                );
             },
             .Some(list) then {
                 for item in list then {
@@ -410,10 +476,19 @@ given ModuleResolver {
 
     // Resolve file merge: using "file_name"
     // Resolves a normalized relative source path against the current file's directory and merges it.
-    file_private resolve_file_merge(self, file_name String, using_span SourceSpan, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
+    file_private resolve_file_merge(
+        self,
+        file_name String,
+        using_span SourceSpan,
+        module ModuleInfo,
+        unit CompilationUnit,
+        current_file String,
+    ) Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string();
         if not file_name.ends_with(".koral") then {
-            return Result[Void].Error("File merge path must end in '.koral'; write '\(file_name).koral'");
+            return Result[Void].Error(
+                "File merge path must end in '.koral'; write '\(file_name).koral'",
+            );
         };
         let _ = using_span;
 
@@ -434,7 +509,11 @@ given ModuleResolver {
         let file_path = target.to_string();
 
         if not path_exist(file_path.into_path()) then {
-            return Result[Void].Error(ModuleError.FileNotFound(file_name, current_dir).render(module.entry_file()));
+            return Result[Void].Error(
+                ModuleError.FileNotFound(file_name, current_dir).render(
+                    module.entry_file(),
+                ),
+            );
         };
 
         // A merge cycle means each file is waiting on the other's definitions
@@ -447,12 +526,18 @@ given ModuleResolver {
                     cycle.push(step);
                 };
                 cycle.push(file_path);
-                return Result[Void].Error(ModuleError.CircularDependency(cycle).render(module.entry_file()));
+                return Result[Void].Error(
+                    ModuleError.CircularDependency(cycle).render(module.entry_file()),
+                );
             };
         };
 
         if module.has_merged_submodule(file_path) then {
-            return Result[Void].Error(ModuleError.DuplicateUsing(file_name, using_span).render(module.entry_file()));
+            return Result[Void].Error(
+                ModuleError.DuplicateUsing(file_name, using_span).render(
+                    module.entry_file(),
+                ),
+            );
         };
 
         module.add_merged_submodule(file_path);
@@ -467,10 +552,18 @@ given ModuleResolver {
     };
 
     // Main entry: resolve a module from its entry file.
-    public resolve_module_with_path(self, entry_file String, root_module_path Option[List[String]]) Result[CompilationUnit] = {
+    public resolve_module_with_path(
+        self,
+        entry_file String,
+        root_module_path Option[List[String]],
+    ) Result[CompilationUnit] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
-            .Error(e) then { return Result[CompilationUnit].Error("Cannot resolve path: \(entry_file)");},
+            .Error(e) then {
+                return Result[CompilationUnit].Error(
+                    "Cannot resolve path: \(entry_file)",
+                );
+            },
         };
 
         module_debug("[module] resolve_module: \(abs_path)");
@@ -478,7 +571,9 @@ given ModuleResolver {
         let filename = abs_path.into_path().with_ext_name("").base_name();
 
         if validate_module_name(filename) is .Some(reason) then {
-            return Result[CompilationUnit].Error("Invalid entry file name '\(filename)': \(reason)");
+            return Result[CompilationUnit].Error(
+                "Invalid entry file name '\(filename)': \(reason)",
+            );
         };
 
         let mutable root_path = when root_module_path in {
@@ -493,7 +588,9 @@ given ModuleResolver {
         let unit = CompilationUnit.new(root);
 
         let _ = self.resolve_file(abs_path, root, unit) or return;
-        module_debug("[module] root-local nodes after resolve: \(root.global_nodes().count())");
+        module_debug(
+            "[module] root-local nodes after resolve: \(root.global_nodes().count())",
+        );
 
         return Result[CompilationUnit].Ok(unit);
     };
@@ -512,7 +609,11 @@ given ModuleResolver {
     /// The prelude is NOT part of the `using` graph -- it is the base the graph
     /// sits on (§6.4's "主模块是基础层"). Everything else is whatever the file's
     /// own `using` statements reach.
-    public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
+    public resolve_for_typecheck(
+        self,
+        entry_file String,
+        no_std Bool,
+    ) Result[ResolvedModuleGraph] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then entry_file,
@@ -531,7 +632,11 @@ given ModuleResolver {
             let std_path = find_std_manifest_path() or else {
                 return Result[ResolvedModuleGraph].Error("standard library not found");
             };
-            let registry = load_package_registry(std_path, Option[String].Some(std_path), Option[String].None()) or return;
+            let registry = load_package_registry(
+                std_path,
+                Option[String].Some(std_path),
+                Option[String].None(),
+            ) or return;
             let std_package = registry.std_package or else {
                 return Result[ResolvedModuleGraph].Error("standard library not found");
             };
@@ -555,16 +660,18 @@ given ModuleResolver {
             node_source_paths.push(pair.first.source_file);
         };
 
-        return Result[ResolvedModuleGraph].Ok(ResolvedModuleGraph(
-            root.path_string(),
-            unit.import_graph(),
-            loaded_nodes,
-            all_pairs,
-            node_source_paths,
-            self.collect_unique_module_paths(all_pairs),
-            self.collect_unique_sources(loaded_nodes),
-            unit.collect_parsed_defaults(),
-        ));
+        return Result[ResolvedModuleGraph].Ok(
+            ResolvedModuleGraph(
+                root.path_string(),
+                unit.import_graph(),
+                loaded_nodes,
+                all_pairs,
+                node_source_paths,
+                self.collect_unique_module_paths(all_pairs),
+                self.collect_unique_sources(loaded_nodes),
+                unit.collect_parsed_defaults(),
+            ),
+        );
     };
 
     /// Every module spec this resolver has loaded, in no particular order.
@@ -576,7 +683,10 @@ given ModuleResolver {
         return specs;
     };
 
-    file_private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
+    file_private collect_unique_module_paths(
+        self,
+        loaded_nodes_with_path List[Pair[LoadedNode, List[String]]],
+    ) List[List[String]] = {
         let mutable seen = Set[String].new();
         let mutable module_paths = List[List[String]].new();
         for pair in loaded_nodes_with_path.iterator() then {
@@ -641,7 +751,9 @@ public let declared_module_keys(manifest PackageManifest) List[String] = {
 // Convert PascalCase module identifier to snake_case file name
 // e.g. "Primitives" -> "primitives", "BufReader" -> "buf_reader", "Std" -> "std"
 public let module_identifier_to_file_name(identifier String) String = {
-    if identifier.is_empty() then { return identifier;};
+    if identifier.is_empty() then {
+        return identifier;
+    };
     let mutable result = StringBuilder.new();
     let runes = identifier.to_runes();
     let mutable first = true;
@@ -691,7 +803,8 @@ file_private let validate_module_identifier(name String) Option[String] = {
         return .Some("Module name must start with an uppercase letter (A-Z)");
     };
     for ch in runes then {
-        if not ch.is_ascii_uppercase() and not ch.is_ascii_lowercase() and not ch.is_ascii_digit() then {
+        if not ch.is_ascii_uppercase() and not ch.is_ascii_lowercase() and not ch.is_ascii_digit(
+        ) then {
             return .Some("Module name can only contain letters and digits");
         };
     };

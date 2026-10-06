@@ -5,16 +5,21 @@ using "std";
 
 // FFI declarations for C runtime regex functions
 foreign let __koral_regex_compile(
-    pattern *unsafe UInt8, flags Int32,
+    pattern *unsafe UInt8,
+    flags Int32,
     out_handle *unsafe *unsafe UInt8,
-    out_error_buf *unsafe UInt8, error_buf_size Int32,
-    out_error_len *unsafe Int32
+    out_error_buf *unsafe UInt8,
+    error_buf_size Int32,
+    out_error_len *unsafe Int32,
 ) Int32;
 
 foreign let __koral_regex_match(
-    handle *unsafe UInt8, text *unsafe UInt8, text_offset Int32,
+    handle *unsafe UInt8,
+    text *unsafe UInt8,
+    text_offset Int32,
     max_groups Int32,
-    out_starts *unsafe Int32, out_ends *unsafe Int32
+    out_starts *unsafe Int32,
+    out_ends *unsafe Int32,
 ) Int32;
 
 foreign let __koral_regex_free(handle *unsafe UInt8) Void;
@@ -40,10 +45,12 @@ given Regex {
         defer dealloc_memory(error_len_out);
 
         let rc = __koral_regex_compile(
-            pattern.data, c_flags,
+            pattern.data,
+            c_flags,
             handle_out,
-            error_buf, 256,
-            error_len_out
+            error_buf,
+            256,
+            error_len_out,
         );
 
         if rc <> 0 then {
@@ -71,7 +78,7 @@ given Regex {
         while i < len then {
             let ch = pattern[i];
             if ch == '\\' then {
-                i += 2;// 跳过转义字符
+                i += 2; // 跳过转义字符
                 continue;
             };
             if ch == '(' then {
@@ -96,17 +103,13 @@ given Regex {
         defer dealloc_memory(starts);
         defer dealloc_memory(ends);
 
-        let matched = __koral_regex_match(
-            self.handle, text.data, 0,
-            1, starts, ends
-        );
+        let matched = __koral_regex_match(self.handle, text.data, 0, 1, starts, ends);
 
         return matched > 0;
     };
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
-    public find(self, text String) Option[Match] =
-        Regex.find_at(self, text, 0);
+    public find(self, text String) Option[Match] = Regex.find_at(self, text, 0);
 
     // 从指定偏移开始查找（内部方法，仅 $0）
     find_at(self, text String, offset UInt) Option[Match] = {
@@ -116,8 +119,12 @@ given Regex {
         defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
-            self.handle, text.data, offset(Int32),
-            1, starts, ends
+            self.handle,
+            text.data,
+            offset(Int32),
+            1,
+            starts,
+            ends,
         );
 
         if matched == 0 then {
@@ -137,24 +144,26 @@ given Regex {
 
 given Regex {
 
-    public find_all(self, text String) MatchIterator =
-        MatchIterator(self, text, 0);
+    public find_all(self, text String) MatchIterator = MatchIterator(self, text, 0);
 
     // 完整路径：捕获所有 group
-    public captures(self, text String) Option[Captures] =
-        Regex.captures_at(self, text, 0);
+    public captures(self, text String) Option[Captures] = Regex.captures_at(self, text, 0);
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
     captures_at(self, text String, offset UInt) Option[Captures] = {
-        let max_groups = (self.groups + 1)(Int32);// +1 for $0
+        let max_groups = (self.groups + 1)(Int32); // +1 for $0
         let starts = alloc_memory[Int32](max_groups(UInt));
         let ends = alloc_memory[Int32](max_groups(UInt));
         defer dealloc_memory(starts);
         defer dealloc_memory(ends);
 
         let matched = __koral_regex_match(
-            self.handle, text.data, offset(Int32),
-            max_groups, starts, ends
+            self.handle,
+            text.data,
+            offset(Int32),
+            max_groups,
+            starts,
+            ends,
         );
 
         if matched == 0 then {
@@ -249,13 +258,13 @@ given Regex {
                     let group_idx = (next - '0')(UInt);
                     when c.group(group_idx) in {
                         .Some(g) then result.push_string(g),
-                        .None() then {},// 未匹配的组替换为空
+                        .None() then {}, // 未匹配的组替换为空
                     };
                     i += 2;
                     continue;
                 };
                 if next == '$' then {
-                    result.push_byte('$');// $$ 转义为字面 $
+                    result.push_byte('$'); // $$ 转义为字面 $
                     i += 2;
                     continue;
                 };
@@ -275,5 +284,5 @@ given Regex {
 given Regex {
 
     public split(self, text String) RegexSplitIterator =
-    RegexSplitIterator(self, text, 0, false);
+        RegexSplitIterator(self, text, 0, false);
 };

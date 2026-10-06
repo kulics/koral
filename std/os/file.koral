@@ -41,11 +41,11 @@ foreign let __koral_errno_is_wouldblock() Int32;
 
 /// File open mode enumeration
 public type OpenMode {
-    Read(),// O_RDONLY — read-only
-    Write(),// O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
-    Create(),// O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
-    Append(),// O_WRONLY | O_CREAT | O_APPEND — append
-    ReadWrite(),// O_RDWR — read-write (file must exist)
+    Read(), // O_RDONLY — read-only
+    Write(), // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
+    Create(), // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
+    Append(), // O_WRONLY | O_CREAT | O_APPEND — append
+    ReadWrite(), // O_RDWR — read-write (file must exist)
 };
 
 // ============================================================================
@@ -66,7 +66,6 @@ given FileStorage as Drop {
         };
     };
 };
-
 
 // ============================================================================
 // FFI Declarations for File metadata queries
@@ -113,14 +112,16 @@ given File {
             2 then FileType.Symlink(),
             _ then FileType.Other(),
         };
-        return Result[FileInfo].Ok(FileInfo(
-            stat_buf.size(UInt64),
-            ft,
-            Permission.from_mode(stat_buf.permissions),
-            Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
-            Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
-            Duration(stat_buf.created_secs, stat_buf.created_nanos)
-        ));
+        return Result[FileInfo].Ok(
+            FileInfo(
+                stat_buf.size(UInt64),
+                ft,
+                Permission.from_mode(stat_buf.permissions),
+                Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
+                Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
+                Duration(stat_buf.created_secs, stat_buf.created_nanos),
+            ),
+        );
     };
 
     /// Sync file data to disk (fsync, ensures physical persistence).
@@ -137,7 +138,7 @@ given File {
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
     public lock(self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 2);// LOCK_EX
+        let result = __koral_flock(self.storage.fd, 2); // LOCK_EX
         if result <> 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -146,7 +147,7 @@ given File {
 
     /// Acquire a shared lock (blocking, waits until acquired)
     public lock_shared(self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 1);// LOCK_SH
+        let result = __koral_flock(self.storage.fd, 1); // LOCK_SH
         if result <> 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -156,7 +157,7 @@ given File {
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock(self) Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 6);// LOCK_EX | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 6); // LOCK_EX | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
         };
@@ -169,7 +170,7 @@ given File {
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_shared(self) Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 5);// LOCK_SH | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 5); // LOCK_SH | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
         };
@@ -181,7 +182,7 @@ given File {
 
     /// Release the lock
     public unlock(self) Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 8);// LOCK_UN
+        let result = __koral_flock(self.storage.fd, 8); // LOCK_UN
         if result <> 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -236,9 +237,18 @@ given File as Seeker {
         let mutable offset Int64 = 0;
         let mutable whence Int32 = 0;
         when pos in {
-            .Start(o) then { offset = o(Int64); whence = 0;},
-            .Current(o) then { offset = o; whence = 1;},
-            .End(o) then { offset = o; whence = 2;},
+            .Start(o) then {
+                offset = o(Int64);
+                whence = 0;
+            },
+            .Current(o) then {
+                offset = o;
+                whence = 1;
+            },
+            .End(o) then {
+                offset = o;
+                whence = 2;
+            },
         };
         let new_pos = __koral_lseek(self.storage.fd, offset, whence);
         if new_pos < 0 then {

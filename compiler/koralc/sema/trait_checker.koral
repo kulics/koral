@@ -1,4 +1,3 @@
-
 // Trait 一致性检查器
 // 检查 given Type as Trait { ... } 声明是否实现了所有 requirement 方法
 
@@ -56,7 +55,7 @@ given TraitRegistry {
             Dict[String, TraitInfo].new(),
             Dict[UInt, TraitInfo].new(),
             Dict[String, Dict[String, TypedTraitMember]].new(),
-            Dict[String, List[String]].new()
+            Dict[String, List[String]].new(),
         );
     };
 
@@ -92,10 +91,21 @@ given TraitRegistry {
         let mutable visited = List[UInt].new();
         let mutable stack = List[UInt].new();
         let mutable stack_names = List[String].new();
-        return self.validate_inheritance_graph_internal(trait_name, visited, stack, stack_names);
+        return self.validate_inheritance_graph_internal(
+            trait_name,
+            visited,
+            stack,
+            stack_names,
+        );
     };
 
-    file_private validate_inheritance_graph_internal(self, trait_name String, visited List[UInt], stack List[UInt], stack_names List[String]) Result[Void] = {
+    file_private validate_inheritance_graph_internal(
+        self,
+        trait_name String,
+        visited List[UInt],
+        stack List[UInt],
+        stack_names List[String],
+    ) Result[Void] = {
         let info = self.traits.get(trait_name) or else {
             return Result[Void].Ok({});
         };
@@ -114,8 +124,15 @@ given TraitRegistry {
         stack.push(info.def_id.id);
         stack_names.push(trait_name);
         for parent in info.parent_traits then {
-            let parent_info = self.traits_by_def_id.get(parent.def_id.id) or else { continue;};
-            let _ = self.validate_inheritance_graph_internal(parent_info.name, visited, stack, stack_names) or return;
+            let parent_info = self.traits_by_def_id.get(parent.def_id.id) or else {
+                continue;
+            };
+            let _ = self.validate_inheritance_graph_internal(
+                parent_info.name,
+                visited,
+                stack,
+                stack_names,
+            ) or return;
         };
         let _ = stack.pop();
         let _ = stack_names.pop();
@@ -131,7 +148,11 @@ given TraitRegistry {
 
     /// The spelling is resolved to a declaration here, once; the walk is by
     /// declaration from here on.
-    public flatten_methods_in_module(self, trait_name String, module_path List[String]) Result[Dict[String, TypedTraitMember]] = {
+    public flatten_methods_in_module(
+        self,
+        trait_name String,
+        module_path List[String],
+    ) Result[Dict[String, TypedTraitMember]] = {
         return when self.get_in_module(trait_name, module_path) in {
             .None() then {
                 let mutable message = StringBuilder.new();
@@ -149,7 +170,10 @@ given TraitRegistry {
     /// The cache is keyed on the declaration: two same-named traits from
     /// different modules are different traits and must not share one flattened
     /// method set.
-    public flatten_methods_for_def(self, trait_def_id DefId) Result[Dict[String, TypedTraitMember]] = {
+    public flatten_methods_for_def(
+        self,
+        trait_def_id DefId,
+    ) Result[Dict[String, TypedTraitMember]] = {
         let cache_key = "d\(trait_def_id.id)";
         if self.flattened_cache.get(cache_key) is .Some(cached) then {
             return Result[Dict[String, TypedTraitMember]].Ok(cached);
@@ -157,13 +181,17 @@ given TraitRegistry {
         let info = self.traits_by_def_id.get(trait_def_id.id) or else {
             // A parent that no declaration binds is reported elsewhere; here it
             // simply contributes no methods.
-            return Result[Dict[String, TypedTraitMember]].Ok(Dict[String, TypedTraitMember].new());
+            return Result[Dict[String, TypedTraitMember]].Ok(
+                Dict[String, TypedTraitMember].new(),
+            );
         };
         let mutable result = Dict[String, TypedTraitMember].new();
 
         // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
         for parent in info.parent_traits then {
-            if not parent.def_id.is_valid() then { continue;};
+            if not parent.def_id.is_valid() then {
+                continue;
+            };
             when self.flatten_methods_for_def(parent.def_id) in {
                 .Ok(parent_methods) then {
                     for entry in parent_methods then {
@@ -198,12 +226,19 @@ given TraitRegistry {
     /// where a name selects within an already-identified impl/trait.
     public check_object_safety_by_def_id(self, trait_def_id DefId) Result[Bool] = {
         return when self.traits_by_def_id.get(trait_def_id.id) in {
-            .Some(info) then self.check_object_safety_in_module(info.name, info.module_path),
+            .Some(info) then self.check_object_safety_in_module(
+                info.name,
+                info.module_path,
+            ),
             .None() then Result[Bool].Error("Trait 'd\(trait_def_id.id)' not found"),
         };
     };
 
-    public check_object_safety_in_module(self, trait_name String, module_path List[String]) Result[Bool] = {
+    public check_object_safety_in_module(
+        self,
+        trait_name String,
+        module_path List[String],
+    ) Result[Bool] = {
         let cache_key = qualified_symbol_key(module_path, trait_name);
         let reasons = self.object_safety_reasons(trait_name, module_path) or return;
         return Result[Bool].Ok(reasons.is_empty());
@@ -214,7 +249,11 @@ given TraitRegistry {
     ///
     /// The verdict alone is not enough to report: "is not object-safe" leaves
     /// the reader to find which method is responsible.
-    public object_safety_reasons(self, trait_name String, module_path List[String]) Result[List[String]] = {
+    public object_safety_reasons(
+        self,
+        trait_name String,
+        module_path List[String],
+    ) Result[List[String]] = {
         let cache_key = qualified_symbol_key(module_path, trait_name);
         if self.object_safety_cache.get(cache_key) is .Some(cached) then {
             return Result[List[String]].Ok(cached);
@@ -229,7 +268,9 @@ given TraitRegistry {
             };
             if not m.params.is_empty() then {
                 let receiver = m.params[0(UInt)];
-                if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
+                if receiver.name == "self" and not self.is_object_safe_receiver_type(
+                    receiver.param_type,
+                ) then {
                     reasons.push("method '\(m.name)' uses Self in receiver");
                 };
             };
@@ -245,7 +286,9 @@ given TraitRegistry {
                     continue;
                 };
                 if self.type_uses_self(p.param_type) then {
-                    reasons.push("method '\(m.name)' uses Self in parameter '\(p.name)'");
+                    reasons.push(
+                        "method '\(m.name)' uses Self in parameter '\(p.name)'",
+                    );
                 };
                 param_index += 1(UInt);
             };
@@ -320,7 +363,12 @@ given TraitRegistry {
         return self.has_inheritance_internal(trait_id, target_id, visited);
     };
 
-    file_private has_inheritance_internal(self, trait_id DefId, target_id DefId, visited Set[UInt]) Bool = {
+    file_private has_inheritance_internal(
+        self,
+        trait_id DefId,
+        target_id DefId,
+        visited Set[UInt],
+    ) Bool = {
         if visited.contains(trait_id.id) then {
             return false;
         };
@@ -332,7 +380,11 @@ given TraitRegistry {
             // Identity: the parent constraint carries the declaration it names.
             when self.traits_by_def_id.get(parent.def_id.id) in {
                 .Some(parent_info) then {
-                    if self.has_inheritance_internal(parent_info.def_id, target_id, visited) then {
+                    if self.has_inheritance_internal(
+                        parent_info.def_id,
+                        target_id,
+                        visited,
+                    ) then {
                         return true;
                     };
                 },
@@ -353,7 +405,11 @@ public type TraitChecker(
 
 given TraitChecker {
 
-    public new(registry TraitRegistry, method_table MethodTable, context CompilerContext) TraitChecker = {
+    public new(
+        registry TraitRegistry,
+        method_table MethodTable,
+        context CompilerContext,
+    ) TraitChecker = {
         return TraitChecker(registry, method_table, context);
     };
 
@@ -373,15 +429,33 @@ given TraitChecker {
         out.push_byte('(');
         let mutable first = true;
         for p in method.params then {
-            if not first then { out.push_string(", ");};
+            if not first then {
+                out.push_string(", ");
+            };
             first = false;
-            if p.is_mutable then { out.push_string("mutable ");};
+            if p.is_mutable then {
+                out.push_string("mutable ");
+            };
             out.push_string(p.name);
             out.push_byte(' ');
-            out.push_string(self.display_trait_method_type(p.param_type, target_type, trait_type_params, trait_type_args));
+            out.push_string(
+                self.display_trait_method_type(
+                    p.param_type,
+                    target_type,
+                    trait_type_params,
+                    trait_type_args,
+                ),
+            );
         };
         out.push_string(") ");
-        out.push_string(self.display_trait_method_type(method.return_type, target_type, trait_type_params, trait_type_args));
+        out.push_string(
+            self.display_trait_method_type(
+                method.return_type,
+                target_type,
+                trait_type_params,
+                trait_type_args,
+            ),
+        );
         return out.to_string();
     };
 
@@ -399,7 +473,8 @@ given TraitChecker {
                 } else {
                     let mutable idx UInt = 0;
                     while idx < trait_type_params.count() then {
-                        if trait_type_params[idx] == name and idx < trait_type_args.count() then {
+                        if trait_type_params[idx] == name and idx < trait_type_args.count(
+                        ) then {
                             return self.context.type_display_name(trait_type_args[idx]);
                         };
                         idx += 1;
@@ -472,15 +547,24 @@ given TraitChecker {
                     message.push_byte(' ');
                     message.push_string(trait_name);
                     message.push_string("' is invalid: missing method ");
-                    message.push_string(self.display_trait_method_signature(required, target_type, trait_type_params, trait_type_args));
+                    message.push_string(
+                        self.display_trait_method_signature(
+                            required,
+                            target_type,
+                            trait_type_params,
+                            trait_type_args,
+                        ),
+                    );
                     return Result[Void].Error(message.to_string());
                 },
                 .Some(actual) then {
                     // 检查参数数量（跳过 self 参数）
                     let required_count = required.params.count();
                     let actual_count = actual.params.count();
-                    let required_param_count = if required_count > 0 then required_count - 1 else 0;
-                    let actual_param_count = if actual_count > 0 then actual_count - 1 else 0;
+                    let required_param_count = if required_count > 0 then required_count - 1
+                    else 0;
+                    let actual_param_count = if actual_count > 0 then actual_count - 1
+                    else 0;
 
                     if required_param_count <> actual_param_count then {
                         let mutable message = StringBuilder.new();
@@ -496,7 +580,8 @@ given TraitChecker {
                     };
 
                     let mutable idx UInt = 1;
-                    let named_check_end = if required_count < actual_count then required_count else actual_count;
+                    let named_check_end = if required_count < actual_count then required_count
+                    else actual_count;
                     while idx < named_check_end then {
                         let trait_param = required.params[idx];
                         let impl_param = actual.params[idx];
@@ -509,15 +594,21 @@ given TraitChecker {
                                 message.push_string(trait_param.name);
                                 message.push_string("' at position ");
                                 message.push_string(idx.to_string());
-                                message.push_string(", but implementation uses positional parameter");
+                                message.push_string(
+                                    ", but implementation uses positional parameter",
+                                );
                                 return Result[Void].Error(message.to_string());
                             };
                             let mutable message = StringBuilder.new();
                             message.push_string("Trait method '");
                             message.push_string(method_name);
-                            message.push_string("' requires positional parameter at position ");
+                            message.push_string(
+                                "' requires positional parameter at position ",
+                            );
                             message.push_string(idx.to_string());
-                            message.push_string(", but implementation uses named parameter");
+                            message.push_string(
+                                ", but implementation uses named parameter",
+                            );
                             return Result[Void].Error(message.to_string());
                         };
                         if trait_param.named and impl_param.named and trait_param.name <> impl_param.name then {
@@ -541,5 +632,4 @@ given TraitChecker {
 
         return Result[Void].Ok({});
     };
-
 };

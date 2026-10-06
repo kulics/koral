@@ -15,12 +15,18 @@ using "std/os" { Path, IntoPath };
 /// Create a child process via posix_spawn (Unix) / CreateProcess (Windows).
 foreign let __koral_spawn(
     program *unsafe UInt8,
-    argv *unsafe *unsafe UInt8, argc Int32,
-    envp *unsafe *unsafe UInt8, envc Int32,
+    argv *unsafe *unsafe UInt8,
+    argc Int32,
+    envp *unsafe *unsafe UInt8,
+    envc Int32,
     cwd *unsafe UInt8,
-    stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
-    stdin_fd Int32, stdout_fd Int32, stderr_fd Int32,
-    out *unsafe KoralProcess
+    stdin_mode Int32,
+    stdout_mode Int32,
+    stderr_mode Int32,
+    stdin_fd Int32,
+    stdout_fd Int32,
+    stderr_fd Int32,
+    out *unsafe KoralProcess,
 ) Int32;
 
 /// Get pointer to errno value.
@@ -129,15 +135,18 @@ public type mutable Command(file_private mutable storage CommandStorage);
 given Command {
 
     /// Create a new command builder for the specified program.
-    public new(program String) Command = Command(CommandStorage(
-        program,
-        [],
-        [],
-        .None(),
-        IoRedirect.Inherit(),
-        IoRedirect.Inherit(),
-        IoRedirect.Inherit()
-    ));
+    public new(program String) Command =
+        Command(
+            CommandStorage(
+                program,
+                [],
+                [],
+                .None(),
+                IoRedirect.Inherit(),
+                IoRedirect.Inherit(),
+                IoRedirect.Inherit(),
+            ),
+        );
 
     /// Add a single argument (chainable).
     public arg(self, value String) Command = {
@@ -235,21 +244,25 @@ given Command {
             stdin_fd,
             stdout_fd,
             stderr_fd,
-            &unsafe proc
+            &unsafe proc,
         );
 
         if result <> 0 then {
             return .Error(last_error_message());
         };
 
-        return .Ok(Process(ProcessStorage(
-            proc.pid,
-            proc.stdin_fd,
-            proc.stdout_fd,
-            proc.stderr_fd,
-            false,
-            0
-        )));
+        return .Ok(
+            Process(
+                ProcessStorage(
+                    proc.pid,
+                    proc.stdin_fd,
+                    proc.stdout_fd,
+                    proc.stderr_fd,
+                    false,
+                    0,
+                ),
+            ),
+        );
     };
 
     /// Synchronously execute the command and wait for completion.

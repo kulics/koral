@@ -48,14 +48,17 @@ public type mutable ImportGraph(
 
 given ImportGraph {
     public new() ImportGraph = {
-        return ImportGraph(
-            [],
-            [],
-            Dict[String, List[SymbolImportEdge]].new(),
-        );
+        return ImportGraph([], [], Dict[String, List[SymbolImportEdge]].new());
     };
 
-    public add_module_import(self, from List[String], to List[String], kind ImportKind, source_file Option[String], span SourceSpan) Void = {
+    public add_module_import(
+        self,
+        from List[String],
+        to List[String],
+        kind ImportKind,
+        source_file Option[String],
+        span SourceSpan,
+    ) Void = {
         self.edges.push(ImportEdge(from, to, kind, source_file, span));
     };
 
@@ -69,7 +72,15 @@ given ImportGraph {
         original_symbol Option[String],
         span SourceSpan,
     ) Void = {
-        let edge = SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file, span);
+        let edge = SymbolImportEdge(
+            module,
+            target,
+            symbol,
+            original_symbol or else symbol,
+            kind,
+            source_file,
+            span,
+        );
         self.symbol_imports.push(edge);
         self.index_symbol_import(edge);
     };
@@ -83,7 +94,9 @@ given ImportGraph {
 
     file_private index_symbol_import_name(self, edge SymbolImportEdge, name String) Void = {
         when self.symbol_imports_by_name.get(name) in {
-            .Some(bucket) then { bucket.push(edge); },
+            .Some(bucket) then {
+                bucket.push(edge);
+            },
             .None() then {
                 let mutable bucket = List[SymbolImportEdge].new();
                 bucket.push(edge);
@@ -111,7 +124,13 @@ given ImportGraph {
         };
     };
 
-    public get_import_kind(self, symbol_module_path List[String], symbol_name Option[String], in_module List[String], in_source_file Option[String]) ImportKind = {
+    public get_import_kind(
+        self,
+        symbol_module_path List[String],
+        symbol_name Option[String],
+        in_module List[String],
+        in_source_file Option[String],
+    ) ImportKind = {
         // Local definition
         if string_list_eq(symbol_module_path, in_module) then {
             return ImportKind.Local();
@@ -123,7 +142,13 @@ given ImportGraph {
                 when self.symbol_import_candidates(name) in {
                     .Some(candidates) then {
                         for si in candidates then {
-                            if string_list_eq(si.module, in_module) and string_list_eq(si.target, symbol_module_path) and (si.symbol == name or si.original_symbol == name) and source_file_matches(si.source_file, in_source_file) then {
+                            if string_list_eq(si.module, in_module) and string_list_eq(
+                                si.target,
+                                symbol_module_path,
+                            ) and (si.symbol == name or si.original_symbol == name) and source_file_matches(
+                                si.source_file,
+                                in_source_file,
+                            ) then {
                                 return si.kind;
                             };
                         };
@@ -136,7 +161,10 @@ given ImportGraph {
 
         // Module/batch import
         for edge in self.edges then {
-            if string_list_eq(edge.source, in_module) and source_file_matches(edge.source_file, in_source_file) then {
+            if string_list_eq(edge.source, in_module) and source_file_matches(
+                edge.source_file,
+                in_source_file,
+            ) then {
                 when edge.kind in {
                     .BatchImport() then {
                         if string_list_eq(symbol_module_path, edge.target) then {
@@ -160,11 +188,7 @@ given ImportGraph {
 // ── LoadedFile ────────────────────────────────────────────────────────────────
 
 // A parsed global node with its source file.
-public type LoadedNode(
-    decl Decl,
-    source_file String,
-    package_id String,
-);
+public type LoadedNode(decl Decl, source_file String, package_id String);
 
 // ── ModuleInfo ────────────────────────────────────────────────────────────────
 
@@ -221,7 +245,9 @@ given ModuleInfo {
         out.push_string("");
         let mutable first = true;
         for seg in self.storage.path then {
-            if not first then { out.push_byte('.');};
+            if not first then {
+                out.push_byte('.');
+            };
             out.push_string(seg);
             first = false;
         };
@@ -239,13 +265,17 @@ given ModuleInfo {
 
     public has_merged_submodule(self, file String) Bool = {
         for f in self.storage.merged_submodules then {
-            if f == file then { return true;};
+            if f == file then {
+                return true;
+            };
         };
         return false;
     };
 
     public add_node(self, decl Decl, source_file String) Void = {
-        self.storage.global_nodes.push(LoadedNode(decl, source_file, self.storage.package_id));
+        self.storage.global_nodes.push(
+            LoadedNode(decl, source_file, self.storage.package_id),
+        );
     };
 };
 
@@ -268,7 +298,7 @@ given CompilationUnit {
             [root_module.path_string()],
             [root_module],
             ImportGraph.new(),
-            Dict[String, String].new()
+            Dict[String, String].new(),
         );
         return CompilationUnit(s);
     };
@@ -283,7 +313,7 @@ given CompilationUnit {
             List[String].new(),
             List[ModuleInfo].new(),
             ImportGraph.new(),
-            Dict[String, String].new()
+            Dict[String, String].new(),
         );
         return CompilationUnit(s);
     };
@@ -291,7 +321,14 @@ given CompilationUnit {
     public root_module(self) ModuleInfo = self.storage.root_module;
     public import_graph(self) ImportGraph = self.storage.import_graph;
 
-    public add_import_edge(self, from List[String], to List[String], kind ImportKind, source_file Option[String], span SourceSpan) Void = {
+    public add_import_edge(
+        self,
+        from List[String],
+        to List[String],
+        kind ImportKind,
+        source_file Option[String],
+        span SourceSpan,
+    ) Void = {
         self.storage.import_graph.add_module_import(from, to, kind, source_file, span);
     };
 
@@ -305,7 +342,15 @@ given CompilationUnit {
         original_symbol Option[String],
         span SourceSpan,
     ) Void = {
-        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file, original_symbol, span);
+        self.storage.import_graph.add_symbol_import(
+            module,
+            target,
+            symbol,
+            kind,
+            source_file,
+            original_symbol,
+            span,
+        );
     };
 
     // 合并另一个编译单元的导入图（用于标准库合并）
@@ -336,7 +381,9 @@ given CompilationUnit {
     public add_module(self, module ModuleInfo) Void = {
         let key = module.path_string();
         for p in self.storage.loaded_module_paths then {
-            if p == key then { return;};
+            if p == key then {
+                return;
+            };
         };
 
         let mutable insert_at = self.storage.loaded_modules.count();
@@ -355,7 +402,9 @@ given CompilationUnit {
 
     public has_module(self, path_string String) Bool = {
         for p in self.storage.loaded_module_paths then {
-            if p == path_string then { return true;};
+            if p == path_string then {
+                return true;
+            };
         };
         return false;
     };
@@ -403,7 +452,10 @@ given CompilationUnit {
     public collect_all_nodes_with_path_sorted(self) List[Pair[LoadedNode, List[String]]] =
         self.collect_all_nodes_with_path();
 
-    public collect_nodes_with_path_for_module(self, path_string String) List[Pair[LoadedNode, List[String]]] = {
+    public collect_nodes_with_path_for_module(
+        self,
+        path_string String,
+    ) List[Pair[LoadedNode, List[String]]] = {
         let mutable result = List[Pair[LoadedNode, List[String]]].new();
         when self.get_module(path_string) in {
             .Some(module) then {
@@ -421,21 +473,24 @@ given CompilationUnit {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 public let string_list_eq(a List[String], b List[String]) Bool = {
-    if a.count() <> b.count() then { return false;};
+    if a.count() <> b.count() then {
+        return false;
+    };
     for i in 0..<a.count() then {
-        if a[i] <> b[i] then { return false;};
+        if a[i] <> b[i] then {
+            return false;
+        };
     };
     return true;
 };
 
-public let source_file_matches(stored Option[String], current Option[String]) Bool =
-    when stored in {
-        .None() then true,
-        .Some(s) then when current in {
-            .Some(c) then source_file_paths_equal(s, c),
-            .None() then false,
-        },
-    };
+public let source_file_matches(stored Option[String], current Option[String]) Bool = when stored in {
+    .None() then true,
+    .Some(s) then when current in {
+        .Some(c) then source_file_paths_equal(s, c),
+        .None() then false,
+    },
+};
 
 /// 与「两侧各自做 `\`→`/` 规范化后比较」等价，但不分配。
 ///
@@ -457,8 +512,12 @@ file_private let source_file_paths_equal(a String, b String) Bool = {
     while i < len then {
         let mutable x = ap[i];
         let mutable y = bp[i];
-        if x == 92(UInt8) then { x = 47(UInt8); };
-        if y == 92(UInt8) then { y = 47(UInt8); };
+        if x == 92(UInt8) then {
+            x = 47(UInt8);
+        };
+        if y == 92(UInt8) then {
+            y = 47(UInt8);
+        };
         if x <> y then {
             return false;
         };
@@ -473,7 +532,9 @@ public let join_path(segments List[String], sep String) String = {
     out.push_string("");
     let mutable first = true;
     for seg in segments then {
-        if not first then { out.push_string(sep);};
+        if not first then {
+            out.push_string(sep);
+        };
         out.push_string(seg);
         first = false;
     };
@@ -489,7 +550,9 @@ public let validate_module_name(name String) Option[String] = {
     for c in name.runes() then {
         if first then {
             if c < 'a' or c > 'z' then {
-                return Option[String].Some("Module name must start with a lowercase letter");
+                return Option[String].Some(
+                    "Module name must start with a lowercase letter",
+                );
             };
             first = false;
         } else {

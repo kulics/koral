@@ -149,11 +149,63 @@ public trait Integer Numeric and Div[Self] and Rem[Self] {
 
 ## Given Implementations
 ```koral
+given Float64 as Numeric {};
+
 given Float64 as Default {
     public default() Self;
 };
 
+given Float64 as FloatingPoint {};
+
+given Float64 as FloatMath {};
+
+given Float32 as Numeric {};
+
 given Float32 as Default {
     public default() Self;
 };
+
+given Float32 as FloatingPoint {};
+
+given Float32 as FloatMath {};
+
+given Int8 as Numeric {};
+
+given Int8 as Integer {};
+
+given Int16 as Numeric {};
+
+given Int16 as Integer {};
+
+given Int32 as Numeric {};
+
+given Int32 as Integer {};
+
+given Int64 as Numeric {};
+
+given Int64 as Integer {};
+
+given UInt8 as Numeric {};
+
+given UInt8 as Integer {};
+
+given UInt16 as Numeric {};
+
+given UInt16 as Integer {};
+
+given UInt32 as Numeric {};
+
+given UInt32 as Integer {};
+
+given UInt64 as Numeric {};
+
+given UInt64 as Integer {};
+
+given Int as Numeric {};
+
+given Int as Integer {};
+
+given UInt as Integer {};
+
+given UInt as Numeric {};
 ```

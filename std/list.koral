@@ -7,7 +7,11 @@
 // ============================================================================
 // List Type Definition
 // ============================================================================
-public type mutable List[T Any](module_private mutable source *unsafe mutable T, module_private mutable len UInt, module_private mutable cap UInt);
+public type mutable List[T Any](
+    module_private mutable source *unsafe mutable T,
+    module_private mutable len UInt,
+    module_private mutable cap UInt,
+);
 
 given[T Any] List[T] as Drop {
 
@@ -19,7 +23,10 @@ given[T Any] List[T] as Drop {
     };
 };
 
-public type mutable ListIterator[T Any](module_private source List[T], module_private mutable index UInt);
+public type mutable ListIterator[T Any](
+    module_private source List[T],
+    module_private mutable index UInt,
+);
 
 // ============================================================================
 // List Methods
@@ -48,7 +55,8 @@ given[T Any] List[T] {
     file_private ensure_capacity(self, min_capacity UInt) Void = {
         if min_capacity > self.cap then {
             // 从 0 起步时先要一块够用的容量，避免 1,2,3… 逐个翻倍。
-            let mutable new_cap = if self.cap == 0(UInt) then 8(UInt) else self.cap * 2(UInt);
+            let mutable new_cap = if self.cap == 0(UInt) then 8(UInt)
+            else self.cap * 2(UInt);
             if new_cap < min_capacity then {
                 new_cap = min_capacity;
             };
@@ -70,14 +78,12 @@ given[T Any] List[T] {
         self.len = self.len + 1;
     };
 
-    public push_list(self, other List[T]) Void = {
-        self.push_sublist(other, ..);
-    };
-
-    public push_sublist(self, other List[T], range Range[UInt]) Void = {
-        let span = other.slice_spec(range);
-        let start = span.start();
-        let end = span.end();
+    // `span` picks which slice of `other` to append, defaulting to all of it --
+    // the same shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
+    public push_list(self, other List[T], span: Range[UInt] = ..) Void = {
+        let spec = other.slice_spec(span);
+        let start = spec.start();
+        let end = spec.end();
         if end <= start then {
             return;
         };
@@ -99,18 +105,15 @@ given[T Any] List[T] {
         return Option[T].Some(value);
     };
 
-    public insert_list_at(self, index UInt, other List[T]) Void = {
-        self.insert_sublist_at(index, other, ..);
-    };
-
-    public insert_sublist_at(self, index UInt, other List[T], range Range[UInt]) Void = {
+    // `span` picks which slice of `other` to insert, defaulting to all of it.
+    public insert_list_at(self, index UInt, other List[T], span: Range[UInt] = ..) Void = {
         if index > self.len then {
-            panic("List insert_sublist_at index out of bounds");
+            panic("List insert_list_at index out of bounds");
         };
-        let span = other.slice_spec(range);
-        let start = span.start();
-        let end = span.end();
-        let other_len = span.len();
+        let spec = other.slice_spec(span);
+        let start = spec.start();
+        let end = spec.end();
+        let other_len = spec.len();
         if other_len == 0 then {
             return;
         };

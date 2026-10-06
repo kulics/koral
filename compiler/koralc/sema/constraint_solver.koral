@@ -26,9 +26,7 @@ given ConstraintSolverError as Error {
 };
 
 // 类型替换：将类型变量 ID 映射到具体类型。
-public type TypeSubstitution(
-    mapping Dict[UInt, Type],
-);
+public type TypeSubstitution(mapping Dict[UInt, Type]);
 
 given TypeSubstitution {
 
@@ -61,22 +59,30 @@ given TypeSubstitution {
                 while i < params.count() then {
                     let original = params[i].param_type;
                     let substituted = self.apply_impl(original);
-                    if original <> substituted then { changed = true;};
+                    if original <> substituted then {
+                        changed = true;
+                    };
                     new_params.push(substituted);
                     i += 1(UInt);
                 };
                 let original_ret = ret;
                 let substituted_ret = self.apply_impl(original_ret);
-                if original_ret <> substituted_ret then { changed = true;};
+                if original_ret <> substituted_ret then {
+                    changed = true;
+                };
                 if changed then {
-                    Type.FunctionType(types_to_param_entries(new_params), substituted_ret)
+                    Type.FunctionType(
+                        types_to_param_entries(new_params),
+                        substituted_ret,
+                    )
                 } else {
                     t
                 }
             },
             .MutableReferenceType(inner) then {
                 let substituted = self.apply_impl(inner);
-                if inner == substituted then t else Type.MutableReferenceType(substituted)
+                if inner == substituted then t
+                else Type.MutableReferenceType(substituted)
             },
             .ReferenceType(inner) then {
                 let substituted = self.apply_impl(inner);
@@ -96,7 +102,8 @@ given TypeSubstitution {
             },
             .MutableWeakReferenceType(inner) then {
                 let substituted = self.apply_impl(inner);
-                if inner == substituted then t else Type.MutableWeakReferenceType(substituted)
+                if inner == substituted then t
+                else Type.MutableWeakReferenceType(substituted)
             },
             .GenericStruct(template_def_id, args) then {
                 let mutable changed = false;
@@ -105,7 +112,9 @@ given TypeSubstitution {
                 while i < args.count() then {
                     let original = args[i];
                     let substituted = self.apply_impl(original);
-                    if original <> substituted then { changed = true;};
+                    if original <> substituted then {
+                        changed = true;
+                    };
                     new_args.push(substituted);
                     i += 1(UInt);
                 };
@@ -118,7 +127,9 @@ given TypeSubstitution {
                 while i < args.count() then {
                     let original = args[i];
                     let substituted = self.apply_impl(original);
-                    if original <> substituted then { changed = true;};
+                    if original <> substituted then {
+                        changed = true;
+                    };
                     new_args.push(substituted);
                     i += 1(UInt);
                 };
@@ -164,10 +175,19 @@ given ConstraintSolver {
         return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span);
     };
 
-    public fresh_literal_type_variable(self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
+    public fresh_literal_type_variable(
+        self,
+        kind LiteralDefaultKind,
+        span SourceSpan,
+    ) TypeVariable = {
         let id = self.next_type_variable_id;
         self.next_type_variable_id += 1;
-        return TypeVariable(id, Option[String].None(), Option[LiteralDefaultKind].Some(kind), span);
+        return TypeVariable(
+            id,
+            Option[String].None(),
+            Option[LiteralDefaultKind].Some(kind),
+            span,
+        );
     };
 
     // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
@@ -192,9 +212,15 @@ given ConstraintSolver {
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
     public add_constraint(self, c Constraint) Void = {
         when c in {
-            .DefaultInt(_, _) then { self.default_constraints.push(c);},
-            .DefaultFloat(_, _) then { self.default_constraints.push(c);},
-            _ then { self.constraints.push(c);},
+            .DefaultInt(_, _) then {
+                self.default_constraints.push(c);
+            },
+            .DefaultFloat(_, _) then {
+                self.default_constraints.push(c);
+            },
+            _ then {
+                self.constraints.push(c);
+            },
         };
     };
 
@@ -260,7 +286,10 @@ given ConstraintSolver {
         let bindings = self.unifier.current_bindings();
         let mutable resolved_bindings = Dict[UInt, Type].new();
         for entry in bindings then {
-            resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second));
+            resolved_bindings.insert(
+                entry.first,
+                self.unifier.resolve_deep(entry.second),
+            );
         };
         return Result[TypeSubstitution].Ok(TypeSubstitution(resolved_bindings));
     };
@@ -272,7 +301,9 @@ given ConstraintSolver {
                 let result = self.unifier.unify(lhs, rhs, span);
                 when result in {
                     .Error(e) then {
-                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
+                        self.errors.push(
+                            ConstraintSolverError.UnificationFailed(e.message(), span),
+                        );
                     },
                     .Ok(_) then {},
                 };
@@ -281,12 +312,18 @@ given ConstraintSolver {
                 // 创建泛型实例类型并与类型变量合一。
                 // 使用注册的 enum 类型名称集合判断是 struct 还是 enum。
                 let is_enum = self.enum_type_names.contains(template);
-                let template_def_id = self.template_def_ids.get(template) or else def_id_invalid();
-                let mutable instance_type = if is_enum then Type.GenericEnum(template_def_id, self.types_to_refs(args)) else Type.GenericStruct(template_def_id, self.types_to_refs(args));
+                let template_def_id = self.template_def_ids.get(template) or else def_id_invalid(
+                );
+                let mutable instance_type = if is_enum then Type.GenericEnum(
+                    template_def_id,
+                    self.types_to_refs(args),
+                ) else Type.GenericStruct(template_def_id, self.types_to_refs(args));
                 let result = self.unifier.unify(Type.TypeVar(tv), instance_type, span);
                 when result in {
                     .Error(e) then {
-                        self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
+                        self.errors.push(
+                            ConstraintSolverError.UnificationFailed(e.message(), span),
+                        );
                     },
                     .Ok(_) then {},
                 };
@@ -297,7 +334,9 @@ given ConstraintSolver {
                 // 如果类型仍包含类型变量，重新入队稍后处理。
                 let still_has_tv = self.type_contains_tv(resolved);
                 if still_has_tv then {
-                    self.constraints.push(Constraint.TraitBound(resolved, trait_name, span));
+                    self.constraints.push(
+                        Constraint.TraitBound(resolved, trait_name, span),
+                    );
                 };
                 // 完整的 trait 一致性检查在 check_decl 阶段的 TraitChecker 中完成。
             },
@@ -314,10 +353,19 @@ given ConstraintSolver {
                 // 若类型变量仍未解决，应用默认类型 Int
                 when resolved in {
                     .TypeVar(_) then {
-                        let result = self.unifier.unify(Type.TypeVar(tv), Type.IntType(), span);
+                        let result = self.unifier.unify(
+                            Type.TypeVar(tv),
+                            Type.IntType(),
+                            span,
+                        );
                         when result in {
                             .Error(e) then {
-                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
+                                self.errors.push(
+                                    ConstraintSolverError.UnificationFailed(
+                                        e.message(),
+                                        span,
+                                    ),
+                                );
                             },
                             .Ok(_) then {},
                         };
@@ -330,10 +378,19 @@ given ConstraintSolver {
                 // 若类型变量仍未解决，应用默认类型 Float64
                 when resolved in {
                     .TypeVar(_) then {
-                        let result = self.unifier.unify(Type.TypeVar(tv), Type.Float64Type(), span);
+                        let result = self.unifier.unify(
+                            Type.TypeVar(tv),
+                            Type.Float64Type(),
+                            span,
+                        );
                         when result in {
                             .Error(e) then {
-                                self.errors.push(ConstraintSolverError.UnificationFailed(e.message(), span));
+                                self.errors.push(
+                                    ConstraintSolverError.UnificationFailed(
+                                        e.message(),
+                                        span,
+                                    ),
+                                );
                             },
                             .Ok(_) then {},
                         };
@@ -360,7 +417,9 @@ given ConstraintSolver {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
                 for entry in params then {
-                    if self.type_contains_tv(entry.param_type) then { return true;};
+                    if self.type_contains_tv(entry.param_type) then {
+                        return true;
+                    };
                 };
                 self.type_contains_tv(ret)
             },
@@ -372,13 +431,17 @@ given ConstraintSolver {
             .MutableWeakReferenceType(inner) then self.type_contains_tv(inner),
             .GenericStruct(_, args) then {
                 for a in args then {
-                    if self.type_contains_tv(a) then { return true;};
+                    if self.type_contains_tv(a) then {
+                        return true;
+                    };
                 };
                 false
             },
             .GenericEnum(_, args) then {
                 for a in args then {
-                    if self.type_contains_tv(a) then { return true;};
+                    if self.type_contains_tv(a) then {
+                        return true;
+                    };
                 };
                 false
             },

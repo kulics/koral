@@ -140,12 +140,16 @@ given SocketAddr as Eq {
     public equals(self, other SocketAddr) Bool;
 };
 
+given TcpListener as Drop {};
+
 given TcpListener {
     public fd(self) Int;
     public bind[T IntoSocketAddr](addr T) Result[TcpListener];
     public accept(self) Result[Pair[TcpSocket, SocketAddr]];
     public local_addr(self) Result[SocketAddr];
 };
+
+given TcpSocket as Drop {};
 
 given TcpSocket {
     public fd(self) Int;
@@ -170,14 +174,16 @@ given TcpSocket as Writer {
     public flush(self) Result[Void];
 };
 
+given UdpSocket as Drop {};
+
 given UdpSocket {
     public fd(self) Int;
     public bind[T IntoSocketAddr](addr T) Result[UdpSocket];
-    public send_to[T IntoSocketAddr](self, addr T, from: List[UInt8], span: Range[UInt]) Result[UInt];
-    public recv_from(self, into: List[UInt8], span: Range[UInt]) Result[Pair[UInt, SocketAddr]];
+    public send_to[T IntoSocketAddr](self, addr T, from: List[UInt8], span: Range[UInt] = ..) Result[UInt];
+    public recv_from(self, into: List[UInt8], span: Range[UInt] = ..) Result[Pair[UInt, SocketAddr]];
     public connect[T IntoSocketAddr](self, addr T) Result[Void];
-    public send(self, from: List[UInt8], span: Range[UInt]) Result[UInt];
-    public recv(self, into: List[UInt8], span: Range[UInt]) Result[UInt];
+    public send(self, from: List[UInt8], span: Range[UInt] = ..) Result[UInt];
+    public recv(self, into: List[UInt8], span: Range[UInt] = ..) Result[UInt];
     public local_addr(self) Result[SocketAddr];
     public peer_addr(self) Result[SocketAddr];
     public set_broadcast(self, broadcast Bool) Result[Void];

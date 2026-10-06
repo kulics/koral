@@ -11,10 +11,7 @@ This page lists the public API of module `Std.Json` (declaration-only syntax), o
 
 ## Types
 ```koral
-public type JsonError(
-    msg String,
-    position UInt,
-);
+public type JsonError(msg String, position UInt);
 
 public type JsonValue {
     Null(),
@@ -56,6 +53,8 @@ given JsonValue {
 given JsonValue as Eq {
     public equals(self, other JsonValue) Bool;
 };
+
+given JsonParser {};
 
 given JsonValue as Parseable {
     public parse(s String) Result[Self];

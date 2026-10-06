@@ -6,7 +6,13 @@ using "std";
 // Uses compile-time static dispatch (generics, not trait objects).
 // ============================================================================
 
-public type mutable BufReader[R Reader](file_private inner R, file_private mutable buf List[UInt8], file_private cap UInt, file_private mutable start UInt, file_private mutable end UInt);
+public type mutable BufReader[R Reader](
+    file_private inner R,
+    file_private mutable buf List[UInt8],
+    file_private cap UInt,
+    file_private mutable start UInt,
+    file_private mutable end UInt,
+);
 
 given[R Reader] BufReader[R] {
 
@@ -59,7 +65,11 @@ given[R Reader] BufReader[R] {
                     .None() then Result[Option[Rune]].Ok(Option[Rune].None()),
                     .Some(first) then {
                         if first < 128(UInt8) then {
-                            return Result[Option[Rune]].Ok(Option[Rune].Some(Rune.from_uint32_unchecked(first(UInt32))));
+                            return Result[Option[Rune]].Ok(
+                                Option[Rune].Some(
+                                    Rune.from_uint32_unchecked(first(UInt32)),
+                                ),
+                            );
                         };
 
                         let mutable needed UInt = 0;
@@ -87,11 +97,15 @@ given[R Reader] BufReader[R] {
                                 .Ok(next_opt) then {
                                     when next_opt in {
                                         .None() then {
-                                            return Result[Option[Rune]].Error("invalid UTF-8 sequence");
+                                            return Result[Option[Rune]].Error(
+                                                "invalid UTF-8 sequence",
+                                            );
                                         },
                                         .Some(next_byte) then {
                                             if next_byte < 128(UInt8) or next_byte > 191(UInt8) then {
-                                                return Result[Option[Rune]].Error("invalid UTF-8 sequence");
+                                                return Result[Option[Rune]].Error(
+                                                    "invalid UTF-8 sequence",
+                                                );
                                             };
                                             code = (code << 6) | ((next_byte & 63(UInt8))(UInt32));
                                         },
@@ -113,7 +127,9 @@ given[R Reader] BufReader[R] {
 
                         return when Rune.from_uint32(code) in {
                             .Ok(r) then Result[Option[Rune]].Ok(Option[Rune].Some(r)),
-                            .Error(_) then Result[Option[Rune]].Error("invalid UTF-8 sequence"),
+                            .Error(_) then Result[Option[Rune]].Error(
+                                "invalid UTF-8 sequence",
+                            ),
                         };
                     },
                 };
@@ -121,11 +137,18 @@ given[R Reader] BufReader[R] {
         };
     };
 
-    public read_until(self, delim UInt8, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
-        let span = into.slice_spec(span);
-        let base = span.start();
+    // `span` bounds where the delimiter is looked for and where bytes land,
+    // defaulting to the whole buffer like `Reader.read`.
+    public read_until(
+        self,
+        delim UInt8,
+        into: List[UInt8],
+        span: Range[UInt] = ..,
+    ) Result[UInt] = {
+        let spec = into.slice_spec(span);
+        let base = spec.start();
         let mutable out_pos = base;
-        let out_end = span.end();
+        let out_end = spec.end();
         if out_end <= out_pos then {
             return Result[UInt].Ok(0);
         };

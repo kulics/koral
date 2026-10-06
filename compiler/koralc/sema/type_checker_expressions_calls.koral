@@ -1,11 +1,15 @@
-
 using "std/os" { IntoPath, env, read_text_file };
 
 given TypeChecker {
-    module_private typed_generic_function_callee_for_call(self, callee Expr) Option[TypedExpr] = {
+    module_private typed_generic_function_callee_for_call(
+        self,
+        callee Expr,
+    ) Option[TypedExpr] = {
         return when callee in {
             .GenericInstantiation(base, _, _) then {
-                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(
+                    base,
+                ) is .Some(_) then {
                     return Option[TypedExpr].None();
                 };
 
@@ -14,7 +18,9 @@ given TypeChecker {
                     .None() then self.storage.global_scope.lookup(base),
                 };
                 when fn_lookup in {
-                    .Some(sym) then Option[TypedExpr].Some(make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type)),
+                    .Some(sym) then Option[TypedExpr].Some(
+                        make_typed_expr(TypedExprKind.Variable(sym), sym.symbol_type),
+                    ),
                     .None() then Option[TypedExpr].None(),
                 }
             },
@@ -22,7 +28,10 @@ given TypeChecker {
         };
     };
 
-    module_private generic_function_template_for_callee(self, callee TypedExpr) Option[GenericFunctionTemplate] = {
+    module_private generic_function_template_for_callee(
+        self,
+        callee TypedExpr,
+    ) Option[GenericFunctionTemplate] = {
         return when callee.expr_kind in {
             .Variable(sym) then {
                 if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
@@ -34,10 +43,16 @@ given TypeChecker {
         };
     };
 
-    module_private explicit_generic_function_type_args(self, callee Expr, scope Scope) List[Type] = {
+    module_private explicit_generic_function_type_args(
+        self,
+        callee Expr,
+        scope Scope,
+    ) List[Type] = {
         return when callee in {
             .GenericInstantiation(base, type_args, _) then {
-                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(
+                    base,
+                ) is .Some(_) then {
                     return List[Type].new();
                 };
                 let mutable resolved = List[Type].new();
@@ -50,7 +65,11 @@ given TypeChecker {
         };
     };
 
-    module_private raw_generic_function_param_type(self, template GenericFunctionTemplate, param_index UInt) Option[Type] = {
+    module_private raw_generic_function_param_type(
+        self,
+        template GenericFunctionTemplate,
+        param_index UInt,
+    ) Option[Type] = {
         if param_index >= template.parameters.count() then {
             return Option[Type].None();
         };
@@ -61,10 +80,20 @@ given TypeChecker {
             // instead of falling through to a same-named global.
             generic_scope.define_generic_param(tp.name);
         };
-        return Option[Type].Some(self.resolve_type_in_scope(template.parameters[param_index].param_type, generic_scope));
+        return Option[Type].Some(
+            self.resolve_type_in_scope(
+                template.parameters[param_index].param_type,
+                generic_scope,
+            ),
+        );
     };
 
-    module_private initial_generic_function_bindings(self, callee Expr, typed_callee TypedExpr, scope Scope) Option[Dict[String, Type]] = {
+    module_private initial_generic_function_bindings(
+        self,
+        callee Expr,
+        typed_callee TypedExpr,
+        scope Scope,
+    ) Option[Dict[String, Type]] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Dict[String, Type]].None();
         };
@@ -76,12 +105,18 @@ given TypeChecker {
         let mutable bindings = Dict[String, Type].new();
         if not explicit_type_args.is_empty() then {
             if explicit_type_args.count() <> template.type_parameters.count() then {
-                self.push_diagnostic("Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())", expr_span(callee));
+                self.push_diagnostic(
+                    "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())",
+                    expr_span(callee),
+                );
                 return Option[Dict[String, Type]].None();
             };
             let mutable idx UInt = 0;
             while idx < template.type_parameters.count() then {
-                bindings.insert(template.type_parameters[idx].name, explicit_type_args[idx]);
+                bindings.insert(
+                    template.type_parameters[idx].name,
+                    explicit_type_args[idx],
+                );
                 idx += 1;
             };
         };
@@ -101,14 +136,19 @@ given TypeChecker {
                 .None() then List[Type].new(),
             },
             // Identity: the template's DECLARATION, not its spelling.
-            .GenericStruct(template_def_id, args) then when self.storage.generic_templates.struct_by_def_id(template_def_id) in {
-                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
+            .GenericStruct(template_def_id, args) then when self.storage.generic_templates.struct_by_def_id(
+                template_def_id,
+            ) in {
+                .Some(struct_template) then when self.context().get_struct_fields(
+                    struct_template.def_id,
+                ) in {
                     .Some(fields) then {
                         let mutable bindings = Dict[String, Type].new();
                         let mutable i UInt = 0;
                         let param_count = struct_template.type_parameters.count();
                         let arg_count = args.count();
-                        let n = if param_count < arg_count then param_count else arg_count;
+                        let n = if param_count < arg_count then param_count
+                        else arg_count;
                         while i < n then {
                             let tp = struct_template.type_parameters[i];
                             bindings.insert(tp.name, (args[i]));
@@ -116,7 +156,9 @@ given TypeChecker {
                         };
                         let mutable types = List[Type].new();
                         for field in fields then {
-                            types.push(self.apply_type_bindings(field.field_type, bindings));
+                            types.push(
+                                self.apply_type_bindings(field.field_type, bindings),
+                            );
                         };
                         types
                     },
@@ -128,7 +170,11 @@ given TypeChecker {
         };
     };
 
-    module_private constructor_matches_expected_type(self, constructor_type Type, expected_type Type) Bool = {
+    module_private constructor_matches_expected_type(
+        self,
+        constructor_type Type,
+        expected_type Type,
+    ) Bool = {
         // Identity: compare DECLARATIONS. An instance points at its template, so
         // a nominal and a generic match when they share one template. Nothing
         // here reads a spelling -- two same-named types from different modules
@@ -136,26 +182,40 @@ given TypeChecker {
         return when constructor_type in {
             .StructureType(def_id) then when expected_type in {
                 .StructureType(expected_def_id) then def_id.id == expected_def_id.id,
-                .GenericStruct(expected_def_id, _) then self.context().template_declaration(def_id) == expected_def_id,
+                .GenericStruct(expected_def_id, _) then self.context().template_declaration(
+                    def_id,
+                ) == expected_def_id,
                 _ then false,
             },
             .GenericStruct(template_def_id, _) then when expected_type in {
                 .GenericStruct(expected_def_id, _) then template_def_id == expected_def_id,
-                .StructureType(expected_def_id) then self.context().template_declaration(expected_def_id) == template_def_id,
+                .StructureType(expected_def_id) then self.context().template_declaration(
+                    expected_def_id,
+                ) == template_def_id,
                 _ then false,
             },
             _ then false,
         };
     };
 
-    module_private resolved_constructor_type_or_unknown(self, callee Expr, scope Scope) Type = {
+    module_private resolved_constructor_type_or_unknown(
+        self,
+        callee Expr,
+        scope Scope,
+    ) Type = {
         return when callee in {
-            .Identifier(name, _) then when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
+            .Identifier(name, _) then when self.try_resolve_named_type_in_scope_without_diag(
+                name,
+                scope,
+            ) in {
                 .Some(t) then t,
                 .None() then Type.Unknown(),
             },
             .GenericInstantiation(base, type_args, _) then {
-                let resolved_base = self.try_resolve_named_type_in_scope_without_diag(base, scope) or else {
+                let resolved_base = self.try_resolve_named_type_in_scope_without_diag(
+                    base,
+                    scope,
+                ) or else {
                     return Type.Unknown();
                 };
                 let mutable resolved_args = List[Type].new();
@@ -166,15 +226,29 @@ given TypeChecker {
                     .StructureType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base;
                         let template_def_id = self.context().get_template_def_id(def_id);
-                        Type.GenericStruct(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
+                        Type.GenericStruct(
+                            if template_def_id.is_valid() then template_def_id
+                            else def_id,
+                            resolved_args,
+                        )
                     },
                     .EnumType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base;
                         let template_def_id = self.context().get_template_def_id(def_id);
-                        Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
+                        Type.GenericEnum(
+                            if template_def_id.is_valid() then template_def_id
+                            else def_id,
+                            resolved_args,
+                        )
                     },
-                    .GenericStruct(template_def_id, _) then Type.GenericStruct(template_def_id, resolved_args),
-                    .GenericEnum(template_def_id, _) then Type.GenericEnum(template_def_id, resolved_args),
+                    .GenericStruct(template_def_id, _) then Type.GenericStruct(
+                        template_def_id,
+                        resolved_args,
+                    ),
+                    .GenericEnum(template_def_id, _) then Type.GenericEnum(
+                        template_def_id,
+                        resolved_args,
+                    ),
                     _ then resolved_base,
                 }
             },
@@ -189,19 +263,30 @@ given TypeChecker {
         };
     };
 
-    module_private resolve_expected_constructor_param_types(self, callee Expr, expected Option[Type], scope Scope) List[Type] = {
+    module_private resolve_expected_constructor_param_types(
+        self,
+        callee Expr,
+        expected Option[Type],
+        scope Scope,
+    ) List[Type] = {
         if expected is .Some(expected_type) then {
             when callee in {
                 .MemberPath(_, path, _) then {
                     if not path.is_empty() then {
-                        let enum_case_param_types = self.get_enum_case_field_types(expected_type, path[path.count() - 1(UInt)]);
+                        let enum_case_param_types = self.get_enum_case_field_types(
+                            expected_type,
+                            path[path.count() - 1(UInt)],
+                        );
                         if not enum_case_param_types.is_empty() then {
                             return enum_case_param_types;
                         };
                     };
                 },
                 .StaticMethodCall(_, _, method_name, _, _) then {
-                    let enum_case_param_types = self.get_enum_case_field_types(expected_type, method_name);
+                    let enum_case_param_types = self.get_enum_case_field_types(
+                        expected_type,
+                        method_name,
+                    );
                     if not enum_case_param_types.is_empty() then {
                         return enum_case_param_types;
                     };
@@ -210,7 +295,10 @@ given TypeChecker {
             };
         };
 
-        let mutable constructor_type = self.resolved_constructor_type_or_unknown(callee, scope);
+        let mutable constructor_type = self.resolved_constructor_type_or_unknown(
+            callee,
+            scope,
+        );
         if constructor_type is .Unknown() then {
             return List[Type].new();
         };
@@ -218,7 +306,10 @@ given TypeChecker {
         let direct_param_types = self.constructor_direct_param_types(constructor_type);
         if expected is .Some(_) then {
             let mutable expected_type = self.option_type_or_unknown(expected);
-            if not (expected_type is .Unknown()) and self.constructor_matches_expected_type(constructor_type, expected_type) then {
+            if not (expected_type is .Unknown()) and self.constructor_matches_expected_type(
+                constructor_type,
+                expected_type,
+            ) then {
                 return self.struct_constructor_param_types(expected_type);
             };
         } else if not direct_param_types.is_empty() then {
@@ -227,7 +318,13 @@ given TypeChecker {
         return direct_param_types;
     };
 
-    module_private infer_generic_function_bindings(self, callee Expr, typed_callee TypedExpr, typed_args List[TypedExpr], scope Scope) Option[Dict[String, Type]] = {
+    module_private infer_generic_function_bindings(
+        self,
+        callee Expr,
+        typed_callee TypedExpr,
+        typed_args List[TypedExpr],
+        scope Scope,
+    ) Option[Dict[String, Type]] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Dict[String, Type]].None();
         };
@@ -240,12 +337,18 @@ given TypeChecker {
 
         if not explicit_type_args.is_empty() then {
             if explicit_type_args.count() <> template.type_parameters.count() then {
-                self.push_diagnostic("Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())", expr_span(callee));
+                self.push_diagnostic(
+                    "Type mismatch: expected \(template.type_parameters.count()) generic arguments, got \(explicit_type_args.count())",
+                    expr_span(callee),
+                );
                 return Option[Dict[String, Type]].None();
             };
             let mutable idx UInt = 0;
             while idx < template.type_parameters.count() then {
-                bindings.insert(template.type_parameters[idx].name, explicit_type_args[idx]);
+                bindings.insert(
+                    template.type_parameters[idx].name,
+                    explicit_type_args[idx],
+                );
                 idx += 1;
             };
         } else {
@@ -258,8 +361,15 @@ given TypeChecker {
             };
             let mutable idx UInt = 0;
             while idx < template.parameters.count() and idx < typed_args.count() then {
-                let mutable expected_type = self.resolve_type_in_scope(template.parameters[idx].param_type, generic_scope);
-                bindings = self.infer_type_bindings_persistent(expected_type, typed_args[idx].expr_type, bindings);
+                let mutable expected_type = self.resolve_type_in_scope(
+                    template.parameters[idx].param_type,
+                    generic_scope,
+                );
+                bindings = self.infer_type_bindings_persistent(
+                    expected_type,
+                    typed_args[idx].expr_type,
+                    bindings,
+                );
                 idx += 1;
             };
         };
@@ -284,7 +394,12 @@ given TypeChecker {
         };
         let mutable bindings = inferred_bindings;
         if bindings.is_empty() then {
-            bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+            bindings = self.infer_generic_function_bindings(
+                callee,
+                typed_callee,
+                typed_args,
+                scope,
+            ) or else {
                 return Option[Type].None();
             };
         };
@@ -302,11 +417,17 @@ given TypeChecker {
         };
         when expected in {
             .Some(expected_type) then {
-                bindings = self.infer_type_bindings_persistent(generic_return_type, expected_type, bindings);
+                bindings = self.infer_type_bindings_persistent(
+                    generic_return_type,
+                    expected_type,
+                    bindings,
+                );
             },
             .None() then {},
         };
-        return Option[Type].Some(self.apply_type_bindings(generic_return_type, bindings));
+        return Option[Type].Some(
+            self.apply_type_bindings(generic_return_type, bindings),
+        );
     };
 
     module_private validate_generic_function_call_constraints(
@@ -319,9 +440,13 @@ given TypeChecker {
     ) Void = {
         when self.generic_function_template_for_callee(typed_callee) in {
             .Some(template) then {
-                if template.type_parameters.is_empty() then {
-                } else {
-                    let bindings = if inferred_bindings.is_empty() then self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) else Option[Dict[String, Type]].Some(inferred_bindings);
+                if template.type_parameters.is_empty() then {} else {
+                    let bindings = if inferred_bindings.is_empty() then self.infer_generic_function_bindings(
+                        callee,
+                        typed_callee,
+                        typed_args,
+                        scope,
+                    ) else Option[Dict[String, Type]].Some(inferred_bindings);
                     when bindings in {
                         .Some(resolved_bindings) then {
                             for tp in template.type_parameters then {
@@ -331,13 +456,23 @@ given TypeChecker {
                                         // whose visibility can be checked.
                                         when bound_trait_name(constraint) in {
                                             .Some(trait_name) then {
-                                                when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
+                                                when self.storage.trait_registry.get_in_module(
+                                                    trait_name,
+                                                    self.storage.module_path,
+                                                ) in {
                                                     .Some(info) then {
                                                         if self.make_visibility_checker() is .Some(checker) then {
-                                                            when checker.check_symbol(info.module_path, trait_name, false) in {
+                                                            when checker.check_symbol(
+                                                                info.module_path,
+                                                                trait_name,
+                                                                false,
+                                                            ) in {
                                                                 .Ok(_) then {},
                                                                 .Error(message) then {
-                                                                    self.push_typed_expr_diagnostic(typed_callee, message.message());
+                                                                    self.push_typed_expr_diagnostic(
+                                                                        typed_callee,
+                                                                        message.message(),
+                                                                    );
                                                                     return;
                                                                 },
                                                             };
@@ -348,20 +483,24 @@ given TypeChecker {
                                             },
                                             .None() then {},
                                         };
-                                        if not self.enforce_bound_requirement(bound_type, constraint, tp.name, resolved_bindings, expr_span(callee)) then {
+                                        if not self.enforce_bound_requirement(
+                                            bound_type,
+                                            constraint,
+                                            tp.name,
+                                            resolved_bindings,
+                                            expr_span(callee),
+                                        ) then {
                                             return;
                                         };
                                     };
                                 };
                             };
                         },
-                        .None() then {
-                        },
+                        .None() then {},
                     };
                 };
             },
-            .None() then {
-            },
+            .None() then {},
         };
     };
 
@@ -404,7 +543,9 @@ given TypeChecker {
                     if self.is_mutable_ref_like_type(current) then {
                         mutable_path = true;
                         if is_last then {
-                            return segment.is_mutable() or self.is_mutable_ref_like_type(segment_type);
+                            return segment.is_mutable() or self.is_mutable_ref_like_type(
+                                segment_type,
+                            );
                         };
                     } else if self.is_read_only_ref_like_type(current) then {
                         mutable_path = false;
@@ -413,7 +554,9 @@ given TypeChecker {
                         };
                     } else if is_last then {
                         return mutable_path and segment.is_mutable();
-                    } else if not segment.is_mutable() and not self.is_mutable_ref_like_type(segment_type) then {
+                    } else if not segment.is_mutable() and not self.is_mutable_ref_like_type(
+                        segment_type,
+                    ) then {
                         mutable_path = false;
                     };
                     current = segment_type;
@@ -463,7 +606,9 @@ given TypeChecker {
                 let mutable idx UInt = 0;
                 while not can_take and idx < path.count() then {
                     let mutable segment_type = path[idx].symbol_type;
-                    can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(segment_type);
+                    can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(
+                        segment_type,
+                    );
                     current = segment_type;
                     idx += 1;
                 };
@@ -497,7 +642,8 @@ given TypeChecker {
             .StringLiteral(value, _) then Option[String].Some("\"" + value + "\""),
             .IntegerLiteral(value, _) then Option[String].Some(value),
             .FloatLiteral(value, _) then Option[String].Some(value),
-            .BoolLiteral(value, _) then if value then Option[String].Some("true") else Option[String].Some("false"),
+            .BoolLiteral(value, _) then if value then Option[String].Some("true")
+            else Option[String].Some("false"),
             .MemberPath(base, path, _) then if self.render_call_site_expr_text(base) is .Some(base_text) then {
                 let mutable out = base_text;
                 for part in path then {
@@ -511,7 +657,11 @@ given TypeChecker {
         };
     };
 
-    module_private call_site_lookup_text(self, callee Expr, args List[Expr]) Option[String] = {
+    module_private call_site_lookup_text(
+        self,
+        callee Expr,
+        args List[Expr],
+    ) Option[String] = {
         if self.render_call_site_expr_text(callee) is .Some(callee_text) then {
             let mutable rendered_args = List[String].new();
             let mutable all_args_rendered = true;
@@ -542,13 +692,22 @@ given TypeChecker {
 
         return when callee in {
             .Identifier(name, _) then Option[String].Some(name + "("),
-            .MemberPath(_, path, _) then if path.is_empty() then Option[String].None() else Option[String].Some(path[path.count() - 1(UInt)] + "("),
-            .StaticMethodCall(_, _, method_name, _, _) then Option[String].Some(method_name + "("),
+            .MemberPath(_, path, _) then if path.is_empty() then Option[String].None()
+            else Option[String].Some(path[path.count() - 1(UInt)] + "("),
+            .StaticMethodCall(_, _, method_name, _, _) then Option[String].Some(
+                method_name + "(",
+            ),
             _ then Option[String].None(),
         };
     };
 
-    module_private format_call_type_mismatch_message(self, callee Expr, args List[Expr], expected_t Type, actual_t Type) String = {
+    module_private format_call_type_mismatch_message(
+        self,
+        callee Expr,
+        args List[Expr],
+        expected_t Type,
+        actual_t Type,
+    ) String = {
         let expected_name = self.display_type_name(expected_t);
         let actual_name = self.display_type_name(actual_t);
         // The location is the diagnostic's span, not part of the message.
@@ -568,12 +727,22 @@ given TypeChecker {
         };
     };
 
-    module_private validate_function_expression_argument_count(self, typed_callee TypedExpr, args List[Expr]) Bool = {
+    module_private validate_function_expression_argument_count(
+        self,
+        typed_callee TypedExpr,
+        args List[Expr],
+    ) Bool = {
         // Skip validation for method-like callees — self is implicit, validated separately.
         when typed_callee.expr_kind in {
-            .MethodReference(_, _, _, _, _, _) then { return true;},
-            .TraitMethodPlaceholder(_, _, _, _, _) then { return true;},
-            .TraitMethodCall(_, _, _, _, _) then { return true;},
+            .MethodReference(_, _, _, _, _, _) then {
+                return true;
+            },
+            .TraitMethodPlaceholder(_, _, _, _, _) then {
+                return true;
+            },
+            .TraitMethodCall(_, _, _, _, _) then {
+                return true;
+            },
             _ then {},
         };
         let callable_type = self.function_like_type(typed_callee.expr_type) or else {
@@ -587,13 +756,19 @@ given TypeChecker {
             return true;
         };
         if args.count() <> param_count then {
-            self.push_diagnostic("Invalid argument count for function expression: expected \(param_count), got \(args.count())", self.typed_expr_span(typed_callee));
+            self.push_diagnostic(
+                "Invalid argument count for function expression: expected \(param_count), got \(args.count())",
+                self.typed_expr_span(typed_callee),
+            );
             return false;
         };
         return true;
     };
 
-    module_private positional_param_specs_for_function_type(self, fn_type Type) List[FunctionParamSpec] = {
+    module_private positional_param_specs_for_function_type(
+        self,
+        fn_type Type,
+    ) List[FunctionParamSpec] = {
         return when fn_type in {
             .FunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params);
@@ -608,7 +783,10 @@ given TypeChecker {
         };
     };
 
-    module_private positional_param_specs_for_count(self, count UInt) List[FunctionParamSpec] = {
+    module_private positional_param_specs_for_count(
+        self,
+        count UInt,
+    ) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new();
         let mutable index UInt = 0;
         while index < count then {
@@ -618,7 +796,10 @@ given TypeChecker {
         return specs;
     };
 
-    module_private drop_first_param_specs(self, specs List[FunctionParamSpec]) List[FunctionParamSpec] = {
+    module_private drop_first_param_specs(
+        self,
+        specs List[FunctionParamSpec],
+    ) List[FunctionParamSpec] = {
         let mutable out = List[FunctionParamSpec].new();
         let mutable index UInt = 1;
         while index < specs.count() then {
@@ -628,8 +809,14 @@ given TypeChecker {
         return out;
     };
 
-    module_private normalize_param_specs_for_count(self, specs List[FunctionParamSpec], expected_count UInt) List[FunctionParamSpec] = {
-        if specs.count() == expected_count + 1(UInt) and not specs.is_empty() and specs[0(UInt)].name == "self" then {
+    module_private normalize_param_specs_for_count(
+        self,
+        specs List[FunctionParamSpec],
+        expected_count UInt,
+    ) List[FunctionParamSpec] = {
+        if specs.count() == expected_count + 1(UInt) and not specs.is_empty() and specs[
+            0(UInt)
+        ].name == "self" then {
             return self.drop_first_param_specs(specs);
         };
         if specs.count() == expected_count then {
@@ -646,8 +833,10 @@ given TypeChecker {
     };
 
     module_private drop_receiver_param_specs(self, method Symbol) List[FunctionParamSpec] = {
-        let param_specs = self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new();
-        let expected_count = if self.method_param_count(method) == 0(UInt) then 0(UInt) else self.method_param_count(method) - 1(UInt);
+        let param_specs = self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(
+        );
+        let expected_count = if self.method_param_count(method) == 0(UInt) then 0(UInt)
+        else self.method_param_count(method) - 1(UInt);
         return self.normalize_param_specs_for_count(param_specs, expected_count);
     };
 
@@ -656,13 +845,19 @@ given TypeChecker {
             .StructureType(def_id) then self.context().get_name(def_id),
             .EnumType(def_id) then self.context().get_name(def_id),
             // Display only: the spelling is read from the declaration.
-            .GenericStruct(template_def_id, _) then Option[String].Some(def_id_spelling(template_def_id)),
-            .GenericEnum(template_def_id, _) then Option[String].Some(def_id_spelling(template_def_id)),
+            .GenericStruct(template_def_id, _) then Option[String].Some(
+                def_id_spelling(template_def_id),
+            ),
+            .GenericEnum(template_def_id, _) then Option[String].Some(
+                def_id_spelling(template_def_id),
+            ),
             .GenericParameter(name) then Option[String].Some(name),
             .ReferenceType(inner) then self.owner_type_name_for_type(inner),
             .MutableReferenceType(inner) then self.owner_type_name_for_type(inner),
             .BorrowedReferenceType(inner) then self.owner_type_name_for_type(inner),
-            .MutableBorrowedReferenceType(inner) then self.owner_type_name_for_type(inner),
+            .MutableBorrowedReferenceType(inner) then self.owner_type_name_for_type(
+                inner,
+            ),
             .WeakReferenceType(inner) then self.owner_type_name_for_type(inner),
             .MutableWeakReferenceType(inner) then self.owner_type_name_for_type(inner),
             _ then Option[String].None(),
@@ -677,7 +872,10 @@ given TypeChecker {
         };
     };
 
-    module_private struct_constructor_param_specs(self, constructor_type Type) List[FunctionParamSpec] = {
+    module_private struct_constructor_param_specs(
+        self,
+        constructor_type Type,
+    ) List[FunctionParamSpec] = {
         let inner_type = when constructor_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -694,8 +892,19 @@ given TypeChecker {
                     for field in fields then {
                         let type_name = self.context().get_name(def_id) or else "";
                         let key1 = "\(type_name).\(field.name)";
-                        let has_def = self.context().parsed_default_values.contains_key(key1) or self.context().parsed_default_values.contains_key(field.name);
-                        specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named, has_def));
+                        let has_def = self.context().parsed_default_values.contains_key(
+                            key1,
+                        ) or self.context().parsed_default_values.contains_key(
+                            field.name,
+                        );
+                        specs.push(
+                            FunctionParamSpec(
+                                field.name,
+                                field.is_mutable,
+                                field.named,
+                                has_def,
+                            ),
+                        );
                     };
                     specs
                 },
@@ -705,13 +914,23 @@ given TypeChecker {
             // fallback -- the type carries the declaration.
             .GenericStruct(template_def_id, _) then {
                 let resolved_def_id = template_def_id;
-                let fields = self.context().get_struct_fields(resolved_def_id) or else List[StructField].new();
+                let fields = self.context().get_struct_fields(resolved_def_id) or else List[StructField].new(
+                );
                 let mutable specs = List[FunctionParamSpec].new();
                 for field in fields then {
                     let type_name = self.context().get_name(resolved_def_id) or else "";
                     let key1 = "\(type_name).\(field.name)";
-                    let has_def = self.context().parsed_default_values.contains_key(key1) or self.context().parsed_default_values.contains_key(field.name);
-                    specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named, has_def));
+                    let has_def = self.context().parsed_default_values.contains_key(
+                        key1,
+                    ) or self.context().parsed_default_values.contains_key(field.name);
+                    specs.push(
+                        FunctionParamSpec(
+                            field.name,
+                            field.is_mutable,
+                            field.named,
+                            has_def,
+                        ),
+                    );
                 };
                 return specs;
             },
@@ -719,7 +938,11 @@ given TypeChecker {
         };
     };
 
-    module_private enum_case_param_specs(self, enum_type Type, case_name String) List[FunctionParamSpec] = {
+    module_private enum_case_param_specs(
+        self,
+        enum_type Type,
+        case_name String,
+    ) List[FunctionParamSpec] = {
         let inner_type = when enum_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -730,16 +953,28 @@ given TypeChecker {
             _ then enum_type,
         };
         return when inner_type in {
-            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(def_id(UInt), case_name),
-            .GenericEnum(template_def_id, _) then when self.context().get_kind(template_def_id) in {
-                .Some(_) then self.context().enum_case_param_specs_by_raw_id(template_def_id.id, case_name),
+            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(
+                def_id(UInt),
+                case_name,
+            ),
+            .GenericEnum(template_def_id, _) then when self.context().get_kind(
+                template_def_id,
+            ) in {
+                .Some(_) then self.context().enum_case_param_specs_by_raw_id(
+                    template_def_id.id,
+                    case_name,
+                ),
                 .None() then List[FunctionParamSpec].new(),
             },
             _ then List[FunctionParamSpec].new(),
         };
     };
 
-    module_private static_member_is_enum_case(self, receiver_type Type, member_name String) Bool = {
+    module_private static_member_is_enum_case(
+        self,
+        receiver_type Type,
+        member_name String,
+    ) Bool = {
         let inner_type = when receiver_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -750,18 +985,33 @@ given TypeChecker {
             _ then receiver_type,
         };
         return when inner_type in {
-            .EnumType(DefId(def_id)) then self.context().enum_has_case_by_raw_id(def_id(UInt), member_name),
+            .EnumType(DefId(def_id)) then self.context().enum_has_case_by_raw_id(
+                def_id(UInt),
+                member_name,
+            ),
             // Identity: the template's DECLARATION, not its spelling.
-            .GenericEnum(template_def_id, _) then when self.storage.generic_templates.enum_by_def_id(template_def_id) in {
-                .Some(enum_template) then self.context().enum_has_case_by_raw_id(enum_template.def_id.id, member_name),
+            .GenericEnum(template_def_id, _) then when self.storage.generic_templates.enum_by_def_id(
+                template_def_id,
+            ) in {
+                .Some(enum_template) then self.context().enum_has_case_by_raw_id(
+                    enum_template.def_id.id,
+                    member_name,
+                ),
                 .None() then false,
             },
             _ then false,
         };
     };
 
-    module_private resolve_static_call_param_specs(self, type_name String, method_name String) List[FunctionParamSpec] = {
-        let bound_specs = self.resolve_generic_bound_method_param_specs(type_name, method_name);
+    module_private resolve_static_call_param_specs(
+        self,
+        type_name String,
+        method_name String,
+    ) List[FunctionParamSpec] = {
+        let bound_specs = self.resolve_generic_bound_method_param_specs(
+            type_name,
+            method_name,
+        );
         if not bound_specs.is_empty() then {
             return bound_specs;
         };
@@ -769,30 +1019,44 @@ given TypeChecker {
         when self.method_owner_for_name(type_name) in {
             .Some(owner) then {
                 when self.context().get_method_param_specs(owner, method_name) in {
-                    .Some(specs) then { return specs; },
+                    .Some(specs) then {
+                        return specs;
+                    },
                     .None() then {},
                 };
                 if self.lookup_method_signature(owner, method_name) is .Some(method) then {
-                    return self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new();
+                    return self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(
+                    );
                 };
             },
             .None() then {},
         };
         return when self.try_resolve_named_type_without_diag(type_name) in {
-            .Some(receiver_type) then self.enum_case_param_specs(receiver_type, method_name),
+            .Some(receiver_type) then self.enum_case_param_specs(
+                receiver_type,
+                method_name,
+            ),
             .None() then List[FunctionParamSpec].new(),
         };
     };
 
-    module_private resolve_qualified_method_param_specs(self, trait_name String, method_name String) List[FunctionParamSpec] = {
+    module_private resolve_qualified_method_param_specs(
+        self,
+        trait_name String,
+        method_name String,
+    ) List[FunctionParamSpec] = {
         when self.storage.trait_registry.flatten_methods(trait_name) in {
             .Ok(methods) then {
                 if methods.get(method_name) is .Some(member) then {
                     let mutable specs = List[FunctionParamSpec].new();
-                    let mutable idx UInt = if member.params.is_empty() or member.params[0(UInt)].name <> "self" then 0(UInt) else 1(UInt);
+                    let mutable idx UInt = if member.params.is_empty() or member.params[
+                        0(UInt)
+                    ].name <> "self" then 0(UInt) else 1(UInt);
                     while idx < member.params.count() then {
                         let p = member.params[idx];
-                        specs.push(FunctionParamSpec(p.name, p.is_mutable, p.named, false));
+                        specs.push(
+                            FunctionParamSpec(p.name, p.is_mutable, p.named, false),
+                        );
                         idx += 1;
                     };
                     return specs;
@@ -806,11 +1070,18 @@ given TypeChecker {
         };
     };
 
-    module_private resolve_generic_bound_method_param_specs(self, type_name String, method_name String) List[FunctionParamSpec] = {
+    module_private resolve_generic_bound_method_param_specs(
+        self,
+        type_name String,
+        method_name String,
+    ) List[FunctionParamSpec] = {
         when self.storage.generic_param_constraints.get(type_name) in {
             .Some(bounds) then {
                 for bound in bounds then {
-                    let specs = self.resolve_qualified_method_param_specs(bound.trait_name, method_name);
+                    let specs = self.resolve_qualified_method_param_specs(
+                        bound.trait_name,
+                        method_name,
+                    );
                     if not specs.is_empty() then {
                         return specs;
                     };
@@ -821,7 +1092,11 @@ given TypeChecker {
         return List[FunctionParamSpec].new();
     };
 
-    module_private resolve_identifier_call_param_specs(self, name String, typed_callee TypedExpr) List[FunctionParamSpec] = {
+    module_private resolve_identifier_call_param_specs(
+        self,
+        name String,
+        typed_callee TypedExpr,
+    ) List[FunctionParamSpec] = {
         if typed_callee.expr_kind is .Variable(sym) then {
             if sym.kind is .TypeSymbol() then {
                 return self.struct_constructor_param_specs(sym.symbol_type);
@@ -838,7 +1113,12 @@ given TypeChecker {
         return self.positional_param_specs_for_function_type(typed_callee.expr_type);
     };
 
-    module_private resolve_method_call_param_specs(self, base_type Type, method Symbol, callee_type Type) List[FunctionParamSpec] = {
+    module_private resolve_method_call_param_specs(
+        self,
+        base_type Type,
+        method Symbol,
+        callee_type Type,
+    ) List[FunctionParamSpec] = {
         let method_name = self.context().symbol_name(method);
         when self.find_trait_constraint_for_method(base_type, method_name) in {
             .Some(trait_name) then {
@@ -849,20 +1129,29 @@ given TypeChecker {
         // Owner IDENTITY of the receiver -- `owner_type_name_for_type` returned a
         // spelling and two same-named types shared one param-spec bucket.
         let receiver_owner = self.extension_template_key(base_type);
-        let owner_specs = self.context().get_method_param_specs(receiver_owner, method_name);
+        let owner_specs = self.context().get_method_param_specs(
+            receiver_owner,
+            method_name,
+        );
         let expected_count = when owner_specs in {
             .Some(specs) then self.declared_call_param_count(specs),
             .None() then {
                 let signature = self.resolve_method_signature(base_type, method_name);
                 when signature in {
-                    .Some(sig) then if self.method_param_count(sig) == 0(UInt) then 0(UInt) else self.method_param_count(sig) - 1(UInt),
-                    .None() then if self.method_param_count(method) == 0(UInt) then 0(UInt) else self.method_param_count(method) - 1(UInt),
+                    .Some(sig) then if self.method_param_count(sig) == 0(UInt) then 0(UInt)
+                    else self.method_param_count(sig) - 1(UInt),
+                    .None() then if self.method_param_count(method) == 0(UInt) then 0(UInt)
+                    else self.method_param_count(method) - 1(UInt),
                 }
             },
         };
         let resolved_specs = when owner_specs in {
             .Some(specs) then self.normalize_param_specs_for_count(specs, expected_count),
-            .None() then self.normalize_param_specs_for_count(self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(), expected_count),
+            .None() then self.normalize_param_specs_for_count(
+                self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(
+                ),
+                expected_count,
+            ),
         };
         if not resolved_specs.is_empty() then {
             return resolved_specs;
@@ -870,22 +1159,37 @@ given TypeChecker {
         return self.positional_param_specs_for_count(expected_count);
     };
 
-    module_private resolve_call_param_specs(self, callee Expr, typed_callee TypedExpr, scope Scope) List[FunctionParamSpec] = {
+    module_private resolve_call_param_specs(
+        self,
+        callee Expr,
+        typed_callee TypedExpr,
+        scope Scope,
+    ) List[FunctionParamSpec] = {
         when callee in {
             .Identifier(name, _) then {
                 return self.resolve_identifier_call_param_specs(name, typed_callee);
             },
             .GenericInstantiation(base, _, _) then {
-                return when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
-                    .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
-                    .None() then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                return when self.try_resolve_named_type_in_scope_without_diag(
+                    base,
+                    scope,
+                ) in {
+                    .Some(constructor_type) then self.struct_constructor_param_specs(
+                        constructor_type,
+                    ),
+                    .None() then self.positional_param_specs_for_function_type(
+                        typed_callee.expr_type,
+                    ),
                 };
             },
             .MemberPath(base_expr, path, _) then {
                 when base_expr in {
                     .Identifier(base_name, _) then {
                         if not path.is_empty() then {
-                            let bound_specs = self.resolve_generic_bound_method_param_specs(base_name, path[path.count() - 1(UInt)]);
+                            let bound_specs = self.resolve_generic_bound_method_param_specs(
+                                base_name,
+                                path[path.count() - 1(UInt)],
+                            );
                             if not bound_specs.is_empty() then {
                                 return bound_specs;
                             };
@@ -894,22 +1198,44 @@ given TypeChecker {
                     _ then {},
                 };
                 return when typed_callee.expr_kind in {
-                    .TraitMethodPlaceholder(_, trait_type, method, _, _) then self.resolve_qualified_method_param_specs(self.trait_name_for_type(trait_type), self.context().symbol_name(method)),
-                    .MethodReference(base, _, method, _, _, _) then self.resolve_method_call_param_specs(base.expr_type, method, typed_callee.expr_type),
+                    .TraitMethodPlaceholder(_, trait_type, method, _, _) then self.resolve_qualified_method_param_specs(
+                        self.trait_name_for_type(trait_type),
+                        self.context().symbol_name(method),
+                    ),
+                    .MethodReference(base, _, method, _, _, _) then self.resolve_method_call_param_specs(
+                        base.expr_type,
+                        method,
+                        typed_callee.expr_type,
+                    ),
                     .MemberPath(base, path) then if not path.is_empty() then {
-                        return when self.resolve_method_signature(base.expr_type, self.context().symbol_name(path[path.count() - 1(UInt)])) in {
+                        return when self.resolve_method_signature(
+                            base.expr_type,
+                            self.context().symbol_name(path[path.count() - 1(UInt)]),
+                        ) in {
                             .Some(sig) then self.drop_receiver_param_specs(sig),
-                            .None() then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                            .None() then self.positional_param_specs_for_function_type(
+                                typed_callee.expr_type,
+                            ),
                         };
-                    } else self.positional_param_specs_for_function_type(typed_callee.expr_type),
-                    _ then self.positional_param_specs_for_function_type(typed_callee.expr_type),
+                    } else self.positional_param_specs_for_function_type(
+                        typed_callee.expr_type,
+                    ),
+                    _ then self.positional_param_specs_for_function_type(
+                        typed_callee.expr_type,
+                    ),
                 };
             },
             .QualifiedMethodCall(_, trait_type_node, method_name, _, _) then {
-                return self.resolve_qualified_method_param_specs(self.type_node_name(trait_type_node), method_name);
+                return self.resolve_qualified_method_param_specs(
+                    self.type_node_name(trait_type_node),
+                    method_name,
+                );
             },
             .QualifiedGenericMethodCall(_, trait_type_node, _, method_name, _, _) then {
-                return self.resolve_qualified_method_param_specs(self.type_node_name(trait_type_node), method_name);
+                return self.resolve_qualified_method_param_specs(
+                    self.type_node_name(trait_type_node),
+                    method_name,
+                );
             },
             .StaticMethodCall(type_name, _, method_name, _, _) then {
                 return self.resolve_static_call_param_specs(type_name, method_name);
@@ -922,7 +1248,8 @@ given TypeChecker {
     module_private call_description_for_expr(self, callee Expr) String = {
         return when callee in {
             .Identifier(name, _) then name,
-            .MemberPath(_, path, _) then if path.is_empty() then "function expression" else path[path.count() - 1(UInt)],
+            .MemberPath(_, path, _) then if path.is_empty() then "function expression"
+            else path[path.count() - 1(UInt)],
             .StaticMethodCall(_, _, method_name, _, _) then method_name,
             .QualifiedMethodCall(_, _, method_name, _, _) then method_name,
             .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
@@ -933,7 +1260,8 @@ given TypeChecker {
     module_private call_defaults_prefix_for_expr(self, callee Expr) String = {
         return when callee in {
             .Identifier(name, _) then name,
-            .MemberPath(_, path, _) then if path.is_empty() then "" else path[path.count() - 1(UInt)],
+            .MemberPath(_, path, _) then if path.is_empty() then ""
+            else path[path.count() - 1(UInt)],
             .StaticMethodCall(_, _, method_name, _, _) then method_name,
             .QualifiedMethodCall(_, _, method_name, _, _) then method_name,
             .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
@@ -948,7 +1276,11 @@ given TypeChecker {
         };
     };
 
-    module_private lookup_default_value(self, defaults_key_prefix String, param_name String) Option[String] = {
+    module_private lookup_default_value(
+        self,
+        defaults_key_prefix String,
+        param_name String,
+    ) Option[String] = {
         let exact_key = "\(defaults_key_prefix).\(param_name)";
         let exact = self.context().parsed_default_values.get(exact_key);
         if exact is .Some(_) then {
@@ -1000,44 +1332,70 @@ given TypeChecker {
                         field_index += 1;
                     };
                     if not found then {
-                        self.push_diagnostic_at_span("Unknown named argument '\(label)' for '\(call_description)'", expr_span(arg));
+                        self.push_diagnostic_at_span(
+                            "Unknown named argument '\(label)' for '\(call_description)'",
+                            expr_span(arg),
+                        );
                         return Option[List[Expr]].None();
                     };
                     if not param_specs[field_index].named then {
-                        self.push_diagnostic_at_span("Parameter '\(label)' is positional and cannot be passed by label", expr_span(arg));
+                        self.push_diagnostic_at_span(
+                            "Parameter '\(label)' is positional and cannot be passed by label",
+                            expr_span(arg),
+                        );
                         return Option[List[Expr]].None();
                     };
                     if ordered[field_index] is .Some(_) then {
-                        self.push_diagnostic_at_span("Duplicate argument '\(label)'", expr_span(arg));
+                        self.push_diagnostic_at_span(
+                            "Duplicate argument '\(label)'",
+                            expr_span(arg),
+                        );
                         return Option[List[Expr]].None();
                     };
-                    ordered[field_index] = Option[Expr].Some(self.call_argument_expr(arg));
+                    ordered[field_index] = Option[Expr].Some(
+                        self.call_argument_expr(arg),
+                    );
                 },
                 _ then {
                     if seen_named then {
-                        self.push_diagnostic_at_span("Positional argument cannot appear after named argument in call to '\(call_description)'", expr_span(arg));
+                        self.push_diagnostic_at_span(
+                            "Positional argument cannot appear after named argument in call to '\(call_description)'",
+                            expr_span(arg),
+                        );
                         return Option[List[Expr]].None();
                     };
-                    while positional_index < param_specs.count() and param_specs[positional_index].named then {
+                    while positional_index < param_specs.count() and param_specs[
+                        positional_index
+                    ].named then {
                         positional_index += 1;
                     };
                     if positional_index >= param_specs.count() then {
                         let mutable required_index UInt = 0;
                         let mutable reported = false;
                         while required_index < param_specs.count() then {
-                            if param_specs[required_index].named and ordered[required_index] is .None() then {
-                                self.push_diagnostic_at_span("Named parameter '\(param_specs[required_index].name)' must be passed by label", expr_span(arg));
+                            if param_specs[required_index].named and ordered[
+                                required_index
+                            ] is .None() then {
+                                self.push_diagnostic_at_span(
+                                    "Named parameter '\(param_specs[required_index].name)' must be passed by label",
+                                    expr_span(arg),
+                                );
                                 reported = true;
                                 break;
                             };
                             required_index += 1;
                         };
                         if not reported then {
-                            self.push_diagnostic_at_span("Too many positional arguments in call to '\(call_description)'", expr_span(arg));
+                            self.push_diagnostic_at_span(
+                                "Too many positional arguments in call to '\(call_description)'",
+                                expr_span(arg),
+                            );
                         };
                         return Option[List[Expr]].None();
                     };
-                    ordered[positional_index] = Option[Expr].Some(self.call_argument_expr(arg));
+                    ordered[positional_index] = Option[Expr].Some(
+                        self.call_argument_expr(arg),
+                    );
                     positional_index += 1;
                 },
             };
@@ -1050,16 +1408,22 @@ given TypeChecker {
             when ordered[index] in {
                 .Some(expr) then expressions.push(expr),
                 .None() then {
-                    let default_value = self.lookup_default_value(defaults_key_prefix, spec.name);
+                    let default_value = self.lookup_default_value(
+                        defaults_key_prefix,
+                        spec.name,
+                    );
                     when default_value in {
-                        .Some(value) then expressions.push(self.make_default_value_expr(value, unknown_span())),
+                        .Some(value) then expressions.push(
+                            self.make_default_value_expr(value, unknown_span()),
+                        ),
                         .None() then {
                             let message = if spec.named then {
                                 "Missing named argument '\(spec.name)' for '\(call_description)'; provide '\(spec.name):' or declare a default value"
                             } else {
                                 "Missing positional argument '\(spec.name)' for '\(call_description)'"
                             };
-                            let diagnostic_span = if args.is_empty() then unknown_span() else expr_span(args[0(UInt)]);
+                            let diagnostic_span = if args.is_empty() then unknown_span()
+                            else expr_span(args[0(UInt)]);
                             self.push_diagnostic_at_span(message, diagnostic_span);
                             return Option[List[Expr]].None();
                         },
@@ -1071,7 +1435,6 @@ given TypeChecker {
         return Option[List[Expr]].Some(expressions);
     };
 
-
     module_private validate_call_argument_order(self, args List[Expr]) Bool = {
         let mutable seen_named = false;
         for arg in args then {
@@ -1081,7 +1444,10 @@ given TypeChecker {
                 },
                 _ then {
                     if seen_named then {
-                        self.push_diagnostic("Positional arguments are not allowed after named arguments", unknown_span());
+                        self.push_diagnostic(
+                            "Positional arguments are not allowed after named arguments",
+                            unknown_span(),
+                        );
                         return false;
                     };
                 },
@@ -1090,7 +1456,11 @@ given TypeChecker {
         return true;
     };
 
-    module_private validate_named_param_call_labels(self, args List[Expr], param_specs List[FunctionParamSpec]) Bool = {
+    module_private validate_named_param_call_labels(
+        self,
+        args List[Expr],
+        param_specs List[FunctionParamSpec],
+    ) Bool = {
         let mutable arg_idx UInt = 0;
         for arg in args then {
             if arg_idx < param_specs.count() then {
@@ -1098,17 +1468,26 @@ given TypeChecker {
                 when arg in {
                     .NamedArgument(label, _, _) then {
                         if not spec.named then {
-                            self.push_diagnostic("Positional argument provided for named field '\(spec.name)'", unknown_span());
+                            self.push_diagnostic(
+                                "Positional argument provided for named field '\(spec.name)'",
+                                unknown_span(),
+                            );
                             return false;
                         };
                         if label <> spec.name then {
-                            self.push_diagnostic("Named argument label '\(label)' does not match parameter '\(spec.name)'", unknown_span());
+                            self.push_diagnostic(
+                                "Named argument label '\(label)' does not match parameter '\(spec.name)'",
+                                unknown_span(),
+                            );
                             return false;
                         };
                     },
                     _ then {
                         if spec.named then {
-                            self.push_diagnostic("Named parameter '\(spec.name)' must be called with label '\(spec.name):'", unknown_span());
+                            self.push_diagnostic(
+                                "Named parameter '\(spec.name)' must be called with label '\(spec.name):'",
+                                unknown_span(),
+                            );
                             return false;
                         };
                     },
@@ -1118,5 +1497,4 @@ given TypeChecker {
         };
         return true;
     };
-
 };

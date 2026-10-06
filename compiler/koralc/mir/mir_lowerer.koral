@@ -14,10 +14,7 @@ file_private type PreparedMIRLowering(
     builder_program MonomorphizedProgram,
 );
 
-public type LoweredMIRProgram(
-    mir_program MIRProgram,
-    diagnostics DiagnosticCollector,
-);
+public type LoweredMIRProgram(mir_program MIRProgram, diagnostics DiagnosticCollector);
 
 file_private let empty_monomorphized_program() MonomorphizedProgram = {
     return MonomorphizedProgram(
@@ -40,7 +37,9 @@ file_private let empty_monomorphized_program() MonomorphizedProgram = {
     );
 };
 
-file_private let make_builder_program_view(program MonomorphizedProgram) MonomorphizedProgram = {
+file_private let make_builder_program_view(
+    program MonomorphizedProgram,
+) MonomorphizedProgram = {
     return MonomorphizedProgram(
         List[TypedDecl].new(),
         Dict[String, TraitDeclInfo].new(),
@@ -61,7 +60,10 @@ file_private let make_builder_program_view(program MonomorphizedProgram) Monomor
     );
 };
 
-file_private let prepare_mir_lowering(program MonomorphizedProgram, context CompilerContext) PreparedMIRLowering = {
+file_private let prepare_mir_lowering(
+    program MonomorphizedProgram,
+    context CompilerContext,
+) PreparedMIRLowering = {
     let mutable prep = MIRLowerer.new(program, context);
     let metadata_program = prep.metadata_program();
     let mutable work_items = List[MIRFunctionWorkItem].new();
@@ -77,14 +79,21 @@ file_private let prepare_mir_lowering(program MonomorphizedProgram, context Comp
         };
         when prep.program.global_nodes.pop() in {
             .Some(node_ref) then prep.enqueue_node_work_items(node_ref),
-            .None() then { done = true;},
+            .None() then {
+                done = true;
+            },
         };
     };
-    return PreparedMIRLowering(metadata_program, work_items, make_builder_program_view(program));
+    return PreparedMIRLowering(
+        metadata_program,
+        work_items,
+        make_builder_program_view(program),
+    );
 };
 
 file_private let mir_progress_enabled() Bool = {
-    return if env("KORAL_DEBUG_MIR_PROGRESS") is .Some(value) then value == "1" or value == "true" or value == "TRUE" else false;
+    return if env("KORAL_DEBUG_MIR_PROGRESS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
+    else false;
 };
 
 file_private let trace_mir_progress(label String) Void = {
@@ -93,7 +102,10 @@ file_private let trace_mir_progress(label String) Void = {
     };
 };
 
-public let lower_monomorphized_program_releasing_source(mutable program MonomorphizedProgram, context CompilerContext) LoweredMIRProgram = {
+public let lower_monomorphized_program_releasing_source(
+    mutable program MonomorphizedProgram,
+    context CompilerContext,
+) LoweredMIRProgram = {
     let prepared = prepare_mir_lowering(program, context);
     program = empty_monomorphized_program();
 
@@ -109,7 +121,9 @@ public let lower_monomorphized_program_releasing_source(mutable program Monomorp
             message.push_string(" name=");
             message.push_string(context.symbol_name(item.identifier));
             message.push_string(" file=");
-            message.push_string(context.get_source_file(item.identifier.def_id) or else "");
+            message.push_string(
+                context.get_source_file(item.identifier.def_id) or else "",
+            );
             trace_mir_progress(message.to_string());
         };
         functions.push(lowerer.lower_work_item(item));
@@ -140,7 +154,13 @@ public let lower_monomorphized_program_releasing_source(mutable program Monomorp
 
 given MIRLowerer {
     public new(program MonomorphizedProgram, context CompilerContext) MIRLowerer =
-    MIRLowerer(program, context, List[MIRFunctionWorkItem].new(), false, DiagnosticCollector.new());
+        MIRLowerer(
+            program,
+            context,
+            List[MIRFunctionWorkItem].new(),
+            false,
+            DiagnosticCollector.new(),
+        );
 
     module_private unique_vtable_requests(self) List[VtableRequest] = {
         let _ = self;
@@ -170,38 +190,66 @@ given MIRLowerer {
         let mutable globals_reversed = List[MIRGlobal].new();
 
         for request in self.unique_vtable_requests() then {
-            globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)));
+            globals_reversed.push(
+                MIRGlobal.TraitVTable(self.make_trait_vtable(request)),
+            );
         };
 
         for node_ref in self.program.global_nodes then {
             when node_ref in {
                 .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.ForeignFunction(identifier, params, return_type));
+                    globals_reversed.push(
+                        MIRGlobal.ForeignFunction(identifier, params, return_type),
+                    );
                 },
                 .ForeignLetDecl(_, _, is_mutable, decl_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type));
+                    globals_reversed.push(
+                        MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type),
+                    );
                 },
                 .ForeignTypeDecl(_, _, fields, _, identifier) then {
                     when fields in {
-                        .Some(f) then globals_reversed.push(MIRGlobal.ForeignStruct(identifier, f)),
-                        .None() then globals_reversed.push(MIRGlobal.ForeignType(identifier)),
+                        .Some(f) then globals_reversed.push(
+                            MIRGlobal.ForeignStruct(identifier, f),
+                        ),
+                        .None() then globals_reversed.push(
+                            MIRGlobal.ForeignType(identifier),
+                        ),
                     };
                 },
                 .LetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
                     let init_function = self.make_global_initializer_symbol(identifier);
-                    globals_reversed.push(MIRGlobal.GlobalVariable(identifier, init_function, is_mutable, decl_type));
+                    globals_reversed.push(
+                        MIRGlobal.GlobalVariable(
+                            identifier,
+                            init_function,
+                            is_mutable,
+                            decl_type,
+                        ),
+                    );
                     let _ = initializer;
                 },
                 .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                     let kind = MIRFunctionKind.Global();
-                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, kind));
+                    globals_reversed.push(
+                        MIRGlobal.Function(identifier, params, return_type, kind),
+                    );
                     let _ = body;
                 },
                 .IntrinsicFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()));
+                    globals_reversed.push(
+                        MIRGlobal.Function(
+                            identifier,
+                            params,
+                            return_type,
+                            MIRFunctionKind.Global(),
+                        ),
+                    );
                 },
                 .TypeStructDecl(_, _, fields, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.StructDeclaration(identifier, fields));
+                    globals_reversed.push(
+                        MIRGlobal.StructDeclaration(identifier, fields),
+                    );
                 },
                 .TypeEnumDecl(_, _, cases, _, identifier) then {
                     globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases));
@@ -210,33 +258,57 @@ given MIRLowerer {
                     let mutable method_symbols = List[Symbol].new();
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref);
-                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                        if not self.context.contains_generic_parameter(
+                            symbol.symbol_type,
+                        ) then {
                             method_symbols.push(symbol);
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols, Option[DefId].None()));
+                        globals_reversed.push(
+                            MIRGlobal.Given(
+                                target_type,
+                                Option[String].None(),
+                                List[Type].new(),
+                                method_symbols,
+                                Option[DefId].None(),
+                            ),
+                        );
                     };
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     let mutable method_symbols = List[Symbol].new();
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref);
-                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                        if not self.context.contains_generic_parameter(
+                            symbol.symbol_type,
+                        ) then {
                             method_symbols.push(symbol);
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols, Option[DefId].None()));
+                        globals_reversed.push(
+                            MIRGlobal.Given(
+                                target_type,
+                                Option[String].None(),
+                                List[Type].new(),
+                                method_symbols,
+                                Option[DefId].None(),
+                            ),
+                        );
                     };
                 },
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _, trait_def_id) then {
                     let mutable copied_trait_args = List[Type].new();
-                    for arg in trait_args then { copied_trait_args.push(arg);};
+                    for arg in trait_args then {
+                        copied_trait_args.push(arg);
+                    };
                     let mutable method_symbols = List[Symbol].new();
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref);
-                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                        if not self.context.contains_generic_parameter(
+                            symbol.symbol_type,
+                        ) then {
                             method_symbols.push(symbol);
                         };
                     };
@@ -247,12 +319,26 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
-                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols, Option[DefId].Some(trait_def_id)));
+                        globals_reversed.push(
+                            MIRGlobal.Given(
+                                target_type,
+                                Option[String].Some(trait_name),
+                                copied_trait_args,
+                                method_symbols,
+                                Option[DefId].Some(trait_def_id),
+                            ),
+                        );
                     };
                 },
-                .GenericFunctionDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
-                .GenericTypeStructDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
-                .GenericTypeEnumDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericFunctionDecl(_, name, _) then globals_reversed.push(
+                    MIRGlobal.TemplatePlaceholder(name),
+                ),
+                .GenericTypeStructDecl(_, name, _) then globals_reversed.push(
+                    MIRGlobal.TemplatePlaceholder(name),
+                ),
+                .GenericTypeEnumDecl(_, name, _) then globals_reversed.push(
+                    MIRGlobal.TemplatePlaceholder(name),
+                ),
                 .TraitDecl(_, _, _, _) then {},
                 .TypeAliasDecl(_, _, _, _) then {},
                 .IntrinsicTypeDecl(_, _, _) then {},
@@ -290,7 +376,9 @@ given MIRLowerer {
                 .None() then {},
             };
 
-            let node_ref = self.program.global_nodes.pop() or else { return Option[MIRFunction].None();};
+            let node_ref = self.program.global_nodes.pop() or else {
+                return Option[MIRFunction].None();
+            };
             self.enqueue_node_work_items(node_ref);
         };
         return Option[MIRFunction].None();
@@ -314,52 +402,91 @@ given MIRLowerer {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier);
                 let mutable context = self.context;
-                let source_initializer = context.take_concrete_global_initializer(identifier.def_id) or else initializer;
-                self.pending_work_items.push(MIRFunctionWorkItem(
-                    init_function,
-                    List[TypedParam].new(),
-                    identifier.symbol_type,
-                    MIRFunctionKind.Global(),
-                    source_initializer,
-                ));
+                let source_initializer = context.take_concrete_global_initializer(
+                    identifier.def_id,
+                ) or else initializer;
+                self.pending_work_items.push(
+                    MIRFunctionWorkItem(
+                        init_function,
+                        List[TypedParam].new(),
+                        identifier.symbol_type,
+                        MIRFunctionKind.Global(),
+                        source_initializer,
+                    ),
+                );
             },
             .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                 if self.should_lower_function(identifier) then {
-                    let kind = when self.program.concrete_callables_by_def_id.get(identifier.def_id) in {
+                    let kind = when self.program.concrete_callables_by_def_id.get(
+                        identifier.def_id,
+                    ) in {
                         .Some(info) then when info.owner_type in {
-                            .Some(owner_type) then MIRFunctionKind.Given(owner_type, info.trait_conformance, List[Type].new(), Option[DefId].None()),
+                            .Some(owner_type) then MIRFunctionKind.Given(
+                                owner_type,
+                                info.trait_conformance,
+                                List[Type].new(),
+                                Option[DefId].None(),
+                            ),
                             .None() then MIRFunctionKind.Global(),
                         },
                         .None() then MIRFunctionKind.Global(),
                     };
                     let mutable context = self.context;
-                    let source_body = when context.take_concrete_function_body(identifier.def_id) in {
+                    let source_body = when context.take_concrete_function_body(
+                        identifier.def_id,
+                    ) in {
                         .Some(existing_body) then existing_body,
-                        .None() then when context.take_concrete_function_source(identifier.def_id) in {
+                        .None() then when context.take_concrete_function_source(
+                            identifier.def_id,
+                        ) in {
                             .Some(source) then {
-                                let mutable checker = TypeChecker.new(self.program.global_scope, self.context, source.source_file);
-                                let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
+                                let mutable checker = TypeChecker.new(
+                                    self.program.global_scope,
+                                    self.context,
+                                    source.source_file,
+                                );
+                                let rechecked = checker.recheck_concrete_function_body(
+                                    params,
+                                    return_type,
+                                    source,
+                                    self.program.import_graph,
+                                    self.program.generic_templates,
+                                    self.program.method_table,
+                                    self.program.trait_registry,
+                                    self.program.conformance_index,
+                                );
                                 if checker.has_errors() then {
                                     self.diagnostics.merge(checker.storage.diagnostics);
                                     body
                                 } else {
-                                    Monomorphizer.resolve_program_body_expression(self.program, self.context, rechecked)
+                                    Monomorphizer.resolve_program_body_expression(
+                                        self.program,
+                                        self.context,
+                                        rechecked,
+                                    )
                                 }
                             },
                             .None() then body,
                         },
                     };
-                    self.pending_work_items.push(MIRFunctionWorkItem(
-                        identifier,
-                        params,
-                        return_type,
-                        kind,
-                        source_body,
-                    ));
+                    self.pending_work_items.push(
+                        MIRFunctionWorkItem(
+                            identifier,
+                            params,
+                            return_type,
+                            kind,
+                            source_body,
+                        ),
+                    );
                 };
             },
             .GivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new(), Option[DefId].None());
+                let kind = MIRFunctionKind.Given(
+                    target_type,
+                    Option[String].None(),
+                    List[Type].new(),
+                    Option[DefId].None(),
+                );
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -367,26 +494,72 @@ given MIRLowerer {
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                methods_reversed.push(
+                                    MIRFunctionWorkItem(
+                                        symbol,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        kind,
+                                        body,
+                                    ),
+                                );
                             };
                         },
-                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                        .None() then when context.take_concrete_given_member_source(
+                            member_ref.def_id,
+                        ) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, self.context, source.source_file);
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
+                                    let mutable checker = TypeChecker.new(
+                                        self.program.global_scope,
+                                        self.context,
+                                        source.source_file,
+                                    );
+                                    let rebuilt = checker.recheck_concrete_given_member_body(
+                                        target_type,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        source,
+                                        self.program.import_graph,
+                                        self.program.generic_templates,
+                                        self.program.method_table,
+                                        self.program.trait_registry,
+                                        self.program.conformance_index,
+                                    );
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics);
+                                        self.diagnostics.merge(
+                                            checker.storage.diagnostics,
+                                        );
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, rebuilt);
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body));
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(
+                                            self.program,
+                                            self.context,
+                                            rebuilt,
+                                        );
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                resolved_body,
+                                            ),
+                                        );
                                     };
                                 };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                body,
+                                            ),
+                                        );
                                     };
                                 },
                                 .None() then {},
@@ -400,8 +573,15 @@ given MIRLowerer {
             },
             .GivenTraitDecl(target_type, trait_name, trait_args, members, _, trait_def_id) then {
                 let mutable copied_trait_args = List[Type].new();
-                for arg in trait_args then { copied_trait_args.push(arg);};
-                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args, Option[DefId].Some(trait_def_id));
+                for arg in trait_args then {
+                    copied_trait_args.push(arg);
+                };
+                let kind = MIRFunctionKind.Given(
+                    target_type,
+                    Option[String].Some(trait_name),
+                    copied_trait_args,
+                    Option[DefId].Some(trait_def_id),
+                );
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -409,26 +589,72 @@ given MIRLowerer {
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                methods_reversed.push(
+                                    MIRFunctionWorkItem(
+                                        symbol,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        kind,
+                                        body,
+                                    ),
+                                );
                             };
                         },
-                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                        .None() then when context.take_concrete_given_member_source(
+                            member_ref.def_id,
+                        ) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, self.context, source.source_file);
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
+                                    let mutable checker = TypeChecker.new(
+                                        self.program.global_scope,
+                                        self.context,
+                                        source.source_file,
+                                    );
+                                    let rebuilt = checker.recheck_concrete_given_member_body(
+                                        target_type,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        source,
+                                        self.program.import_graph,
+                                        self.program.generic_templates,
+                                        self.program.method_table,
+                                        self.program.trait_registry,
+                                        self.program.conformance_index,
+                                    );
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics);
+                                        self.diagnostics.merge(
+                                            checker.storage.diagnostics,
+                                        );
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, rebuilt);
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body));
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(
+                                            self.program,
+                                            self.context,
+                                            rebuilt,
+                                        );
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                resolved_body,
+                                            ),
+                                        );
                                     };
                                 };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                body,
+                                            ),
+                                        );
                                     };
                                 },
                                 .None() then {},
@@ -441,7 +667,12 @@ given MIRLowerer {
                 };
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new(), Option[DefId].None());
+                let kind = MIRFunctionKind.Given(
+                    target_type,
+                    Option[String].None(),
+                    List[Type].new(),
+                    Option[DefId].None(),
+                );
                 let mutable methods_reversed = List[MIRFunctionWorkItem].new();
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref);
@@ -449,26 +680,72 @@ given MIRLowerer {
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
-                                methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                methods_reversed.push(
+                                    MIRFunctionWorkItem(
+                                        symbol,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        kind,
+                                        body,
+                                    ),
+                                );
                             };
                         },
-                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                        .None() then when context.take_concrete_given_member_source(
+                            member_ref.def_id,
+                        ) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mutable checker = TypeChecker.new(self.program.global_scope, self.context, source.source_file);
-                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index);
+                                    let mutable checker = TypeChecker.new(
+                                        self.program.global_scope,
+                                        self.context,
+                                        source.source_file,
+                                    );
+                                    let rebuilt = checker.recheck_concrete_given_member_body(
+                                        target_type,
+                                        member_ref.params,
+                                        member_ref.return_type,
+                                        source,
+                                        self.program.import_graph,
+                                        self.program.generic_templates,
+                                        self.program.method_table,
+                                        self.program.trait_registry,
+                                        self.program.conformance_index,
+                                    );
                                     if checker.has_errors() then {
-                                        self.diagnostics.merge(checker.storage.diagnostics);
+                                        self.diagnostics.merge(
+                                            checker.storage.diagnostics,
+                                        );
                                     } else {
-                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, rebuilt);
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body));
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(
+                                            self.program,
+                                            self.context,
+                                            rebuilt,
+                                        );
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                resolved_body,
+                                            ),
+                                        );
                                     };
                                 };
                             },
                             .None() then when member_ref.body in {
                                 .Some(body) then {
                                     if self.should_lower_function(symbol) then {
-                                        methods_reversed.push(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body));
+                                        methods_reversed.push(
+                                            MIRFunctionWorkItem(
+                                                symbol,
+                                                member_ref.params,
+                                                member_ref.return_type,
+                                                kind,
+                                                body,
+                                            ),
+                                        );
                                     };
                                 },
                                 .None() then {},
@@ -490,7 +767,9 @@ given MIRLowerer {
         while true then {
             when self.lower_next_work_item() in {
                 .Some(function) then functions.push(function),
-                .None() then { break;},
+                .None() then {
+                    break;
+                },
             };
         };
         let lowered = MIRProgram(
@@ -509,7 +788,13 @@ given MIRLowerer {
     };
 
     public lower_work_item(self, item MIRFunctionWorkItem) MIRFunction = {
-        return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body);
+        return self.make_function(
+            item.identifier,
+            item.params,
+            item.return_type,
+            item.kind,
+            item.body,
+        );
     };
 
     module_private make_function(
@@ -525,10 +810,19 @@ given MIRLowerer {
         // Detection: single "self" parameter AND function name is "drop" (or ends with "_drop" for monomorphized).
         let mutable effective_params = params;
         let def_name = self.context.get_name(identifier.def_id) or else "";
-        let is_drop_method = params.count() == 1 and params[0(UInt)].name == "self" and (def_name == "drop" or def_name.ends_with("_drop"));
+        let is_drop_method = params.count() == 1 and params[0(UInt)].name == "self" and (def_name == "drop" or def_name.ends_with(
+            "_drop",
+        ));
         if is_drop_method then {
             let mutable wrapped = List[TypedParam].new();
-            wrapped.push(TypedParam(params[0(UInt)].name, params[0(UInt)].is_mutable, Type.MutablePointerType(params[0(UInt)].param_type), params[0(UInt)].named));
+            wrapped.push(
+                TypedParam(
+                    params[0(UInt)].name,
+                    params[0(UInt)].is_mutable,
+                    Type.MutablePointerType(params[0(UInt)].param_type),
+                    params[0(UInt)].named,
+                ),
+            );
             effective_params = wrapped;
         };
         let mutable builder = MIRFunctionBuilder.new(
@@ -554,7 +848,10 @@ given MIRLowerer {
     };
 
     module_private make_global_initializer_symbol(self, identifier Symbol) Symbol = {
-        let mutable function_type = Type.FunctionType(List[FunctionParamEntry].new(), identifier.symbol_type);
+        let mutable function_type = Type.FunctionType(
+            List[FunctionParamEntry].new(),
+            identifier.symbol_type,
+        );
         let mutable context = self.context;
         return context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
@@ -570,7 +867,9 @@ given MIRLowerer {
     };
 
     module_private make_given_member_symbol(self, member TypedGivenMember) Symbol = {
-        let mutable is_drop_method = member.name == "drop" and member.params.count() == 1 and member.params[0(UInt)].name == "self";
+        let mutable is_drop_method = member.name == "drop" and member.params.count() == 1 and member.params[
+            0(UInt)
+        ].name == "self";
         let mutable rebuilt_param_types = List[Type].new();
         for param in member.params then {
             // For Drop trait's drop(self): wrap self parameter type as
@@ -581,13 +880,18 @@ given MIRLowerer {
                 rebuilt_param_types.push(param.param_type);
             };
         };
-        let rebuilt_function_type = Type.FunctionType(types_to_param_entries(rebuilt_param_types), member.return_type);
+        let rebuilt_function_type = Type.FunctionType(
+            types_to_param_entries(rebuilt_param_types),
+            member.return_type,
+        );
         // For Drop methods, always use the rebuilt function type (with wrapped
         // self parameter) instead of the context's stored type.
         let mutable function_type = rebuilt_function_type;
         if not is_drop_method then {
             function_type = when self.context.get_function_type(member.def_id) in {
-                .Some(t) then if self.context.contains_generic_parameter(t) and not self.context.contains_generic_parameter(rebuilt_function_type) then rebuilt_function_type else t,
+                .Some(t) then if self.context.contains_generic_parameter(t) and not self.context.contains_generic_parameter(
+                    rebuilt_function_type,
+                ) then rebuilt_function_type else t,
                 .None() then rebuilt_function_type,
             };
         };
@@ -606,11 +910,16 @@ given MIRLowerer {
 
     module_private copy_type_ref_list(self, values List[Type]) List[Type] = {
         let mutable out = List[Type].new();
-        for value in values then { out.push(value);};
+        for value in values then {
+            out.push(value);
+        };
         return out;
     };
 
-    module_private make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
+    module_private make_trait_vtable_methods(
+        self,
+        request VtableRequest,
+    ) List[MIRTraitVTableMethod] = {
         let mutable ordered_members = List[TypedTraitMember].new();
         let mutable visited_traits = Set[String].new();
         let mutable seen_methods = Set[String].new();
@@ -618,7 +927,9 @@ given MIRLowerer {
         when self.program.conformance_witnesses.get(request.witness_key) in {
             .Some(witness) then {
                 for slot in witness.requirement_slots then {
-                    methods.push(self.make_trait_vtable_method_from_requirement_slot(slot));
+                    methods.push(
+                        self.make_trait_vtable_method_from_requirement_slot(slot),
+                    );
                 };
                 return methods;
             },
@@ -626,27 +937,39 @@ given MIRLowerer {
         };
         let bindings = self.trait_member_type_bindings(request);
         let preferred_module_path = self.type_module_path(request.concrete_type);
-        self.collect_instantiated_trait_members(request.trait_def_id, request.concrete_type, bindings, visited_traits, seen_methods, ordered_members);
+        self.collect_instantiated_trait_members(
+            request.trait_def_id,
+            request.concrete_type,
+            bindings,
+            visited_traits,
+            seen_methods,
+            ordered_members,
+        );
         for member in ordered_members then {
             methods.push(self.make_trait_vtable_method(member));
         };
         return methods;
     };
 
-    module_private make_trait_vtable_method_from_requirement_slot(self, slot RequirementSlot) MIRTraitVTableMethod = {
+    module_private make_trait_vtable_method_from_requirement_slot(
+        self,
+        slot RequirementSlot,
+    ) MIRTraitVTableMethod = {
         let mutable parameters = List[MIRTraitVTableParameter].new();
         for parameter in slot.parameters then {
-            parameters.push(MIRTraitVTableParameter(
-                parameter.name,
-                Option[Type].Some(parameter.param_type),
-                parameter.name == "self"
-            ));
+            parameters.push(
+                MIRTraitVTableParameter(
+                    parameter.name,
+                    Option[Type].Some(parameter.param_type),
+                    parameter.name == "self",
+                ),
+            );
         };
         return MIRTraitVTableMethod(
             slot.method_name,
             Option[Type].Some(slot.return_type),
             parameters,
-            self.requirement_slot_self_by_value(slot)
+            self.requirement_slot_self_by_value(slot),
         );
     };
 
@@ -673,19 +996,20 @@ given MIRLowerer {
 
     module_private type_module_path(self, t Type) List[String] = {
         return when t in {
-            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
-            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
-            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            ),
+            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            ),
+            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            ),
             _ then List[String].new(),
         };
     };
-
 
     /// Resolves a trait spelling to the declaration identity it names, preferring
     /// the trait declared in `preferred_module_path`. Used only where the caller
     /// holds a name and nothing else (parent-trait walks); anything that already
     /// carries the identity must pass it through instead of re-resolving.
-
 
     module_private collect_instantiated_trait_members(
         self,
@@ -697,7 +1021,9 @@ given MIRLowerer {
         ordered_members List[TypedTraitMember],
     ) Void = {
         let visit_key = self.trait_binding_visit_key(trait_def_id, bindings);
-        if visited_traits.contains(visit_key) then { return;};
+        if visited_traits.contains(visit_key) then {
+            return;
+        };
         visited_traits.insert(visit_key);
 
         when self.program.trait_by_def_id(trait_def_id) in {
@@ -706,14 +1032,32 @@ given MIRLowerer {
                     // `ParentTraitConstraint` still carries only a spelling, so
                     // the parent's name is resolved once here to an identity.
                     let parent_def_id = parent.def_id;
-                    if parent_def_id == def_id_invalid() then { continue;};
-                    let parent_bindings = self.parent_trait_bindings(parent, trait_info.module_path, concrete_type, bindings);
-                    self.collect_instantiated_trait_members(parent_def_id, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members);
+                    if parent_def_id == def_id_invalid() then {
+                        continue;
+                    };
+                    let parent_bindings = self.parent_trait_bindings(
+                        parent,
+                        trait_info.module_path,
+                        concrete_type,
+                        bindings,
+                    );
+                    self.collect_instantiated_trait_members(
+                        parent_def_id,
+                        concrete_type,
+                        parent_bindings,
+                        visited_traits,
+                        seen_methods,
+                        ordered_members,
+                    );
                 };
                 for member in trait_info.members then {
-                    if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
+                    if self.trait_member_has_receiver(member) and not seen_methods.contains(
+                        member.name,
+                    ) then {
                         seen_methods.insert(member.name);
-                        ordered_members.push(self.apply_type_bindings_to_trait_member(member, bindings));
+                        ordered_members.push(
+                            self.apply_type_bindings_to_trait_member(member, bindings),
+                        );
                     };
                 };
             },
@@ -721,7 +1065,11 @@ given MIRLowerer {
         };
     };
 
-    module_private trait_binding_visit_key(self, trait_def_id DefId, bindings Dict[String, Type]) String = {
+    module_private trait_binding_visit_key(
+        self,
+        trait_def_id DefId,
+        bindings Dict[String, Type],
+    ) String = {
         let mutable key = StringBuilder.new();
 
         // Keyed by DECLARATION: two same-named traits from different modules are
@@ -745,7 +1093,13 @@ given MIRLowerer {
         return key.to_string();
     };
 
-    module_private parent_trait_bindings(self, parent ParentTraitConstraint, preferred_module_path List[String], concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
+    module_private parent_trait_bindings(
+        self,
+        parent ParentTraitConstraint,
+        preferred_module_path List[String],
+        concrete_type Type,
+        bindings Dict[String, Type],
+    ) Dict[String, Type] = {
         let mutable result = Dict[String, Type].new();
         for entry in bindings then {
             result.insert(entry.first, entry.second);
@@ -756,8 +1110,15 @@ given MIRLowerer {
         when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
                 let mutable idx UInt = 0;
-                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
-                    result.insert(parent_info.type_params[idx].name, self.resolve_trait_type_node_with_bindings(parent.type_arg_nodes[idx], bindings));
+                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count(
+                ) then {
+                    result.insert(
+                        parent_info.type_params[idx].name,
+                        self.resolve_trait_type_node_with_bindings(
+                            parent.type_arg_nodes[idx],
+                            bindings,
+                        ),
+                    );
                     idx += 1;
                 };
             },
@@ -766,7 +1127,11 @@ given MIRLowerer {
         return result;
     };
 
-    module_private resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
+    module_private resolve_trait_type_node_with_bindings(
+        self,
+        node TypeNode,
+        bindings Dict[String, Type],
+    ) Type = {
         return when node in {
             .Identifier(name, span) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -791,28 +1156,50 @@ given MIRLowerer {
                 },
             },
             .Reference(inner, is_mutable, _) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                if is_mutable then Type.MutableReferenceType(resolved_inner) else Type.ReferenceType(resolved_inner)
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                if is_mutable then Type.MutableReferenceType(resolved_inner)
+                else Type.ReferenceType(resolved_inner)
             },
             .BorrowedReference(inner, is_mutable, span) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner) else Type.BorrowedReferenceType(resolved_inner)
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner)
+                else Type.BorrowedReferenceType(resolved_inner)
             },
             .Pointer(inner, is_mutable, span) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                if is_mutable then Type.MutablePointerType(resolved_inner) else Type.PointerType(resolved_inner)
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                if is_mutable then Type.MutablePointerType(resolved_inner)
+                else Type.PointerType(resolved_inner)
             },
             .WeakReference(inner, is_mutable, span) then {
-                let resolved_inner = self.resolve_trait_type_node_with_bindings(inner, bindings);
-                if is_mutable then Type.MutableWeakReferenceType(resolved_inner) else Type.WeakReferenceType(resolved_inner)
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                if is_mutable then Type.MutableWeakReferenceType(resolved_inner)
+                else Type.WeakReferenceType(resolved_inner)
             },
             .Generic(base, args, span) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
-                    resolved_args.push(self.resolve_trait_type_node_with_bindings(arg, bindings));
+                    resolved_args.push(
+                        self.resolve_trait_type_node_with_bindings(arg, bindings),
+                    );
                 };
-                let struct_def_id = self.program.generic_templates.lookup_struct_def_id(base);
-                let enum_def_id = self.program.generic_templates.lookup_enum_def_id(base);
+                let struct_def_id = self.program.generic_templates.lookup_struct_def_id(
+                    base,
+                );
+                let enum_def_id = self.program.generic_templates.lookup_enum_def_id(
+                    base,
+                );
                 if struct_def_id.is_valid() then {
                     Type.GenericStruct(struct_def_id, resolved_args)
                 } else {
@@ -823,28 +1210,42 @@ given MIRLowerer {
             .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for param_type in param_types then {
-                    resolved_params.push(self.resolve_trait_type_node_with_bindings(param_type, bindings));
+                    resolved_params.push(
+                        self.resolve_trait_type_node_with_bindings(param_type, bindings),
+                    );
                 };
-                make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(return_type, bindings))
+                make_function_type(
+                    resolved_params,
+                    self.resolve_trait_type_node_with_bindings(return_type, bindings),
+                )
             },
         };
     };
 
     module_private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
         let _ = self;
-        if member.params.is_empty() then { return false;};
+        if member.params.is_empty() then {
+            return false;
+        };
         let first_param = member.params[0];
         return first_param.name == "self";
     };
 
-    module_private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
+    module_private trait_member_type_bindings(
+        self,
+        request VtableRequest,
+    ) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         bindings.insert("Self", request.concrete_type);
         when self.program.trait_by_def_id(request.trait_def_id) in {
             .Some(trait_info) then {
                 let mutable index UInt = 0;
-                while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
-                    bindings.insert(trait_info.type_params[index].name, (request.trait_type_args[index]));
+                while index < trait_info.type_params.count() and index < request.trait_type_args.count(
+                ) then {
+                    bindings.insert(
+                        trait_info.type_params[index].name,
+                        (request.trait_type_args[index]),
+                    );
                     index += 1;
                 };
             },
@@ -855,52 +1256,103 @@ given MIRLowerer {
 
     module_private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         let _ = self;
-        if bindings.is_empty() then { return t;};
+        if bindings.is_empty() then {
+            return t;
+        };
         return when t in {
-            .GenericParameter(name) then when bindings.get(name) in { .Some(bound) then bound, .None() then t },
-            .ReferenceType(inner) then Type.ReferenceType(self.apply_type_bindings(inner, bindings)),
-            .MutableReferenceType(inner) then Type.MutableReferenceType(self.apply_type_bindings(inner, bindings)),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(self.apply_type_bindings(inner, bindings)),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(self.apply_type_bindings(inner, bindings)),
-            .PointerType(inner) then Type.PointerType(self.apply_type_bindings(inner, bindings)),
-            .MutablePointerType(inner) then Type.MutablePointerType(self.apply_type_bindings(inner, bindings)),
-            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(self.apply_type_bindings(inner, bindings)),
-            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(self.apply_type_bindings(inner, bindings)),
+            .GenericParameter(name) then when bindings.get(name) in {
+                .Some(bound) then bound,
+                .None() then t,
+            },
+            .ReferenceType(inner) then Type.ReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .PointerType(inner) then Type.PointerType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .MutablePointerType(inner) then Type.MutablePointerType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(
+                self.apply_type_bindings(inner, bindings),
+            ),
             .FunctionType(params, return_type) then {
                 let mutable bound_params = List[Type].new();
                 for param in params then {
-                    bound_params.push(self.apply_type_bindings(param.param_type, bindings));
+                    bound_params.push(
+                        self.apply_type_bindings(param.param_type, bindings),
+                    );
                 };
-                make_function_type(bound_params, self.apply_type_bindings(return_type, bindings))
+                make_function_type(
+                    bound_params,
+                    self.apply_type_bindings(return_type, bindings),
+                )
             },
             .GenericStruct(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
-                for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
+                for arg in args then {
+                    bound_args.push(self.apply_type_bindings(arg, bindings));
+                };
                 Type.GenericStruct(template_def_id, bound_args)
             },
             .GenericEnum(template_def_id, args) then {
                 let mutable bound_args = List[Type].new();
-                for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
+                for arg in args then {
+                    bound_args.push(self.apply_type_bindings(arg, bindings));
+                };
                 Type.GenericEnum(template_def_id, bound_args)
             },
             .TraitObject(trait_def_id, args) then {
                 let mutable bound_args = List[Type].new();
-                for arg in args then { bound_args.push(self.apply_type_bindings(arg, bindings));};
+                for arg in args then {
+                    bound_args.push(self.apply_type_bindings(arg, bindings));
+                };
                 Type.TraitObject(trait_def_id, bound_args)
             },
             _ then t,
         };
     };
 
-    module_private apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
+    module_private apply_type_bindings_to_trait_member(
+        self,
+        member TypedTraitMember,
+        bindings Dict[String, Type],
+    ) TypedTraitMember = {
         let mutable params = List[TypedParam].new();
         for param in member.params then {
-            params.push(TypedParam(param.name, param.is_mutable, self.apply_type_bindings(param.param_type, bindings), param.named));
+            params.push(
+                TypedParam(
+                    param.name,
+                    param.is_mutable,
+                    self.apply_type_bindings(param.param_type, bindings),
+                    param.named,
+                ),
+            );
         };
-        return TypedTraitMember(member.name, member.has_generic_type_params, params, self.apply_type_bindings(member.return_type, bindings));
+        return TypedTraitMember(
+            member.name,
+            member.has_generic_type_params,
+            params,
+            self.apply_type_bindings(member.return_type, bindings),
+        );
     };
 
-    module_private make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
+    module_private make_trait_vtable_method(
+        self,
+        member TypedTraitMember,
+    ) MIRTraitVTableMethod = {
         let mutable params = List[MIRTraitVTableParameter].new();
         let mutable first = true;
         let mutable self_by_value = false;
@@ -919,10 +1371,20 @@ given MIRLowerer {
                     _ then true,
                 };
             };
-            params.push(MIRTraitVTableParameter(param.name, Option[Type].Some(param.param_type), is_self));
+            params.push(
+                MIRTraitVTableParameter(
+                    param.name,
+                    Option[Type].Some(param.param_type),
+                    is_self,
+                ),
+            );
             first = false;
         };
-        return MIRTraitVTableMethod(member.name, Option[Type].Some(member.return_type), params, self_by_value);
+        return MIRTraitVTableMethod(
+            member.name,
+            Option[Type].Some(member.return_type),
+            params,
+            self_by_value,
+        );
     };
 };
-

@@ -7,7 +7,11 @@ using "std";
 foreign let __koral_local_timezone_offset(out_offset_secs *unsafe Int32) Void;
 foreign let __koral_local_timezone_name(buf *unsafe UInt8, buf_size Int32) Int32;
 foreign let __koral_timezone_name_exists(name *unsafe UInt8) Int32;
-foreign let __koral_timezone_offset_at(name *unsafe UInt8, unix_secs Int64, out_offset_secs *unsafe Int32) Void;
+foreign let __koral_timezone_offset_at(
+    name *unsafe UInt8,
+    unix_secs Int64,
+    out_offset_secs *unsafe Int32,
+) Void;
 
 /// Internal enum representing the kind of timezone.
 type TimeZoneKind {
@@ -37,38 +41,37 @@ given TimeZone {
 
     /// Creates a fixed-offset timezone from a Duration.
     /// Returns Error if the absolute offset is >= 86400 seconds.
-    public from_offset(offset Duration) Result[TimeZone] =
-        if offset.secs >= 86400 or offset.secs <= -86400 then
-            Result[TimeZone].Error("TimeZone offset must be less than 86400 seconds (24 hours)") else
-            Result[TimeZone].Ok(TimeZone(TimeZoneKind.Fixed(offset.secs(Int32))));
+    public from_offset(offset Duration) Result[TimeZone] = if offset.secs >= 86400 or offset.secs <= -86400 then Result[TimeZone].Error(
+        "TimeZone offset must be less than 86400 seconds (24 hours)",
+    ) else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Fixed(offset.secs(Int32))));
 
     /// Creates a named timezone from an IANA timezone name.
     /// Returns Error if the timezone name is not found.
     public from_name(name String) Result[TimeZone] = {
         let exists = __koral_timezone_name_exists(name.data);
-        return if exists == 0 then Result[TimeZone].Error("unknown timezone: " + name) else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Named(name)));
+        return if exists == 0 then Result[TimeZone].Error("unknown timezone: " + name)
+        else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Named(name)));
     };
 };
 
 given TimeZone as Eq {
 
-    public equals(self, other TimeZone) Bool =
-        when self.kind in {
-            .Utc() then when other.kind in {
-                .Utc() then true,
-                _ then false,
-            },
-            .Fixed(a) then when other.kind in {
-                .Fixed(b) then a == b,
-                _ then false,
-            },
-            .Named(a) then when other.kind in {
-                .Named(b) then a == b,
-                _ then false,
-            },
-            .Local(a) then when other.kind in {
-                .Local(b) then a == b,
-                _ then false,
-            },
-        };
+    public equals(self, other TimeZone) Bool = when self.kind in {
+        .Utc() then when other.kind in {
+            .Utc() then true,
+            _ then false,
+        },
+        .Fixed(a) then when other.kind in {
+            .Fixed(b) then a == b,
+            _ then false,
+        },
+        .Named(a) then when other.kind in {
+            .Named(b) then a == b,
+            _ then false,
+        },
+        .Local(a) then when other.kind in {
+            .Local(b) then a == b,
+            _ then false,
+        },
+    };
 };

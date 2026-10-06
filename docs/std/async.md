@@ -37,6 +37,8 @@ given Task {
     public spawn(self) Thread;
 };
 
+given Thread as Drop {};
+
 given Thread {
     public wait(self) Result[Void];
     public detach(self) Void;
@@ -44,12 +46,16 @@ given Thread {
     public name(self) Option[String];
 };
 
+given Timer as Drop {};
+
 given Timer {
     public new(d Duration) Timer;
     public wait(self) Void;
     public reset(self, d Duration) Void;
     public cancel(self) Void;
 };
+
+given Ticker as Drop {};
 
 given Ticker {
     public new(interval Duration) Ticker;

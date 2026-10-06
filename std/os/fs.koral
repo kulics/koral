@@ -65,7 +65,7 @@ public let read_file[T IntoPath](path T) Result[List[UInt8]] = {
                         if n == 0 then {
                             return Result[List[UInt8]].Ok(out);
                         };
-                        out.push_sublist(chunk, 0..<n);
+                        out.push_list(chunk, span: 0..<n);
                     },
                     .Error(e) then {
                         return Result[List[UInt8]].Error(e);
@@ -132,7 +132,6 @@ public let append_file[T IntoPath](path T, content: List[UInt8]) Result[Void] = 
     };
 };
 
-
 // ============================================================================
 // Text-Oriented File Operations
 // ============================================================================
@@ -160,27 +159,26 @@ public let append_text_file[T IntoPath](path T, content: String) Result[Void] = 
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void] =
-    when read_file(src) in {
-        .Ok(bytes) then write_file(to, content: bytes),
-        .Error(e) then Result[Void].Error(e),
-    };
+public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void] = when read_file(
+    src,
+) in {
+    .Ok(bytes) then write_file(to, content: bytes),
+    .Error(e) then Result[Void].Error(e),
+};
 
 /// Remove (delete) a file
 public let remove_file[T IntoPath](path T) Result[Void] = {
     let s = path.into_path().to_string();
-    return if __koral_remove(s.data) == 0 then
-        Result[Void].Ok({}) else
-        Result[Void].Error(last_error_message());
+    return if __koral_remove(s.data) == 0 then Result[Void].Ok({})
+    else Result[Void].Error(last_error_message());
 };
 
 /// Rename or move a file/directory
 public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void] = {
     let src_s = src.into_path().to_string();
     let to_s = to.into_path().to_string();
-    return if __koral_rename(src_s.data, to_s.data) == 0 then
-        Result[Void].Ok({}) else
-        Result[Void].Error(last_error_message());
+    return if __koral_rename(src_s.data, to_s.data) == 0 then Result[Void].Ok({})
+    else Result[Void].Error(last_error_message());
 };
 
 // ============================================================================
@@ -224,7 +222,6 @@ public let canonicalize_path[T IntoPath](path T) Result[Path] = {
     };
 };
 
-
 // ============================================================================
 // File Open / Create
 // ============================================================================
@@ -236,11 +233,26 @@ public let open_file[T IntoPath](path T, mode OpenMode) Result[File] = {
     let mutable open_mode Int32 = 0;
     let mutable perm UInt32 = 0;
     when mode in {
-        .Read() then { open_mode = 0; perm = 0;},
-        .Write() then { open_mode = 1; perm = 420;},
-        .Create() then { open_mode = 2; perm = 420;},
-        .Append() then { open_mode = 3; perm = 420;},
-        .ReadWrite() then { open_mode = 4; perm = 0;},
+        .Read() then {
+            open_mode = 0;
+            perm = 0;
+        },
+        .Write() then {
+            open_mode = 1;
+            perm = 420;
+        },
+        .Create() then {
+            open_mode = 2;
+            perm = 420;
+        },
+        .Append() then {
+            open_mode = 3;
+            perm = 420;
+        },
+        .ReadWrite() then {
+            open_mode = 4;
+            perm = 0;
+        },
     };
     let fd = __koral_open(s.data, open_mode, perm);
     if fd < 0 then {
@@ -270,14 +282,16 @@ public let file_info[T IntoPath](path T) Result[FileInfo] = {
         2 then FileType.Symlink(),
         _ then FileType.Other(),
     };
-    return Result[FileInfo].Ok(FileInfo(
-        stat_buf.size(UInt64),
-        ft,
-        Permission.from_mode(stat_buf.permissions),
-        Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
-        Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
-        Duration(stat_buf.created_secs, stat_buf.created_nanos)
-    ));
+    return Result[FileInfo].Ok(
+        FileInfo(
+            stat_buf.size(UInt64),
+            ft,
+            Permission.from_mode(stat_buf.permissions),
+            Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
+            Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
+            Duration(stat_buf.created_secs, stat_buf.created_nanos),
+        ),
+    );
 };
 
 /// Query symlink metadata (does NOT follow symlinks).
@@ -294,14 +308,16 @@ public let symlink_info[T IntoPath](path T) Result[FileInfo] = {
         2 then FileType.Symlink(),
         _ then FileType.Other(),
     };
-    return Result[FileInfo].Ok(FileInfo(
-        stat_buf.size(UInt64),
-        ft,
-        Permission.from_mode(stat_buf.permissions),
-        Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
-        Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
-        Duration(stat_buf.created_secs, stat_buf.created_nanos)
-    ));
+    return Result[FileInfo].Ok(
+        FileInfo(
+            stat_buf.size(UInt64),
+            ft,
+            Permission.from_mode(stat_buf.permissions),
+            Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
+            Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
+            Duration(stat_buf.created_secs, stat_buf.created_nanos),
+        ),
+    );
 };
 
 // ============================================================================

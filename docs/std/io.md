@@ -50,7 +50,7 @@ given[R Reader] BufReader[R] {
     public with_capacity(cap UInt, r R) BufReader[R];
     public read_byte(self) Result[Option[UInt8]];
     public read_rune(self) Result[Option[Rune]];
-    public read_until(self, delim UInt8, into: List[UInt8], span: Range[UInt]) Result[UInt];
+    public read_until(self, delim UInt8, into: List[UInt8], span: Range[UInt] = ..) Result[UInt];
     public read_line(self) Result[Option[String]];
     public skip(self, n UInt) Result[UInt];
 };
@@ -80,6 +80,8 @@ given[W Writer] BufWriter[W] as Writer {
 given[W Writer and Seeker] BufWriter[W] as Seeker {
     public seek(self, pos SeekOrigin) Result[UInt64];
 };
+
+given ByteBuffer as Drop {};
 
 given ByteBuffer {
     public new() ByteBuffer;
@@ -111,6 +113,6 @@ given Reader {
 };
 
 given Writer {
-    public write_all(self, from: List[UInt8], span: Range[UInt]) Result[Void];
+    public write_all(self, from: List[UInt8], span: Range[UInt] = ..) Result[Void];
 };
 ```

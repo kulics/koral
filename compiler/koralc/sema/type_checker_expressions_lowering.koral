@@ -1,6 +1,10 @@
 given TypeChecker {
     // A by-value receiver expects a ref-like expression to auto-dereference.
-    file_private receiver_needs_value_deref(self, receiver TypedExpr, expected_self Type) Bool = {
+    file_private receiver_needs_value_deref(
+        self,
+        receiver TypedExpr,
+        expected_self Type,
+    ) Bool = {
         let expected_is_ref_like = when expected_self in {
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
@@ -16,48 +20,79 @@ given TypeChecker {
             return false;
         };
         return when receiver.expr_type in {
-            .ReferenceType(inner) then self.type_matches_expected_pattern(expected_self, inner),
-            .BorrowedReferenceType(inner) then self.type_matches_expected_pattern(expected_self, inner),
+            .ReferenceType(inner) then self.type_matches_expected_pattern(
+                expected_self,
+                inner,
+            ),
+            .BorrowedReferenceType(inner) then self.type_matches_expected_pattern(
+                expected_self,
+                inner,
+            ),
             _ then false,
         };
     };
 
-    module_private adapt_receiver_to_expected_self_type(self, receiver TypedExpr, expected_self_type Option[Type]) TypedExpr = {
+    module_private adapt_receiver_to_expected_self_type(
+        self,
+        receiver TypedExpr,
+        expected_self_type Option[Type],
+    ) TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then {
                 if self.receiver_needs_value_deref(receiver, expected_self) then {
-                    return make_typed_expr(TypedExprKind.DerefExpr(receiver), expected_self);
+                    return make_typed_expr(
+                        TypedExprKind.DerefExpr(receiver),
+                        expected_self,
+                    );
                 };
                 when expected_self in {
-                .ReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(receiver.expr_type) then {
-                        return receiver;
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_ref_like(receiver.expr_type) then {
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                },
-                .BorrowedReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        return receiver;
-                    };
-                },
-                .MutableReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(receiver.expr_type) then {
-                        return receiver;
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_ref_like(receiver.expr_type) then {
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                },
-                .MutableBorrowedReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        if self.can_take_implicit_ref_receiver(receiver) then {
+                    .ReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
                             return receiver;
                         };
-                    };
-                },
-                _ then {},
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                    },
+                    .BorrowedReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            return receiver;
+                        };
+                    },
+                    .MutableReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
+                            return receiver;
+                        };
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                    },
+                    .MutableBorrowedReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            if self.can_take_implicit_ref_receiver(receiver) then {
+                                return receiver;
+                            };
+                        };
+                    },
+                    _ then {},
                 };
             },
             .None() then {},
@@ -65,113 +100,163 @@ given TypeChecker {
         return self.adapt_expr_to_expected_type(receiver, expected_self_type);
     };
 
-    module_private adapt_receiver_to_expected_self_type_for_method(self, receiver TypedExpr, expected_self_type Option[Type], method_name String) TypedExpr = {
+    module_private adapt_receiver_to_expected_self_type_for_method(
+        self,
+        receiver TypedExpr,
+        expected_self_type Option[Type],
+        method_name String,
+    ) TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then {
                 if self.receiver_needs_value_deref(receiver, expected_self) then {
-                    return make_typed_expr(TypedExprKind.DerefExpr(receiver), expected_self);
+                    return make_typed_expr(
+                        TypedExprKind.DerefExpr(receiver),
+                        expected_self,
+                    );
                 };
                 when expected_self in {
-                .ReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(receiver.expr_type) then {
-                        return receiver;
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                },
-                .BorrowedReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        return receiver;
-                    };
-                },
-                .MutableReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(receiver.expr_type) then {
-                        return receiver;
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        if not self.can_take_mutable_ref_of_expr(receiver) then {
+                    .ReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
+                            return receiver;
+                        };
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                    },
+                    .BorrowedReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            return receiver;
+                        };
+                    },
+                    .MutableReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
+                            return receiver;
+                        };
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            if not self.can_take_mutable_ref_of_expr(receiver) then {
+                                self.push_diagnostic_at_span(
+                                    "Cannot take mutable raw address of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through dereference or raw-pointer links) can use '&unsafe mutable'.",
+                                    self.typed_expr_span(receiver),
+                                );
+                                return receiver;
+                            };
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                        when receiver.expr_type in {
+                            .ReferenceType(actual_inner) then {
+                                if self.type_matches_expected_pattern(
+                                    inner,
+                                    actual_inner,
+                                ) then {
+                                    self.push_diagnostic_at_span(
+                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                        self.typed_expr_span(receiver),
+                                    );
+                                    return receiver;
+                                };
+                            },
+                            .BorrowedReferenceType(actual_inner) then {
+                                if self.type_matches_expected_pattern(
+                                    inner,
+                                    actual_inner,
+                                ) then {
+                                    self.push_diagnostic_at_span(
+                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                        self.typed_expr_span(receiver),
+                                    );
+                                    return receiver;
+                                };
+                            },
+                            _ then {},
+                        };
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
                             self.push_diagnostic_at_span(
-                                "Cannot take mutable raw address of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through dereference or raw-pointer links) can use '&unsafe mutable'.",
-                                self.typed_expr_span(receiver)
+                                "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
+                                self.typed_expr_span(receiver),
+                            );
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                    },
+                    .MutableBorrowedReferenceType(inner) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            if self.can_take_mutable_ref_of_expr(receiver) then {
+                                return receiver;
+                            };
+                            self.push_diagnostic_at_span(
+                                "Cannot take '&' of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through * or unsafe links) can use '&'.",
+                                self.typed_expr_span(receiver),
                             );
                             return receiver;
                         };
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                    when receiver.expr_type in {
-                        .ReferenceType(actual_inner) then {
-                            if self.type_matches_expected_pattern(inner, actual_inner) then {
-                                self.push_diagnostic_at_span(
-                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                    self.typed_expr_span(receiver)
-                                );
-                                return receiver;
-                            };
-                        },
-                        .BorrowedReferenceType(actual_inner) then {
-                            if self.type_matches_expected_pattern(inner, actual_inner) then {
-                                self.push_diagnostic_at_span(
-                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                    self.typed_expr_span(receiver)
-                                );
-                                return receiver;
-                            };
-                        },
-                        _ then {},
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.is_implicit_ref_candidate_shape(receiver) then {
-                        self.push_diagnostic_at_span(
-                            "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
-                            self.typed_expr_span(receiver)
-                        );
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                },
-                .MutableBorrowedReferenceType(inner) then {
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.is_implicit_ref_candidate_shape(receiver) then {
-                        if self.can_take_mutable_ref_of_expr(receiver) then {
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(
+                            receiver.expr_type,
+                        ) then {
                             return receiver;
                         };
-                        self.push_diagnostic_at_span(
-                            "Cannot take '&' of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through * or unsafe links) can use '&'.",
-                            self.typed_expr_span(receiver)
-                        );
-                        return receiver;
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and self.receiver_is_ref_like(receiver.expr_type) then {
-                        return receiver;
-                    };
-                    when receiver.expr_type in {
-                        .ReferenceType(actual_inner) then {
-                            if self.type_matches_expected_pattern(inner, actual_inner) then {
-                                self.push_diagnostic_at_span(
-                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                    self.typed_expr_span(receiver)
-                                );
-                                return receiver;
-                            };
-                        },
-                        .BorrowedReferenceType(actual_inner) then {
-                            if self.type_matches_expected_pattern(inner, actual_inner) then {
-                                self.push_diagnostic_at_span(
-                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                    self.typed_expr_span(receiver)
-                                );
-                                return receiver;
-                            };
-                        },
-                        _ then {},
-                    };
-                    if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.is_implicit_ref_candidate_shape(receiver) then {
-                        self.push_diagnostic_at_span(
-                            "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
-                            self.typed_expr_span(receiver)
-                        );
-                        return make_typed_expr(TypedExprKind.RefExpr(receiver), expected_self);
-                    };
-                },
-                _ then {},
+                        when receiver.expr_type in {
+                            .ReferenceType(actual_inner) then {
+                                if self.type_matches_expected_pattern(
+                                    inner,
+                                    actual_inner,
+                                ) then {
+                                    self.push_diagnostic_at_span(
+                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                        self.typed_expr_span(receiver),
+                                    );
+                                    return receiver;
+                                };
+                            },
+                            .BorrowedReferenceType(actual_inner) then {
+                                if self.type_matches_expected_pattern(
+                                    inner,
+                                    actual_inner,
+                                ) then {
+                                    self.push_diagnostic_at_span(
+                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                        self.typed_expr_span(receiver),
+                                    );
+                                    return receiver;
+                                };
+                            },
+                            _ then {},
+                        };
+                        if self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.is_implicit_ref_candidate_shape(
+                            receiver,
+                        ) then {
+                            self.push_diagnostic_at_span(
+                                "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
+                                self.typed_expr_span(receiver),
+                            );
+                            return make_typed_expr(
+                                TypedExprKind.RefExpr(receiver),
+                                expected_self,
+                            );
+                        };
+                    },
+                    _ then {},
                 };
             },
             .None() then {},
@@ -213,32 +298,64 @@ given TypeChecker {
         };
     };
 
-    module_private receiver_needs_materialization(self, receiver TypedExpr, expected_self_type Option[Type]) Bool = {
+    module_private receiver_needs_materialization(
+        self,
+        receiver TypedExpr,
+        expected_self_type Option[Type],
+    ) Bool = {
         return when expected_self_type in {
             .Some(expected_self) then when expected_self in {
                 .ReferenceType(inner) then {
                     when receiver.expr_type in {
-                        .ReferenceType(_) then { return false;},
-                        .MutableReferenceType(_) then { return false;},
-                        .BorrowedReferenceType(_) then { return false;},
-                        .MutableBorrowedReferenceType(_) then { return false;},
-                        .WeakReferenceType(_) then { return false;},
-                        .MutableWeakReferenceType(_) then { return false;},
+                        .ReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableReferenceType(_) then {
+                            return false;
+                        },
+                        .BorrowedReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableBorrowedReferenceType(_) then {
+                            return false;
+                        },
+                        .WeakReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableWeakReferenceType(_) then {
+                            return false;
+                        },
                         _ then {},
                     };
-                    self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_addressable_without_temp(receiver)
+                    self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_addressable_without_temp(
+                        receiver,
+                    )
                 },
                 .BorrowedReferenceType(inner) then {
                     when receiver.expr_type in {
-                        .ReferenceType(_) then { return false;},
-                        .MutableReferenceType(_) then { return false;},
-                        .BorrowedReferenceType(_) then { return false;},
-                        .MutableBorrowedReferenceType(_) then { return false;},
-                        .WeakReferenceType(_) then { return false;},
-                        .MutableWeakReferenceType(_) then { return false;},
+                        .ReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableReferenceType(_) then {
+                            return false;
+                        },
+                        .BorrowedReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableBorrowedReferenceType(_) then {
+                            return false;
+                        },
+                        .WeakReferenceType(_) then {
+                            return false;
+                        },
+                        .MutableWeakReferenceType(_) then {
+                            return false;
+                        },
                         _ then {},
                     };
-                    self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_addressable_without_temp(receiver)
+                    self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_addressable_without_temp(
+                        receiver,
+                    )
                 },
                 _ then false,
             },
@@ -252,50 +369,111 @@ given TypeChecker {
         return Symbol(def_id, t, SymbolKind.Variable(VariableKind.Value()));
     };
 
-    module_private prepare_call_receiver(self, receiver TypedExpr, expected_self_type Option[Type]) Pair[TypedExpr, Option[Symbol]] = {
+    module_private prepare_call_receiver(
+        self,
+        receiver TypedExpr,
+        expected_self_type Option[Type],
+    ) Pair[TypedExpr, Option[Symbol]] = {
         if self.receiver_is_ref_like(receiver.expr_type) then {
             return Pair[TypedExpr, Option[Symbol]](receiver, Option[Symbol].None());
         };
         if self.receiver_needs_materialization(receiver, expected_self_type) then {
-            let temp_symbol = self.make_receiver_temp_symbol("__recv", receiver.expr_type);
-            let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
-            return Pair[TypedExpr, Option[Symbol]](temp_var, Option[Symbol].Some(temp_symbol));
+            let temp_symbol = self.make_receiver_temp_symbol(
+                "__recv",
+                receiver.expr_type,
+            );
+            let temp_var = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
+            return Pair[TypedExpr, Option[Symbol]](
+                temp_var,
+                Option[Symbol].Some(temp_symbol),
+            );
         };
         return Pair[TypedExpr, Option[Symbol]](receiver, Option[Symbol].None());
     };
 
-    module_private wrap_receiver_materialized_call(self, temp_symbol_opt Option[Symbol], original_receiver TypedExpr, call_expr TypedExpr) TypedExpr = {
+    module_private wrap_receiver_materialized_call(
+        self,
+        temp_symbol_opt Option[Symbol],
+        original_receiver TypedExpr,
+        call_expr TypedExpr,
+    ) TypedExpr = {
         return when temp_symbol_opt in {
             .Some(temp_symbol) then {
                 let mutable block_statements = List[TypedStatement].new();
-                block_statements.push(TypedStatement.LetStmt(temp_symbol, original_receiver, unknown_span()));
-                make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].Some(call_expr)), call_expr.expr_type)
+                block_statements.push(
+                    TypedStatement.LetStmt(temp_symbol, original_receiver, unknown_span()),
+                );
+                make_typed_expr(
+                    TypedExprKind.Block(
+                        block_statements,
+                        Option[TypedExpr].Some(call_expr),
+                    ),
+                    call_expr.expr_type,
+                )
             },
             .None() then call_expr,
         };
     };
 
-    module_private make_expr_temp_symbol(self, prefix String, t Type, variable_kind VariableKind) Symbol = {
+    module_private make_expr_temp_symbol(
+        self,
+        prefix String,
+        t Type,
+        variable_kind VariableKind,
+    ) Symbol = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable());
         return Symbol(def_id, t, SymbolKind.Variable(variable_kind));
     };
 
-    module_private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args List[TypedExpr], result_type Type) TypedExpr = {
+    module_private lower_subscript_read_expr(
+        self,
+        typed_base TypedExpr,
+        typed_args List[TypedExpr],
+        result_type Type,
+    ) TypedExpr = {
         return when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
             .Some(kind) then when kind in {
-                .String() or .List(_) or .Deque(_) or .Dict(_, _) then self.build_builtin_subscript_helper_call(typed_base, typed_args, "__index_get"),
+                .String() or .List(_) or .Deque(_) or .Dict(_, _) then self.build_builtin_subscript_helper_call(
+                    typed_base,
+                    typed_args,
+                    "__index_get",
+                ),
                 .Pointer(element_type, _) then {
-                    let pointer_base_type = self.builtin_subscript_base_type(typed_base.expr_type);
+                    let pointer_base_type = self.builtin_subscript_base_type(
+                        typed_base.expr_type,
+                    );
                     let pointer_expr = when typed_base.expr_type in {
-                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(typed_base), pointer_base_type),
-                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(typed_base), pointer_base_type),
-                        .BorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(typed_base), pointer_base_type),
-                        .MutableBorrowedReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(typed_base), pointer_base_type),
+                        .ReferenceType(_) then make_typed_expr(
+                            TypedExprKind.DerefExpr(typed_base),
+                            pointer_base_type,
+                        ),
+                        .MutableReferenceType(_) then make_typed_expr(
+                            TypedExprKind.DerefExpr(typed_base),
+                            pointer_base_type,
+                        ),
+                        .BorrowedReferenceType(_) then make_typed_expr(
+                            TypedExprKind.DerefExpr(typed_base),
+                            pointer_base_type,
+                        ),
+                        .MutableBorrowedReferenceType(_) then make_typed_expr(
+                            TypedExprKind.DerefExpr(typed_base),
+                            pointer_base_type,
+                        ),
                         _ then typed_base,
                     };
-                    let index_expr = if typed_args.is_empty() then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType()) else (typed_args[0(UInt)]);
+                    let index_expr = if typed_args.is_empty() then make_typed_expr(
+                        TypedExprKind.IntegerLiteral("0"),
+                        Type.UIntType(),
+                    ) else (typed_args[0(UInt)]);
                     let offset_expr = make_typed_expr(
-                        TypedExprKind.ArithmeticExpr(pointer_expr, ArithmeticOperator.Add(), index_expr),
+                        TypedExprKind.ArithmeticExpr(
+                            pointer_expr,
+                            ArithmeticOperator.Add(),
+                            index_expr,
+                        ),
                         pointer_base_type,
                     );
                     make_typed_expr(TypedExprKind.DerefExpr(offset_expr), element_type)
@@ -304,7 +482,7 @@ given TypeChecker {
             .None() then {
                 self.push_diagnostic_at_span(
                     "subscript is only supported for String, List, Deque, Dict, and pointer types",
-                    self.typed_expr_span(typed_base)
+                    self.typed_expr_span(typed_base),
                 );
                 self.empty_typed_block(result_type)
             },
@@ -312,10 +490,19 @@ given TypeChecker {
     };
 
     module_private empty_typed_block(self, t Type) TypedExpr = {
-        return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()), t);
+        return make_typed_expr(
+            TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
+            t,
+        );
     };
 
-    module_private lower_static_method_call_expr(self, receiver_type Type, method_name String, args List[TypedExpr], fallback_return_type Type) TypedExpr = {
+    module_private lower_static_method_call_expr(
+        self,
+        receiver_type Type,
+        method_name String,
+        args List[TypedExpr],
+        fallback_return_type Type,
+    ) TypedExpr = {
         let mutable effective_type_name = "";
         let mutable receiver_type_args = List[Type].new();
         let mutable resolved_receiver_type = receiver_type;
@@ -374,15 +561,36 @@ given TypeChecker {
         let resolved_return_type = if effective_type_name.is_empty() then {
             self.resolve_method_return_type(receiver_type, method_name)
         } else {
-            let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args);
-            static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name);
+            let declared_receiver_type = self.resolve_static_declared_receiver_type(
+                effective_type_name,
+                receiver_type_args,
+            );
+            static_sig_opt = self.resolve_static_method_signature_for_receiver(
+                effective_type_name,
+                declared_receiver_type,
+                method_name,
+            );
             resolved_method_type_args = when static_sig_opt in {
-                .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, args, List[Type].new(), Option[Type].Some(fallback_return_type)),
+                .Some(sig) then self.resolve_static_method_type_args_for_call(
+                    effective_type_name,
+                    receiver_type_args,
+                    sig,
+                    args,
+                    List[Type].new(),
+                    Option[Type].Some(fallback_return_type),
+                ),
                 .None() then List[Type].new(),
             };
             resolved_receiver_type = when static_sig_opt in {
                 .Some(sig) then {
-                    static_bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, Option[Type].Some(fallback_return_type));
+                    static_bindings = self.resolve_static_call_type_bindings(
+                        effective_type_name,
+                        receiver_type_args,
+                        sig,
+                        args,
+                        resolved_method_type_args,
+                        Option[Type].Some(fallback_return_type),
+                    );
                     // `declared_receiver_type` is already instantiated when the
                     // call carries type arguments (`List[Pair[UInt, T]]`); the
                     // substitution map still maps `T -> Pair[UInt, T]`, so
@@ -397,11 +605,25 @@ given TypeChecker {
                 .None() then declared_receiver_type,
             };
             if resolved_receiver_type is not .Unknown() then {
-                self.maybe_record_extension_method_instantiation(resolved_receiver_type, method_name, resolved_method_type_args);
+                self.maybe_record_extension_method_instantiation(
+                    resolved_receiver_type,
+                    method_name,
+                    resolved_method_type_args,
+                );
             };
             let raw_return_type = when static_sig_opt in {
-                .Some(sig) then self.resolve_static_method_return_type_for_call(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, Option[Type].Some(fallback_return_type)),
-                .None() then self.resolve_static_method_return_type(effective_type_name, method_name),
+                .Some(sig) then self.resolve_static_method_return_type_for_call(
+                    effective_type_name,
+                    receiver_type_args,
+                    sig,
+                    args,
+                    resolved_method_type_args,
+                    Option[Type].Some(fallback_return_type),
+                ),
+                .None() then self.resolve_static_method_return_type(
+                    effective_type_name,
+                    method_name,
+                ),
             };
             // When a signature was resolved, `resolve_static_method_return_type_for_call`
             // already applied the receiver substitution exactly once (Swift's
@@ -410,11 +632,16 @@ given TypeChecker {
             // maps. Only the raw registered return type still needs it.
             let bound_return_type = when static_sig_opt in {
                 .Some(_) then raw_return_type,
-                .None() then self.apply_static_method_type_bindings(effective_type_name, receiver_type_arg_refs, raw_return_type),
+                .None() then self.apply_static_method_type_bindings(
+                    effective_type_name,
+                    receiver_type_arg_refs,
+                    raw_return_type,
+                ),
             };
             bound_return_type
         };
-        let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type;
+        let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type
+        else resolved_return_type;
         let method_symbol = when static_sig_opt in {
             .Some(sig) then self.bind_method_symbol_type(sig, static_bindings),
             .None() then self.make_method_symbol(method_name, return_type),
@@ -432,39 +659,93 @@ given TypeChecker {
         );
     };
 
-    module_private lower_enum_constructor_expr(self, enum_type Type, case_name String, args List[TypedExpr]) TypedExpr = {
+    module_private lower_enum_constructor_expr(
+        self,
+        enum_type Type,
+        case_name String,
+        args List[TypedExpr],
+    ) TypedExpr = {
         let method_symbol = self.make_method_symbol(case_name, enum_type);
         let _ = method_symbol;
-        return make_typed_expr(TypedExprKind.EnumConstruction(enum_type, case_name, args), enum_type);
+        return make_typed_expr(
+            TypedExprKind.EnumConstruction(enum_type, case_name, args),
+            enum_type,
+        );
     };
 
-    module_private type_construction_symbol_for_type(self, source_type Type, constructed_type Type) Symbol = {
+    module_private type_construction_symbol_for_type(
+        self,
+        source_type Type,
+        constructed_type Type,
+    ) Symbol = {
         return when source_type in {
-            .StructureType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
-            .EnumType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
-            .OpaqueType(def_id) then Symbol(def_id, constructed_type, SymbolKind.TypeSymbol()),
+            .StructureType(def_id) then Symbol(
+                def_id,
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
+            .EnumType(def_id) then Symbol(
+                def_id,
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
+            .OpaqueType(def_id) then Symbol(
+                def_id,
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
             // Identity is the template's DECLARATION -- the DefId the type
             // already carries (rustc: `Ty::Adt` keeps its `DefId`). It is never
             // replaced by a freshly minted one: two constructions of the same
             // type would then carry two different identities. The registry is
             // not the source of identity either -- it maps the same DefId to the
             // template's parameter list.
-            .GenericStruct(tplDefId, _) then Symbol(tplDefId, constructed_type, SymbolKind.TypeSymbol()),
-            .GenericEnum(tplDefId, _) then Symbol(tplDefId, constructed_type, SymbolKind.TypeSymbol()),
+            .GenericStruct(tplDefId, _) then Symbol(
+                tplDefId,
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
+            .GenericEnum(tplDefId, _) then Symbol(
+                tplDefId,
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
             // No declaration exists for these (scalars, collections), so the
             // DefId is a placeholder identity and its name is display-only.
-            _ then Symbol(self.allocate_unindexed_def_id(self.context().type_display_name(constructed_type), DefKind.TypeDef(TypeDefKind.Structure())), constructed_type, SymbolKind.TypeSymbol()),
+            _ then Symbol(
+                self.allocate_unindexed_def_id(
+                    self.context().type_display_name(constructed_type),
+                    DefKind.TypeDef(TypeDefKind.Structure()),
+                ),
+                constructed_type,
+                SymbolKind.TypeSymbol(),
+            ),
         };
     };
 
-    module_private lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args List[TypedExpr]) TypedExpr = {
-        let initial_method_opt = self.resolve_method_signature(receiver.expr_type, method_name);
+    module_private lower_receiver_method_call_expr(
+        self,
+        receiver TypedExpr,
+        method_name String,
+        args List[TypedExpr],
+    ) TypedExpr = {
+        let initial_method_opt = self.resolve_method_signature(
+            receiver.expr_type,
+            method_name,
+        );
         let expected_self_type = when initial_method_opt in {
-            .Some(method) then self.resolve_bound_method_self_type(receiver.expr_type, method),
+            .Some(method) then self.resolve_bound_method_self_type(
+                receiver.expr_type,
+                method,
+            ),
             .None() then self.resolve_method_self_type(receiver.expr_type, method_name),
         };
         let prepared_receiver = self.prepare_call_receiver(receiver, expected_self_type);
-        let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(prepared_receiver.first, expected_self_type, method_name);
+        let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(
+            prepared_receiver.first,
+            expected_self_type,
+            method_name,
+        );
         let normalized_receiver_type = when receiver.expr_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
@@ -474,15 +755,32 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner,
             _ then receiver.expr_type,
         };
-        self.maybe_record_extension_method_instantiation(normalized_receiver_type, method_name, List[Type].new());
-        let method_symbol = when self.resolve_method_signature(adapted_receiver.expr_type, method_name) in {
+        self.maybe_record_extension_method_instantiation(
+            normalized_receiver_type,
+            method_name,
+            List[Type].new(),
+        );
+        let method_symbol = when self.resolve_method_signature(
+            adapted_receiver.expr_type,
+            method_name,
+        ) in {
             .Some(method) then method,
             .None() then when initial_method_opt in {
                 .Some(method) then method,
-                .None() then self.make_method_symbol(method_name, self.resolve_method_return_type(adapted_receiver.expr_type, method_name)),
+                .None() then self.make_method_symbol(
+                    method_name,
+                    self.resolve_method_return_type(
+                        adapted_receiver.expr_type,
+                        method_name,
+                    ),
+                ),
             },
         };
-        let param_types = self.resolve_method_param_types_with_method_type_args(adapted_receiver.expr_type, method_name, List[Type].new());
+        let param_types = self.resolve_method_param_types_with_method_type_args(
+            adapted_receiver.expr_type,
+            method_name,
+            List[Type].new(),
+        );
         let mutable typed_args = List[TypedExpr].new();
         let mutable arg_index UInt = 0;
         for arg_ref in args then {
@@ -490,48 +788,118 @@ given TypeChecker {
                 .Some(param_type) then Option[Type].Some(param_type),
                 .None() then Option[Type].None(),
             };
-            typed_args.push(self.adapt_expr_to_expected_type(arg_ref, expected_arg_type));
+            typed_args.push(
+                self.adapt_expr_to_expected_type(arg_ref, expected_arg_type),
+            );
             arg_index += 1(UInt);
         };
-        let return_type = self.resolve_method_return_type_for_call(adapted_receiver.expr_type, method_symbol, typed_args, List[Type].new());
+        let return_type = self.resolve_method_return_type_for_call(
+            adapted_receiver.expr_type,
+            method_symbol,
+            typed_args,
+            List[Type].new(),
+        );
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(adapted_receiver, adapted_receiver.expr_type, method_symbol, List[Type].new(), List[Type].new(), .None()),
+            TypedExprKind.MethodReference(
+                adapted_receiver,
+                adapted_receiver.expr_type,
+                method_symbol,
+                List[Type].new(),
+                List[Type].new(),
+                .None(),
+            ),
             method_symbol.symbol_type,
         );
-        let call_expr = make_typed_expr(TypedExprKind.Call(callee, typed_args), return_type);
-        return self.wrap_receiver_materialized_call(prepared_receiver.second, receiver, call_expr);
+        let call_expr = make_typed_expr(
+            TypedExprKind.Call(callee, typed_args),
+            return_type,
+        );
+        return self.wrap_receiver_materialized_call(
+            prepared_receiver.second,
+            receiver,
+            call_expr,
+        );
     };
 
-    module_private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else Option[TypedExpr], result_type Type, scope Scope) TypedExpr = {
+    module_private lower_if_pattern_from_typed(
+        self,
+        typed_subj TypedExpr,
+        pattern PatternNode,
+        typed_then TypedExpr,
+        typed_else Option[TypedExpr],
+        result_type Type,
+        scope Scope,
+    ) TypedExpr = {
         let mutable arms = List[TypedWhenArm].new();
-        arms.push(TypedWhenArm(self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), typed_then, typed_then.expr_type));
+        arms.push(
+            TypedWhenArm(
+                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope),
+                typed_then,
+                typed_then.expr_type,
+            ),
+        );
         when typed_else in {
             .Some(else_ref) then {
-                arms.push(TypedWhenArm(TypedPattern.Wildcard(), else_ref, else_ref.expr_type));
+                arms.push(
+                    TypedWhenArm(TypedPattern.Wildcard(), else_ref, else_ref.expr_type),
+                );
             },
             .None() then {
                 let empty_else = self.empty_typed_block(Type.VoidType());
-                arms.push(TypedWhenArm(TypedPattern.Wildcard(), empty_else, empty_else.expr_type));
+                arms.push(
+                    TypedWhenArm(
+                        TypedPattern.Wildcard(),
+                        empty_else,
+                        empty_else.expr_type,
+                    ),
+                );
             },
         };
         return make_typed_expr(TypedExprKind.WhenExpr(typed_subj, arms), result_type);
     };
 
-    module_private lower_while_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_body TypedExpr, scope Scope) TypedStatement = {
+    module_private lower_while_pattern_from_typed(
+        self,
+        typed_subj TypedExpr,
+        pattern PatternNode,
+        typed_body TypedExpr,
+        scope Scope,
+    ) TypedStatement = {
         let mutable arms = List[TypedWhenArm].new();
-        arms.push(TypedWhenArm(self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), typed_body, typed_body.expr_type));
+        arms.push(
+            TypedWhenArm(
+                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope),
+                typed_body,
+                typed_body.expr_type,
+            ),
+        );
 
         let mutable break_statements = List[TypedStatement].new();
         break_statements.push(TypedStatement.BreakStmt(unknown_span()));
-        let break_block = make_typed_expr(TypedExprKind.Block(break_statements, Option[TypedExpr].None()), Type.VoidType());
-        arms.push(TypedWhenArm(TypedPattern.Wildcard(), break_block, break_block.expr_type));
+        let break_block = make_typed_expr(
+            TypedExprKind.Block(break_statements, Option[TypedExpr].None()),
+            Type.VoidType(),
+        );
+        arms.push(
+            TypedWhenArm(TypedPattern.Wildcard(), break_block, break_block.expr_type),
+        );
 
-        let when_expr = make_typed_expr(TypedExprKind.WhenExpr(typed_subj, arms), Type.VoidType());
-        let loop_condition = make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType());
+        let when_expr = make_typed_expr(
+            TypedExprKind.WhenExpr(typed_subj, arms),
+            Type.VoidType(),
+        );
+        let loop_condition = make_typed_expr(
+            TypedExprKind.BoolLiteral(true),
+            Type.BoolType(),
+        );
         return TypedStatement.WhileStmt(loop_condition, when_expr, unknown_span());
     };
 
-    module_private infer_collection_literal_result_type(self, typed_elems List[TypedExpr], expected Option[Type]) Type = {
+    module_private infer_collection_literal_result_type(
+        self,
+        typed_elems List[TypedExpr],
+        expected Option[Type],
+    ) Type = {
         when expected in {
             .Some(et) then {
                 return et;
@@ -555,10 +923,17 @@ given TypeChecker {
         args.push(element_type);
         // Std's `List` is a LANG ITEM, reached by declaration the way rustc
         // reaches `str` -- not by a spelling lookup that a user type could win.
-        return Type.GenericStruct(self.context().std_type_def_id("List") or else def_id_invalid(), args);
+        return Type.GenericStruct(
+            self.context().std_type_def_id("List") or else def_id_invalid(),
+            args,
+        );
     };
 
-    module_private infer_dict_literal_result_type(self, typed_entries List[Pair[TypedExpr, TypedExpr]], expected Option[Type]) Type = {
+    module_private infer_dict_literal_result_type(
+        self,
+        typed_entries List[Pair[TypedExpr, TypedExpr]],
+        expected Option[Type],
+    ) Type = {
         when expected in {
             .Some(et) then {
                 return et;
@@ -569,17 +944,27 @@ given TypeChecker {
         let mutable key_type = Type.Unknown();
         let mutable value_type = Type.Unknown();
         for entry in typed_entries then {
-            let key_candidate = self.concretize_default_literal_type(entry.first.expr_type);
-            let value_candidate = self.concretize_default_literal_type(entry.second.expr_type);
-            if self.is_unresolved_expr_type(key_type) and not self.is_unresolved_expr_type(key_candidate) then {
+            let key_candidate = self.concretize_default_literal_type(
+                entry.first.expr_type,
+            );
+            let value_candidate = self.concretize_default_literal_type(
+                entry.second.expr_type,
+            );
+            if self.is_unresolved_expr_type(key_type) and not self.is_unresolved_expr_type(
+                key_candidate,
+            ) then {
                 key_type = key_candidate;
             };
-            if self.is_unresolved_expr_type(value_type) and not self.is_unresolved_expr_type(value_candidate) then {
+            if self.is_unresolved_expr_type(value_type) and not self.is_unresolved_expr_type(
+                value_candidate,
+            ) then {
                 value_type = value_candidate;
             };
         };
 
-        if self.is_unresolved_expr_type(key_type) or self.is_unresolved_expr_type(value_type) then {
+        if self.is_unresolved_expr_type(key_type) or self.is_unresolved_expr_type(
+            value_type,
+        ) then {
             return Type.Unknown();
         };
 
@@ -587,59 +972,130 @@ given TypeChecker {
         args.push(key_type);
         args.push(value_type);
         // Std's `Dict` is a LANG ITEM, reached by declaration.
-        return Type.GenericStruct(self.context().std_type_def_id("Dict") or else def_id_invalid(), args);
+        return Type.GenericStruct(
+            self.context().std_type_def_id("Dict") or else def_id_invalid(),
+            args,
+        );
     };
 
-    module_private lower_collection_literal_from_typed(self, typed_elems List[TypedExpr], result_type Type) TypedExpr = {
+    module_private lower_collection_literal_from_typed(
+        self,
+        typed_elems List[TypedExpr],
+        result_type Type,
+    ) TypedExpr = {
         if self.is_unresolved_expr_type(result_type) then {
             return self.empty_typed_block(Type.Unknown());
         };
 
-        let temp_symbol = self.make_expr_temp_symbol("__collection", result_type, VariableKind.MutableValue());
-        let init_expr = self.lower_static_method_call_expr(result_type, "new", List[TypedExpr].new(), result_type);
+        let temp_symbol = self.make_expr_temp_symbol(
+            "__collection",
+            result_type,
+            VariableKind.MutableValue(),
+        );
+        let init_expr = self.lower_static_method_call_expr(
+            result_type,
+            "new",
+            List[TypedExpr].new(),
+            result_type,
+        );
         let mutable block_statements = List[TypedStatement].new();
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()));
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()),
+        );
 
-        let mutable push_return_type = self.resolve_method_return_type(result_type, "push");
-        let element_method_name = if self.is_unresolved_expr_type(push_return_type) then "insert" else "push";
+        let mutable push_return_type = self.resolve_method_return_type(
+            result_type,
+            "push",
+        );
+        let element_method_name = if self.is_unresolved_expr_type(push_return_type) then "insert"
+        else "push";
         for elem in typed_elems then {
-            let receiver = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
+            let receiver = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
             let mutable call_args = List[TypedExpr].new();
             call_args.push(elem);
-            let call_expr = self.lower_receiver_method_call_expr(receiver, element_method_name, call_args);
+            let call_expr = self.lower_receiver_method_call_expr(
+                receiver,
+                element_method_name,
+                call_args,
+            );
             block_statements.push(TypedStatement.ExprStmt(call_expr, unknown_span()));
         };
 
-        let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
-        return make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].Some(result_var)), result_type);
+        let result_var = make_typed_expr(
+            TypedExprKind.Variable(temp_symbol),
+            temp_symbol.symbol_type,
+        );
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(result_var)),
+            result_type,
+        );
     };
 
-    module_private lower_dict_literal_from_typed(self, typed_entries List[Pair[TypedExpr, TypedExpr]], result_type Type) TypedExpr = {
+    module_private lower_dict_literal_from_typed(
+        self,
+        typed_entries List[Pair[TypedExpr, TypedExpr]],
+        result_type Type,
+    ) TypedExpr = {
         if self.is_unresolved_expr_type(result_type) then {
             return self.empty_typed_block(Type.Unknown());
         };
 
-        let temp_symbol = self.make_expr_temp_symbol("__dict", result_type, VariableKind.MutableValue());
-        let init_expr = self.lower_static_method_call_expr(result_type, "new", List[TypedExpr].new(), result_type);
+        let temp_symbol = self.make_expr_temp_symbol(
+            "__dict",
+            result_type,
+            VariableKind.MutableValue(),
+        );
+        let init_expr = self.lower_static_method_call_expr(
+            result_type,
+            "new",
+            List[TypedExpr].new(),
+            result_type,
+        );
         let mutable block_statements = List[TypedStatement].new();
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()));
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()),
+        );
 
         for entry in typed_entries then {
-            let receiver = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
+            let receiver = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
             let mutable call_args = List[TypedExpr].new();
             call_args.push(entry.first);
             call_args.push(entry.second);
-            let call_expr = self.lower_receiver_method_call_expr(receiver, "insert", call_args);
+            let call_expr = self.lower_receiver_method_call_expr(
+                receiver,
+                "insert",
+                call_args,
+            );
             block_statements.push(TypedStatement.ExprStmt(call_expr, unknown_span()));
         };
 
-        let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type);
-        return make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].Some(result_var)), result_type);
+        let result_var = make_typed_expr(
+            TypedExprKind.Variable(temp_symbol),
+            temp_symbol.symbol_type,
+        );
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(result_var)),
+            result_type,
+        );
     };
 
-    module_private lower_collection_literal_expr(self, elements List[Expr], expected Option[Type], scope Scope) TypedExpr = {
+    module_private lower_collection_literal_expr(
+        self,
+        elements List[Expr],
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
         if expected is .None() and elements.is_empty() then {
-            self.push_diagnostic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.", unknown_span());
+            self.push_diagnostic(
+                "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.",
+                unknown_span(),
+            );
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -648,7 +1104,10 @@ given TypeChecker {
             .None() then Option[Type].None(),
         };
         if expected is .Some(et) and elem_expected is .None() then {
-            self.push_diagnostic(self.collection_literal_target_error(et), unknown_span());
+            self.push_diagnostic(
+                self.collection_literal_target_error(et),
+                unknown_span(),
+            );
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -656,17 +1115,31 @@ given TypeChecker {
         for e in elements then {
             typed_elems.push(self.check_expr_scoped_ref(e, elem_expected, scope));
         };
-        let result_type = self.infer_collection_literal_result_type(typed_elems, expected);
+        let result_type = self.infer_collection_literal_result_type(
+            typed_elems,
+            expected,
+        );
         return self.lower_collection_literal_from_typed(typed_elems, result_type);
     };
 
-    module_private lower_dict_literal_expr(self, entries List[ExprPair], expected Option[Type], scope Scope) TypedExpr = {
+    module_private lower_dict_literal_expr(
+        self,
+        entries List[ExprPair],
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
         let kv_types = when expected in {
             .Some(et) then self.extract_dict_kv_types(et),
-            .None() then Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None()),
+            .None() then Pair[Option[Type], Option[Type]](
+                Option[Type].None(),
+                Option[Type].None(),
+            ),
         };
         if expected is .Some(et) and kv_types.first is .None() then {
-            self.push_diagnostic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range", unknown_span());
+            self.push_diagnostic(
+                "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range",
+                unknown_span(),
+            );
             return self.empty_typed_block(Type.Unknown());
         };
 
@@ -676,7 +1149,10 @@ given TypeChecker {
             let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope);
             typed_entries.push(Pair[TypedExpr, TypedExpr](tf, ts));
         };
-        let mutable result_type = self.infer_dict_literal_result_type(typed_entries, expected);
+        let mutable result_type = self.infer_dict_literal_result_type(
+            typed_entries,
+            expected,
+        );
         return self.lower_dict_literal_from_typed(typed_entries, result_type);
     };
 
@@ -685,7 +1161,8 @@ given TypeChecker {
             return Option[Type].None();
         };
         let args = self.std_type_arguments(t);
-        return if args.count() > 0(UInt) then Option[Type].Some((args[0(UInt)])) else Option[Type].None();
+        return if args.count() > 0(UInt) then Option[Type].Some((args[0(UInt)]))
+        else Option[Type].None();
     };
 
     module_private lower_empty_literal_expr(self, expected Option[Type]) TypedExpr = {
@@ -697,38 +1174,73 @@ given TypeChecker {
                     let mutable range_args = List[Type].new();
                     range_args.push(element_type);
                     // Std's `Range` is a LANG ITEM, reached by declaration.
-                    let range_type = Type.GenericEnum(self.context().std_type_def_id("Range") or else def_id_invalid(), range_args);
-                    return self.lower_enum_constructor_expr(range_type, "Full", List[TypedExpr].new());
+                    let range_type = Type.GenericEnum(
+                        self.context().std_type_def_id("Range") or else def_id_invalid(),
+                        range_args,
+                    );
+                    return self.lower_enum_constructor_expr(
+                        range_type,
+                        "Full",
+                        List[TypedExpr].new(),
+                    );
                 };
                 if self.extract_collection_element_type(et) is .Some(_) then {
-                    return self.lower_collection_literal_from_typed(List[TypedExpr].new(), et);
+                    return self.lower_collection_literal_from_typed(
+                        List[TypedExpr].new(),
+                        et,
+                    );
                 };
                 if self.extract_dict_kv_types(et).first is .Some(_) then {
-                    return self.lower_dict_literal_from_typed(List[Pair[TypedExpr, TypedExpr]].new(), et);
+                    return self.lower_dict_literal_from_typed(
+                        List[Pair[TypedExpr, TypedExpr]].new(),
+                        et,
+                    );
                 };
-                self.push_diagnostic(self.collection_literal_target_error(et), unknown_span());
+                self.push_diagnostic(
+                    self.collection_literal_target_error(et),
+                    unknown_span(),
+                );
                 return self.empty_typed_block(Type.Unknown());
             },
             .None() then {},
         };
 
-        self.push_diagnostic("Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.", unknown_span());
+        self.push_diagnostic(
+            "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.",
+            unknown_span(),
+        );
         return self.empty_typed_block(Type.Unknown());
     };
 
-    module_private lower_for_binding_pattern_shape(self, pattern ForBindingPattern) PatternNode = {
+    module_private lower_for_binding_pattern_shape(
+        self,
+        pattern ForBindingPattern,
+    ) PatternNode = {
         return when pattern in {
             .Single(binding) then self.lower_for_binding_element_shape(binding),
             .Pair(first, second, span) then {
                 let mutable elements = List[PatternElement].new();
-                elements.push(PatternElement(Option[String].None(), self.lower_for_binding_element_shape(first)));
-                elements.push(PatternElement(Option[String].None(), self.lower_for_binding_element_shape(second)));
+                elements.push(
+                    PatternElement(
+                        Option[String].None(),
+                        self.lower_for_binding_element_shape(first),
+                    ),
+                );
+                elements.push(
+                    PatternElement(
+                        Option[String].None(),
+                        self.lower_for_binding_element_shape(second),
+                    ),
+                );
                 PatternNode.StructPattern("Pair", elements, span)
             },
         };
     };
 
-    module_private lower_for_binding_element_shape(self, binding PairBindingElement) PatternNode = {
+    module_private lower_for_binding_element_shape(
+        self,
+        binding PairBindingElement,
+    ) PatternNode = {
         let _ = self;
         if binding.is_discard then {
             return PatternNode.Wildcard(binding.span);
@@ -736,25 +1248,40 @@ given TypeChecker {
         return PatternNode.Variable(binding.name, binding.is_mutable, binding.span);
     };
 
-    module_private for_pair_binding_types(self, element_type Type, span SourceSpan) Pair[Type, Type] = {
+    module_private for_pair_binding_types(
+        self,
+        element_type Type,
+        span SourceSpan,
+    ) Pair[Type, Type] = {
         let mutable first_type = self.get_pair_binding_type(element_type, "first");
         let mutable second_type = self.get_pair_binding_type(element_type, "second");
         return when first_type in {
             .Some(first) then when second_type in {
                 .Some(second) then Pair[Type, Type](first, second),
                 .None() then {
-                    self.push_diagnostic_at_span("Type mismatch: expected Pair, got \(type_to_string(element_type))", span);
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected Pair, got \(type_to_string(element_type))",
+                        span,
+                    );
                     Pair[Type, Type](Type.Unknown(), Type.Unknown())
                 },
             },
             .None() then {
-                self.push_diagnostic_at_span("Type mismatch: expected Pair, got \(type_to_string(element_type))", span);
+                self.push_diagnostic_at_span(
+                    "Type mismatch: expected Pair, got \(type_to_string(element_type))",
+                    span,
+                );
                 Pair[Type, Type](Type.Unknown(), Type.Unknown())
             },
         };
     };
 
-    module_private bind_for_binding_pattern(self, pattern ForBindingPattern, element_type Type, scope Scope) Void = {
+    module_private bind_for_binding_pattern(
+        self,
+        pattern ForBindingPattern,
+        element_type Type,
+        scope Scope,
+    ) Void = {
         when pattern in {
             .Single(binding) then {
                 let _ = self.bind_pair_let_symbol(binding, element_type, scope);
@@ -791,7 +1318,13 @@ given TypeChecker {
     /// 只处理**有界闭开区间 `a..<b`**（`for i in 0..<n` 是压倒性的常见写法）和**简单绑定**
     /// （含丢弃 `_`）。其余区间形态（`a..=b` 的末元自增会碰到 `max_value`、半开区间、无界区间）
     /// 与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
-    module_private maybe_desugar_range_for_loop(self, pattern ForBindingPattern, typed_iter TypedExpr, body Expr, scope Scope) Option[TypedExpr] = {
+    module_private maybe_desugar_range_for_loop(
+        self,
+        pattern ForBindingPattern,
+        typed_iter TypedExpr,
+        body Expr,
+        scope Scope,
+    ) Option[TypedExpr] = {
         // 只做 `a..<b`：类型检查阶段产出的是 Range 的 ClosedOpen 枚举构造。
         let mutable start_expr Option[TypedExpr] = Option[TypedExpr].None();
         let mutable end_expr Option[TypedExpr] = Option[TypedExpr].None();
@@ -808,9 +1341,12 @@ given TypeChecker {
             return Option[TypedExpr].None();
         };
         // 只做简单绑定；`(a, b)` 解构仍走通用路径。
-        let mutable binding_opt Option[PairBindingElement] = Option[PairBindingElement].None();
+        let mutable binding_opt Option[PairBindingElement] = Option[PairBindingElement].None(
+        );
         when pattern in {
-            .Single(binding) then { binding_opt = Option[PairBindingElement].Some(binding); },
+            .Single(binding) then {
+                binding_opt = Option[PairBindingElement].Some(binding);
+            },
             .Pair(_, _, _) then {},
         };
         if binding_opt is .None() then {
@@ -830,8 +1366,16 @@ given TypeChecker {
             return Option[TypedExpr].None();
         };
 
-        let iter_symbol = self.make_expr_temp_symbol("__for_range_i", element_type, VariableKind.MutableValue());
-        let end_symbol = self.make_expr_temp_symbol("__for_range_end", element_type, VariableKind.Value());
+        let iter_symbol = self.make_expr_temp_symbol(
+            "__for_range_i",
+            element_type,
+            VariableKind.MutableValue(),
+        );
+        let end_symbol = self.make_expr_temp_symbol(
+            "__for_range_end",
+            element_type,
+            VariableKind.Value(),
+        );
         let iter_var = make_typed_expr(TypedExprKind.Variable(iter_symbol), element_type);
         let end_var = make_typed_expr(TypedExprKind.Variable(end_symbol), element_type);
 
@@ -842,20 +1386,32 @@ given TypeChecker {
             Type.BoolType(),
         );
         // i.succ().unwrap()
-        let succ_call = self.lower_receiver_method_call_expr(iter_var, "succ", List[TypedExpr].new());
-        let advance_value = self.lower_receiver_method_call_expr(succ_call, "unwrap", List[TypedExpr].new());
+        let succ_call = self.lower_receiver_method_call_expr(
+            iter_var,
+            "succ",
+            List[TypedExpr].new(),
+        );
+        let advance_value = self.lower_receiver_method_call_expr(
+            succ_call,
+            "unwrap",
+            List[TypedExpr].new(),
+        );
 
         let for_scope = Scope.new_child(scope);
         let bind_symbol_opt = self.bind_pair_let_symbol(binding, element_type, for_scope);
         let mutable inner_statements = List[TypedStatement].new();
         when bind_symbol_opt in {
             .Some(bind_symbol) then {
-                inner_statements.push(TypedStatement.LetStmt(bind_symbol, iter_var, span));
+                inner_statements.push(
+                    TypedStatement.LetStmt(bind_symbol, iter_var, span),
+                );
             },
             .None() then {},
         };
         // 自增先于 body，`continue` 才会正确前进。
-        inner_statements.push(TypedStatement.AssignmentStmt(iter_var, advance_value, span));
+        inner_statements.push(
+            TypedStatement.AssignmentStmt(iter_var, advance_value, span),
+        );
 
         let prev_in_loop = self.storage.in_loop;
         self.storage.in_loop = true;
@@ -863,7 +1419,10 @@ given TypeChecker {
         self.storage.in_loop = prev_in_loop;
         inner_statements.push(TypedStatement.ExprStmt(typed_body, span));
 
-        let inner_block = make_typed_expr(TypedExprKind.Block(inner_statements, Option[TypedExpr].None()), Type.VoidType());
+        let inner_block = make_typed_expr(
+            TypedExprKind.Block(inner_statements, Option[TypedExpr].None()),
+            Type.VoidType(),
+        );
         let while_stmt = TypedStatement.WhileStmt(condition, inner_block, span);
 
         let mutable outer_statements = List[TypedStatement].new();
@@ -871,17 +1430,28 @@ given TypeChecker {
         outer_statements.push(TypedStatement.LetStmt(end_symbol, end, span));
         outer_statements.push(while_stmt);
         return Option[TypedExpr].Some(
-            make_typed_expr(TypedExprKind.Block(outer_statements, Option[TypedExpr].None()), Type.VoidType())
+            make_typed_expr(
+                TypedExprKind.Block(outer_statements, Option[TypedExpr].None()),
+                Type.VoidType(),
+            ),
         );
     };
 
-    module_private lower_for_expr(self, pattern ForBindingPattern, iterable Expr, body Expr, scope Scope) TypedExpr = {
+    module_private lower_for_expr(
+        self,
+        pattern ForBindingPattern,
+        iterable Expr,
+        body Expr,
+        scope Scope,
+    ) TypedExpr = {
         let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope);
 
         // ── 区间循环专用降低 ────────────────────────────────────────────────
         // `for x in a..<b` 走这里，不经过迭代器协议。
         when self.maybe_desugar_range_for_loop(pattern, typed_iter, body, scope) in {
-            .Some(lowered) then { return lowered; },
+            .Some(lowered) then {
+                return lowered;
+            },
             .None() then {},
         };
         let mutable for_scope = Scope.new_child(scope);
@@ -899,7 +1469,10 @@ given TypeChecker {
         let direct_next = self.resolve_method_return_type(iterator_type, "next");
         let mutable uses_iterator_method = false;
         if self.extract_option_result_inner(direct_next) is .Unknown() then {
-            let maybe_iterator = self.resolve_method_return_type(iterable_type, "iterator");
+            let maybe_iterator = self.resolve_method_return_type(
+                iterable_type,
+                "iterator",
+            );
             if maybe_iterator is not .Unknown() then {
                 iterator_type = maybe_iterator;
                 uses_iterator_method = true;
@@ -908,19 +1481,34 @@ given TypeChecker {
                 // cursor: the type named here -- the result of `iterator()` --
                 // is not written at any one token of the statement. `type_to_string`
                 // would print `struct#N`; the reader gets the type's name.
-                self.push_diagnostic("Type \(self.context().type_display_name(iterable_type)) is not iterable: missing iterator() method and does not implement Iterator", unknown_span());
+                self.push_diagnostic(
+                    "Type \(self.context().type_display_name(iterable_type)) is not iterable: missing iterator() method and does not implement Iterator",
+                    unknown_span(),
+                );
                 return self.empty_typed_block(Type.VoidType());
             };
         };
         if iter_item_type is not .Unknown() and iterator_type is not .Unknown() then {
             let mutable iterator_trait_args = List[Type].new();
             iterator_trait_args.push(iter_item_type);
-            self.enforce_explicit_generic_trait_conformance_with_note(iterator_type, "Iterator", iterator_trait_args, "for-in iterator result check", unknown_span());
+            self.enforce_explicit_generic_trait_conformance_with_note(
+                iterator_type,
+                "Iterator",
+                iterator_trait_args,
+                "for-in iterator result check",
+                unknown_span(),
+            );
             if uses_iterator_method then {
                 let mutable iterable_trait_args = List[Type].new();
                 iterable_trait_args.push(iter_item_type);
                 iterable_trait_args.push(iterator_type);
-                self.enforce_explicit_generic_trait_conformance_with_note(iterable_type, "Iterable", iterable_trait_args, "for-in iterable check", unknown_span());
+                self.enforce_explicit_generic_trait_conformance_with_note(
+                    iterable_type,
+                    "Iterable",
+                    iterable_trait_args,
+                    "for-in iterable check",
+                    unknown_span(),
+                );
             };
         };
         self.bind_for_binding_pattern(pattern, iter_item_type, for_scope);
@@ -930,13 +1518,28 @@ given TypeChecker {
         self.storage.in_loop = prev_in_loop;
 
         let iterator_init = if uses_iterator_method then {
-            self.lower_receiver_method_call_expr(typed_iter, "iterator", List[TypedExpr].new())
+            self.lower_receiver_method_call_expr(
+                typed_iter,
+                "iterator",
+                List[TypedExpr].new(),
+            )
         } else {
             typed_iter
         };
-        let iterator_symbol = self.make_expr_temp_symbol("__for_iter", iterator_init.expr_type, VariableKind.MutableValue());
-        let iterator_var = make_typed_expr(TypedExprKind.Variable(iterator_symbol), iterator_symbol.symbol_type);
-        let next_call = self.lower_receiver_method_call_expr(iterator_var, "next", List[TypedExpr].new());
+        let iterator_symbol = self.make_expr_temp_symbol(
+            "__for_iter",
+            iterator_init.expr_type,
+            VariableKind.MutableValue(),
+        );
+        let iterator_var = make_typed_expr(
+            TypedExprKind.Variable(iterator_symbol),
+            iterator_symbol.symbol_type,
+        );
+        let next_call = self.lower_receiver_method_call_expr(
+            iterator_var,
+            "next",
+            List[TypedExpr].new(),
+        );
         let user_pattern = self.lower_for_binding_pattern_shape(pattern);
         let loop_pattern = if self.extract_option_result_inner(next_call.expr_type) is not .Unknown() then {
             let mutable wrapped = List[PatternElement].new();
@@ -945,11 +1548,21 @@ given TypeChecker {
         } else {
             user_pattern
         };
-        let while_stmt = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body, for_scope);
+        let while_stmt = self.lower_while_pattern_from_typed(
+            next_call,
+            loop_pattern,
+            typed_body,
+            for_scope,
+        );
 
         let mutable block_statements = List[TypedStatement].new();
-        block_statements.push(TypedStatement.LetStmt(iterator_symbol, iterator_init, unknown_span()));
+        block_statements.push(
+            TypedStatement.LetStmt(iterator_symbol, iterator_init, unknown_span()),
+        );
         block_statements.push(while_stmt);
-        return make_typed_expr(TypedExprKind.Block(block_statements, Option[TypedExpr].None()), Type.VoidType());
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].None()),
+            Type.VoidType(),
+        );
     };
 };

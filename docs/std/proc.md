@@ -31,11 +31,7 @@ public let run_command_output(program String, args List[String]) Result[CommandO
 ```koral
 public type mutable Command;
 
-public type CommandOutput(
-    public status ExitStatus,
-    public stdout String,
-    public stderr String,
-);
+public type CommandOutput(public status ExitStatus, public stdout String, public stderr String);
 
 public type ExitStatus;
 
@@ -48,11 +44,17 @@ public type StderrPipe;
 public type mutable Process;
 
 public type IoRedirect {
+    /// Inherit the parent process's corresponding file descriptor (default behavior).
     Inherit(),
+    /// Create a pipe connecting parent and child processes.
     Piped(),
+    /// Redirect to /dev/null (Unix) or NUL (Windows).
     Null(),
+    /// Redirect to/from an already-opened file.
     File(file File),
+    /// Use another child process's stdout pipe (typically for stdin chaining: cmd1 | cmd2).
     StdoutPipe(pipe StdoutPipe),
+    /// Use another child process's stderr pipe (typically for stdin chaining).
     StderrPipe(pipe StderrPipe),
 };
 ```
@@ -94,6 +96,8 @@ given ExitStatus as ToString {
     public to_string(self) String;
 };
 
+given PipeStorage as Drop {};
+
 given StdinPipe {
     public fd(self) Int;
 };
@@ -119,8 +123,11 @@ given StderrPipe as Reader {
     public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt];
 };
 
+given ProcessStorage as Drop {};
+
 given Process {
     public pid(self) UInt32;
+    public peak_rss_bytes(self) UInt64;
     public wait(self) Result[ExitStatus];
     public wait_output(self) Result[CommandOutput];
     public try_wait(self) Result[Option[ExitStatus]];

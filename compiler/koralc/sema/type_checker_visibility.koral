@@ -1,4 +1,3 @@
-
 given TypeChecker {
     module_private spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
         let _ = self;
@@ -13,7 +12,12 @@ given TypeChecker {
         return self.storage.diagnostics.has_error(self.storage.file_path, message, span);
     };
 
-    module_private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
+    module_private trait_missing_constraint_message(
+        self,
+        bound_type Type,
+        constraint_param String,
+        constraint String,
+    ) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type ");
         msg.push_string(self.context().type_display_name(bound_type));
@@ -32,7 +36,13 @@ given TypeChecker {
     /// `note` says WHY the trait is needed -- `(operator 'equals')`. It is
     /// what tells the reader which construct demanded the trait; without it
     /// the message names a requirement and leaves the cause unstated.
-    module_private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type], note String) String = {
+    module_private trait_missing_conformance_message(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+        note String,
+    ) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type ");
         msg.push_string(self.context().type_display_name(target_type));
@@ -41,7 +51,9 @@ given TypeChecker {
             let mutable args_display = StringBuilder.new();
             let mutable first = true;
             for arg in trait_args then {
-                if not first then { args_display.push_string(", ");};
+                if not first then {
+                    args_display.push_string(", ");
+                };
                 args_display.push_string(self.context().type_display_name(arg));
                 first = false;
             };
@@ -58,7 +70,13 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    module_private trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
+    module_private trait_requirement_missing_constraint_message(
+        self,
+        target_type Type,
+        trait_name String,
+        bound_type Type,
+        constraint String,
+    ) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type '");
         msg.push_string(self.context().type_display_name(target_type));
@@ -72,7 +90,12 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    module_private trait_requirement_missing_blanket_given_message(self, target_type Type, trait_name String, modifier_name String) String = {
+    module_private trait_requirement_missing_blanket_given_message(
+        self,
+        target_type Type,
+        trait_name String,
+        modifier_name String,
+    ) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type '");
         msg.push_string(self.context().type_display_name(target_type));
@@ -86,7 +109,11 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    module_private mutable_constraint_violation_message(self, target_type Type, context String) String = {
+    module_private mutable_constraint_violation_message(
+        self,
+        target_type Type,
+        context String,
+    ) String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Type '");
         msg.push_string(self.context().type_display_name(target_type));
@@ -96,42 +123,72 @@ given TypeChecker {
             msg.push_string(context);
             msg.push_string(")");
         };
-        msg.push_string(". Only types declared with 'type mutable' can be used as weak references.");
+        msg.push_string(
+            ". Only types declared with 'type mutable' can be used as weak references.",
+        );
         return msg.to_string();
     };
 
     module_private satisfies_mutable_constraint(self, target_type Type) Bool = {
         return when target_type in {
-            .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
+            .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(
+                def_id,
+            ),
             // Identity: the template's DECLARATION decides mutability.
-            .GenericStruct(template_def_id, _) then self.context().def_id_map.is_struct_mutable(template_def_id),
+            .GenericStruct(template_def_id, _) then self.context().def_id_map.is_struct_mutable(
+                template_def_id,
+            ),
             .GenericParameter(_) then true,
             _ then false,
         };
     };
 
     module_private is_upper_first_char(self, s String) Bool = {
-        if s.is_empty() then { return false;};
+        if s.is_empty() then {
+            return false;
+        };
         when s.get(0) in {
-            .Some(c) then { return c >= 'A' and c <= 'Z';},
-            .None() then { return false;},
+            .Some(c) then {
+                return c >= 'A' and c <= 'Z';
+            },
+            .None() then {
+                return false;
+            },
         };
     };
 
     module_private make_visibility_checker(self) Option[VisibilityChecker] = {
         return when self.storage.import_graph in {
-            .Some(graph) then Option[VisibilityChecker].Some(VisibilityChecker.new(graph, self.storage.module_path, self.storage.file_path)),
+            .Some(graph) then Option[VisibilityChecker].Some(
+                VisibilityChecker.new(
+                    graph,
+                    self.storage.module_path,
+                    self.storage.file_path,
+                ),
+            ),
             .None() then Option[VisibilityChecker].None(),
         };
     };
 
     /// `span` is where the type is written. A message about the type belongs
     /// at the spelling, not at whatever declaration happens to carry it.
-    module_private check_type_visibility(self, t Type, type_name String, scope Scope, span SourceSpan) Void = {
+    module_private check_type_visibility(
+        self,
+        t Type,
+        type_name String,
+        scope Scope,
+        span SourceSpan,
+    ) Void = {
         if self.make_visibility_checker() is .Some(checker) then {
             let is_local_binding = scope.is_local_type_binding(type_name);
             let is_generic_param = scope.is_generic_param(type_name);
-            when checker.check_type(t, type_name, self.context(), is_local_binding, is_generic_param) in {
+            when checker.check_type(
+                t,
+                type_name,
+                self.context(),
+                is_local_binding,
+                is_generic_param,
+            ) in {
                 .Ok(_) then {},
                 .Error(message) then {
                     self.push_diagnostic(message.message(), span);
@@ -144,7 +201,9 @@ given TypeChecker {
     /// tells the reader to import it -- pointing anywhere but the use leaves
     /// them searching the file for the thing they must add a `using` for.
     module_private check_symbol_visibility(self, sym Symbol, span SourceSpan) Void = {
-        if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(sym.def_id) is .Some(module_path) then {
+        if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(
+            sym.def_id,
+        ) is .Some(module_path) then {
             when checker.check_symbol(module_path, self.context().symbol_name(sym), false) in {
                 .Ok(_) then {},
                 .Error(message) then {
@@ -164,14 +223,23 @@ given TypeChecker {
         };
     };
 
-    module_private first_signature_visibility_violation(self, t Type, required_access AccessModifier) Option[Pair[String, AccessModifier]] = {
+    module_private first_signature_visibility_violation(
+        self,
+        t Type,
+        required_access AccessModifier,
+    ) Option[Pair[String, AccessModifier]] = {
         return when t in {
             .StructureType(def_id) then {
                 when self.context().get_access(def_id) in {
                     .Some(type_access) then {
-                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
-                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t);
-                            return Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access));
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(
+                            required_access,
+                        ) then {
+                            let type_name = self.context().get_name(def_id) or else self.context(
+                            ).type_display_name(t);
+                            return Option[Pair[String, AccessModifier]].Some(
+                                Pair[String, AccessModifier](type_name, type_access),
+                            );
                         };
                         Option[Pair[String, AccessModifier]].None()
                     },
@@ -181,9 +249,14 @@ given TypeChecker {
             .EnumType(def_id) then {
                 when self.context().get_access(def_id) in {
                     .Some(type_access) then {
-                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
-                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t);
-                            return Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access));
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(
+                            required_access,
+                        ) then {
+                            let type_name = self.context().get_name(def_id) or else self.context(
+                            ).type_display_name(t);
+                            return Option[Pair[String, AccessModifier]].Some(
+                                Pair[String, AccessModifier](type_name, type_access),
+                            );
                         };
                         Option[Pair[String, AccessModifier]].None()
                     },
@@ -193,27 +266,61 @@ given TypeChecker {
             .OpaqueType(def_id) then {
                 when self.context().get_access(def_id) in {
                     .Some(type_access) then {
-                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
-                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t);
-                            return Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access));
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(
+                            required_access,
+                        ) then {
+                            let type_name = self.context().get_name(def_id) or else self.context(
+                            ).type_display_name(t);
+                            return Option[Pair[String, AccessModifier]].Some(
+                                Pair[String, AccessModifier](type_name, type_access),
+                            );
                         };
                         Option[Pair[String, AccessModifier]].None()
                     },
                     .None() then Option[Pair[String, AccessModifier]].None(),
                 }
             },
-            .ReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .MutableReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .BorrowedReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .MutableBorrowedReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .PointerType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .MutablePointerType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .WeakReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
-            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(inner, required_access),
+            .ReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .MutableReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .BorrowedReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .MutableBorrowedReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .PointerType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .MutablePointerType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .WeakReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
+            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(
+                inner,
+                required_access,
+            ),
             .FunctionType(params, return_type) then {
                 for param in params then {
-                    when self.first_signature_visibility_violation(param.param_type, required_access) in {
-                        .Some(violation) then { return .Some(violation);},
+                    when self.first_signature_visibility_violation(
+                        param.param_type,
+                        required_access,
+                    ) in {
+                        .Some(violation) then {
+                            return .Some(violation);
+                        },
                         .None() then {},
                     };
                 };
@@ -222,7 +329,9 @@ given TypeChecker {
             .GenericStruct(_, args) then {
                 for arg in args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
-                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
+                        .Some(violation) then {
+                            return Option[Pair[String, AccessModifier]].Some(violation);
+                        },
                         .None() then {},
                     };
                 };
@@ -231,7 +340,9 @@ given TypeChecker {
             .GenericEnum(_, args) then {
                 for arg in args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
-                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
+                        .Some(violation) then {
+                            return Option[Pair[String, AccessModifier]].Some(violation);
+                        },
                         .None() then {},
                     };
                 };
@@ -240,7 +351,9 @@ given TypeChecker {
             .TraitObject(_, type_args) then {
                 for arg in type_args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
-                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation);},
+                        .Some(violation) then {
+                            return Option[Pair[String, AccessModifier]].Some(violation);
+                        },
                         .None() then {},
                     };
                 };
@@ -250,7 +363,13 @@ given TypeChecker {
         };
     };
 
-    module_private validate_signature_type_visibility(self, symbol_name String, symbol_access AccessModifier, signature_types List[Type], span SourceSpan) Void = {
+    module_private validate_signature_type_visibility(
+        self,
+        symbol_name String,
+        symbol_access AccessModifier,
+        signature_types List[Type],
+        span SourceSpan,
+    ) Void = {
         if symbol_access is .FilePrivate() then {
             return;
         };
@@ -280,9 +399,16 @@ given TypeChecker {
         };
     };
 
-    module_private ensure_generic_template_visible(self, template_name String, template_def_id DefId, span SourceSpan) Bool = {
-        let access = self.context().get_access(template_def_id) or else AccessModifier.ModulePrivate();
-        let module_path = self.context().get_module_path(template_def_id) or else List[String].new();
+    module_private ensure_generic_template_visible(
+        self,
+        template_name String,
+        template_def_id DefId,
+        span SourceSpan,
+    ) Bool = {
+        let access = self.context().get_access(template_def_id) or else AccessModifier.ModulePrivate(
+        );
+        let module_path = self.context().get_module_path(template_def_id) or else List[String].new(
+        );
 
         let access_allowed = when access in {
             .Public() then true,
@@ -305,7 +431,10 @@ given TypeChecker {
             return false;
         };
 
-        if module_path.is_empty() or string_list_eq(module_path, self.storage.module_path) then {
+        if module_path.is_empty() or string_list_eq(
+            module_path,
+            self.storage.module_path,
+        ) then {
             return true;
         };
 
@@ -324,7 +453,11 @@ given TypeChecker {
         return true;
     };
 
-    module_private is_field_accessible_from_current_context(self, field_access AccessModifier, def_id DefId) Bool = {
+    module_private is_field_accessible_from_current_context(
+        self,
+        field_access AccessModifier,
+        def_id DefId,
+    ) Bool = {
         return when field_access in {
             .Public() then true,
             .FilePrivate() then {
@@ -332,7 +465,8 @@ given TypeChecker {
                 def_source_file == self.storage.file_path
             },
             .ModulePrivate() then {
-                let def_module_path = self.context().get_module_path(def_id) or else List[String].new();
+                let def_module_path = self.context().get_module_path(def_id) or else List[String].new(
+                );
                 string_list_eq(def_module_path, self.storage.module_path)
             },
             .PackagePrivate() then {
@@ -343,8 +477,7 @@ given TypeChecker {
     };
 
     module_private is_method_accessible_from_current_context(self, method Symbol) Bool = {
-        if self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) is .Some(info)
-        and info.conformance_trait_name is .Some(_) then {
+        if self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) is .Some(info) and info.conformance_trait_name is .Some(_) then {
             return true;
         };
         return when self.context().get_access(method.def_id) in {
@@ -355,7 +488,8 @@ given TypeChecker {
                     def_source_file == self.storage.file_path
                 },
                 .ModulePrivate() then {
-                    let def_module_path = self.context().get_module_path(method.def_id) or else List[String].new();
+                    let def_module_path = self.context().get_module_path(method.def_id) or else List[String].new(
+                    );
                     string_list_eq(def_module_path, self.storage.module_path)
                 },
                 .PackagePrivate() then {
@@ -367,7 +501,12 @@ given TypeChecker {
         };
     };
 
-    module_private reject_inaccessible_method_from_current_context(self, method Symbol, method_name String, span SourceSpan) Bool = {
+    module_private reject_inaccessible_method_from_current_context(
+        self,
+        method Symbol,
+        method_name String,
+        span SourceSpan,
+    ) Bool = {
         return when self.context().get_access(method.def_id) in {
             .Some(access) then {
                 if self.is_method_accessible_from_current_context(method) then {
@@ -393,19 +532,28 @@ given TypeChecker {
     /// constructed directly. False means it may not, and the value that would
     /// have been built has no type: the caller must poison the result, or the
     /// next line of the program gets checked against a value that cannot exist.
-    module_private ensure_struct_construction_access(self, type_name String, def_id DefId, span SourceSpan) Bool = {
+    module_private ensure_struct_construction_access(
+        self,
+        type_name String,
+        def_id DefId,
+        span SourceSpan,
+    ) Bool = {
         when self.context().get_struct_fields(def_id) in {
             .Some(fields) then {
                 for field in fields then {
-                    if not self.is_field_accessible_from_current_context(field.access, def_id) then {
+                    if not self.is_field_accessible_from_current_context(
+                        field.access,
+                        def_id,
+                    ) then {
                         let access_label = when field.access in {
                             .FilePrivate() then "file_private",
                             .PackagePrivate() then "package_private",
                             _ then "module_private",
                         };
                         self.push_diagnostic(
-                            "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead."
-                        , span);
+                            "Cannot directly construct type '\(type_name)' because field '\(field.name)' is \(access_label). Use a public factory method instead.",
+                            span,
+                        );
                         return false;
                     };
                 };
@@ -419,7 +567,11 @@ given TypeChecker {
     // O(1)。不做「按名字扫全部 DefId」——那既是热路径上的性能黑洞，也违反
     // 「身份判定走 DefId、名字只作索引键」的约定。
     module_private lookup_current_file_def_id(self, name String) Option[DefId] = {
-        return self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path));
+        return self.context().lookup_def_id(
+            self.storage.module_path,
+            name,
+            Option[String].Some(self.storage.file_path),
+        );
     };
 
     module_private lookup_current_file_symbol(self, name String) Option[Symbol] = {
@@ -443,7 +595,9 @@ given TypeChecker {
                     .Structure() then Option[Type].Some(Type.StructureType(def_id)),
                     .Enum() then Option[Type].Some(Type.EnumType(def_id)),
                     .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
-                    .Trait() then Option[Type].Some(Type.TraitObject(def_id, List[Type].new())),
+                    .Trait() then Option[Type].Some(
+                        Type.TraitObject(def_id, List[Type].new()),
+                    ),
                 },
                 .GenericTemplate(template_kind) then when template_kind in {
                     .Structure() then Option[Type].Some(Type.StructureType(def_id)),
@@ -466,7 +620,9 @@ given TypeChecker {
                         .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
                         .Trait() then {
                             let trait_name = self.context().get_name(def_id) or else name;
-                            Option[Type].Some(Type.TraitObject(def_id, List[Type].new()))
+                            Option[Type].Some(
+                                Type.TraitObject(def_id, List[Type].new()),
+                            )
                         },
                     },
                     .GenericTemplate(template_kind) then when template_kind in {
@@ -541,7 +697,10 @@ given TypeChecker {
                         while index > 0 then {
                             index -= 1;
                             let entry = candidates[index(UInt)];
-                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
+                            if string_list_eq(entry.module, current_module) and source_file_matches(
+                                entry.source_file,
+                                current_file,
+                            ) and entry.symbol == alias then {
                                 return Option[String].Some(entry.original_symbol);
                             };
                         };
@@ -565,8 +724,15 @@ given TypeChecker {
                         while index > 0 then {
                             index -= 1;
                             let entry = candidates[index(UInt)];
-                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
-                                return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
+                            if string_list_eq(entry.module, current_module) and source_file_matches(
+                                entry.source_file,
+                                current_file,
+                            ) and entry.symbol == alias then {
+                                return when self.context().lookup_def_id(
+                                    entry.target,
+                                    entry.original_symbol,
+                                    Option[String].None(),
+                                ) in {
                                     .Some(def_id) then self.context().get_symbol(def_id),
                                     .None() then Option[Symbol].None(),
                                 };
@@ -592,9 +758,18 @@ given TypeChecker {
                         while index > 0 then {
                             index -= 1;
                             let entry = candidates[index(UInt)];
-                            if string_list_eq(entry.module, current_module) and source_file_matches(entry.source_file, current_file) and entry.symbol == alias then {
-                                return when self.context().lookup_def_id(entry.target, entry.original_symbol, Option[String].None()) in {
-                                    .Some(def_id) then self.type_for_declared_def_id(def_id),
+                            if string_list_eq(entry.module, current_module) and source_file_matches(
+                                entry.source_file,
+                                current_file,
+                            ) and entry.symbol == alias then {
+                                return when self.context().lookup_def_id(
+                                    entry.target,
+                                    entry.original_symbol,
+                                    Option[String].None(),
+                                ) in {
+                                    .Some(def_id) then self.type_for_declared_def_id(
+                                        def_id,
+                                    ),
                                     .None() then Option[Type].None(),
                                 };
                             };
@@ -611,9 +786,19 @@ given TypeChecker {
     /// Build the conformance key. Name -> declaration identity happens here,
     /// once, and every record and lookup goes through this function, so both
     /// sides always agree on the identity.
-    module_private trait_conformance_key(self, target_type Type, trait_name String, trait_arg_types List[Type]) ExplicitTraitConformanceKey = {
+    module_private trait_conformance_key(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) ExplicitTraitConformanceKey = {
         let def_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
-        return ExplicitTraitConformanceKey(target_type, def_id, trait_name, trait_arg_types);
+        return ExplicitTraitConformanceKey(
+            target_type,
+            def_id,
+            trait_name,
+            trait_arg_types,
+        );
     };
 
     module_private trait_args_match(self, expected List[Type], actual List[Type]) Bool = {
@@ -631,11 +816,21 @@ given TypeChecker {
         return true;
     };
 
-    module_private generic_param_has_trait_bound(self, name String, trait_name String, trait_arg_types List[Type]) Bool = {
+    module_private generic_param_has_trait_bound(
+        self,
+        name String,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) Bool = {
         return when self.storage.generic_param_constraints.get(name) in {
             .Some(constraints) then {
                 for constraint in constraints then {
-                    if self.generic_constraint_satisfies_trait_bound(constraint, Type.GenericParameter(name), trait_name, trait_arg_types) then {
+                    if self.generic_constraint_satisfies_trait_bound(
+                        constraint,
+                        Type.GenericParameter(name),
+                        trait_name,
+                        trait_arg_types,
+                    ) then {
                         return true;
                     };
                 };
@@ -645,25 +840,43 @@ given TypeChecker {
         };
     };
 
-    module_private generic_constraint_satisfies_trait_bound(self, constraint GenericConstraintBound, self_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
+    module_private generic_constraint_satisfies_trait_bound(
+        self,
+        constraint GenericConstraintBound,
+        self_type Type,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) Bool = {
         // Match on declaration identity, not on spelling.
         let want = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         if constraint.trait_def_id == want and constraint.trait_def_id.id > 0(UInt) then {
-            return trait_arg_types.is_empty() or self.trait_args_match(constraint.type_args, trait_arg_types);
+            return trait_arg_types.is_empty() or self.trait_args_match(
+                constraint.type_args,
+                trait_arg_types,
+            );
         };
 
-        return when self.storage.trait_registry.get_in_module(constraint.trait_name, self.storage.module_path) in {
+        return when self.storage.trait_registry.get_in_module(
+            constraint.trait_name,
+            self.storage.module_path,
+        ) in {
             .Some(info) then {
                 let previous_scope = self.storage.current_scope;
-                defer { self.storage.current_scope = previous_scope;};
+                defer {
+                    self.storage.current_scope = previous_scope;
+                };
 
                 let child_scope = Scope.new_child(self.storage.current_scope);
                 child_scope.define_type("Self", self_type);
                 self.storage.current_scope = child_scope;
 
                 let mutable index UInt = 0;
-                while index < info.type_params.count() and index < constraint.type_args.count() then {
-                    child_scope.define_type(info.type_params[index], constraint.type_args[index]);
+                while index < info.type_params.count() and index < constraint.type_args.count(
+                ) then {
+                    child_scope.define_type(
+                        info.type_params[index],
+                        constraint.type_args[index],
+                    );
                     index += 1;
                 };
 
@@ -672,7 +885,12 @@ given TypeChecker {
                     for arg_node in parent.type_arg_nodes then {
                         parent_args.push(self.resolve_type(arg_node));
                     };
-                    if self.generic_constraint_satisfies_trait_bound(GenericConstraintBound(parent.def_id, parent.name, parent_args), self_type, trait_name, trait_arg_types) then {
+                    if self.generic_constraint_satisfies_trait_bound(
+                        GenericConstraintBound(parent.def_id, parent.name, parent_args),
+                        self_type,
+                        trait_name,
+                        trait_arg_types,
+                    ) then {
                         return true;
                     };
                 };
@@ -682,16 +900,30 @@ given TypeChecker {
         };
     };
 
-    module_private record_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Void = {
+    module_private record_explicit_trait_conformance(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) Void = {
         self.invalidate_trait_requirement_caches();
-        self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name, trait_arg_types));
+        self.storage.explicit_trait_conformances.insert(
+            self.trait_conformance_key(target_type, trait_name, trait_arg_types),
+        );
     };
 
-    module_private is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
+    module_private is_implicitly_satisfied_trait_requirement(
+        self,
+        target_type Type,
+        trait_name String,
+    ) Bool = {
         let target_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         when target_type in {
             .TraitObject(trait_object_def_id, _) then {
-                return self.storage.trait_registry.has_inheritance(trait_object_def_id, target_id);
+                return self.storage.trait_registry.has_inheritance(
+                    trait_object_def_id,
+                    target_id,
+                );
             },
             _ then {},
         };
@@ -701,63 +933,133 @@ given TypeChecker {
     /// Does `subject` satisfy `b` right now? The single satisfaction predicate:
     /// every consumer asks this question here, dispatching on the bound's KIND
     /// rather than on its spelling.
-    module_private satisfies_bound(self, subject Type, b Bound, bindings Dict[String, Type]) Bool = {
+    module_private satisfies_bound(
+        self,
+        subject Type,
+        b Bound,
+        bindings Dict[String, Type],
+    ) Bool = {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
-            .Trait(_, trait_name, _) then self.satisfies_trait_requirement_with_args(subject, trait_name, self.bound_trait_args_with_bindings(b, bindings)),
+            .Trait(_, trait_name, _) then self.satisfies_trait_requirement_with_args(
+                subject,
+                trait_name,
+                self.bound_trait_args_with_bindings(b, bindings),
+            ),
         };
     };
 
     /// Could `subject` still satisfy `b` after type substitution? Distinct from
     /// `satisfies_bound` on purpose: materialization decisions need "might
     /// become true later", call sites need "is true now". Never merge the two.
-    module_private bound_may_hold(self, subject Type, b Bound, bindings Dict[String, Type]) Bool = {
+    module_private bound_may_hold(
+        self,
+        subject Type,
+        b Bound,
+        bindings Dict[String, Type],
+    ) Bool = {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
-            .Trait(_, trait_name, _) then self.trait_bound_may_hold(subject, trait_name, self.bound_trait_args_with_bindings(b, bindings)),
+            .Trait(_, trait_name, _) then self.trait_bound_may_hold(
+                subject,
+                trait_name,
+                self.bound_trait_args_with_bindings(b, bindings),
+            ),
         };
     };
 
     /// Enforce one bound on one type argument. Dispatches on the bound's KIND,
     /// so consumers never string-match a bound's spelling. Shape bounds use
     /// their canonical name only to format the (unchanged) diagnostic.
-    module_private enforce_bound_requirement(self, bound_type Type, b Bound, param_name String, bindings Dict[String, Type], span SourceSpan) Bool = {
+    module_private enforce_bound_requirement(
+        self,
+        bound_type Type,
+        b Bound,
+        param_name String,
+        bindings Dict[String, Type],
+        span SourceSpan,
+    ) Bool = {
         return when b in {
             .Mutable() then {
                 if self.satisfies_mutable_constraint(bound_type) then {
                     true
                 } else {
-                    self.push_diagnostic_at_span(self.mutable_constraint_violation_message(bound_type, "checking constraint \(param_name): mutable"), span);
+                    self.push_diagnostic_at_span(
+                        self.mutable_constraint_violation_message(
+                            bound_type,
+                            "checking constraint \(param_name): mutable",
+                        ),
+                        span,
+                    );
                     false
                 }
             },
             .Trait(_, trait_name, _) then {
                 let trait_args = self.bound_trait_args_with_bindings(b, bindings);
                 if trait_args.is_empty() then {
-                    self.enforce_explicit_trait_requirement_with_context(bound_type, trait_name, param_name, "", span)
+                    self.enforce_explicit_trait_requirement_with_context(
+                        bound_type,
+                        trait_name,
+                        param_name,
+                        "",
+                        span,
+                    )
                 } else {
-                    self.enforce_explicit_generic_trait_conformance(bound_type, trait_name, trait_args, span)
+                    self.enforce_explicit_generic_trait_conformance(
+                        bound_type,
+                        trait_name,
+                        trait_args,
+                        span,
+                    )
                 }
             },
         };
     };
 
-    module_private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
-        return self.satisfies_trait_requirement_with_args(target_type, trait_name, List[Type].new());
+    module_private satisfies_trait_requirement(
+        self,
+        target_type Type,
+        trait_name String,
+    ) Bool = {
+        return self.satisfies_trait_requirement_with_args(
+            target_type,
+            trait_name,
+            List[Type].new(),
+        );
     };
 
-    module_private satisfies_trait_requirement_with_args(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
+    module_private satisfies_trait_requirement_with_args(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+    ) Bool = {
         let key = self.trait_conformance_key(target_type, trait_name, trait_args);
         if self.storage.trait_requirement_in_progress.contains(key) then {
             return false;
         };
         when self.storage.trait_requirement_cache.get(key) in {
-            .Some(cached) then { return cached;},
+            .Some(cached) then {
+                return cached;
+            },
             .None() then {},
         };
         self.storage.trait_requirement_in_progress.insert(key);
-        let result = if trait_args.is_empty() and self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then true else if self.has_explicit_trait_conformance_with_args(target_type, trait_name, trait_args) then true else {
-            when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
+        let result = if trait_args.is_empty() and self.is_implicitly_satisfied_trait_requirement(
+            target_type,
+            trait_name,
+        ) then true
+        else if self.has_explicit_trait_conformance_with_args(
+            target_type,
+            trait_name,
+            trait_args,
+        ) then true
+        else {
+            when self.generic_trait_conformance_status(
+                target_type,
+                trait_name,
+                trait_args,
+            ) in {
                 .Satisfied() then true,
                 _ then false,
             }
@@ -767,28 +1069,58 @@ given TypeChecker {
         return result;
     };
 
-    module_private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
-        return self.has_explicit_trait_conformance_with_args(target_type, trait_name, List[Type].new());
+    module_private has_explicit_trait_conformance(
+        self,
+        target_type Type,
+        trait_name String,
+    ) Bool = {
+        return self.has_explicit_trait_conformance_with_args(
+            target_type,
+            trait_name,
+            List[Type].new(),
+        );
     };
 
     /// Direct conformance to the trait declared at `trait_def_id`. The name is
     /// kept only because the conformance key records it for display; identity
     /// comes from the declaration.
-    module_private has_direct_explicit_trait_conformance(self, target_type Type, trait_def_id DefId, trait_name String, trait_arg_types List[Type]) Bool = {
+    module_private has_direct_explicit_trait_conformance(
+        self,
+        target_type Type,
+        trait_def_id DefId,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) Bool = {
         return self.storage.explicit_trait_conformances.contains(
-            ExplicitTraitConformanceKey(target_type, trait_def_id, trait_name, trait_arg_types)
+            ExplicitTraitConformanceKey(
+                target_type,
+                trait_def_id,
+                trait_name,
+                trait_arg_types,
+            ),
         );
     };
 
-    module_private has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
+    module_private has_explicit_trait_conformance_with_args(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_arg_types List[Type],
+    ) Bool = {
         when target_type in {
             .GenericParameter(name) then {
-                return self.generic_param_has_trait_bound(name, trait_name, trait_arg_types);
+                return self.generic_param_has_trait_bound(
+                    name,
+                    trait_name,
+                    trait_arg_types,
+                );
             },
             _ then {},
         };
         // Check direct explicit conformance
-        if self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types)) then {
+        if self.storage.explicit_trait_conformances.contains(
+            self.trait_conformance_key(target_type, trait_name, trait_arg_types),
+        ) then {
             return true;
         };
         // Check trait hierarchy: if target_type conforms to a child trait that
@@ -805,7 +1137,10 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         for template in templates then {
-            let bindings = self.conformance_type_key_bindings(template.target_type, target_type) or else {
+            let bindings = self.conformance_type_key_bindings(
+                template.target_type,
+                target_type,
+            ) or else {
                 continue;
             };
 
@@ -820,14 +1155,21 @@ given TypeChecker {
                 // and misses, so without this every generic conformance whose
                 // trait arguments mention an owner parameter is rejected --
                 // `let s Sink[Int] = b` used to fail with `Type mismatch`.
-                if not self.trait_args_match_under(template.trait_arg_types, trait_arg_types, bindings) then {
+                if not self.trait_args_match_under(
+                    template.trait_arg_types,
+                    trait_arg_types,
+                    bindings,
+                ) then {
                     continue;
                 };
             } else {
                 if not trait_arg_types.is_empty() then {
                     continue;
                 };
-                if not self.storage.trait_registry.has_inheritance(template.trait_def_id, requested_trait_id) then {
+                if not self.storage.trait_registry.has_inheritance(
+                    template.trait_def_id,
+                    requested_trait_id,
+                ) then {
                     continue;
                 };
             };
@@ -838,8 +1180,15 @@ given TypeChecker {
                     for constraint in tp.constraints then {
                         when bound_trait_name(constraint) in {
                             .Some(required_trait_name) then {
-                                let required_trait_args = self.bound_trait_args_with_bindings(constraint, bindings);
-                                if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                                let required_trait_args = self.bound_trait_args_with_bindings(
+                                    constraint,
+                                    bindings,
+                                );
+                                if not self.satisfies_trait_requirement_with_args(
+                                    bound_type,
+                                    required_trait_name,
+                                    required_trait_args,
+                                ) then {
                                     satisfies_owner_constraints = false;
                                 };
                             },
@@ -876,7 +1225,7 @@ given TypeChecker {
         while index < declared_args.count() then {
             if not self.same_expr_type(
                 self.apply_type_bindings(declared_args[index], bindings),
-                requested_args[index]
+                requested_args[index],
             ) then {
                 return false;
             };
@@ -889,7 +1238,11 @@ given TypeChecker {
         return self.trait_type_args_with_bindings(trait_type, Dict[String, Type].new());
     };
 
-    module_private bound_trait_args_with_bindings(self, b Bound, bindings Dict[String, Type]) List[Type] = {
+    module_private bound_trait_args_with_bindings(
+        self,
+        b Bound,
+        bindings Dict[String, Type],
+    ) List[Type] = {
         let mutable out = List[Type].new();
         for arg in bound_trait_args(b) then {
             out.push(self.resolve_type_with_bindings(arg, bindings));
@@ -897,7 +1250,11 @@ given TypeChecker {
         return out;
     };
 
-    module_private trait_type_args_with_bindings(self, trait_type TypeNode, bindings Dict[String, Type]) List[Type] = {
+    module_private trait_type_args_with_bindings(
+        self,
+        trait_type TypeNode,
+        bindings Dict[String, Type],
+    ) List[Type] = {
         return when trait_type in {
             .Generic(_, trait_args, span) then {
                 let mutable out = List[Type].new();
@@ -910,7 +1267,13 @@ given TypeChecker {
         };
     };
 
-    module_private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_name String, trait_args List[Type]) Void = {
+    module_private record_generic_trait_conformance_template(
+        self,
+        target_type Type,
+        owner_type_params List[TypeParameter],
+        trait_name String,
+        trait_args List[Type],
+    ) Void = {
         self.invalidate_trait_requirement_caches();
         let template = GenericTraitConformanceTemplate(
             target_type,
@@ -956,18 +1319,27 @@ given TypeChecker {
         };
     };
 
-    module_private modifier_blanket_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) Option[GenericTraitConformanceStatus] = {
+    module_private modifier_blanket_trait_conformance_status(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+    ) Option[GenericTraitConformanceStatus] = {
         let mutable inner_type = self.type_modifier_inner_type(target_type) or else {
             return Option[GenericTraitConformanceStatus].None();
         };
         when inner_type in {
             .GenericParameter(_) then {
-                return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied());
+                return Option[GenericTraitConformanceStatus].Some(
+                    GenericTraitConformanceStatus.Satisfied(),
+                );
             },
             _ then {},
         };
         if self.satisfies_trait_requirement_with_args(inner_type, trait_name, trait_args) then {
-            return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied());
+            return Option[GenericTraitConformanceStatus].Some(
+                GenericTraitConformanceStatus.Satisfied(),
+            );
         };
         let modifier_owner = self.conformance_template_key(target_type);
         // Display only: the diagnostic names the modifier ("ref", "mutptr", ...).
@@ -976,7 +1348,11 @@ given TypeChecker {
         let templates = when self.storage.conformance_index.get(modifier_owner) in {
             .Some(list) then list,
             .None() then {
-                return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name));
+                return Option[GenericTraitConformanceStatus].Some(
+                    GenericTraitConformanceStatus.MissingBlanketGiven(
+                        modifier_display_name,
+                    ),
+                );
             },
         };
         let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
@@ -985,7 +1361,10 @@ given TypeChecker {
             if template.trait_def_id <> requested_trait_id then {
                 continue;
             };
-            let bindings = self.conformance_type_key_bindings(template.target_type, target_type) or else {
+            let bindings = self.conformance_type_key_bindings(
+                template.target_type,
+                target_type,
+            ) or else {
                 continue;
             };
             if not (template.trait_arg_types.count() == trait_args.count()) then {
@@ -994,7 +1373,10 @@ given TypeChecker {
             let mutable i UInt = 0;
             let mutable trait_args_match = true;
             while i < trait_args.count() then {
-                let expected_arg = self.apply_type_bindings(template.trait_arg_types[i], bindings);
+                let expected_arg = self.apply_type_bindings(
+                    template.trait_arg_types[i],
+                    bindings,
+                );
                 if not self.same_expr_type(expected_arg, trait_args[i]) then {
                     trait_args_match = false;
                     break;
@@ -1010,10 +1392,21 @@ given TypeChecker {
                     for constraint in tp.constraints then {
                         when bound_trait_name(constraint) in {
                             .Some(required_trait_name) then {
-                                let required_trait_args = self.bound_trait_args_with_bindings(constraint, bindings);
-                                if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                                let required_trait_args = self.bound_trait_args_with_bindings(
+                                    constraint,
+                                    bindings,
+                                );
+                                if not self.satisfies_trait_requirement_with_args(
+                                    bound_type,
+                                    required_trait_name,
+                                    required_trait_args,
+                                ) then {
                                     return Option[GenericTraitConformanceStatus].Some(
-                                        GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, required_trait_name)
+                                        GenericTraitConformanceStatus.MissingConstraint(
+                                            bound_type,
+                                            tp.name,
+                                            required_trait_name,
+                                        ),
                                     );
                                 };
                             },
@@ -1022,15 +1415,26 @@ given TypeChecker {
                     };
                 };
             };
-            return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied());
+            return Option[GenericTraitConformanceStatus].Some(
+                GenericTraitConformanceStatus.Satisfied(),
+            );
         };
         if matched_template then {
-            return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingConformance());
+            return Option[GenericTraitConformanceStatus].Some(
+                GenericTraitConformanceStatus.MissingConformance(),
+            );
         };
-        return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name));
+        return Option[GenericTraitConformanceStatus].Some(
+            GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name),
+        );
     };
 
-    module_private conformance_type_key_matches(self, pattern Type, actual Type, bindings Dict[String, Type]) Bool = {
+    module_private conformance_type_key_matches(
+        self,
+        pattern Type,
+        actual Type,
+        bindings Dict[String, Type],
+    ) Bool = {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
@@ -1042,45 +1446,117 @@ given TypeChecker {
                 };
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .BorrowedReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .MutableBorrowedReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner, a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then false,
             },
             // Identity: the template's DECLARATION, not its spelling.
@@ -1091,7 +1567,11 @@ given TypeChecker {
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((p_args[i]), (a_args[i]), bindings) then {
+                        if not self.conformance_type_key_matches(
+                            (p_args[i]),
+                            (a_args[i]),
+                            bindings,
+                        ) then {
                             return false;
                         };
                         i += 1;
@@ -1104,12 +1584,17 @@ given TypeChecker {
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false;
                     };
-                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count(
+                    )) then {
                         return false;
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((p_args[i]), actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches(
+                            (p_args[i]),
+                            actual_args[i],
+                            bindings,
+                        ) then {
                             return false;
                         };
                         i += 1;
@@ -1126,7 +1611,11 @@ given TypeChecker {
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((p_args[i]), (a_args[i]), bindings) then {
+                        if not self.conformance_type_key_matches(
+                            (p_args[i]),
+                            (a_args[i]),
+                            bindings,
+                        ) then {
                             return false;
                         };
                         i += 1;
@@ -1139,12 +1628,17 @@ given TypeChecker {
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return false;
                     };
-                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count(
+                    )) then {
                         return false;
                     };
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches((p_args[i]), actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches(
+                            (p_args[i]),
+                            actual_args[i],
+                            bindings,
+                        ) then {
                             return false;
                         };
                         i += 1;
@@ -1157,25 +1651,47 @@ given TypeChecker {
         };
     };
 
-    module_private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
+    module_private generic_trait_conformance_status(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+    ) GenericTraitConformanceStatus = {
         let key = self.trait_conformance_key(target_type, trait_name, trait_args);
         if self.storage.generic_trait_status_in_progress.contains(key) then {
             return GenericTraitConformanceStatus.MissingConformance();
         };
         when self.storage.generic_trait_status_cache.get(key) in {
-            .Some(cached) then { return cached;},
+            .Some(cached) then {
+                return cached;
+            },
             .None() then {},
         };
         self.storage.generic_trait_status_in_progress.insert(key);
-        let result = self.compute_generic_trait_conformance_status(target_type, trait_name, trait_args);
+        let result = self.compute_generic_trait_conformance_status(
+            target_type,
+            trait_name,
+            trait_args,
+        );
         self.storage.generic_trait_status_in_progress.remove(key);
         self.storage.generic_trait_status_cache.insert(key, result);
         return result;
     };
 
-    module_private compute_generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
-        when self.modifier_blanket_trait_conformance_status(target_type, trait_name, trait_args) in {
-            .Some(status) then { return status;},
+    module_private compute_generic_trait_conformance_status(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+    ) GenericTraitConformanceStatus = {
+        when self.modifier_blanket_trait_conformance_status(
+            target_type,
+            trait_name,
+            trait_args,
+        ) in {
+            .Some(status) then {
+                return status;
+            },
             .None() then {},
         };
         let mutable matched_template = false;
@@ -1193,7 +1709,10 @@ given TypeChecker {
             if template.trait_def_id <> requested_trait_id then {
                 continue;
             };
-            let bindings = self.conformance_type_key_bindings(template.target_type, target_type) or else {
+            let bindings = self.conformance_type_key_bindings(
+                template.target_type,
+                target_type,
+            ) or else {
                 continue;
             };
             if not (template.trait_arg_types.count() == trait_args.count()) then {
@@ -1202,7 +1721,10 @@ given TypeChecker {
             let mutable i UInt = 0;
             let mutable trait_args_match = true;
             while i < trait_args.count() then {
-                let expected_arg = self.apply_type_bindings(template.trait_arg_types[i], bindings);
+                let expected_arg = self.apply_type_bindings(
+                    template.trait_arg_types[i],
+                    bindings,
+                );
                 if not self.same_expr_type(expected_arg, trait_args[i]) then {
                     trait_args_match = false;
                     break;
@@ -1218,9 +1740,20 @@ given TypeChecker {
                     for constraint in tp.constraints then {
                         when bound_trait_name(constraint) in {
                             .Some(required_trait_name) then {
-                                let required_trait_args = self.bound_trait_args_with_bindings(constraint, bindings);
-                                if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
-                                    result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, required_trait_name);
+                                let required_trait_args = self.bound_trait_args_with_bindings(
+                                    constraint,
+                                    bindings,
+                                );
+                                if not self.satisfies_trait_requirement_with_args(
+                                    bound_type,
+                                    required_trait_name,
+                                    required_trait_args,
+                                ) then {
+                                    result = GenericTraitConformanceStatus.MissingConstraint(
+                                        bound_type,
+                                        tp.name,
+                                        required_trait_name,
+                                    );
                                     return result;
                                 };
                             },
@@ -1232,19 +1765,35 @@ given TypeChecker {
             result = GenericTraitConformanceStatus.Satisfied();
             return result;
         };
-        let final_result = if matched_template then result else GenericTraitConformanceStatus.MissingConformance();
+        let final_result = if matched_template then result
+        else GenericTraitConformanceStatus.MissingConformance();
         return final_result;
     };
 
-    module_private conformance_type_key_bindings(self, pattern Type, actual Type) Option[Dict[String, Type]] = {
-        return self.conformance_type_key_bindings_with(pattern, actual, Dict[String, Type].new());
+    module_private conformance_type_key_bindings(
+        self,
+        pattern Type,
+        actual Type,
+    ) Option[Dict[String, Type]] = {
+        return self.conformance_type_key_bindings_with(
+            pattern,
+            actual,
+            Dict[String, Type].new(),
+        );
     };
 
-    module_private conformance_type_key_bindings_with(self, pattern Type, actual Type, bindings Dict[String, Type]) Option[Dict[String, Type]] = {
+    module_private conformance_type_key_bindings_with(
+        self,
+        pattern Type,
+        actual Type,
+        bindings Dict[String, Type],
+    ) Option[Dict[String, Type]] = {
         return when pattern in {
             .GenericParameter(name) then {
                 when bindings.get(name) in {
-                    .Some(bound) then if self.same_expr_type(bound, actual) then Option[Dict[String, Type]].Some(bindings) else Option[Dict[String, Type]].None(),
+                    .Some(bound) then if self.same_expr_type(bound, actual) then Option[Dict[String, Type]].Some(
+                        bindings,
+                    ) else Option[Dict[String, Type]].None(),
                     .None() then {
                         let mutable next_bindings = bindings;
                         next_bindings.insert(name, actual);
@@ -1253,45 +1802,117 @@ given TypeChecker {
                 }
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .BorrowedReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableBorrowedReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner, a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(
+                    p_inner,
+                    a_inner,
+                    bindings,
+                ),
                 _ then Option[Dict[String, Type]].None(),
             },
             // Identity: the template's DECLARATION, not its spelling.
@@ -1303,7 +1924,11 @@ given TypeChecker {
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), (a_args[i]), current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with(
+                            (p_args[i]),
+                            (a_args[i]),
+                            current_bindings,
+                        ) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1316,13 +1941,18 @@ given TypeChecker {
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return Option[Dict[String, Type]].None();
                     };
-                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count(
+                    )) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with(
+                            (p_args[i]),
+                            actual_args[i],
+                            current_bindings,
+                        ) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1340,7 +1970,11 @@ given TypeChecker {
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), (a_args[i]), current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with(
+                            (p_args[i]),
+                            (a_args[i]),
+                            current_bindings,
+                        ) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1353,13 +1987,18 @@ given TypeChecker {
                     let actual_args = self.context().get_type_arguments(def_id) or else {
                         return Option[Dict[String, Type]].None();
                     };
-                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count()) then {
+                    if not (p_def_id == actual_def_id and p_args.count() == actual_args.count(
+                    )) then {
                         return Option[Dict[String, Type]].None();
                     };
                     let mutable current_bindings = bindings;
                     let mutable i UInt = 0;
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with((p_args[i]), actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with(
+                            (p_args[i]),
+                            actual_args[i],
+                            current_bindings,
+                        ) or else {
                             return Option[Dict[String, Type]].None();
                         };
                         i += 1;
@@ -1368,18 +2007,39 @@ given TypeChecker {
                 },
                 _ then Option[Dict[String, Type]].None(),
             },
-            _ then if self.same_expr_type(pattern, actual) then Option[Dict[String, Type]].Some(bindings) else Option[Dict[String, Type]].None(),
+            _ then if self.same_expr_type(pattern, actual) then Option[Dict[String, Type]].Some(
+                bindings,
+            ) else Option[Dict[String, Type]].None(),
         };
     };
 
-    module_private enforce_explicit_generic_trait_conformance(self, target_type Type, trait_name String, trait_args List[Type], span SourceSpan) Bool = {
-        return self.enforce_explicit_generic_trait_conformance_with_note(target_type, trait_name, trait_args, "", span);
+    module_private enforce_explicit_generic_trait_conformance(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+        span SourceSpan,
+    ) Bool = {
+        return self.enforce_explicit_generic_trait_conformance_with_note(
+            target_type,
+            trait_name,
+            trait_args,
+            "",
+            span,
+        );
     };
 
     /// `note` names the construct that demanded the trait --
     /// `for-in iterator result check`, `operator 'add'`. Without it the message
     /// states a requirement and leaves the cause unstated.
-    module_private enforce_explicit_generic_trait_conformance_with_note(self, target_type Type, trait_name String, trait_args List[Type], note String, span SourceSpan) Bool = {
+    module_private enforce_explicit_generic_trait_conformance_with_note(
+        self,
+        target_type Type,
+        trait_name String,
+        trait_args List[Type],
+        note String,
+        span SourceSpan,
+    ) Bool = {
         // Check generic parameter constraints first (like Swift's hasTraitBound)
         when target_type in {
             .GenericParameter(name) then {
@@ -1389,51 +2049,92 @@ given TypeChecker {
             },
             _ then {},
         };
-        return when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
+        return when self.generic_trait_conformance_status(
+            target_type,
+            trait_name,
+            trait_args,
+        ) in {
             .Satisfied() then true,
             .MissingConstraint(bound_type, constraint_param, constraint) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.push_diagnostic(self.trait_missing_constraint_message(bound_type, constraint_param, constraint), span);
+                self.push_diagnostic(
+                    self.trait_missing_constraint_message(
+                        bound_type,
+                        constraint_param,
+                        constraint,
+                    ),
+                    span,
+                );
                 false
             },
             .MissingBlanketGiven(modifier_name) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.push_diagnostic(self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name), span);
+                self.push_diagnostic(
+                    self.trait_requirement_missing_blanket_given_message(
+                        target_type,
+                        trait_name,
+                        modifier_name,
+                    ),
+                    span,
+                );
                 false
             },
             .MissingConformance() then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args, note);
+                let message = self.trait_missing_conformance_message(
+                    target_type,
+                    trait_name,
+                    trait_args,
+                    note,
+                );
                 self.push_diagnostic(message, span);
                 false
             },
         };
     };
 
-    module_private enforce_explicit_trait_requirement(self, target_type Type, trait_name String, span SourceSpan) Bool = {
-        return self.enforce_explicit_trait_requirement_with_context(target_type, trait_name, "", "", span);
+    module_private enforce_explicit_trait_requirement(
+        self,
+        target_type Type,
+        trait_name String,
+        span SourceSpan,
+    ) Bool = {
+        return self.enforce_explicit_trait_requirement_with_context(
+            target_type,
+            trait_name,
+            "",
+            "",
+            span,
+        );
     };
 
-    module_private enforce_mutable_constraint_for_call(self, target_type Type, function String, span SourceSpan) Bool = {
+    module_private enforce_mutable_constraint_for_call(
+        self,
+        target_type Type,
+        function String,
+        span SourceSpan,
+    ) Bool = {
         let satisfied = when target_type in {
             .StructureType(def_id) then self.context().is_struct_mutable(def_id),
             // Identity: the template's DECLARATION decides mutability. There is
             // no spelling fallback -- the type carries the declaration.
             .GenericStruct(template_def_id, _) then {
-                template_def_id.is_valid() and self.context().is_struct_mutable(template_def_id)
+                template_def_id.is_valid() and self.context().is_struct_mutable(
+                    template_def_id,
+                )
             },
             _ then false,
         };
         if not satisfied then {
             self.push_diagnostic_at_span(
                 "'\(function)' requires a 'type mutable' argument, but '\(type_to_string(target_type))' is not declared as 'type mutable'",
-                span
+                span,
             );
         };
         return satisfied;
@@ -1457,10 +2158,21 @@ given TypeChecker {
     /// -- and is printed with the message. `constraint_param` names a generic
     /// parameter whose bound is unmet and takes the `(checking constraint ...)`
     /// form instead. The two are different reasons and print differently.
-    module_private enforce_explicit_trait_requirement_with_context(self, target_type Type, trait_name String, constraint_param String, note String, span SourceSpan) Bool = {
+    module_private enforce_explicit_trait_requirement_with_context(
+        self,
+        target_type Type,
+        trait_name String,
+        constraint_param String,
+        note String,
+        span SourceSpan,
+    ) Bool = {
         when target_type in {
-            .Unknown() then { return true;},
-            .TypeVar(_) then { return true;},
+            .Unknown() then {
+                return true;
+            },
+            .TypeVar(_) then {
+                return true;
+            },
             _ then {},
         };
 
@@ -1483,31 +2195,59 @@ given TypeChecker {
         };
 
         let empty_trait_args = List[Type].new();
-        return when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+        return when self.generic_trait_conformance_status(
+            target_type,
+            trait_name,
+            empty_trait_args,
+        ) in {
             .Satisfied() then true,
             .MissingConstraint(bound_type, constraint_param, constraint) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.push_diagnostic(self.trait_requirement_missing_constraint_message(target_type, trait_name, bound_type, constraint), span);
+                self.push_diagnostic(
+                    self.trait_requirement_missing_constraint_message(
+                        target_type,
+                        trait_name,
+                        bound_type,
+                        constraint,
+                    ),
+                    span,
+                );
                 false
             },
             .MissingBlanketGiven(modifier_name) then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                self.push_diagnostic(self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name), span);
+                self.push_diagnostic(
+                    self.trait_requirement_missing_blanket_given_message(
+                        target_type,
+                        trait_name,
+                        modifier_name,
+                    ),
+                    span,
+                );
                 false
             },
             .MissingConformance() then {
                 if self.constraint_enforcement_is_deferred() then {
                     return true;
                 };
-                let message = if constraint_param.is_empty() then self.trait_missing_conformance_message(target_type, trait_name, List[Type].new(), note) else self.trait_missing_constraint_message(target_type, constraint_param, trait_name);
+                let message = if constraint_param.is_empty() then self.trait_missing_conformance_message(
+                    target_type,
+                    trait_name,
+                    List[Type].new(),
+                    note,
+                )
+                else self.trait_missing_constraint_message(
+                    target_type,
+                    constraint_param,
+                    trait_name,
+                );
                 self.push_diagnostic(message, span);
                 false
             },
         };
     };
-
 };

@@ -1,6 +1,8 @@
 // codegen_memory.koral - MIR-oriented copy/drop helpers
 
-module_private let drop_thunk_marker() String = { return "/* __koral_drop_thunks__ */\n"; };
+module_private let drop_thunk_marker() String = {
+    return "/* __koral_drop_thunks__ */\n";
+};
 
 /// niche 布局的描述：用「空位模式」而不是 tag 来区分 case。
 module_private type EnumNicheLayout(
@@ -25,7 +27,9 @@ given CodeGen {
             },
             _ then false,
         };
-        if mapped_needs_drop then { return true;};
+        if mapped_needs_drop then {
+            return true;
+        };
         return type_needs_drop(var_type);
     };
 
@@ -44,7 +48,12 @@ given CodeGen {
         self.buffer.push_string("));\n");
     };
 
-    module_private append_copy_call_line(self, type_name String, source String, dest String) Void = {
+    module_private append_copy_call_line(
+        self,
+        type_name String,
+        source String,
+        dest String,
+    ) Void = {
         let copy_prefix = "__koral_" + type_name + "_copy(";
         if source.starts_with(copy_prefix) then {
             // Source is already a value produced by the type copy helper.
@@ -61,13 +70,19 @@ given CodeGen {
         self.buffer.push_string("));\n");
     };
 
-    module_private append_release_control_line(self, runtime_name String, value String) Void = {
+    module_private append_release_control_line(
+        self,
+        runtime_name String,
+        value String,
+    ) Void = {
         // 弱引用持有 control 字；owning ref / 托管值是单字 payload 指针。
         let is_weak = runtime_name == "__koral_weak_retain" or runtime_name == "__koral_weak_release";
         if runtime_name == "__koral_release" then {
             // 头里不存析构函数之后，释放必须带上 dtor，只能走 append_release_handle_statement。
             // 走到这里说明有调用点漏改了 —— 直接炸，不要静默发成 retain。
-            panic("append_release_control_line: release must go through append_release_handle_statement");
+            panic(
+                "append_release_control_line: release must go through append_release_handle_statement",
+            );
         };
         let resolved_name = if is_weak then runtime_name else "__koral_retain_value";
         self.buffer.push_string(resolved_name);
@@ -107,25 +122,43 @@ given CodeGen {
                 self.buffer.push_string(").control);\n");
             },
             .TraitObject(_, _) then {
-                self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+                self.append_release_value_line(
+                    value,
+                    "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
+                );
             },
             .ReferenceType(inner) then {
                 if self.is_trait_object_type(inner) then {
-                    self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+                    self.append_release_value_line(
+                        value,
+                        "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
+                    );
                 } else {
-                    self.append_release_value_line(value, self.drop_function_pointer(inner));
+                    self.append_release_value_line(
+                        value,
+                        self.drop_function_pointer(inner),
+                    );
                 };
             },
             .MutableReferenceType(inner) then {
                 if self.is_trait_object_type(inner) then {
-                    self.append_release_value_line(value, "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy");
+                    self.append_release_value_line(
+                        value,
+                        "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
+                    );
                 } else {
-                    self.append_release_value_line(value, self.drop_function_pointer(inner));
+                    self.append_release_value_line(
+                        value,
+                        self.drop_function_pointer(inner),
+                    );
                 };
             },
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
-                    .Some(mapped) then self.append_release_handle_statement(mapped, value),
+                    .Some(mapped) then self.append_release_handle_statement(
+                        mapped,
+                        value,
+                    ),
                     .None() then {},
                 };
             },
@@ -197,13 +230,22 @@ given CodeGen {
     };
 
     /// 由值表达式算出 case 序号（`intptr_t`），供 `switch` 分派使用。
-    module_private niche_tag_expression(self, layout EnumNicheLayout, value_expr String) String = {
+    module_private niche_tag_expression(
+        self,
+        layout EnumNicheLayout,
+        value_expr String,
+    ) String = {
         return "(\(self.niche_null_test(layout.payload_field_type, value_expr)) ? \(layout.empty_case_index.to_string()) : \(layout.payload_case_index.to_string()))";
     };
 
     /// 按 case 列表判定 niche 布局；形状不对（或参数类型没有 niche）返回 None。
-    module_private enum_niche_layout(self, cases List[TypedEnumCase]) Option[EnumNicheLayout] = {
-        if cases.count() <> 2 then { return Option[EnumNicheLayout].None(); };
+    module_private enum_niche_layout(
+        self,
+        cases List[TypedEnumCase],
+    ) Option[EnumNicheLayout] = {
+        if cases.count() <> 2 then {
+            return Option[EnumNicheLayout].None();
+        };
         let mutable empty_case_index UInt = 0;
         let mutable empty_count UInt = 0;
         let mutable payload_case_index UInt = 0;
@@ -223,7 +265,9 @@ given CodeGen {
             };
             case_index += 1;
         };
-        if empty_count <> 1 or payload_count <> 1 then { return Option[EnumNicheLayout].None(); };
+        if empty_count <> 1 or payload_count <> 1 then {
+            return Option[EnumNicheLayout].None();
+        };
         // Void 参数不占存储，先滤掉再数。
         let mutable field_count UInt = 0;
         let mutable payload_field_name = "";
@@ -235,15 +279,21 @@ given CodeGen {
                 payload_field_type = field.field_type;
             };
         };
-        if field_count <> 1 then { return Option[EnumNicheLayout].None(); };
-        if not self.has_null_niche(payload_field_type) then { return Option[EnumNicheLayout].None(); };
-        return Option[EnumNicheLayout].Some(EnumNicheLayout(
-            empty_case_index,
-            payload_case_index,
-            payload_case_name,
-            payload_field_name,
-            payload_field_type,
-        ));
+        if field_count <> 1 then {
+            return Option[EnumNicheLayout].None();
+        };
+        if not self.has_null_niche(payload_field_type) then {
+            return Option[EnumNicheLayout].None();
+        };
+        return Option[EnumNicheLayout].Some(
+            EnumNicheLayout(
+                empty_case_index,
+                payload_case_index,
+                payload_case_name,
+                payload_field_name,
+                payload_field_type,
+            ),
+        );
     };
 
     /// 从类型出发判定 niche 布局。
@@ -286,19 +336,25 @@ given CodeGen {
     /// 注意：trait object 的销毁是**动态**的（具体类型的 glue 在 vtable 里），
     /// 不要对 trait object 句柄用本函数 —— 用 append_release_handle_statement。
     public drop_function_pointer(self, var_type Type) String = {
-        if not self.needs_drop(var_type) then { return "NULL"; };
+        if not self.needs_drop(var_type) then {
+            return "NULL";
+        };
         return when var_type in {
             .StructureType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
             .EnumType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
             .GenericStruct(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
                 "(__koral_Dtor)__koral_\(type_name)_drop"
             },
             .GenericEnum(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
@@ -325,7 +381,9 @@ given CodeGen {
     module_private materialize_drop_thunk(self, var_type Type) String = {
         let key = self.c_type_name(var_type);
         when self.drop_thunk_names.get(key) in {
-            .Some(existing) then { return existing; },
+            .Some(existing) then {
+                return existing;
+            },
             .None() then {},
         };
         let name = "__koral_drop_thunk_\(self.drop_thunk_defs.count())";
@@ -349,7 +407,9 @@ given CodeGen {
 
     /// 在类型声明之后、函数体之前插入 thunk 定义。
     public emit_drop_thunk_definitions(self, source String) String = {
-        if self.drop_thunk_defs.count() == 0 then { return source; };
+        if self.drop_thunk_defs.count() == 0 then {
+            return source;
+        };
         let mutable code = StringBuilder.new();
         for thunk in self.drop_thunk_defs then {
             code.push_string(thunk);
@@ -361,7 +421,9 @@ given CodeGen {
     public append_drop_statement(self, var_type Type, value String) Void = {
         when var_type in {
             .StructureType(def_id) then {
-                if self.is_foreign_type_def_id(def_id) then { return;};
+                if self.is_foreign_type_def_id(def_id) then {
+                    return;
+                };
                 self.append_drop_call_line(self.c_name_for_def_id(def_id), value);
             },
             .EnumType(def_id) then {
@@ -370,18 +432,30 @@ given CodeGen {
             .BorrowedReferenceType(_) then {},
             .MutableBorrowedReferenceType(_) then {},
             .ReferenceType(_) then self.append_release_handle_statement(var_type, value),
-            .MutableReferenceType(_) then self.append_release_handle_statement(var_type, value),
+            .MutableReferenceType(_) then self.append_release_handle_statement(
+                var_type,
+                value,
+            ),
             .FunctionType(_, _) then {
                 self.buffer.push_string("__koral_closure_release(");
                 self.buffer.push_string(value);
                 self.buffer.push_string(");\n");
             },
-            .WeakReferenceType(_) then self.append_release_handle_statement(var_type, value),
-            .MutableWeakReferenceType(_) then self.append_release_handle_statement(var_type, value),
+            .WeakReferenceType(_) then self.append_release_handle_statement(
+                var_type,
+                value,
+            ),
+            .MutableWeakReferenceType(_) then self.append_release_handle_statement(
+                var_type,
+                value,
+            ),
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then self.append_release_handle_statement(var_type, value),
+                        .TraitObject(_, _) then self.append_release_handle_statement(
+                            var_type,
+                            value,
+                        ),
                         .OpaqueType(_) then {},
                         _ then self.append_drop_statement(mapped, value),
                     },
@@ -389,14 +463,18 @@ given CodeGen {
                 };
             },
             .GenericStruct(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
                 self.append_drop_call_line(type_name, value);
             },
             .GenericEnum(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
@@ -488,7 +566,9 @@ given CodeGen {
                 };
             },
             .GenericStruct(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
@@ -496,7 +576,9 @@ given CodeGen {
                 self.append_copy_call_line(type_name, source, dest);
             },
             .GenericEnum(_, _) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(var_type) in {
+                let type_name = when self.find_type_def_id_by_layout_or_template(
+                    var_type,
+                ) in {
                     .Some(def_id) then self.c_name_for_def_id(def_id),
                     .None() then self.sanitize_codegen_identifier(layout_key(var_type)),
                 };
@@ -510,7 +592,13 @@ given CodeGen {
         };
     };
 
-    public append_copy_or_move_assignment(self, var_type Type, source String, dest String, is_lvalue Bool) Void = {
+    public append_copy_or_move_assignment(
+        self,
+        var_type Type,
+        source String,
+        dest String,
+        is_lvalue Bool,
+    ) Void = {
         if is_lvalue and self.needs_drop(var_type) then {
             self.append_copy_assignment(var_type, source, dest);
         } else {

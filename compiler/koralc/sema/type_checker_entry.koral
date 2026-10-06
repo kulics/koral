@@ -8,14 +8,42 @@ public let type_check(program Program, file_path String) BodyCheckerOutput = {
 
     if collector.diagnostics.has_errors() then {
         diagnostics.merge(collector.diagnostics);
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), collector.global_scope, ImportGraph.new(), MethodTable.new(), TraitRegistry.new(), Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(), Dict[String, ConformanceWitness].new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new());
+        return BodyCheckerOutput(
+            Option[TypedProgram].None(),
+            CompilerContext.new(),
+            collector.global_scope,
+            ImportGraph.new(),
+            MethodTable.new(),
+            TraitRegistry.new(),
+            Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
+            Dict[String, ConformanceWitness].new(),
+            diagnostics,
+            GenericTemplateRegistry.new(),
+            Set[InstantiationRequest].new(),
+        );
     };
 
-    let mutable checker = TypeChecker.new(collector.global_scope, collector.context, file_path);
+    let mutable checker = TypeChecker.new(
+        collector.global_scope,
+        collector.context,
+        file_path,
+    );
     let typed = checker.check_program(program, true);
 
     if checker.has_errors() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), collector.global_scope, ImportGraph.new(), checker.storage.method_table, checker.storage.trait_registry, checker.storage.conformance_index, checker.storage.conformance_witnesses, checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests);
+        return BodyCheckerOutput(
+            Option[TypedProgram].None(),
+            checker.compiler_context(),
+            collector.global_scope,
+            ImportGraph.new(),
+            checker.storage.method_table,
+            checker.storage.trait_registry,
+            checker.storage.conformance_index,
+            checker.storage.conformance_witnesses,
+            checker.storage.diagnostics,
+            checker.storage.generic_templates,
+            checker.storage.instantiation_requests,
+        );
     };
 
     let context = checker.compiler_context();
@@ -34,9 +62,16 @@ public let type_check(program Program, file_path String) BodyCheckerOutput = {
     );
 };
 
-file_private let build_module_resolver_output(graph ResolvedModuleGraph) ModuleResolverOutput = {
+file_private let build_module_resolver_output(
+    graph ResolvedModuleGraph,
+) ModuleResolverOutput = {
     return ModuleResolverOutput(
-        ModuleTree(graph.root_module_path, graph.module_paths, graph.source_files, graph.loaded_nodes.count()),
+        ModuleTree(
+            graph.root_module_path,
+            graph.module_paths,
+            graph.source_files,
+            graph.loaded_nodes.count(),
+        ),
         graph.import_graph,
         graph.loaded_nodes,
         graph.loaded_nodes_with_path,
@@ -51,18 +86,23 @@ file_private type NameCollectorPassResult(
 );
 
 file_private let run_name_collector_pass(input NameCollectorInput) NameCollectorPassResult = {
-    let mutable collector = NameCollector.new_with_context(List[String].new(), input.user_file_path);
-    collector.collect_loaded_nodes_with_path(input.resolver_output.loaded_nodes_with_path);
+    let mutable collector = NameCollector.new_with_context(
+        List[String].new(),
+        input.user_file_path,
+    );
+    collector.collect_loaded_nodes_with_path(
+        input.resolver_output.loaded_nodes_with_path,
+    );
 
     let name_collector_has_errors = collector.diagnostics.has_errors();
     if name_collector_has_errors then {
-        return NameCollectorPassResult(Option[NameCollectorOutput].None(), collector.diagnostics);
+        return NameCollectorPassResult(
+            Option[NameCollectorOutput].None(),
+            collector.diagnostics,
+        );
     };
 
-    let output = NameCollectorOutput(
-        collector.global_scope,
-        collector.context,
-    );
+    let output = NameCollectorOutput(collector.global_scope, collector.context);
     return NameCollectorPassResult(
         Option[NameCollectorOutput].Some(output),
         DiagnosticCollector.new(),
@@ -74,30 +114,59 @@ file_private let run_type_resolver_pass(input TypeResolverInput) TypeResolverOut
     return TypeResolverOutput(input.collector_output, input.resolver_output);
 };
 
-file_private let run_body_checker_pass(input BodyCheckerInput, retain_checked_template_bodies Bool) BodyCheckerOutput = {
+file_private let run_body_checker_pass(
+    input BodyCheckerInput,
+    retain_checked_template_bodies Bool,
+) BodyCheckerOutput = {
     let mutable checker = TypeChecker.new(
         input.type_resolver_output.collector_output.global_scope,
         input.type_resolver_output.collector_output.context,
         input.user_file_path,
     );
-    checker.storage.import_graph = Option[ImportGraph].Some(input.type_resolver_output.resolver_output.import_graph);
+    checker.storage.import_graph = Option[ImportGraph].Some(
+        input.type_resolver_output.resolver_output.import_graph,
+    );
     checker.storage.context.parsed_default_values = input.type_resolver_output.resolver_output.parsed_defaults;
 
     // 注入 enum 类型名称到 constraint solver，用于 Instantiate 约束判断。
-    for type_entry in input.type_resolver_output.collector_output.global_scope.all_types() then {
+    for type_entry in input.type_resolver_output.collector_output.global_scope.all_types(
+    ) then {
         when type_entry.second in {
-            .StructureType(def_id) then checker.storage.constraint_solver.register_struct_type(type_entry.first, def_id),
-            .EnumType(def_id) then checker.storage.constraint_solver.register_enum_type(type_entry.first, def_id),
+            .StructureType(def_id) then checker.storage.constraint_solver.register_struct_type(
+                type_entry.first,
+                def_id,
+            ),
+            .EnumType(def_id) then checker.storage.constraint_solver.register_enum_type(
+                type_entry.first,
+                def_id,
+            ),
             _ then {},
         };
     };
 
-    let typed = Option[TypedProgram].Some(checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path, retain_checked_template_bodies));
+    let typed = Option[TypedProgram].Some(
+        checker.check_loaded_nodes(
+            input.type_resolver_output.resolver_output.loaded_nodes_with_path,
+            retain_checked_template_bodies,
+        ),
+    );
     let global_scope = input.type_resolver_output.collector_output.global_scope;
     let import_graph = input.type_resolver_output.resolver_output.import_graph;
 
     if checker.has_errors() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), global_scope, import_graph, checker.storage.method_table, checker.storage.trait_registry, checker.storage.conformance_index, checker.storage.conformance_witnesses, checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests);
+        return BodyCheckerOutput(
+            Option[TypedProgram].None(),
+            checker.compiler_context(),
+            global_scope,
+            import_graph,
+            checker.storage.method_table,
+            checker.storage.trait_registry,
+            checker.storage.conformance_index,
+            checker.storage.conformance_witnesses,
+            checker.storage.diagnostics,
+            checker.storage.generic_templates,
+            checker.storage.instantiation_requests,
+        );
     };
 
     let mutable diagnostics = DiagnosticCollector.new();
@@ -132,7 +201,11 @@ file_private let run_body_checker_pass(input BodyCheckerInput, retain_checked_te
 /// one module may each `using "std";` (§3.3.4 scopes a `using` to a file, not
 /// to a module), so a name only fights when TWO modules both declare it under
 /// one spelling that a single file now has.
-file_private let import_collision_message(name String, target List[String], is_import_all Bool) String = {
+file_private let import_collision_message(
+    name String,
+    target List[String],
+    is_import_all Bool,
+) String = {
     let module_path = target.join_to_string("::");
     if is_import_all then {
         return "Import of '\(name)' from '\(module_path)' collides with a name already in scope; an import-all cannot be renamed, so use an explicit list";
@@ -146,7 +219,11 @@ file_private let import_collision_message(name String, target List[String], is_i
 /// private levels never. A name that cannot be imported is not in the file's
 /// scope to begin with, so it cannot collide with anything -- reporting it
 /// would blame the reader for a rule they cannot act on.
-file_private let decl_importable(access AccessModifier, decl_package String, importer_package String) Bool = {
+file_private let decl_importable(
+    access AccessModifier,
+    decl_package String,
+    importer_package String,
+) Bool = {
     return when access in {
         .Public() then true,
         .PackagePrivate() then not decl_package.is_empty() and decl_package == importer_package,
@@ -175,12 +252,20 @@ file_private let record_import_binding(
     is_import_all Bool,
     span SourceSpan,
 ) Void = {
-    let mutable file_owners = owner.get(file) or else Dict[String, Pair[List[String], String]].new();
+    let mutable file_owners = owner.get(file) or else Dict[String, Pair[List[String], String]].new(
+    );
 
     when file_owners.get(local) in {
         .Some(prior) then {
             if not string_list_eq(prior.first, identity.first) or prior.second <> identity.second then {
-                out.push(DiagnosticError(.Semantic(), file, import_collision_message(local, target, is_import_all), Option[SourceSpan].Some(span)));
+                out.push(
+                    DiagnosticError(
+                        .Semantic(),
+                        file,
+                        import_collision_message(local, target, is_import_all),
+                        Option[SourceSpan].Some(span),
+                    ),
+                );
                 file_owners.insert(local, identity);
                 owner.insert(file, file_owners);
             };
@@ -192,9 +277,17 @@ file_private let record_import_binding(
     // A declaration in THIS module owns the spelling too -- and unlike an
     // import, its own level does not matter. `type Shared` here blocks the name
     // whether or not anyone outside could have imported it.
-    let mine = declared.get(importer_module_key) or else Dict[String, AccessModifier].new();
+    let mine = declared.get(importer_module_key) or else Dict[String, AccessModifier].new(
+    );
     if mine.get(local) is .Some(_) then {
-        out.push(DiagnosticError(.Semantic(), file, import_collision_message(local, target, is_import_all), Option[SourceSpan].Some(span)));
+        out.push(
+            DiagnosticError(
+                .Semantic(),
+                file,
+                import_collision_message(local, target, is_import_all),
+                Option[SourceSpan].Some(span),
+            ),
+        );
     };
 
     file_owners.insert(local, identity);
@@ -222,9 +315,12 @@ file_private let check_import_name_collisions(
         module_package.insert(mkey, pair.first.package_id);
         when decl_name(pair.first.decl) in {
             .Some(name) then {
-                let mutable names = declared.get(mkey) or else Dict[String, AccessModifier].new();
+                let mutable names = declared.get(mkey) or else Dict[String, AccessModifier].new(
+                );
                 when decl_access(pair.first.decl) in {
-                    .Some(access) then { names.insert(name, access); },
+                    .Some(access) then {
+                        names.insert(name, access);
+                    },
                     .None() then {},
                 };
                 declared.insert(mkey, names);
@@ -245,10 +341,13 @@ file_private let check_import_name_collisions(
         when edge.source_file in {
             .Some(file) then {
                 let target_key = edge.target.join_to_string(".");
-                let mkey = file_module.get(file) or else { continue; };
+                let mkey = file_module.get(file) or else {
+                    continue;
+                };
                 let importer_package = file_package.get(file) or else "";
                 let their_package = module_package.get(target_key) or else "";
-                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new();
+                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new(
+                );
 
                 let mutable names = List[String].new();
                 for entry in theirs then {
@@ -263,9 +362,16 @@ file_private let check_import_name_collisions(
                 names.sort();
                 for name in names then {
                     record_import_binding(
-                        out, declared, owner, file, mkey, name,
+                        out,
+                        declared,
+                        owner,
+                        file,
+                        mkey,
+                        name,
                         Pair[List[String], String](edge.target, name),
-                        edge.target, true, edge.span,
+                        edge.target,
+                        true,
+                        edge.span,
                     );
                 };
             },
@@ -277,19 +383,31 @@ file_private let check_import_name_collisions(
         when si.source_file in {
             .Some(file) then {
                 let target_key = si.target.join_to_string(".");
-                let mkey = file_module.get(file) or else { continue; };
+                let mkey = file_module.get(file) or else {
+                    continue;
+                };
                 let importer_package = file_package.get(file) or else "";
                 let their_package = module_package.get(target_key) or else "";
-                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new();
+                let theirs = declared.get(target_key) or else Dict[String, AccessModifier].new(
+                );
 
-                let access = theirs.get(si.original_symbol) or else { continue; };
+                let access = theirs.get(si.original_symbol) or else {
+                    continue;
+                };
                 if not decl_importable(access, their_package, importer_package) then {
                     continue;
                 };
                 record_import_binding(
-                    out, declared, owner, file, mkey, si.symbol,
+                    out,
+                    declared,
+                    owner,
+                    file,
+                    mkey,
+                    si.symbol,
                     Pair[List[String], String](si.target, si.original_symbol),
-                    si.target, false, si.span,
+                    si.target,
+                    false,
+                    si.span,
                 );
             },
             .None() then {},
@@ -299,7 +417,11 @@ file_private let check_import_name_collisions(
     return out;
 };
 
-file_private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String, retain_checked_template_bodies Bool) BodyCheckerOutput = {
+file_private let type_check_resolver_output(
+    resolver_output ModuleResolverOutput,
+    user_file_path String,
+    retain_checked_template_bodies Bool,
+) BodyCheckerOutput = {
     let name_input = NameCollectorInput(resolver_output, user_file_path);
     let name_pass = run_name_collector_pass(name_input);
 
@@ -314,7 +436,19 @@ file_private let type_check_resolver_output(resolver_output ModuleResolverOutput
     };
 
     if name_pass.output is .None() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), Scope.new_root(), resolver_output.import_graph, MethodTable.new(), TraitRegistry.new(), Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(), Dict[String, ConformanceWitness].new(), name_pass.diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new());
+        return BodyCheckerOutput(
+            Option[TypedProgram].None(),
+            CompilerContext.new(),
+            Scope.new_root(),
+            resolver_output.import_graph,
+            MethodTable.new(),
+            TraitRegistry.new(),
+            Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
+            Dict[String, ConformanceWitness].new(),
+            name_pass.diagnostics,
+            GenericTemplateRegistry.new(),
+            Set[InstantiationRequest].new(),
+        );
     };
 
     let type_input = TypeResolverInput(
@@ -336,12 +470,26 @@ file_private let type_check_resolver_output(resolver_output ModuleResolverOutput
     return output;
 };
 
-public let type_check_resolved_graph(resolved_graph ResolvedModuleGraph, user_file_path String) BodyCheckerOutput = {
-    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, true);
+public let type_check_resolved_graph(
+    resolved_graph ResolvedModuleGraph,
+    user_file_path String,
+) BodyCheckerOutput = {
+    return type_check_resolver_output(
+        build_module_resolver_output(resolved_graph),
+        user_file_path,
+        true,
+    );
 };
 
-public let check_resolved_graph(resolved_graph ResolvedModuleGraph, user_file_path String) BodyCheckerOutput = {
-    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, false);
+public let check_resolved_graph(
+    resolved_graph ResolvedModuleGraph,
+    user_file_path String,
+) BodyCheckerOutput = {
+    return type_check_resolver_output(
+        build_module_resolver_output(resolved_graph),
+        user_file_path,
+        false,
+    );
 };
 
 public let type_check_entry_file(user_file_path String, no_std Bool) BodyCheckerOutput = {
@@ -350,9 +498,32 @@ public let type_check_entry_file(user_file_path String, no_std Bool) BodyChecker
         .Ok(graph) then graph,
         .Error(err) then {
             let mutable diagnostics = DiagnosticCollector.new();
-            diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, err.message(), unknown_span()));
-            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), Scope.new_root(), ImportGraph.new(), MethodTable.new(), TraitRegistry.new(), Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(), Dict[String, ConformanceWitness].new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new());
+            diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    user_file_path,
+                    err.message(),
+                    unknown_span(),
+                ),
+            );
+            return BodyCheckerOutput(
+                Option[TypedProgram].None(),
+                CompilerContext.new(),
+                Scope.new_root(),
+                ImportGraph.new(),
+                MethodTable.new(),
+                TraitRegistry.new(),
+                Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
+                Dict[String, ConformanceWitness].new(),
+                diagnostics,
+                GenericTemplateRegistry.new(),
+                Set[InstantiationRequest].new(),
+            );
         },
     };
-    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, true);
+    return type_check_resolver_output(
+        build_module_resolver_output(resolved_graph),
+        user_file_path,
+        true,
+    );
 };

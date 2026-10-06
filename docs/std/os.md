@@ -104,11 +104,11 @@ public type DirIterator;
 public type mutable WalkDirIterator;
 
 public type OpenMode {
-    Read(),
-    Write(),
-    Create(),
-    Append(),
-    ReadWrite(),
+    Read(), // O_RDONLY — read-only
+    Write(), // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
+    Create(), // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
+    Append(), // O_WRONLY | O_CREAT | O_APPEND — append
+    ReadWrite(), // O_RDWR — read-write (file must exist)
 };
 
 public type File;
@@ -143,6 +143,8 @@ given DirEntry as ToString {
     public to_string(self) String;
 };
 
+given DirIteratorStorage as Drop {};
+
 given DirIterator as Iterator[DirEntry] {
     public next(self) Option[DirEntry];
 };
@@ -150,6 +152,8 @@ given DirIterator as Iterator[DirEntry] {
 given WalkDirIterator as Iterator[DirEntry] {
     public next(self) Option[DirEntry];
 };
+
+given FileStorage as Drop {};
 
 given File {
     public fd(self) Int;

@@ -14,8 +14,11 @@ foreign let __koral_wallclock_now(out_secs *unsafe Int64, out_nanos *unsafe Int6
 
 /// DateTime represents a calendar date and time with timezone information.
 /// Internal storage is UTC unix seconds + nanoseconds + timezone.
-public type DateTime(file_private unix_secs Int64, file_private nanos Int32, file_private tz TimeZone);
-
+public type DateTime(
+    file_private unix_secs Int64,
+    file_private nanos Int32,
+    file_private tz TimeZone,
+);
 
 // ============================================================================
 // TimeZone Instance Methods (depend on DateTime, so placed here)
@@ -24,46 +27,49 @@ public type DateTime(file_private unix_secs Int64, file_private nanos Int32, fil
 given TimeZone {
 
     /// Returns the timezone name.
-    public name(self) String =
-        when self.kind in {
-            .Utc() then "UTC",
-            .Local(n) then n,
-            .Named(n) then n,
-            .Fixed(offset_secs) then {
-                let abs_secs = if offset_secs < 0 then 0 - offset_secs(Int) else offset_secs(Int);
-                let hours = abs_secs / 3600;
-                let mins = (abs_secs % 3600) / 60;
-                let mutable result = StringBuilder.new();
-                if offset_secs < 0 then {
-                    result.push_byte('-');
-                } else {
-                    result.push_byte('+');
-                };
-                if hours < 10 then { result.push_byte('0');};
-                result.push_string(hours.to_string());
-                result.push_byte(':');
-                if mins < 10 then { result.push_byte('0');};
-                result.push_string(mins.to_string());
-                result.to_string()
-            },
-        };
+    public name(self) String = when self.kind in {
+        .Utc() then "UTC",
+        .Local(n) then n,
+        .Named(n) then n,
+        .Fixed(offset_secs) then {
+            let abs_secs = if offset_secs < 0 then 0 - offset_secs(Int)
+            else offset_secs(Int);
+            let hours = abs_secs / 3600;
+            let mins = (abs_secs % 3600) / 60;
+            let mutable result = StringBuilder.new();
+            if offset_secs < 0 then {
+                result.push_byte('-');
+            } else {
+                result.push_byte('+');
+            };
+            if hours < 10 then {
+                result.push_byte('0');
+            };
+            result.push_string(hours.to_string());
+            result.push_byte(':');
+            if mins < 10 then {
+                result.push_byte('0');
+            };
+            result.push_string(mins.to_string());
+            result.to_string()
+        },
+    };
 
     /// Returns the UTC offset at the given DateTime as a Duration.
-    public offset_at(self, datetime DateTime) Duration =
-        when self.kind in {
-            .Utc() then Duration.zero(),
-            .Fixed(offset_secs) then 1s * offset_secs(Int),
-            .Local(n) then {
-                let mutable out Int32 = 0;
-                __koral_timezone_offset_at(n.data, datetime.unix_secs, &unsafe out);
-                1s * out(Int)
-            },
-            .Named(n) then {
-                let mutable out Int32 = 0;
-                __koral_timezone_offset_at(n.data, datetime.unix_secs, &unsafe out);
-                1s * out(Int)
-            },
-        };
+    public offset_at(self, datetime DateTime) Duration = when self.kind in {
+        .Utc() then Duration.zero(),
+        .Fixed(offset_secs) then 1s * offset_secs(Int),
+        .Local(n) then {
+            let mutable out Int32 = 0;
+            __koral_timezone_offset_at(n.data, datetime.unix_secs, &unsafe out);
+            1s * out(Int)
+        },
+        .Named(n) then {
+            let mutable out Int32 = 0;
+            __koral_timezone_offset_at(n.data, datetime.unix_secs, &unsafe out);
+            1s * out(Int)
+        },
+    };
 };
 
 // ============================================================================
@@ -96,7 +102,8 @@ given DateTime {
         DateTime(timestamp.secs, timestamp.nanos(Int32), TimeZone.utc());
 
     /// Creates a UTC DateTime from seconds since the Unix epoch.
-    public from_unix_seconds(seconds Int64) DateTime = DateTime(seconds, 0, TimeZone.utc());
+    public from_unix_seconds(seconds Int64) DateTime =
+        DateTime(seconds, 0, TimeZone.utc());
 
     /// Creates a DateTime from a Date and ClockTime in the given timezone.
     public from_parts(date Date, time ClockTime, timezone TimeZone) DateTime = {
@@ -122,7 +129,6 @@ given DateTime {
         return DateTime(unix_secs, 0, timezone);
     };
 };
-
 
 // ============================================================================
 // DateTime Field Access Methods
@@ -222,13 +228,15 @@ given DateTime {
     public to_unix_seconds(self) Int64 = self.unix_secs;
 
     /// Converts to the given timezone (same instant, different display).
-    public in_timezone(self, timezone TimeZone) DateTime = DateTime(self.unix_secs, self.nanos, timezone);
+    public in_timezone(self, timezone TimeZone) DateTime =
+        DateTime(self.unix_secs, self.nanos, timezone);
 
     /// Converts to UTC.
     public in_utc(self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.utc());
 
     /// Converts to local timezone.
-    public in_local(self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.local());
+    public in_local(self) DateTime =
+        DateTime(self.unix_secs, self.nanos, TimeZone.local());
 
     /// Return the Duration elapsed since this DateTime instant.
     /// If current wall clock is earlier than self, returns Duration.zero().
@@ -308,15 +316,11 @@ given DateTime as Eq {
 given DateTime as Ord {
 
     /// Ord: compare — based on unix_secs + nanos (timezone-independent)
-    public compare(self, other DateTime) Int =
-        if self.unix_secs < other.unix_secs then
-            -1 else if self.unix_secs > other.unix_secs then
-            1 else if self.nanos < other.nanos then
-            -1 else if self.nanos > other.nanos then
-            1 else
-            0;
+    public compare(self, other DateTime) Int = if self.unix_secs < other.unix_secs then -1
+    else if self.unix_secs > other.unix_secs then 1
+    else if self.nanos < other.nanos then -1
+    else if self.nanos > other.nanos then 1 else 0;
 };
-
 
 // ============================================================================
 // DateTime ISO 8601 Formatting and Parsing
@@ -359,14 +363,30 @@ given DateTime as ToString {
                 count = count - 1;
             };
             // Pad leading zeros
-            if count >= 2 and digits < 10 then { result.push_byte('0');};
-            if count >= 3 and digits < 100 then { result.push_byte('0');};
-            if count >= 4 and digits < 1000 then { result.push_byte('0');};
-            if count >= 5 and digits < 10000 then { result.push_byte('0');};
-            if count >= 6 and digits < 100000 then { result.push_byte('0');};
-            if count >= 7 and digits < 1000000 then { result.push_byte('0');};
-            if count >= 8 and digits < 10000000 then { result.push_byte('0');};
-            if count >= 9 and digits < 100000000 then { result.push_byte('0');};
+            if count >= 2 and digits < 10 then {
+                result.push_byte('0');
+            };
+            if count >= 3 and digits < 100 then {
+                result.push_byte('0');
+            };
+            if count >= 4 and digits < 1000 then {
+                result.push_byte('0');
+            };
+            if count >= 5 and digits < 10000 then {
+                result.push_byte('0');
+            };
+            if count >= 6 and digits < 100000 then {
+                result.push_byte('0');
+            };
+            if count >= 7 and digits < 1000000 then {
+                result.push_byte('0');
+            };
+            if count >= 8 and digits < 10000000 then {
+                result.push_byte('0');
+            };
+            if count >= 9 and digits < 100000000 then {
+                result.push_byte('0');
+            };
             result.push_string(digits.to_string());
         };
 
@@ -402,84 +422,150 @@ given DateTime as Parseable {
     public parse(s String) Result[DateTime] = {
         let len = s.count()(Int);
         // Minimum: "YYYY-MM-DDTHH:MM:SSZ" = 20 chars
-        if len < 20 then { return Result[DateTime].Error("invalid ISO 8601: string too short");};
+        if len < 20 then {
+            return Result[DateTime].Error("invalid ISO 8601: string too short");
+        };
 
         // Parse date: YYYY-MM-DD
         let yr = parse_digits(s, 0, 4);
-        if yr.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 4-digit year");};
-        if s[4] <> 45(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected '-' after year");};// '-'
+        if yr.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 4-digit year");
+        };
+        if s[4] <> 45(UInt8) then {
+            return Result[DateTime].Error("invalid ISO 8601: expected '-' after year");
+        }; // '-'
         let mo = parse_digits(s, 5, 2);
-        if mo.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit month");};
-        if s[7] <> 45(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected '-' after month");};// '-'
+        if mo.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 2-digit month");
+        };
+        if s[7] <> 45(UInt8) then {
+            return Result[DateTime].Error("invalid ISO 8601: expected '-' after month");
+        }; // '-'
         let dy = parse_digits(s, 8, 2);
-        if dy.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit day");};
+        if dy.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 2-digit day");
+        };
 
         // 'T' separator
-        if s[10] <> 84(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected 'T' separator");};// 'T'
+        if s[10] <> 84(UInt8) then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 'T' separator");
+        }; // 'T'
 
         // Parse time: HH:MM:SS
         let hr = parse_digits(s, 11, 2);
-        if hr.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit hour");};
-        if s[13] <> 58(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected ':' after hour");};// ':'
+        if hr.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 2-digit hour");
+        };
+        if s[13] <> 58(UInt8) then {
+            return Result[DateTime].Error("invalid ISO 8601: expected ':' after hour");
+        }; // ':'
         let mi = parse_digits(s, 14, 2);
-        if mi.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit minute");};
-        if s[16] <> 58(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected ':' after minute");};// ':'
+        if mi.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 2-digit minute");
+        };
+        if s[16] <> 58(UInt8) then {
+            return Result[DateTime].Error("invalid ISO 8601: expected ':' after minute");
+        }; // ':'
         let se = parse_digits(s, 17, 2);
-        if se.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit second");};
+        if se.value < 0 then {
+            return Result[DateTime].Error("invalid ISO 8601: expected 2-digit second");
+        };
 
         let mutable pos = 19;
         let mutable nanos = 0;
 
         // Optional fractional seconds
-        if pos < len and s[pos(UInt)] == 46(UInt8) then {// '.'
+        if pos < len and s[pos(UInt)] == 46(UInt8) then {
+            // '.'
             pos = pos + 1;
             let frac = parse_frac_digits(s, pos);
-            if frac.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: invalid fractional seconds");};
+            if frac.value < 0 then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: invalid fractional seconds",
+                );
+            };
             nanos = frac.value;
             pos = frac.pos;
         };
 
         // Timezone: 'Z' or '+HH:MM' or '-HH:MM'
-        if pos >= len then { return Result[DateTime].Error("invalid ISO 8601: missing timezone");};
+        if pos >= len then {
+            return Result[DateTime].Error("invalid ISO 8601: missing timezone");
+        };
         let tz_char = s[pos(UInt)];
 
-        let tz = if tz_char == 90(UInt8) then {// 'Z'
+        let tz = if tz_char == 90(UInt8) then {
+            // 'Z'
             pos = pos + 1;
             TimeZone.utc()
-        } else if tz_char == 43(UInt8) or tz_char == 45(UInt8) then {// '+' or '-'
+        } else if tz_char == 43(UInt8) or tz_char == 45(UInt8) then {
+            // '+' or '-'
             let sign = if tz_char == 45(UInt8) then -1 else 1;
             pos = pos + 1;
             let oh = parse_digits(s, pos, 2);
-            if oh.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit timezone hour");};
+            if oh.value < 0 then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: expected 2-digit timezone hour",
+                );
+            };
             pos = pos + 2;
-            if pos >= len or s[pos(UInt)] <> 58(UInt8) then { return Result[DateTime].Error("invalid ISO 8601: expected ':' in timezone offset");};// ':'
+            if pos >= len or s[pos(UInt)] <> 58(UInt8) then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: expected ':' in timezone offset",
+                );
+            }; // ':'
             pos = pos + 1;
             let om = parse_digits(s, pos, 2);
-            if om.value < 0 then { return Result[DateTime].Error("invalid ISO 8601: expected 2-digit timezone minute");};
+            if om.value < 0 then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: expected 2-digit timezone minute",
+                );
+            };
             pos = pos + 2;
             let offset_secs = sign * (oh.value * 3600 + om.value * 60);
             let tz_result = TimeZone.from_offset(1s * offset_secs);
             when tz_result in {
                 .Ok(t) then t,
-                .Error(e) then { return Result[DateTime].Error(e);},
+                .Error(e) then {
+                    return Result[DateTime].Error(e);
+                },
             }
         } else {
-            return Result[DateTime].Error("invalid ISO 8601: expected 'Z' or timezone offset");
+            return Result[DateTime].Error(
+                "invalid ISO 8601: expected 'Z' or timezone offset",
+            );
         };
 
         // Must have consumed entire string
-        if pos <> len then { return Result[DateTime].Error("invalid ISO 8601: unexpected trailing characters");};
+        if pos <> len then {
+            return Result[DateTime].Error(
+                "invalid ISO 8601: unexpected trailing characters",
+            );
+        };
 
         // Build DateTime via from_parts
         let date_result = Date.new(year: yr.value, month: mo.value, day: dy.value);
-        let time_result = ClockTime.new_full(hour: hr.value, minute: mi.value, second: se.value, nanosecond: nanos);
+        let time_result = ClockTime.new_full(
+            hour: hr.value,
+            minute: mi.value,
+            second: se.value,
+            nanosecond: nanos,
+        );
         let date = when date_result in {
             .Ok(d) then d,
-            .Error(_) then { return Result[DateTime].Error("invalid ISO 8601: date/time values out of range");},
+            .Error(_) then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: date/time values out of range",
+                );
+            },
         };
         let time = when time_result in {
             .Ok(t) then t,
-            .Error(_) then { return Result[DateTime].Error("invalid ISO 8601: date/time values out of range");},
+            .Error(_) then {
+                return Result[DateTime].Error(
+                    "invalid ISO 8601: date/time values out of range",
+                );
+            },
         };
         return Result[DateTime].Ok(DateTime.from_parts(date, time, tz));
     };

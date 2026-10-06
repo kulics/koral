@@ -9,22 +9,36 @@
 // ============================================================================
 
 // String is immutable value data with fixed storage length.
-public type String(
-    package_private data *unsafe mutable UInt8,
-    package_private len UInt,
-);
+public type String(package_private data *unsafe mutable UInt8, package_private len UInt);
 
 // Mutable builder for incremental string construction without relying on String alias mutation.
-public type mutable StringBuilder(module_private mutable data *unsafe mutable UInt8, module_private mutable len UInt, module_private mutable cap UInt);
+public type mutable StringBuilder(
+    module_private mutable data *unsafe mutable UInt8,
+    module_private mutable len UInt,
+    module_private mutable cap UInt,
+);
 
 // String iterator types
-public type mutable StringSplitAsciiWhitespaceIterator(module_private source String, module_private mutable index UInt);
+public type mutable StringSplitAsciiWhitespaceIterator(
+    module_private source String,
+    module_private mutable index UInt,
+);
 
-public type mutable StringSplitIterator(module_private source String, module_private sep String, module_private mutable index UInt);
+public type mutable StringSplitIterator(
+    module_private source String,
+    module_private sep String,
+    module_private mutable index UInt,
+);
 
-public type mutable StringLinesIterator(module_private source String, module_private mutable index UInt);
+public type mutable StringLinesIterator(
+    module_private source String,
+    module_private mutable index UInt,
+);
 
-public type mutable StringBytesIterator(module_private source String, module_private mutable index UInt);
+public type mutable StringBytesIterator(
+    module_private source String,
+    module_private mutable index UInt,
+);
 
 given String as Drop {
 
@@ -77,25 +91,16 @@ given StringBuilder {
         self.data[self.len] = 0;
     };
 
-    public push_string(self, other String) Void = {
-        let other_len = other.count();
-        if other_len == 0 then {
-            return;
-        };
-        self.ensure_capacity(self.len + other_len + 1);
-        copy_memory(self.data + self.len, other.borrow_ptr(), other_len);
-        self.len = self.len + other_len;
-        self.data[self.len] = 0;
-    };
-
-    public push_substring(self, other String, range Range[UInt]) Void = {
-        let span = other.slice_spec(range);
-        let copy_len = span.len();
+    // `span` picks which slice of `other` to append, defaulting to all of it --
+    // the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
+    public push_string(self, other String, span: Range[UInt] = ..) Void = {
+        let spec = other.slice_spec(span);
+        let copy_len = spec.len();
         if copy_len == 0 then {
             return;
         };
         self.ensure_capacity(self.len + copy_len + 1);
-        copy_memory(self.data + self.len, other.borrow_ptr() + span.start(), copy_len);
+        copy_memory(self.data + self.len, other.borrow_ptr() + spec.start(), copy_len);
         self.len = self.len + copy_len;
         self.data[self.len] = 0;
     };
@@ -157,7 +162,10 @@ given String {
     };
 
     // Unsafe constructor for low-level builders: takes ownership of an allocated UTF-8 buffer.
-    package_private from_owned_utf8_ptr_unchecked(bytes *unsafe mutable UInt8, len UInt) String = {
+    package_private from_owned_utf8_ptr_unchecked(
+        bytes *unsafe mutable UInt8,
+        len UInt,
+    ) String = {
         return String(bytes, len);
     };
 
@@ -274,12 +282,24 @@ given String {
 
     // Using comparison patterns for ASCII space check
     file_private is_ascii_space(b UInt8) Bool = {
-        if b == ' ' then { return true;};
-        if b == '\t' then { return true;};
-        if b == '\n' then { return true;};
-        if b == '\v' then { return true;};
-        if b == '\f' then { return true;};
-        if b == '\r' then { return true;};
+        if b == ' ' then {
+            return true;
+        };
+        if b == '\t' then {
+            return true;
+        };
+        if b == '\n' then {
+            return true;
+        };
+        if b == '\v' then {
+            return true;
+        };
+        if b == '\f' then {
+            return true;
+        };
+        if b == '\r' then {
+            return true;
+        };
         return false;
     };
 
@@ -521,8 +541,10 @@ given String {
     };
 
     // Using comparison patterns for case conversion
-    file_private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32 else b;
-    file_private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32 else b;
+    file_private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32
+    else b;
+    file_private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32
+    else b;
 
     public to_ascii_lowercase(self) String = {
         let data = alloc_memory[UInt8](self.len + 1);
@@ -635,7 +657,7 @@ given String {
                     count += 1;
                 },
                 .None() then {
-                    count = n;// break
+                    count = n; // break
                 },
             };
         };
@@ -710,10 +732,10 @@ given String {
 
     public lines(self) StringLinesIterator = StringLinesIterator(self, 0);
 
-    public trim_prefix(self, prefix String) String =
-        if self.starts_with(prefix) then
-            self.make_substring(prefix.len, self.len - prefix.len) else
-            self;
+    public trim_prefix(self, prefix String) String = if self.starts_with(prefix) then self.make_substring(
+        prefix.len,
+        self.len - prefix.len,
+    ) else self;
 
     public trim_suffix(self, suffix String) String = {
         if self.ends_with(suffix) then {
@@ -726,7 +748,9 @@ given String {
 
     public strip_prefix(self, prefix String) Option[String] = {
         if self.starts_with(prefix) then {
-            return Option[String].Some(self.make_substring(prefix.len, self.len - prefix.len));
+            return Option[String].Some(
+                self.make_substring(prefix.len, self.len - prefix.len),
+            );
         };
         return Option[String].None();
     };
@@ -753,7 +777,6 @@ given String {
         };
         return list;
     };
-
 };
 
 given String as Default {
@@ -790,7 +813,8 @@ given String as Ord {
                 return 1;
             };
         };
-        return if self.len < other.len then 0 - 1 else if self.len > other.len then 1 else 0;
+        return if self.len < other.len then 0 - 1
+        else if self.len > other.len then 1 else 0;
     };
 };
 
@@ -892,7 +916,10 @@ given StringLinesIterator as Iterator[String] {
 // ============================================================================
 
 // Iterator type for rune iteration (provides next() method)
-public type mutable StringRunesIterator(module_private source String, module_private mutable byte_index UInt);
+public type mutable StringRunesIterator(
+    module_private source String,
+    module_private mutable byte_index UInt,
+);
 
 given StringRunesIterator as Iterator[Rune] {
 

@@ -30,34 +30,27 @@ file_private let manifest_error_detail(err ManifestError) String = when err in {
     .InvalidField(path, message) then "Invalid manifest field '\(path)': \(message)",
     .MissingTargetModule(module) then "Target module '\(module)' not found in resolved module graph",
     .DuplicateModuleEntry(entry) then "entry file '\(entry)' is declared by two modules",
-    .UnknownPackageName(name, context, known) then
-        "Unknown package name \"\(name)\"\n  referenced from \(context)\n  known package names: \(known.join_to_string(", "))",
-    .UnknownModule(name, package_name, declared) then
-        // One condition, one spelling: the `using` path reports these through
-        // `ModuleError`, and the two must not grow apart.
-        "Module '\(name)' does not exist in package '\(package_name)'; declared modules: \(declared.join_to_string(", "))",
-    .NoMainModule(package_name, declared) then
-        "Package '\(package_name)' has no main module; write its subpath instead; declared modules: \(declared.join_to_string(", "))",
+    .UnknownPackageName(name, context, known) then "Unknown package name \"\(name)\"\n  referenced from \(context)\n  known package names: \(known.join_to_string(", "))",
+    .UnknownModule(name, package_name, declared) then // One condition, one spelling: the `using` path reports these through
+    // `ModuleError`, and the two must not grow apart.
+    "Module '\(name)' does not exist in package '\(package_name)'; declared modules: \(declared.join_to_string(", "))",
+    .NoMainModule(package_name, declared) then "Package '\(package_name)' has no main module; write its subpath instead; declared modules: \(declared.join_to_string(", "))",
     .ReservedName(name) then "Package name '\(name)' is reserved",
-    .UnsupportedSource(source) then
-        "Cannot locate package source '\(source)'\n  only 'path:' sources are resolvable without a fetch step",
+    .UnsupportedSource(source) then "Cannot locate package source '\(source)'\n  only 'path:' sources are resolvable without a fetch step",
     .Message(text) then text,
 };
 
 /// How a manifest failure reaches the reader: `Error: msg`. It is about the
 /// manifest or the command line, not about source, so it carries no location.
-public let manifest_error_text(err ManifestError) String = "Error: " + manifest_error_detail(err);
+public let manifest_error_text(err ManifestError) String =
+    "Error: " + manifest_error_detail(err);
 
 // ── manifest shape ────────────────────────────────────────────────────────────
 
 /// The name this package writes for a dependency, where that dependency lives,
 /// and which versions of it are acceptable. `source` is both the fetch location
 /// and the package's identity, and never carries a ref (§5.3).
-public type PackageDependencyConfig(
-    key String,
-    source String,
-    version String,
-);
+public type PackageDependencyConfig(key String, source String, version String);
 
 /// A module as the manifest declares it. `key` is the package-internal name --
 /// `"."` for the main module, otherwise the subpath. A consumer spells the FULL
@@ -111,12 +104,13 @@ public type mutable PackageRegistry(
 );
 
 given PackageRegistry {
-    public new() PackageRegistry = PackageRegistry(
-        Dict[String, LoadedPackage].new(),
-        [],
-        Option[LoadedPackage].None(),
-        Option[LoadedPackage].None(),
-    );
+    public new() PackageRegistry =
+        PackageRegistry(
+            Dict[String, LoadedPackage].new(),
+            [],
+            Option[LoadedPackage].None(),
+            Option[LoadedPackage].None(),
+        );
 
     public register(self, package LoadedPackage) Void = {
         if self.by_identity.get(package.identity) is .None() then {
@@ -278,7 +272,7 @@ public let make_resolved_module_spec(
     owner LoadedPackage,
 ) ResolvedModuleSpec = {
     let full_name = if config.subpath.is_empty() then root_name
-        else root_name + "/" + config.subpath;
+    else root_name + "/" + config.subpath;
 
     let mutable segments = List[String].new();
     segments.push(module_file_name_to_identifier(root_name));
@@ -328,20 +322,13 @@ public let root_view_name(
 // ── parsing ───────────────────────────────────────────────────────────────────
 
 file_private let obsolete_field_hint(field String) String = when field in {
-    "name" then
-        "renamed to 'package'; 'package' is the name the SOURCE writes, not an identity",
-    "entry" then
-        "removed; the default build target is the main module ('modules' key \".\")",
-    "requires" then
-        "removed; the module graph is derived from 'using' (§5.4)",
-    "module_aliases" then
-        "removed; renaming a dependency is its 'dependencies' key (§5.3)",
-    "git" then
-        "removed; the fetch location is 'source' (§5.3)",
-    "hash" then
-        "removed; hashes live in koral.lock, one place (§11.2)",
-    "links" then
-        "moved onto the module that needs it ('modules.<key>.links')",
+    "name" then "renamed to 'package'; 'package' is the name the SOURCE writes, not an identity",
+    "entry" then "removed; the default build target is the main module ('modules' key \".\")",
+    "requires" then "removed; the module graph is derived from 'using' (§5.4)",
+    "module_aliases" then "removed; renaming a dependency is its 'dependencies' key (§5.3)",
+    "git" then "removed; the fetch location is 'source' (§5.3)",
+    "hash" then "removed; hashes live in koral.lock, one place (§11.2)",
+    "links" then "moved onto the module that needs it ('modules.<key>.links')",
     _ then "unsupported",
 };
 
@@ -349,7 +336,11 @@ file_private let obsolete_field_hint(field String) String = when field in {
 /// replacement. A manifest that still carries one is told so instead of being
 /// silently half-read. The list is per section: `entry` is gone at the top
 /// level but is exactly what a module entry must still declare.
-file_private let reject_obsolete_fields(json JsonValue, context String, fields List[String]) Result[Void] = {
+file_private let reject_obsolete_fields(
+    json JsonValue,
+    context String,
+    fields List[String],
+) Result[Void] = {
     for field in fields then {
         if json.get_field(field) is .Some(_) then {
             let field_path = if context.is_empty() then field else context + "." + field;
@@ -363,22 +354,33 @@ file_private let reject_obsolete_fields(json JsonValue, context String, fields L
 
 file_private let expect_manifest_string(json JsonValue, path String) Result[String] = {
     let value = json.get_field(path) or else {
-        return Result[String].Error(manifest_error_text(.InvalidField(path, "missing required string")));
+        return Result[String].Error(
+            manifest_error_text(.InvalidField(path, "missing required string")),
+        );
     };
     let text = value.as_string() or else {
-        return Result[String].Error(manifest_error_text(.InvalidField(path, "expected string")));
+        return Result[String].Error(
+            manifest_error_text(.InvalidField(path, "expected string")),
+        );
     };
     return Result[String].Ok(text);
 };
 
-file_private let load_manifest_string_array(value JsonValue, path String) Result[List[String]] = {
+file_private let load_manifest_string_array(
+    value JsonValue,
+    path String,
+) Result[List[String]] = {
     let arr = value.as_array() or else {
-        return Result[List[String]].Error(manifest_error_text(.InvalidField(path, "expected string array")));
+        return Result[List[String]].Error(
+            manifest_error_text(.InvalidField(path, "expected string array")),
+        );
     };
     let mutable out List[String] = [];
     for i in 0..<arr.count() then {
         let item = arr[i].as_string() or else {
-            return Result[List[String]].Error(manifest_error_text(.InvalidField("\(path)[\(i)]", "expected string")));
+            return Result[List[String]].Error(
+                manifest_error_text(.InvalidField("\(path)[\(i)]", "expected string")),
+            );
         };
         out.push(item);
     };
@@ -391,15 +393,25 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         .Error(_) then manifest_path,
     };
     if not path_exist(absolute_manifest_path.into_path()) then {
-        return Result[PackageManifest].Error(manifest_error_text(.FileNotFound(absolute_manifest_path)));
+        return Result[PackageManifest].Error(
+            manifest_error_text(.FileNotFound(absolute_manifest_path)),
+        );
     };
 
     let text = read_text_file(absolute_manifest_path.into_path()) or return;
     let json = JsonValue.parse(text) or else {
-        return Result[PackageManifest].Error(manifest_error_text(.Message("Invalid manifest JSON: \(absolute_manifest_path)")));
+        return Result[PackageManifest].Error(
+            manifest_error_text(
+                .Message("Invalid manifest JSON: \(absolute_manifest_path)"),
+            ),
+        );
     };
     if json.as_object() is .None() then {
-        return Result[PackageManifest].Error(manifest_error_text(.Message("Invalid manifest JSON: \(absolute_manifest_path)")));
+        return Result[PackageManifest].Error(
+            manifest_error_text(
+                .Message("Invalid manifest JSON: \(absolute_manifest_path)"),
+            ),
+        );
     };
 
     let top_fields = List[String].new();
@@ -414,10 +426,14 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
 
     let package_name = expect_manifest_string(json, "package") or return;
     if not is_valid_package_or_segment_name(package_name) then {
-        return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-            "package",
-            "package name must be a single lowercase identifier",
-        )));
+        return Result[PackageManifest].Error(
+            manifest_error_text(
+                .InvalidField(
+                    "package",
+                    "package name must be a single lowercase identifier",
+                ),
+            ),
+        );
     };
     let version = expect_manifest_string(json, "version") or return;
 
@@ -425,7 +441,11 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
     when json.get_field("dependencies") in {
         .Some(dep_ref) then {
             let dep_obj = dep_ref.as_object() or else {
-                return Result[PackageManifest].Error(manifest_error_text(.InvalidField("dependencies", "expected object")));
+                return Result[PackageManifest].Error(
+                    manifest_error_text(
+                        .InvalidField("dependencies", "expected object"),
+                    ),
+                );
             };
             let mutable source_owners = Dict[String, String].new();
             // Sorted: the message names the two keys that fight, and which
@@ -437,21 +457,33 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
             };
             dep_keys.sort();
             for dep_key in dep_keys then {
-                let dep_json = dep_obj.get(dep_key) or else { continue; };
+                let dep_json = dep_obj.get(dep_key) or else {
+                    continue;
+                };
                 if not is_valid_package_or_segment_name(dep_key) then {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key)",
-                        "dependency key must be a single lowercase identifier",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key)",
+                                "dependency key must be a single lowercase identifier",
+                            ),
+                        ),
+                    );
                 };
                 if dep_key == package_name then {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key)",
-                        "dependency key collides with this package's own name",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key)",
+                                "dependency key collides with this package's own name",
+                            ),
+                        ),
+                    );
                 };
                 if dep_key == "std" then {
-                    return Result[PackageManifest].Error(manifest_error_text(.ReservedName(dep_key)));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(.ReservedName(dep_key)),
+                    );
                 };
 
                 let dep_fields = List[String].new();
@@ -461,51 +493,78 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
                 dep_fields.push("hash");
                 reject_obsolete_fields(dep_json, "dependencies.\(dep_key)", dep_fields) or return;
                 let source = expect_manifest_string(dep_json, "source") or else {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key).source",
-                        "missing required string",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key).source",
+                                "missing required string",
+                            ),
+                        ),
+                    );
                 };
                 let dep_version = expect_manifest_string(dep_json, "version") or else {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key).version",
-                        "missing required string",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key).version",
+                                "missing required string",
+                            ),
+                        ),
+                    );
                 };
                 if not is_valid_version_constraint(dep_version) then {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key).version",
-                        "'\(dep_version)' is not a semver constraint (for example '^1.2')",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key).version",
+                                "'\(dep_version)' is not a semver constraint (for example '^1.2')",
+                            ),
+                        ),
+                    );
                 };
                 if source.contains("#") or source.contains("?") then {
-                    return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                        "dependencies.\(dep_key).source",
-                        "source must not carry a ref; pin the version with koral.lock",
-                    )));
+                    return Result[PackageManifest].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dep_key).source",
+                                "source must not carry a ref; pin the version with koral.lock",
+                            ),
+                        ),
+                    );
                 };
                 when source_owners.get(source) in {
                     .Some(previous) then {
                         // One source may only have one spelling in a project (§4).
                         // Name both keys so the reader can see which two fight.
-                        return Result[PackageManifest].Error(manifest_error_text(.Message(
-                            "Source '\(source)' is declared by both '\(previous)' and '\(dep_key)'; one package would have two spellings",
-                        )));
+                        return Result[PackageManifest].Error(
+                            manifest_error_text(
+                                .Message(
+                                    "Source '\(source)' is declared by both '\(previous)' and '\(dep_key)'; one package would have two spellings",
+                                ),
+                            ),
+                        );
                     },
                     .None() then {},
                 };
                 source_owners.insert(source, dep_key);
-                dependencies.insert(dep_key, PackageDependencyConfig(dep_key, source, dep_version));
+                dependencies.insert(
+                    dep_key,
+                    PackageDependencyConfig(dep_key, source, dep_version),
+                );
             };
         },
         .None() then {},
     };
 
     let modules_ref = json.get_field("modules") or else {
-        return Result[PackageManifest].Error(manifest_error_text(.InvalidField("modules", "missing required object")));
+        return Result[PackageManifest].Error(
+            manifest_error_text(.InvalidField("modules", "missing required object")),
+        );
     };
     let modules_obj = modules_ref.as_object() or else {
-        return Result[PackageManifest].Error(manifest_error_text(.InvalidField("modules", "expected object")));
+        return Result[PackageManifest].Error(
+            manifest_error_text(.InvalidField("modules", "expected object")),
+        );
     };
 
     let mutable modules = Dict[String, PackageModuleConfig].new();
@@ -515,20 +574,32 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         let module_name = module_entry.first;
         let module_fields = List[String].new();
         module_fields.push("requires");
-        reject_obsolete_fields(module_entry.second, "modules.\(module_name)", module_fields) or return;
+        reject_obsolete_fields(
+            module_entry.second,
+            "modules.\(module_name)",
+            module_fields,
+        ) or return;
 
         let subpath = parse_manifest_module_key(module_name) or else {
-            return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                "modules.\(module_name)",
-                "module key must be '.' or lowercase segments joined by '/'",
-            )));
+            return Result[PackageManifest].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        "modules.\(module_name)",
+                        "module key must be '.' or lowercase segments joined by '/'",
+                    ),
+                ),
+            );
         };
         let module_json = module_entry.second;
         let entry_rel = expect_manifest_string(module_json, "entry") or else {
-            return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                "modules.\(module_name).entry",
-                "missing required string",
-            )));
+            return Result[PackageManifest].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        "modules.\(module_name).entry",
+                        "missing required string",
+                    ),
+                ),
+            );
         };
         // Resolve `.` / `..` ourselves: `join` keeps them, so `../x` would still
         // start with the package root as a string and the containment check
@@ -546,7 +617,9 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         };
         let entry_abs = entry_target.to_string();
         if seen_entries.contains(entry_abs) then {
-            return Result[PackageManifest].Error(manifest_error_text(.DuplicateModuleEntry(entry_rel)));
+            return Result[PackageManifest].Error(
+                manifest_error_text(.DuplicateModuleEntry(entry_rel)),
+            );
         };
         // An entry file lives inside the package (§7.16). `entry` is relative
         // to the package root, so a path that climbs out is either a mistake or
@@ -555,37 +628,57 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         // whether or not something happens to sit there.
         let root_norm = package_root.into_path().normalize().to_string();
         if not (entry_abs == root_norm or entry_abs.starts_with(root_norm + "/")) then {
-            return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                "modules.\(module_name).entry",
-                "entry file '\(entry_rel)' is outside the package root",
-            )));
+            return Result[PackageManifest].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        "modules.\(module_name).entry",
+                        "entry file '\(entry_rel)' is outside the package root",
+                    ),
+                ),
+            );
         };
         seen_entries.insert(entry_abs);
         if not path_exist(entry_abs.into_path()) then {
-            return Result[PackageManifest].Error(manifest_error_text(.InvalidField(
-                "modules.\(module_name).entry",
-                "entry file '\(entry_rel)' does not exist",
-            )));
+            return Result[PackageManifest].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        "modules.\(module_name).entry",
+                        "entry file '\(entry_rel)' does not exist",
+                    ),
+                ),
+            );
         };
         let module_links = when module_json.get_field("links") in {
-            .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).links") or return,
+            .Some(value_ref) then load_manifest_string_array(
+                value_ref,
+                "modules.\(module_name).links",
+            ) or return,
             .None() then List[String].new(),
         };
-        modules.insert(module_name, PackageModuleConfig(module_name, subpath, entry_abs, module_links));
+        modules.insert(
+            module_name,
+            PackageModuleConfig(module_name, subpath, entry_abs, module_links),
+        );
     };
 
     if modules.is_empty() then {
-        return Result[PackageManifest].Error(manifest_error_text(.InvalidField("modules", "a package declares at least one module")));
+        return Result[PackageManifest].Error(
+            manifest_error_text(
+                .InvalidField("modules", "a package declares at least one module"),
+            ),
+        );
     };
 
-    return Result[PackageManifest].Ok(PackageManifest(
-        absolute_manifest_path,
-        package_root,
-        package_name,
-        version,
-        modules,
-        dependencies,
-    ));
+    return Result[PackageManifest].Ok(
+        PackageManifest(
+            absolute_manifest_path,
+            package_root,
+            package_name,
+            version,
+            modules,
+            dependencies,
+        ),
+    );
 };
 
 // ── loading the package set ───────────────────────────────────────────────────
@@ -603,28 +696,33 @@ public let locate_dependency(
     if dependency.source.starts_with("path:") then {
         let relative = dependency.source.trim_prefix("path:");
         if relative.is_empty() then {
-            return Result[String].Error(manifest_error_text(.InvalidField(
-                "dependencies.\(dependency.key).source",
-                "'path:' source needs a path after the colon",
-            )));
+            return Result[String].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        "dependencies.\(dependency.key).source",
+                        "'path:' source needs a path after the colon",
+                    ),
+                ),
+            );
         };
         return Result[String].Ok(
-            declaring_manifest.package_root.into_path()
-                .join(relative)
-                .join("koral.json")
-                .normalize()
-                .to_string()
+            declaring_manifest.package_root.into_path().join(relative).join(
+                "koral.json",
+            ).normalize().to_string(),
         );
     };
 
     when fetch_root in {
         .Some(root) then {
             return Result[String].Ok(
-                root.into_path().join(dependency.key).join("koral.json").normalize().to_string()
+                root.into_path().join(dependency.key).join("koral.json").normalize().to_string(
+                ),
             );
         },
         .None() then {
-            return Result[String].Error(manifest_error_text(.UnsupportedSource(dependency.source)));
+            return Result[String].Error(
+                manifest_error_text(.UnsupportedSource(dependency.source)),
+            );
         },
     };
 };
@@ -645,7 +743,9 @@ public let load_package_registry(
     };
     let root_is_std = when std_manifest_path in {
         .Some(path) then {
-            let absolute_std = absolute_path(path.into_path()) or else { path.into_path() };
+            let absolute_std = absolute_path(path.into_path()) or else {
+                path.into_path()
+            };
             absolute_std.normalize().to_string() == absolute_root.normalize().to_string()
         },
         .None() then false,
@@ -654,13 +754,18 @@ public let load_package_registry(
     if not root_is_std and root_manifest.package_name == "std" then {
         // `std` names the standard library and nothing else (§4). Only the
         // manifest loaded AS std may claim it.
-        return Result[PackageRegistry].Error(manifest_error_text(.ReservedName(root_manifest.package_name)));
+        return Result[PackageRegistry].Error(
+            manifest_error_text(.ReservedName(root_manifest.package_name)),
+        );
     };
 
-    let root = if root_is_std then
-        LoadedPackage("std", "std", root_manifest, .Std())
-    else
-        LoadedPackage(root_manifest.package_name, root_manifest.package_name, root_manifest, .Root());
+    let root = if root_is_std then LoadedPackage("std", "std", root_manifest, .Std())
+    else LoadedPackage(
+        root_manifest.package_name,
+        root_manifest.package_name,
+        root_manifest,
+        .Root(),
+    );
 
     if not root_is_std then {
         when std_manifest_path in {
@@ -707,17 +812,23 @@ public let load_package_registry(
 
             let manifest_path = locate_dependency(dependency, owner.manifest, fetch_root) or return;
             let manifest = load_package_manifest(manifest_path) or else {
-                return Result[PackageRegistry].Error(manifest_error_text(.InvalidField(
-                    "dependencies.\(dependency.key).source",
-                    "cannot load '\(dependency.source)': \(it.message())",
-                )));
+                return Result[PackageRegistry].Error(
+                    manifest_error_text(
+                        .InvalidField(
+                            "dependencies.\(dependency.key).source",
+                            "cannot load '\(dependency.source)': \(it.message())",
+                        ),
+                    ),
+                );
             };
 
             // `std` is reserved (§7.20). Only the standard library's own
             // manifest may claim it; a dependency trying to is a name collision
             // with the built-in.
             if manifest.package_name == "std" then {
-                return Result[PackageRegistry].Error(manifest_error_text(.ReservedName(manifest.package_name)));
+                return Result[PackageRegistry].Error(
+                    manifest_error_text(.ReservedName(manifest.package_name)),
+                );
             };
 
             let package = LoadedPackage(
@@ -743,7 +854,7 @@ public let prelude_module_spec(registry PackageRegistry) Option[ResolvedModuleSp
             when std.manifest.modules.get(".") in {
                 .Some(config) then {
                     return Option[ResolvedModuleSpec].Some(
-                        make_resolved_module_spec(".", config, "std", std)
+                        make_resolved_module_spec(".", config, "std", std),
                     );
                 },
                 .None() then {},

@@ -27,7 +27,7 @@ given Scope {
             Set[String].new(),
             Option[Scope].None(),
             Option[ImportGraph].None(),
-            Option[String].None()
+            Option[String].None(),
         );
         return Scope(s);
     };
@@ -41,7 +41,7 @@ given Scope {
             Set[String].new(),
             Option[Scope].Some(parent),
             Option[ImportGraph].None(),
-            Option[String].None()
+            Option[String].None(),
         );
         return Scope(s);
     };
@@ -70,34 +70,48 @@ given Scope {
     /// 2. a symbol import (`using "m" { x }`; `using "m" { x as y }` spells `y` and
     ///    declares `x`), 3. a batch/module import (`using "m";`) which
     ///    creates no symbol edge and keeps the same spelling.
-    file_private imported_type_entry(self, current Scope, name String, module_path List[String]) Option[Type] = {
+    file_private imported_type_entry(
+        self,
+        current Scope,
+        name String,
+        module_path List[String],
+    ) Option[Type] = {
         let graph = when current.storage.import_graph in {
             .Some(g) then g,
-            .None() then { return Option[Type].None(); },
+            .None() then {
+                return Option[Type].None();
+            },
         };
         let mutable targets = List[Pair[List[String], String]].new();
         when graph.symbol_import_candidates(name) in {
             .Some(candidates) then {
                 for edge in candidates then {
-                    if edge.symbol == name
-                        and string_list_eq(edge.module, module_path)
-                        and source_file_matches(edge.source_file, current.storage.source_file) then {
-                        targets.push(Pair[List[String], String](edge.target, edge.original_symbol));
+                    if edge.symbol == name and string_list_eq(edge.module, module_path) and source_file_matches(
+                        edge.source_file,
+                        current.storage.source_file,
+                    ) then {
+                        targets.push(
+                            Pair[List[String], String](edge.target, edge.original_symbol),
+                        );
                     };
                 };
             },
             .None() then {},
         };
         for edge in graph.edges then {
-            if string_list_eq(edge.source, module_path)
-                and source_file_matches(edge.source_file, current.storage.source_file) then {
+            if string_list_eq(edge.source, module_path) and source_file_matches(
+                edge.source_file,
+                current.storage.source_file,
+            ) then {
                 targets.push(Pair[List[String], String](edge.target, name));
             };
         };
         for pair in targets then {
             let qualified = qualified_symbol_key(pair.first, pair.second);
             when current.storage.type_entries.get(qualified) in {
-                .Some(t) then { return Option[Type].Some(t); },
+                .Some(t) then {
+                    return Option[Type].Some(t);
+                },
                 .None() then {},
             };
         };
@@ -105,7 +119,11 @@ given Scope {
     };
 
     /// Install the ambient import context used by `lookup_type_in_module`.
-    public set_import_context(self, import_graph Option[ImportGraph], source_file Option[String]) Void = {
+    public set_import_context(
+        self,
+        import_graph Option[ImportGraph],
+        source_file Option[String],
+    ) Void = {
         self.storage.import_graph = import_graph;
         self.storage.source_file = source_file;
     };
@@ -123,12 +141,16 @@ given Scope {
             };
             if current.storage.generic_params.contains(name) then {
                 when current.storage.type_entries.get(name) in {
-                    .Some(t) then { return Option[Type].Some(t); },
+                    .Some(t) then {
+                        return Option[Type].Some(t);
+                    },
                     .None() then {},
                 };
             };
             when current.storage.type_entries.get(qualified) in {
-                .Some(t) then { return Option[Type].Some(t); },
+                .Some(t) then {
+                    return Option[Type].Some(t);
+                },
                 .None() then {},
             };
             // What this module IMPORTS under this spelling wins over the
@@ -136,7 +158,9 @@ given Scope {
             // so cannot answer "which `Box`?". See
             // `GenericTemplateRegistry.candidate_keys` for the full order.
             when self.imported_type_entry(current, name, module_path) in {
-                .Some(t) then { return Option[Type].Some(t); },
+                .Some(t) then {
+                    return Option[Type].Some(t);
+                },
                 .None() then {},
             };
             when current.storage.type_entries.get(name) in {
@@ -165,7 +189,9 @@ given Scope {
             };
 
             when current.storage.entries.get(name) in {
-                .Some(symbol) then { return .Some(symbol);},
+                .Some(symbol) then {
+                    return .Some(symbol);
+                },
                 .None() then {},
             };
 
@@ -193,13 +219,17 @@ given Scope {
             // Generic params have highest priority (matches Swift's genericParameters check)
             if current.storage.generic_params.contains(name) then {
                 when current.storage.type_entries.get(name) in {
-                    .Some(t) then { return .Some(t);},
+                    .Some(t) then {
+                        return .Some(t);
+                    },
                     .None() then {},
                 };
             };
 
             when current.storage.type_entries.get(name) in {
-                .Some(t) then { return .Some(t);},
+                .Some(t) then {
+                    return .Some(t);
+                },
                 .None() then {},
             };
 
@@ -267,7 +297,9 @@ given Scope {
             };
             if current.storage.generic_params.contains(name) then {
                 when current.storage.type_entries.get(name) in {
-                    .Some(t) then { return Option[Type].Some(t); },
+                    .Some(t) then {
+                        return Option[Type].Some(t);
+                    },
                     .None() then {},
                 };
             };
@@ -312,6 +344,4 @@ given Scope {
     public generic_param_count(self) UInt = {
         return self.storage.generic_params.count();
     };
-
-
 };

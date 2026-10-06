@@ -20,10 +20,14 @@ given Reader {
         while true then {
             when self.read(into: chunk, span: ..) in {
                 .Ok(n) then {
-                    if n == 0 then { return .Ok(out);};
-                    out.push_sublist(chunk, 0..<n);
+                    if n == 0 then {
+                        return .Ok(out);
+                    };
+                    out.push_list(chunk, span: 0..<n);
                 },
-                .Error(e) then { return .Error(e);},
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
         };
         return .Ok(out);
@@ -36,13 +40,17 @@ given Reader {
         while true then {
             when self.read(into: chunk, span: ..) in {
                 .Ok(n) then {
-                    if n == 0 then { return .Ok(total);};
+                    if n == 0 then {
+                        return .Ok(total);
+                    };
                     let _ = dst.write_all(chunk, 0..<n) or else {
                         return .Error(it);
                     };
                     total += n;
                 },
-                .Error(e) then { return .Error(e);},
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
         };
         return .Ok(total);
@@ -55,19 +63,26 @@ given Reader {
 
 given Writer {
 
-    // Write all bytes in src[range] to self, looping on short writes.
-    public write_all(self, from: List[UInt8], span: Range[UInt]) Result[Void] = {
-        let span = from.slice_spec(span);
-        let mutable start = span.start();
-        let end = span.end();
-        if end <= start then { return .Ok({});};
+    // Write all bytes in `span` to self, looping on short writes. `span`
+    // defaults to the whole buffer, like `Writer.write`.
+    public write_all(self, from: List[UInt8], span: Range[UInt] = ..) Result[Void] = {
+        let spec = from.slice_spec(span);
+        let mutable start = spec.start();
+        let end = spec.end();
+        if end <= start then {
+            return .Ok({});
+        };
         while start < end then {
             when self.write(from: from, span: start..<end) in {
                 .Ok(n) then {
-                    if n == 0 then { return .Error(IoError.WriteZero());};
+                    if n == 0 then {
+                        return .Error(IoError.WriteZero());
+                    };
                     start += n;
                 },
-                .Error(e) then { return .Error(e);},
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
         };
         return .Ok({});
