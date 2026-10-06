@@ -748,7 +748,13 @@ given TypeChecker {
             .GenericParameter(name) then {
                 when bindings.get(name) in {
                     .Some(existing) then {
-                        if self.same_expr_type(existing, normalized_concrete) then {
+                        // A binding of a parameter to ITSELF is the "not yet
+                        // inferred" placeholder `bind_static_receiver_type_args`
+                        // plants so the name reads as receiver-owned; inference
+                        // is what fills it in. Anything else already has a value
+                        // and stands.
+                        if existing is .GenericParameter(existing_name) and existing_name == name then {
+                            bindings.insert(name, normalized_concrete);
                         };
                     },
                     .None() then {
@@ -2478,35 +2484,35 @@ given TypeChecker {
         return bindings;
     };
 
+    /// Bind the receiver template's type parameter NAMES to the written type
+    /// arguments.
+    ///
+    /// Every parameter of the receiver is bound, not just the ones spelled out.
+    /// For the bare spelling `Boxed.new(...)` no arguments are written, but `R`
+    /// is still the RECEIVER's parameter and must not be collected as one of
+    /// the method's own -- `new` declares zero method type parameters, and
+    /// counting `R` as one made the call carry a method type argument that mono
+    /// then rejected, bailing to `Symbol(DefId(0))` and emitting a nameless call
+    /// whose constructed body was never monomorphized. An unwritten parameter is
+    /// bound to `Type.GenericParameter(name)`, the same placeholder
+    /// `resolve_static_declared_receiver_type` uses.
     module_private bind_static_receiver_type_args(self, type_name String, receiver_type_args List[Type], bindings Dict[String, Type]) Void = {
-        when self.storage.generic_templates.lookup_struct(type_name) in {
-            .Some(struct_template) then {
-                let mutable i UInt = 0;
-                let param_count = struct_template.type_parameters.count();
-                let arg_count = receiver_type_args.count();
-                let n = if param_count < arg_count then param_count else arg_count;
-                while i < n then {
-                    let tp = struct_template.type_parameters[i];
-                    bindings.insert(tp.name, receiver_type_args[i]);
-                    i += 1;
-                };
+        let type_params = when self.storage.generic_templates.lookup_struct(type_name) in {
+            .Some(struct_template) then struct_template.type_parameters,
+            .None() then when self.storage.generic_templates.lookup_enum(type_name) in {
+                .Some(enum_template) then enum_template.type_parameters,
+                .None() then List[TypeParameterDecl].new(),
             },
-            .None() then {
-                when self.storage.generic_templates.lookup_enum(type_name) in {
-                    .Some(enum_template) then {
-                        let mutable i UInt = 0;
-                        let param_count = enum_template.type_parameters.count();
-                        let arg_count = receiver_type_args.count();
-                        let n = if param_count < arg_count then param_count else arg_count;
-                        while i < n then {
-                            let tp = enum_template.type_parameters[i];
-                            bindings.insert(tp.name, receiver_type_args[i]);
-                            i += 1;
-                        };
-                    },
-                    .None() then {},
-                };
-            },
+        };
+        let mutable i UInt = 0;
+        while i < type_params.count() then {
+            let tp = type_params[i];
+            if i < receiver_type_args.count() then {
+                bindings.insert(tp.name, receiver_type_args[i]);
+            } else {
+                bindings.insert(tp.name, Type.GenericParameter(tp.name));
+            };
+            i += 1;
         };
     };
 

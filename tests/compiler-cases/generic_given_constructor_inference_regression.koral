@@ -1,0 +1,67 @@
+// A constructor declared on a generic `given[R ...]` block must build the
+// wrapper, not hand back its argument.
+//
+//     type mutable Boxed[R Mark](value R);
+//     given[R Mark] Boxed[R] {
+//         public new(r R) Boxed[R] = { return Boxed[R](r); };
+//     };
+//     let b = Boxed.new(Small(7));     -- R is inferred from the argument
+//
+// `samples/cat` does exactly this at its `BufReader.new(file)` call. The type
+// checker got `R` right -- the generated symbol was `BufReader_Std_Os_File` --
+// but codegen initialized the result temporary from the ARGUMENT instead of the
+// constructed value:
+//
+//     struct BufReader_Std_Os_File_d117 _t594 = (_t593);   // _t593 is a Std_Os_File
+//
+// clang then rejected the C with `member reference base type 'intptr_t' is not
+// a structure or union`, which is not a sentence about anything the user wrote.
+// A missing member used to degrade into a field access the same way; this is
+// the same shape of failure one level down -- sema letting something through
+// and codegen emitting a type it never checked.
+//
+// The trigger is the receiver's type arguments being left to INFERENCE, not
+// anything about managed types or about construction. `type` (value) fails the
+// same way -- see `generic_receiver_param_not_method_param_regression`, which
+// also covers a plain static method with no construction in it.
+//
+// These two spell out the same call and only one of them is broken:
+//
+//   * `Boxed.new(Small(7))`        -- receiver type args inferred, BROKEN
+//   * `Boxed[Small].new(Small(9))` -- written out, always worked
+//
+// Every `.new(` in `tests/compiler-cases` before this was on a non-generic type
+// (`Command`, `Date`, `ClockTime`), so a constructor that has to infer its
+// receiver's type arguments from the argument list was untested.
+//
+// A single explicit `Boxed[Small].new(...)` ANYWHERE in the program masks the
+// defect -- before or after the inferred call -- because that instantiation
+// lays down a correct entry the inferred path then reuses. This case therefore
+// contains no explicit call at all; adding one "to also cover the other form"
+// would make it pass while the bug is still there.
+
+trait Mark {
+    mark(self) Int;
+};
+
+type Small(v Int);
+
+given Small as Mark {
+    public mark(self) Int = self.v;
+};
+
+type mutable Boxed[R Mark](value R);
+
+given[R Mark] Boxed[R] {
+    public new(r R) Boxed[R] = {
+        return Boxed[R](r);
+    };
+
+    public get(self) R = self.value;
+};
+
+let main() Int = {
+    let b = Boxed.new(Small(7));
+    println(b.get().mark().to_string());
+    return 0;
+};

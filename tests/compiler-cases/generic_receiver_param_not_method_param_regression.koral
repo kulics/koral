@@ -1,0 +1,67 @@
+// A type parameter of the RECEIVER must not be collected as one of the
+// METHOD's own -- not when the receiver is written bare, with its type
+// arguments left to inference.
+//
+//     type mutable Boxed[R Mark](value R);
+//     given[R Mark] Boxed[R] {
+//         public stat(r R) Int = { return r.mark(); };
+//     };
+//     Boxed.stat(Small(7));        -- R is the receiver's, not the method's
+//
+// For the bare spelling no receiver type arguments are written, so the lookup
+// that classifies generic names found `R` unbound and filed it under the
+// method. `stat` declares ZERO method type parameters, so the call then
+// carried one type argument too many. mono's arity check bailed to
+// `Symbol(DefId(0))`, and codegen emitted a call whose C name is the empty
+// string -- the body was never monomorphized at all:
+//
+//     intptr_t _t68 = (__mir_tmp_0_0);
+//
+// The written spelling `Boxed[Small].stat(...)` was always fine: there `R` is
+// bound from the written arguments and the classification is right. That is
+// also why a single explicit call ANYWHERE in the program masks the defect --
+// it lays down a correct entry the bare call then reuses.
+//
+// The constructor case is `generic_given_constructor_inference_regression`.
+// This one deliberately has no construction in it: the trigger is the bare
+// static-call form, not anything about building a value. It is also not about
+// managed types -- the value-typed `Boxed` below fails the same way.
+
+trait Mark {
+    mark(self) Int;
+};
+
+type Small(v Int);
+
+given Small as Mark {
+    public mark(self) Int = self.v;
+};
+
+// Managed, and a method that does not construct anything.
+type mutable MBoxed[R Mark](value R);
+
+given[R Mark] MBoxed[R] {
+    public stat(r R) Int = {
+        return r.mark();
+    };
+};
+
+// Value-typed. Same shape, different layout -- the defect does not care.
+type VBoxed[R Mark](value R);
+
+given[R Mark] VBoxed[R] {
+    public new(r R) VBoxed[R] = {
+        return VBoxed[R](r);
+    };
+
+    public get(self) R = self.value;
+};
+
+let main() Int = {
+    println(MBoxed.stat(Small(1)).to_string());
+
+    let v = VBoxed.new(Small(2));
+    println(v.get().mark().to_string());
+
+    return 0;
+};

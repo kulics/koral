@@ -669,6 +669,17 @@ given TypeChecker {
         };
     };
 
+    /// Declaration identity of the enum template named `name`.
+    ///
+    /// Prefers the type symbol table, which name collection fills before any
+    /// signature is resolved -- so the identity cannot depend on declaration
+    /// order. `fallback` is the id the lookup already carried, and is used only
+    /// when the name is not in the symbol table at all.
+    module_private named_enum_template_def_id(self, name String, fallback DefId) DefId = {
+        let declared = self.generic_template_def_id(name);
+        return if declared.is_valid() then declared else fallback;
+    };
+
     /// `span` is the TYPE NAME as written. Every complaint here is about that
     /// name -- it is module-prefixed, it is not visible, it is not a type --
     /// and falling back to the ambient cursor blamed whatever statement the
@@ -732,7 +743,16 @@ given TypeChecker {
         let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) in {
             .Some(t) then when t in {
                 .EnumType(def_id) then {
-                    let template_def_id = self.context().get_template_def_id(def_id);
+                    // Declaration identity of the template this NAME denotes.
+                    // `generic_template_def_id` reads the type symbol table that
+                    // name collection fills before any signature is resolved, so
+                    // it cannot depend on declaration order. It must not be
+                    // `get_template_def_id(def_id)`: that one answers "which
+                    // template is this DefId an INSTANCE of", which is invalid
+                    // for a template's own declaration -- and an invalid id makes
+                    // every identity comparison below silently fail, handing back
+                    // the bare `Res` where `Res[Int]` was wanted.
+                    let template_def_id = self.named_enum_template_def_id(effective_type_name, def_id);
                     if not receiver_type_arg_refs.is_empty() then {
                         Option[Type].Some(Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, receiver_type_arg_refs))
                     } else when expected in {
@@ -742,7 +762,7 @@ given TypeChecker {
                                 if expected_def_id == template_def_id then Option[Type].Some(et) else Option[Type].Some(t)
                             },
                             .EnumType(expected_def_id) then {
-                                if expected_def_id.id == def_id.id then Option[Type].Some(et) else Option[Type].Some(t)
+                                if expected_def_id.id == template_def_id.id then Option[Type].Some(et) else Option[Type].Some(t)
                             },
                             _ then Option[Type].Some(t),
                         },
@@ -750,13 +770,16 @@ given TypeChecker {
                     }
                 },
                 .GenericEnum(template_def_id, existing_args) then {
+                    // Same identity rule as above: the registry key can carry an
+                    // invalid id, so prefer the declaration the name denotes.
+                    let resolved_template_def_id = self.named_enum_template_def_id(effective_type_name, template_def_id);
                     if not receiver_type_arg_refs.is_empty() then {
-                        Option[Type].Some(Type.GenericEnum(template_def_id, receiver_type_arg_refs))
+                        Option[Type].Some(Type.GenericEnum(resolved_template_def_id, receiver_type_arg_refs))
                     } else when expected in {
                         .Some(et) then when et in {
                             // Identity: compare declarations, never spellings.
                             .GenericEnum(expected_def_id, _) then {
-                                if expected_def_id == template_def_id then Option[Type].Some(et) else Option[Type].Some(t)
+                                if expected_def_id == resolved_template_def_id then Option[Type].Some(et) else Option[Type].Some(t)
                             },
                             _ then Option[Type].Some(t),
                         },
@@ -1122,6 +1145,42 @@ given TypeChecker {
         };
     };
 
+    /// The enum type a constructor should build when the receiver was written
+    /// as a bare template name.
+    ///
+    /// `Res.Ok(1)` resolves `Res` to its TEMPLATE form, which carries no type
+    /// arguments. When the context supplies an instance of that same template
+    /// (`Res[Int]`), that instance is what gets constructed. This is the same
+    /// rule the `Res[Int].Ok(1)` spelling and `check_static_method_call_ref`
+    /// already follow -- only the bare spelling was missing it, so it handed
+    /// back `Res` where `Res[Int]` was wanted.
+    ///
+    /// Identity is the template's DECLARATION, via `named_enum_template_def_id`.
+    /// An invalid id makes the comparison below silently fail and the bare form
+    /// win, which is exactly the defect this closes.
+    module_private enum_constructor_type_from_expected(self, resolved Type, expected Option[Type], base_name String) Type = {
+        let canonical = self.canonicalize_alias_type(resolved);
+        return when canonical in {
+            .EnumType(def_id) then {
+                let template_def_id = self.named_enum_template_def_id(base_name, def_id);
+                when expected in {
+                    .Some(et) then when et in {
+                        // Identity: compare declarations, never spellings.
+                        .GenericEnum(expected_def_id, _) then {
+                            if expected_def_id == template_def_id then et else canonical
+                        },
+                        .EnumType(expected_def_id) then {
+                            if expected_def_id.id == template_def_id.id then et else canonical
+                        },
+                        _ then canonical,
+                    },
+                    .None() then canonical,
+                }
+            },
+            _ then canonical,
+        };
+    };
+
     module_private check_call_expr_ref(self, callee Expr, args List[Expr], expected Option[Type], scope Scope) TypedExpr = {
         let mutable call_args = List[Expr].new();
         for arg in args then {
@@ -1198,7 +1257,7 @@ given TypeChecker {
                             let resolved_type_opt = self.try_resolve_named_type_in_scope_without_diag(base_name, scope);
                             when resolved_type_opt in {
                                 .Some(resolved_type) then {
-                                    let canonical = self.canonicalize_alias_type(resolved_type);
+                                    let canonical = self.enum_constructor_type_from_expected(resolved_type, expected, base_name);
                                     if self.static_member_is_enum_case(canonical, member_name) then {
                                         let field_types = self.get_enum_case_field_types(canonical, member_name);
                                         let param_specs = self.get_enum_case_param_specs(canonical, member_name);
@@ -1222,11 +1281,10 @@ given TypeChecker {
                                     };
                                     let enum_type = when base_type in {
                                         .EnumType(def_id) then {
-                                            let template_name = self.context().get_template_name(def_id) or else base_name;
-                                            let template_def_id = self.context().get_template_def_id(def_id);
+                                            let template_def_id = self.named_enum_template_def_id(base_name, def_id);
                                             Type.GenericEnum(if template_def_id.is_valid() then template_def_id else def_id, resolved_args)
                                         },
-                                        .GenericEnum(template_def_id, _) then Type.GenericEnum(template_def_id, resolved_args),
+                                        .GenericEnum(template_def_id, _) then Type.GenericEnum(self.named_enum_template_def_id(base_name, template_def_id), resolved_args),
                                         _ then Type.Unknown(),
                                     };
                                     if not (enum_type is .Unknown()) then {

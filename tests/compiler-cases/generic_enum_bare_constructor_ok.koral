@@ -1,0 +1,77 @@
+// Constructing a generic enum through its BARE template name must infer the
+// type arguments, the same way constructing a generic struct does.
+//
+//   let f() Res[Int] = { return Res.Ok(1); };      -- expected type supplies [Int]
+//   let f(r Res[Int]) Int = ... Res.Ok(3) ...      -- call position
+//   let x Res[Int] = Res.Ok(1);                    -- annotated binding
+//
+// The qualified-with-args spelling `Res[Int].Ok(1)` always worked, and the
+// implicit-member spelling `.Ok(1)` always worked. Only the bare `Res.Ok(1)`
+// failed, and only in the enum case: `Res(1)` on a generic STRUCT inferred
+// fine on both compilers, so the two forms disagreed with each other.
+//
+// The samples were written this way (`Result.Ok(...)` in samples/expr-eval) and
+// were rejected while the Swift compiler accepted them. A whole real program
+// was unbuildable, and the corpus could not see it: every case spelled the
+// arguments out (`MyOption[Int].Some(42)`), and std does too
+// (`Result[Duration].Ok(...)`), so this shape had zero coverage.
+//
+// Root cause was template identity being asked of the wrong table.
+// `get_template_def_id` answers "which template is this DefId an INSTANCE of",
+// which is invalid for a template's own declaration -- so the identity
+// comparison against the expected type failed and the lookup fell back to the
+// bare, argument-less `Res`. Declaration identity has to come from
+// `generic_template_def_id`, which reads the type symbol table that name
+// collection fills before any signature is resolved.
+
+type Res[T Any] {
+    Ok(v T),
+    Bad(),
+};
+
+// Expected type on the return supplies the arguments.
+let from_return() Res[Int] = {
+    return Res.Ok(1);
+};
+
+// Annotated binding supplies them.
+let from_binding() Int = {
+    let x Res[Int] = Res.Ok(2);
+    return when x in {
+        .Ok(v) then v,
+        .Bad() then 0,
+    };
+};
+
+// Call position -- the callee's parameter supplies them.
+let take(r Res[Int]) Int = when r in {
+    .Ok(v) then v,
+    .Bad() then 0,
+};
+
+// Multi-parameter template, so it is not a single-argument special case.
+type Two[A Any, B Any] {
+    Both(a A, b B),
+    Neither(),
+};
+
+let from_two() Int = {
+    let p Two[Int, Bool] = Two.Both(3, true);
+    return when p in {
+        .Both(a, _) then a,
+        .Neither() then 0,
+    };
+};
+
+let unwrap(r Res[Int]) Int = when r in {
+    .Ok(v) then v,
+    .Bad() then 0,
+};
+
+let main() Int = {
+    println(unwrap(from_return()).to_string());
+    println(from_binding().to_string());
+    println(take(Res.Ok(4)).to_string());
+    println(from_two().to_string());
+    return 0;
+};
