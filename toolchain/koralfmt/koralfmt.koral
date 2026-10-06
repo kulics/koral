@@ -1,12 +1,10 @@
-﻿// ============================================================================
+// ============================================================================
 // Koral Formatter - CLI Entry Point
 // ============================================================================
 // Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]
 // ============================================================================
 
-using "./tokenizer.koral";
-using "./parser.koral";
-using "./printer.koral";
+using "koral_syntax";
 
 using "std/os";
 
@@ -69,7 +67,9 @@ let main() Void = {
         };
     };
 
-    if had_error then { exit(1);};
+    if had_error then {
+        exit(1);
+    };
 };
 
 // ============================================================================
@@ -79,32 +79,30 @@ let main() Void = {
 let format_file(path String) Result[Void] = {
     let file_path = path.into_path();
     let source = read_text_file(file_path) or return;
-    let normalized = normalize_newlines(source);
-    let formatted = safe_format_source(normalized) or return;
+    let formatted = formatted_file_content(source) or return;
 
-    if formatted == source then { return .Ok({});};
+    if formatted == source then {
+        return .Ok({});
+    };
     return write_text_file(file_path, content: formatted);
 };
 
 let check_file(path String) Result[Bool] = {
     let source = read_text_file(path.into_path()) or return;
-    let normalized = normalize_newlines(source);
-    let formatted = safe_format_source(normalized) or return;
-    return .Ok(formatted == normalized);
+    let formatted = formatted_file_content(source) or return;
+    return .Ok(formatted == source);
 };
 
-let safe_format_source(source String) Result[String] = {
-    let first_pass = format_source(source) or return;
-    let before_sig = comment_signature(source) or return;
-    let after_sig = comment_signature(first_pass) or return;
+/// The whole file as the formatter would write it. Line endings are layout:
+/// `\r\n` and bare `\r` are folded to `\n` first, so everything downstream --
+/// including the contract check -- sees one spelling of "end of line". A
+/// byte-order mark is handled by `format_source_checked` itself.
+let formatted_file_content(source String) Result[String] =
+    format_source_checked(normalize_newlines(source));
 
-    if before_sig <> after_sig then { return .Error("Formatter internal error: comment signature changed after formatting");};
-
-    let second_pass = format_source(first_pass) or return;
-    if first_pass == second_pass then { return .Ok(first_pass);};
-    return .Error("Formatter internal error: formatting is not idempotent");
-};
-
+/// Line endings are layout. `\r\n` and bare `\r` are folded to `\n` first so
+/// that everything downstream -- including the contract check -- sees one
+/// spelling of "end of line".
 let normalize_newlines(source String) String = {
     if not source.contains("\r") then {
         return source;
@@ -133,35 +131,17 @@ let normalize_newlines(source String) String = {
     return out.to_string();
 };
 
-let comment_signature(source String) Result[String] = {
-    let mutable tokenizer = Tokenizer.new(source);
-    let tokens = tokenizer.tokenize() or return;
-    let mutable out = StringBuilder.new();
-    for token in tokens then {
-        when token in {
-            .LineComment(text) then {
-                out.push_string(text);
-                out.push_string("\n@@\n");
-            },
-            .BlockComment(text) then {
-                out.push_string(text);
-                out.push_string("\n@@\n");
-            },
-            _ then {},
-        };
-    };
-    return .Ok(out.to_string());
-};
-
 // ============================================================================
 // Usage
 // ============================================================================
 
 let print_usage() Void =
-    eprintln("""
+    eprintln(
+        """
         Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]
 
         Options:
           --check    Check if files are formatted (exit 1 if not)
           --help     Show this help message
-        """);
+        """,
+    );

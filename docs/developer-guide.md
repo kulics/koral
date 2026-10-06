@@ -12,7 +12,7 @@ At repository root:
   and backup. Not a development target — see "Compiler roles" below.
 - `std/` — standard library sources and runtime C files
 - `tests/` — shared integration cases (`compiler-cases/`) and the shared Koral test runner (`compiler-runner/`)
-- `toolchain/` — `koral` build tool, `koralfmt` formatter, `doc` std API doc generator, VS Code extension
+- `toolchain/` — `koral` build tool, `koral-syntax` shared parser/printer package, `koralfmt` formatter, `doc` std API doc generator, VS Code extension
 - `samples/` — sample programs
 - `docs/` — language docs and this guide
 
@@ -1064,7 +1064,7 @@ Use these files as the authoritative references:
 - `docs/developer-guide.md` — required change workflow, compiler roles and trust boundary, and validation checklist.
 - `tests/README.md` — unified test runner contract, flags, buckets, and rerun guidance.
 - `compiler/koral.json`, `tests/compiler-runner/koral.json`, `std/koral.json` — build/package targets for the compiler-side builds.
-- `toolchain/koralfmt/test/README.md` — formatter regression test contract and execution steps.
+- `toolchain/koralfmt/test/README.md` — formatter gate: language assertions plus the corpus check, and how to run both.
 - `README.md` — top-level repo shape, prerequisites, quick start, and public contribution guidance.
 
 ### Required change workflow
@@ -1126,21 +1126,30 @@ Use the repository's sample build/package targets if the sample uses a manifest.
 
 ### Toolchain verification
 
-Run these validations when the change affects formatting, std API surface, or generated documentation:
+`toolchain/koral-syntax` is the syntactic front end both `koralfmt` and the std
+API doc generator build on: tokenizer, CST, parser, printer, and the formatting
+contract. Neither tool scans raw text for declarations. If a change touches how
+Koral is parsed or spelled, it lands there first and both consumers follow.
 
 ```bash
-# Build formatter regression runner
-bin/compiler/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
+# Formatter: language assertions + a corpus gate over every real .koral file
+bin/compiler/koralc build --package-config toolchain/koralfmt/koral.json --target-module koralfmt/test -o bin/koralfmt-test
+bin/koralfmt-test/koralfmt__test
 
-# Run formatter regression suite
-toolchain/koralfmt/build/test_fmt
+# Std API docs: extraction self-test, then "are the checked-in pages current?"
+bin/compiler/koralc build --package-config toolchain/doc/koral.json --target-module koral_doc -o bin/toolchain-doc-gen
+bin/toolchain-doc-gen/koral_doc --self-test
+bin/toolchain-doc-gen/koral_doc --check
 
-# Build std API doc generator
-bin/compiler/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
-
-# Run doc generator from repo root so it can locate std sources
-bin/toolchain-doc-gen/generate_std_api_docs
+# Regenerate the pages after a change to std's public surface
+bin/toolchain-doc-gen/koral_doc
 ```
+
+The formatter's contract is the reason its gate can be a gate: it re-tokenizes
+every result and requires the input's tokens in the same order and spelling,
+with only `;` and `,` added or removed, and requires formatting to reach a fixed
+point. A layout rule that drops a comment or reorders a token fails here, on
+real code, rather than the next time someone runs `koral format`.
 
 ### PR/change checklist
 

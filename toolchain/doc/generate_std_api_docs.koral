@@ -1,887 +1,41 @@
+// ============================================================================
+// Standard Library API Doc Generator
+// ============================================================================
+// Walks the Koral sources of `std/` and writes one markdown page per module,
+// listing its public API in declaration-only syntax.
+//
+// Extraction goes through `koral_syntax`, the same tokenizer, parser and
+// printer the formatter uses. An earlier version of this tool scanned raw lines
+// and counted braces to guess where declarations began and ended; it could not
+// tell a `//` inside a string from a comment, and its idea of a signature was
+// whatever text happened to sit between two heuristics. Here a declaration is a
+// CST node, and the text on the page is printed by the one printer that knows
+// how Koral is spelled -- so a signature in these docs is the syntax the
+// formatter would write for it.
+// ============================================================================
+
+using "koral_syntax";
+
 using "std/os";
 
-type Decl(lines List[String]);
+// ============================================================================
+// What gets collected
+// ============================================================================
 
-type TraitBlock(header Decl, methods List[Decl]);
+/// One rendered declaration, already in its final spelling. Multi-line by
+/// construction -- a type with a body, say -- so it is kept as text rather than
+/// re-split into lines.
+type Decl(text String);
 
 type mutable ParsedApi(
     mutable free_functions List[Decl],
-    mutable traits List[TraitBlock],
+    mutable traits List[Decl],
     mutable types List[Decl],
-    mutable givens List[TraitBlock],
+    mutable givens List[Decl],
 );
 
-type CollectSignatureResult(end UInt, signature List[String], has_block Bool);
-
-type ExtractBlockResult(end UInt, block List[String]);
-
-type ExtractTypeResult(end UInt, declaration Decl);
-
-type ExtractTraitResult(block TraitBlock, valid Bool);
-
 let empty_parsed_api() ParsedApi =
-    ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new());
-
-let is_space(b UInt8) Bool = b == ' ' or b == '\t' or b == '\r' or b == '\n';
-
-let rstrip(text String) String = {
-    let mutable end = text.count();
-    while end > 0 and is_space(text[end - 1]) then {
-        end -= 1;
-    };
-    return if end == text.count() then text else text.substring(0..<end);
-};
-
-let trim(text String) String = {
-    let mutable start UInt = 0;
-    let mutable end = text.count();
-
-    while start < end and is_space(text[start]) then {
-        start += 1;
-    };
-    while end > start and is_space(text[end - 1]) then {
-        end -= 1;
-    };
-
-    return if start == 0 and end == text.count() then text else if start >= end then "" else text.substring(start..<end);
-};
-
-let strip_inline_comment(text String) String =
-    when text.find("//") in {
-        .Some(idx) then rstrip(text.substring(0..<idx)),
-        .None() then rstrip(text),
-    };
-
-let count_braces(text String) Int = {
-    let mutable delta Int = 0;
-    let mutable in_string = false;
-    let mutable in_rune = false;
-    let mutable escaped = false;
-
-    for i in 0..<text.count() then {
-        let ch = text[i];
-
-        if in_string then {
-            if escaped then {
-                escaped = false;
-            } else if ch == '\\' then {
-                escaped = true;
-            } else if ch == '"' then {
-                in_string = false;
-            };
-            continue;
-        };
-
-        if in_rune then {
-            if escaped then {
-                escaped = false;
-            } else if ch == '\\' then {
-                escaped = true;
-            } else if ch == '\'' then {
-                in_rune = false;
-            };
-            continue;
-        };
-
-        if ch == '/' and i + 1 < text.count() and text[i + 1] == '/' then {
-            break;
-        };
-
-        if ch == '"' then {
-            in_string = true;
-            continue;
-        };
-
-        if ch == '\'' then {
-            in_rune = true;
-            continue;
-        };
-
-        if ch == '{' then {
-            delta += 1;
-        } else if ch == '}' then {
-            delta -= 1;
-        };
-    };
-
-    return delta;
-};
-
-let has_unclosed_delimiters(lines List[String]) Bool = {
-    let mutable paren Int = 0;
-    let mutable bracket Int = 0;
-
-    for line in lines then {
-        for i in 0..<line.count() then {
-            let ch = line[i];
-            if ch == '(' then {
-                paren += 1;
-            } else if ch == ')' then {
-                paren -= 1;
-            } else if ch == '[' then {
-                bracket += 1;
-            } else if ch == ']' then {
-                bracket -= 1;
-            };
-        };
-    };
-
-    return paren > 0 or bracket > 0;
-};
-
-let signature_seems_complete(line String) Bool = {
-    let raw_line = rstrip(line);
-    if raw_line.is_empty() then {
-        return false;
-    };
-
-    if raw_line.ends_with(",") or raw_line.ends_with("(") or raw_line.ends_with("[") or raw_line.ends_with("<") or raw_line.ends_with("and") or raw_line.ends_with("or") or raw_line.ends_with("->") or raw_line.ends_with(":") or raw_line.ends_with("=") then {
-        return false;
-    };
-
-    let mutable paren Int = 0;
-    let mutable bracket Int = 0;
-    let mutable angle Int = 0;
-
-    for i in 0..<raw_line.count() then {
-        let ch = raw_line[i];
-        if ch == '(' then {
-            paren += 1;
-        } else if ch == ')' then {
-            paren -= 1;
-        } else if ch == '[' then {
-            bracket += 1;
-        } else if ch == ']' then {
-            bracket -= 1;
-        } else if ch == '<' then {
-            angle += 1;
-        } else if ch == '>' then {
-            angle -= 1;
-        };
-    };
-
-    return paren <= 0 and bracket <= 0 and angle <= 0;
-};
-
-let trim_signature_lines(lines List[String], keep_open_brace Bool) List[String] = {
-    let mutable out = List[String].new();
-    for line in lines then {
-        if not trim(line).is_empty() then {
-            out.push(line);
-        };
-    };
-
-    if out.is_empty() then {
-        return out;
-    };
-
-    let last_index = out.count() - 1;
-    let mutable out_count = out.count();
-
-    // Strip expression body from first line (= outside parens)
-    if out.count() > 0 then {
-        let eq_pos = find_eq_outside_parens(out[0]);
-        if eq_pos > 0 then {
-            out[0] = rstrip(out[0].substring(0..<eq_pos(UInt)));
-            // Discard remaining body lines
-            out_count = 1;
-        };
-    };
-
-    let mutable last = out[out_count - 1];
-
-    // Strip "= { ... }" from last line
-    when last.find("=") in {
-        .Some(eq_idx) then {
-            let after_eq = last.substring(eq_idx..<last.count());
-            if after_eq.find("{") is .Some(_) then {
-                last = rstrip(last.substring(0..<eq_idx));
-            };
-        },
-        .None() then {},
-    };
-
-    if keep_open_brace then {
-        when last.find("{") in {
-            .Some(brace_idx) then {
-                let prefix = rstrip(last.substring(0..<brace_idx));
-                last = if prefix.is_empty() then "{" else prefix + " {";
-            },
-            .None() then {
-                if not rstrip(last).ends_with("{") then {
-                    last = rstrip(last) + " {";
-                };
-            },
-        };
-    } else {
-        when last.find("{") in {
-            .Some(_) then {
-                out_count -= 1;
-            },
-            .None() then {},
-        };
-    };
-
-    if out_count < out.count() then {
-        out = out.sublist(0..<out_count);
-    } else {
-        out[out.count() - 1] = last;
-    };
-    return out;
-};
-
-let find_eq_outside_parens(line String) Int = {
-    let mutable pd UInt = 0;
-    let mutable bd UInt = 0;
-    let mutable ng UInt = 0;
-    for ci in 0..<line.count() then {
-        let ch = line[ci];
-        if ch == '(' then { pd += 1; }
-        else if ch == '[' then { bd += 1; }
-        else if ch == '<' then { ng += 1; }
-        else if ch == ')' then { if pd > 0 then { pd -= 1; }; }
-        else if ch == ']' then { if bd > 0 then { bd -= 1; }; }
-        else if ch == '>' then { if ng > 0 then { ng -= 1; }; }
-        else if ch == '=' and pd == 0 and bd == 0 and ng == 0 then {
-            return ci(Int);
-        };
-    };
-    return -1;
-};
-
-let collect_signature(lines List[String], start UInt, keep_open_brace Bool) CollectSignatureResult = {
-    let mutable parts = List[String].new();
-    let mutable i = start;
-    let mutable has_block = false;
-
-    while i < lines.count() then {
-        let cleaned = strip_inline_comment(lines[i]);
-        if not trim(cleaned).is_empty() then {
-            parts.push(cleaned);
-        };
-
-        if cleaned.contains("{") then {
-            has_block = true;
-            break;
-        };
-        // Break on '=' outside parens (expression body)
-        if not has_unclosed_delimiters(parts) and find_eq_outside_parens(cleaned) >= 0 then {
-            break;
-        };
-        if not has_unclosed_delimiters(parts) and signature_seems_complete(cleaned) then {
-            break;
-        };
-        i += 1;
-    };
-
-    return CollectSignatureResult(i, trim_signature_lines(parts, keep_open_brace), has_block);
-};
-
-let extract_block(lines List[String], start UInt) ExtractBlockResult = {
-    let mutable block = List[String].new();
-    block.push(lines[start]);
-    let mutable level = count_braces(lines[start]);
-    let mutable i = start + 1;
-
-    while i < lines.count() and level > 0 then {
-        let raw_str = lines[i];
-        block.push(raw_str);
-        level += count_braces(raw_str);
-        i += 1;
-    };
-
-    return ExtractBlockResult(i - 1, block);
-};
-
-let starts_with_any_public_let(line String) Bool =
-    line.starts_with("public let") or line.starts_with("public foreign let") or line.starts_with("public intrinsic let");
-
-let looks_like_method_signature(line String) Bool = {
-    if line.is_empty() then {
-        return false;
-    };
-    let first = line[0];
-    let starts_ok = (first >= 65 and first <= 90) or (first >= 97 and first <= 122) or first == '_' or first == '[';
-    return starts_ok and line.contains("(");
-};
-
-let list_lines_equal(a List[String], b List[String]) Bool = {
-    if a.count() <> b.count() then {
-        return false;
-    };
-    for i in 0..<a.count() then {
-        if a[i] <> b[i] then {
-            return false;
-        };
-    };
-    return true;
-};
-
-let methods_contains(methods List[Decl], signature List[String]) Bool = {
-    for method in methods then {
-        if list_lines_equal(method.lines, signature) then {
-            return true;
-        };
-    };
-    return false;
-};
-
-let extract_trait_or_given_methods(block List[String], require_public Bool) ExtractTraitResult = {
-    let mutable header_lines = List[String].new();
-    let mutable i UInt = 0;
-
-    while i < block.count() then {
-        let cleaned = strip_inline_comment(block[i]);
-        if not trim(cleaned).is_empty() then {
-            header_lines.push(cleaned);
-        };
-        if cleaned.contains("{") then {
-            break;
-        };
-        i += 1;
-    };
-
-    let header = trim_signature_lines(header_lines, true);
-    if header.is_empty() then {
-        return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
-    };
-
-    let header_first = trim(header[0]);
-    if require_public then {
-        if not header_first.starts_with("given") and not header_first.starts_with("intrinsic given") then {
-            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
-        };
-    } else {
-        if not header_first.starts_with("public trait") then {
-            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false);
-        };
-    };
-
-    let mutable methods = List[Decl].new();
-    let mutable depth Int = 0;
-    i = 0;
-
-    while i < block.count() then {
-        let raw_str = block[i];
-        let cleaned = trim(strip_inline_comment(raw_str));
-        let prev_depth = depth;
-        depth += count_braces(raw_str);
-
-        if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
-            let mutable include = false;
-            if require_public then {
-                include = cleaned.starts_with("public ");
-            } else {
-                include = cleaned.starts_with("public ") or looks_like_method_signature(cleaned);
-            };
-
-            if include then {
-                let collected = collect_signature(block, i, false);
-                let mutable signature = collected.signature;
-                while signature.count() > 0 and trim(signature[signature.count() - 1]) == "}" then {
-                    let _ = signature.pop();
-                };
-
-                if signature.count() > 0 and not methods_contains(methods, signature) then {
-                    methods.push(Decl(signature));
-                };
-                i = collected.end + 1;
-                continue;
-            };
-        };
-
-        i += 1;
-    };
-
-    return ExtractTraitResult(TraitBlock(Decl(header), methods), true);
-};
-
-let extract_type_api(lines List[String], start UInt) ExtractTypeResult = {
-    let collected = collect_signature(lines, start, false);
-    if not collected.has_block then {
-        return ExtractTypeResult(collected.end, Decl(collected.signature));
-    };
-
-    let extracted = extract_block(lines, start);
-    let block = extracted.block;
-    let mutable out = List[String].new();
-    let mutable depth Int = 0;
-    let mutable idx UInt = 0;
-
-    while idx < block.count() then {
-        let raw_str = block[idx];
-        let cleaned_line = strip_inline_comment(raw_str);
-        let cleaned = trim(cleaned_line);
-        let prev_depth = depth;
-        depth += count_braces(raw_str);
-
-        if idx == 0 then {
-            let mutable first = cleaned_line;
-            when first.find("{") in {
-                .Some(brace_idx) then {
-                    let prefix = rstrip(first.substring(0..<brace_idx));
-                    first = if prefix.is_empty() then "{" else prefix + " {";
-                },
-                .None() then {},
-            };
-            out.push(first);
-            idx += 1;
-            continue;
-        };
-
-        if prev_depth == 1 and not cleaned.is_empty() and cleaned <> "{" and cleaned <> "}" then {
-            if contains_word(cleaned, "file_private") or contains_word(cleaned, "module_private") or contains_word(cleaned, "package_private") then {
-                when cleaned.find("(") in {
-                    .Some(_) then {
-                        let mutable oi UInt = 0;
-                        let mutable ci2 UInt = 0;
-                        when cleaned.find("(") in { .Some(ii) then { oi = ii; }, .None() then {}, };
-                        when cleaned.find_last(")") in { .Some(ii) then { ci2 = ii; }, .None() then {}, };
-                        if ci2 > oi then {
-                            let vp = rstrip(cleaned.substring(0..<(oi + 1)));
-                            let vs = cleaned.substring(ci2..<cleaned.count());
-                            let inner = trim(cleaned.substring((oi + 1)..<ci2));
-                            let fields = split_top_level_commas(inner);
-                            let mutable pf = List[String].new();
-                            for fl in fields then {
-                                if not contains_word(fl, "file_private") and not contains_word(fl, "module_private") and not contains_word(fl, "package_private") then {
-                                    pf.push(fl);
-                                };
-                            };
-                            if pf.count() > 0 then {
-                                let li = pf.count() - 1;
-                                if pf[li].ends_with(",") then {
-                                    pf[li] = rstrip(pf[li].substring(0..<(pf[li].count() - 1)));
-                                };
-                                out.push(rstrip(vp + " " + pf.join_to_string(", ") + vs));
-                            } else {
-                                out.push(rstrip(vp + vs));
-                            };
-                        };
-                    },
-                    .None() then {},
-                };
-            } else {
-                out.push(cleaned_line);
-            };
-        };
-
-        idx += 1;
-    };
-
-    if out.count() == 0 or not out[out.count() - 1].contains("}") then {
-        out.push("}");
-    };
-    return ExtractTypeResult(extracted.end, Decl(out));
-};
-
-let split_top_level_commas(text String) List[String] = {
-    let mutable parts = List[String].new();
-    let mutable current = StringBuilder.new();
-    let mutable paren Int = 0;
-    let mutable bracket Int = 0;
-    let mutable brace Int = 0;
-
-    for i in 0..<text.count() then {
-        let ch = text[i];
-        if ch == '(' then {
-            paren += 1;
-            current.push_byte(ch);
-            continue;
-        };
-        if ch == ')' then {
-            paren -= 1;
-            current.push_byte(ch);
-            continue;
-        };
-        if ch == '[' then {
-            bracket += 1;
-            current.push_byte(ch);
-            continue;
-        };
-        if ch == ']' then {
-            bracket -= 1;
-            current.push_byte(ch);
-            continue;
-        };
-        if ch == '{' then {
-            brace += 1;
-            current.push_byte(ch);
-            continue;
-        };
-        if ch == '}' then {
-            brace -= 1;
-            current.push_byte(ch);
-            continue;
-        };
-
-        if ch == ',' and paren == 0 and bracket == 0 and brace == 0 then {
-            let part = trim(current.to_string());
-            if not part.is_empty() then {
-                parts.push(part);
-            };
-            current = StringBuilder.new();
-            continue;
-        };
-
-        current.push_byte(ch);
-    };
-
-    let tail = trim(current.to_string());
-    if not tail.is_empty() then {
-        parts.push(tail);
-    };
-    return parts;
-};
-
-let is_identifier_char(ch UInt8) Bool =
-    (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == '_';
-
-let contains_word(text String, word String) Bool = {
-    if word.is_empty() or text.count() < word.count() then {
-        return false;
-    };
-
-    let limit = text.count() - word.count();
-    let mutable i UInt = 0;
-    while i <= limit then {
-        let mutable matched = true;
-        let mutable j UInt = 0;
-        while j < word.count() then {
-            if text[i + j] <> word[j] then {
-                matched = false;
-                break;
-            };
-            j += 1;
-        };
-
-        if matched then {
-            let left_ok = i == 0 or not is_identifier_char(text[i - 1]);
-            let right_index = i + word.count();
-            let right_ok = right_index >= text.count() or not is_identifier_char(text[right_index]);
-            if left_ok and right_ok then {
-                return true;
-            };
-        };
-
-        i += 1;
-    };
-
-    return false;
-};
-
-let sanitize_type_declaration(decl Decl) Decl = {
-    if decl.lines.count() == 0 then {
-        return decl;
-    };
-
-    let joined = decl.lines.join_to_string("\n");
-    let mutable line = trim(joined);
-    if not line.starts_with("public type") and not line.starts_with("public intrinsic type") then {
-        return decl;
-    };
-    if line.ends_with(";") then {
-        line = rstrip(line.substring(0..<(line.count() - 1)));
-    };
-    if not line.ends_with(")") then {
-        return decl;
-    };
-    if line.contains("{") or line.contains("}") then {
-        return decl;
-    };
-
-    let mutable open_idx UInt = 0;
-    when line.find("(") in {
-        .Some(idx) then {
-            open_idx = idx;
-        },
-        .None() then {
-            return decl;
-        },
-    };
-
-    let mutable close_idx UInt = 0;
-    when line.find_last(")") in {
-        .Some(idx) then {
-            close_idx = idx;
-        },
-        .None() then {
-            return decl;
-        },
-    };
-
-    if close_idx <= open_idx then {
-        return decl;
-    };
-
-    let prefix = rstrip(line.substring(0..<open_idx));
-    let fields_raw = trim(line.substring((open_idx + 1)..<close_idx));
-    let fields = split_top_level_commas(fields_raw);
-    let mutable filtered = List[String].new();
-
-    for field in fields then {
-        if not contains_word(field, "file_private") and not contains_word(field, "module_private") and not contains_word(field, "package_private") then {
-            filtered.push(field);
-        };
-    };
-
-    if filtered.count() == 0 then {
-        let mutable single = List[String].new();
-        single.push(prefix);
-        return Decl(single);
-    };
-
-    let multiline = decl.lines.count() > 1 or filtered.count() > 1;
-    if not multiline and filtered.count() == 1 then {
-        let mutable single = List[String].new();
-        single.push(prefix + "(" + filtered[0] + ")");
-        return Decl(single);
-    };
-
-    let mutable out = List[String].new();
-    out.push(prefix + "(");
-    for field in filtered then {
-        out.push("    " + field + ",");
-    };
-    out.push(")");
-    return Decl(out);
-};
-
-let split_lines(text String) List[String] = {
-    let mutable lines = List[String].new();
-    for line in text.split("\n") then {
-        if line.ends_with("\r") and line.count() > 0 then {
-            lines.push(line.substring(0..<(line.count() - 1)));
-        } else {
-            lines.push(line);
-        };
-    };
-    return lines;
-};
-
-let parse_public_api(file_path Path) ParsedApi = {
-    let text = read_text_file(file_path) or else {
-        eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())");
-        return empty_parsed_api();
-    };
-
-    let lines = split_lines(text);
-    let mutable free_functions = List[Decl].new();
-    let mutable traits = List[TraitBlock].new();
-    let mutable types = List[Decl].new();
-    let mutable givens = List[TraitBlock].new();
-
-    let mutable i UInt = 0;
-    let mutable level Int = 0;
-
-    while i < lines.count() then {
-        let raw_str = lines[i];
-        let cleaned = trim(strip_inline_comment(raw_str));
-
-        if level == 0 then {
-            if starts_with_any_public_let(cleaned) then {
-                let collected = collect_signature(lines, i, false);
-                if collected.signature.count() > 0 then {
-                    free_functions.push(Decl(collected.signature));
-                };
-
-                if collected.has_block then {
-                    let block = extract_block(lines, i);
-                    i = block.end + 1;
-                } else {
-                    i = collected.end + 1;
-                };
-                continue;
-            };
-
-            if cleaned.starts_with("public trait") then {
-                let block = extract_block(lines, i);
-                let extracted = extract_trait_or_given_methods(block.block, false);
-                if extracted.valid then {
-                    traits.push(extracted.block);
-                };
-                i = block.end + 1;
-                continue;
-            };
-
-            if cleaned.starts_with("public type") or cleaned.starts_with("public intrinsic type") then {
-                let type_api = extract_type_api(lines, i);
-                types.push(type_api.declaration);
-                i = type_api.end + 1;
-                continue;
-            };
-
-            if cleaned.starts_with("given") or cleaned.starts_with("intrinsic given") then {
-                let block = extract_block(lines, i);
-                let extracted = extract_trait_or_given_methods(block.block, true);
-                if extracted.valid and extracted.block.methods.count() > 0 then {
-                    givens.push(extracted.block);
-                };
-                i = block.end + 1;
-                continue;
-            };
-        };
-
-        level += count_braces(raw_str);
-        i += 1;
-    };
-
-    return ParsedApi(free_functions, traits, types, givens);
-};
-
-let assert_lines_equal(name String, actual List[String], expected List[String]) Void = {
-    if actual.count() <> expected.count() then {
-        eprintln("SELF-TEST FAIL: \(name) line count mismatch: expected \(expected.count()), got \(actual.count())");
-        exit(1);
-    };
-    let mutable i UInt = 0;
-    while i < expected.count() then {
-        if actual[i] <> expected[i] then {
-            eprintln("SELF-TEST FAIL: \(name) line \(i) mismatch");
-            eprintln("  expected: \(expected[i])");
-            eprintln("  got: \(actual[i])");
-            exit(1);
-        };
-        i += 1;
-    };
-};
-
-let run_self_test() Void = {
-    let single_lines = split_lines("public type Mixed(public_name String, module_private hidden Int, package_private token Int, file_private cache Int);\n");
-    let single = extract_type_api(single_lines, 0).declaration;
-    let sanitized_single = sanitize_type_declaration(single);
-    assert_lines_equal(
-        "single-line mixed fields",
-        sanitized_single.lines,
-        ["public type Mixed(public_name String)"],
-    );
-
-    let multi_lines = split_lines(
-        "public type Config(\n" +
-        "    public_name String,\n" +
-        "    module_private hidden Int,\n" +
-        "    label: String = \"ok\",\n" +
-        "    package_private token Int,\n" +
-        ");\n"
-    );
-    let multi = extract_type_api(multi_lines, 0).declaration;
-    let sanitized_multi = sanitize_type_declaration(multi);
-    assert_lines_equal(
-        "multi-line mixed fields",
-        sanitized_multi.lines,
-        [
-            "public type Config(",
-            "    public_name String,",
-            "    label: String = \"ok\",",
-            ")",
-        ],
-    );
-
-    println("doc self-test ok");
-};
-
-let to_pascal_case(s String) String = {
-    if s.is_empty() then { return s;};
-    let first = s.substring(0..<1).to_ascii_uppercase();
-    let rest = s.substring(1..);
-    return first + rest;
-};
-
-let segments_to_pascal_key(segments List[String]) String = {
-    let mutable out = StringBuilder.new();
-    for i in 0..<segments.count() then {
-        if i > 0 then { out.push_byte('.');};
-        out.push_string(to_pascal_case(segments[i]));
-    };
-    return out.to_string();
-};
-
-let module_key_for_source(source Path, std_root Path) String = {
-    let rel = source.relative_to(std_root) or else {
-        return "Std";
-    };
-    let rel_path = rel.to_string().replace_all("\\", with: "/");
-    let parent = rel_path.into_path().dir_name().to_string().replace_all("\\", with: "/");
-    if parent == "." or parent.is_empty() then {
-        return "Std";
-    };
-    let parts = parent.split("/").into_list();
-    let mutable pascal_parts = List[String].new();
-    pascal_parts.push("Std");
-    for part in parts then {
-        pascal_parts.push(to_pascal_case(part));
-    };
-    return pascal_parts.join_to_string(".");
-};
-
-let module_name_from_key(key String) String = key;
-
-let append_declarations(lines List[String], declarations List[Decl]) Void = {
-    for idx in 0..<declarations.count() then {
-        let decl = declarations[idx];
-        let mutable li UInt = 0;
-        for line in decl.lines then {
-            if li == decl.lines.count() - 1 then {
-                let trimmed = rstrip(line);
-                if not trimmed.is_empty() and not trimmed.ends_with(";") and not trimmed.ends_with("{") and not trimmed.ends_with("}") then {
-                    lines.push(trimmed + ";");
-                } else {
-                    lines.push(line);
-                };
-            } else {
-                lines.push(line);
-            };
-            li += 1;
-        };
-        if idx + 1 < declarations.count() then {
-            lines.push("");
-        };
-    };
-};
-
-let append_traits_or_givens(lines List[String], blocks List[TraitBlock]) Void = {
-    for idx in 0..<blocks.count() then {
-        let block = blocks[idx];
-        for line in block.header.lines then {
-            lines.push(line);
-        };
-        for method in block.methods then {
-            let mutable mi UInt = 0;
-            for line in method.lines then {
-                if mi == method.lines.count() - 1 then {
-                    let trimmed = rstrip(line);
-                    if not trimmed.is_empty() and not trimmed.ends_with(";") and not trimmed.ends_with("{") and not trimmed.ends_with("}") then {
-                        lines.push(trimmed + ";");
-                    } else {
-                        lines.push(line);
-                    };
-                } else {
-                    lines.push(line);
-                };
-                mi += 1;
-            };
-        };
-        lines.push("};");
-        if idx + 1 < blocks.count() then {
-            lines.push("");
-        };
-    };
-};
-
-let file_stem(path Path) String = {
-    let base = path.base_name();
-    let ext = path.ext_name();
-    if ext.is_empty() or base.count() <= ext.count() then {
-        return base;
-    };
-    return base.substring(0..<(base.count() - ext.count()));
-};
-
-let last_segment(key String) String =
-    when key.find_last(".") in {
-        .Some(idx) then key.substring((idx + 1)..),
-        .None() then key,
-    };
+    ParsedApi(List[Decl].new(), List[Decl].new(), List[Decl].new(), List[Decl].new());
 
 let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
     for item in parsed.free_functions then {
@@ -898,7 +52,107 @@ let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
     };
 };
 
-let write_module_doc(module_key String, source_files List[String], docs_root Path) Result[Void] = {
+// ============================================================================
+// Extraction: a walk over the CST
+// ============================================================================
+
+/// Everything a consumer of the file can see, in source order. The filtering
+/// rule lives in `Printer.print_signature` -- one place decides what "the public
+/// API" of a declaration is, and this tool only sorts the results into pages.
+let parse_public_api(file_path Path) ParsedApi = {
+    let api = empty_parsed_api();
+
+    let text = read_text_file(file_path) or else {
+        eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())");
+        return api;
+    };
+
+    let file = parse_source(text) or else {
+        eprintln("Warning: failed to parse \(file_path.to_string()): \(it.message())");
+        return api;
+    };
+
+    for item in file.items then {
+        when item in {
+            .Decl(d) then {
+                collect_decl(api, d);
+            },
+            _ then {},
+        };
+    };
+
+    return api;
+};
+
+let parse_source(text String) Result[CstFile] = {
+    let mutable tokenizer = Tokenizer.new(text);
+    let tokens = tokenizer.tokenize() or return;
+    let mutable parser = CstParser.new(tokens);
+    return parser.parse();
+};
+
+/// Renders a declaration without its body and without the members a consumer
+/// cannot reach, then terminates it. The `;` is added here rather than by the
+/// printer because this is documentation: the page shows a signature, and a
+/// signature ends in a semicolon.
+let render_signature(d CstDecl) Decl = {
+    let mutable printer = Printer.new();
+    printer.print_signature(d);
+    printer.write_terminator();
+    return Decl(printer.result());
+};
+
+let collect_decl(api ParsedApi, d CstDecl) Void = {
+    if not Printer.is_public(Printer.decl_visibility(d)) then {
+        // A `given` block carries no access modifier and is always part of the
+        // story -- it is where a type meets its traits.
+        when d in {
+            .Given(_, _, _, _, _, _, _, _, _, _) then {
+                api.givens.push(render_signature(d));
+            },
+            _ then {},
+        };
+        return;
+    };
+
+    when d in {
+        .Func(_, _, _, _, _, _, _, _, _, _, _, _) then {
+            api.free_functions.push(render_signature(d));
+        },
+        .ForeignDecl(_, _, _, _, _, _, _, _, _, _) then {
+            api.free_functions.push(render_signature(d));
+        },
+        .Var(_, _, _, _, _) then {
+            api.free_functions.push(render_signature(d));
+        },
+        .Type(_, _, _, _, _, _, _) then {
+            api.types.push(render_signature(d));
+        },
+        .Trait(_, _, _, _, _, _, _, _) then {
+            api.traits.push(render_signature(d));
+        },
+        .Given(_, _, _, _, _, _, _, _, _, _) then {
+            api.givens.push(render_signature(d));
+        },
+        _ then {},
+    };
+};
+
+// ============================================================================
+// Page assembly
+// ============================================================================
+
+let append_declarations(lines List[String], declarations List[Decl]) Void = {
+    for idx in 0..<declarations.count() then {
+        lines.push(declarations[idx].text);
+        if idx + 1 < declarations.count() then {
+            lines.push("");
+        };
+    };
+};
+
+/// The whole markdown page for one module, as text.
+let render_module_doc(module_key String, source_files List[String]) Result[String] = {
     let module_name = module_name_from_key(module_key);
     let module_stem = last_segment(module_key);
     let mutable stem_first = List[String].new();
@@ -917,22 +171,17 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     ordered_sources.push_list(rest);
 
     let mutable parsed_all = empty_parsed_api();
-
     for source_str in ordered_sources then {
-        let parsed = parse_public_api(source_str.into_path());
-        merge_parsed(parsed_all, parsed);
-    };
-
-    let mutable sanitized_types = List[Decl].new();
-    for decl in parsed_all.types then {
-        sanitized_types.push(sanitize_type_declaration(decl));
+        merge_parsed(parsed_all, parse_public_api(source_str.into_path()));
     };
 
     let mutable lines = List[String].new();
     lines.push("# " + module_name + " API");
     lines.push("");
     lines.push("## Overview");
-    lines.push("This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.");
+    lines.push(
+        "This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.",
+    );
     lines.push("");
 
     lines.push("## Free Functions");
@@ -948,7 +197,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Traits");
     if parsed_all.traits.count() > 0 then {
         lines.push("```koral");
-        append_traits_or_givens(lines, parsed_all.traits);
+        append_declarations(lines, parsed_all.traits);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -956,9 +205,9 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
 
     lines.push("");
     lines.push("## Types");
-    if sanitized_types.count() > 0 then {
+    if parsed_all.types.count() > 0 then {
         lines.push("```koral");
-        append_declarations(lines, sanitized_types);
+        append_declarations(lines, parsed_all.types);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -968,7 +217,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     lines.push("## Given Implementations");
     if parsed_all.givens.count() > 0 then {
         lines.push("```koral");
-        append_traits_or_givens(lines, parsed_all.givens);
+        append_declarations(lines, parsed_all.givens);
         lines.push("```");
     } else {
         lines.push("(none)");
@@ -976,9 +225,234 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
 
     lines.push("");
 
-    let output = docs_root.join(last_segment(module_key).to_ascii_lowercase() + ".md");
-    return write_text_file(output, content: lines.join_to_string("\n"));
+    return Result[String].Ok(lines.join_to_string("\n"));
 };
+
+// ============================================================================
+// Self-test
+// ============================================================================
+// The extraction used to be checked against hand-written line lists. Now that a
+// declaration is a CST node, the check is against the language: given source
+// text, does the page show the right thing?
+
+type mutable SelfTest(mutable failed Bool);
+
+given SelfTest {
+
+    new() SelfTest = SelfTest(false);
+
+    contains(self, name String, text String, needle String) Void = {
+        if text.contains(needle) then {
+            return;
+        };
+        self.failed = true;
+        eprintln("SELF-TEST FAIL: \(name)");
+        eprintln("  expected to contain: \(needle)");
+        eprintln("  got:");
+        eprintln(text);
+    };
+
+    not_contains(self, name String, text String, needle String) Void = {
+        if not text.contains(needle) then {
+            return;
+        };
+        self.failed = true;
+        eprintln("SELF-TEST FAIL: \(name)");
+        eprintln("  expected NOT to contain: \(needle)");
+        eprintln("  got:");
+        eprintln(text);
+    };
+};
+
+let render_all(source String) Result[String] = {
+    let file = parse_source(source) or return;
+    let mutable out = StringBuilder.new();
+    for item in file.items then {
+        when item in {
+            .Decl(d) then {
+                if not Printer.is_public(Printer.decl_visibility(d)) then {
+                    when d in {
+                        .Given(_, _, _, _, _, _, _, _, _, _) then {},
+                        _ then {
+                            continue;
+                        },
+                    };
+                };
+                let rendered = render_signature(d);
+                out.push_string(rendered.text);
+                out.push_string("\n");
+            },
+            _ then {},
+        };
+    };
+    return .Ok(out.to_string());
+};
+
+let run_self_test() Void = {
+    let mutable t = SelfTest.new();
+
+    // Non-public fields stay off the page; the public ones do not.
+    let mixed = render_all(
+        "public type Mixed(public_name String, module_private hidden Int, package_private token Int, file_private cache Int);\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render mixed type: \(it.message())");
+        exit(1);
+    };
+    t.contains("type keeps public fields", mixed, "public_name");
+    t.not_contains("type drops module_private fields", mixed, "hidden");
+    t.not_contains("type drops package_private fields", mixed, "token");
+    t.not_contains("type drops file_private fields", mixed, "cache");
+
+    // A `given` shows only its public methods; a trait shows all of them,
+    // because a trait's whole body is its interface.
+    let given_text = render_all(
+        "type mutable Box[R Any](value R);\n" + "given[R Any] Box[R] {\n" + "    public new(value R) Box[R] = Box[R](value);\n" + "    file_private peek(self) R = self.value;\n" + "    get(self) R = self.value;\n" + "};\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render given: \(it.message())");
+        exit(1);
+    };
+    t.contains("given shows public methods", given_text, "public new(value R) Box[R]");
+    t.not_contains("given drops file_private methods", given_text, "peek");
+    t.not_contains("given drops unexported methods", given_text, "get(self)");
+
+    let trait_text = render_all(
+        "public trait Greet {\n" + "    greet(self) String;\n" + "    help(self) String;\n" + "};\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render trait: \(it.message())");
+        exit(1);
+    };
+    t.contains("trait keeps every member", trait_text, "greet(self) String");
+    t.contains("trait keeps every member (2)", trait_text, "help(self) String");
+
+    // Bodies are not part of a signature.
+    let function_text = render_all(
+        "public let add(a Int, b Int) Int = {\n" + "    return a + b;\n" + "};\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render function: \(it.message())");
+        exit(1);
+    };
+    t.contains("function signature", function_text, "public let add(a Int, b Int) Int;");
+    t.not_contains("function body is not shown", function_text, "return");
+
+    // A declaration that is not `public` is not part of the public API -- and
+    // `given` is the exception, since it carries no access modifier at all.
+    let private_text = render_all(
+        "let hidden() Int = 1;\n" + "type Secret(value Int);\n" + "trait Quiet { q(self) Int; };\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render private decls: \(it.message())");
+        exit(1);
+    };
+    t.not_contains("non-public function is skipped", private_text, "hidden");
+    t.not_contains("non-public type is skipped", private_text, "Secret");
+    t.not_contains("non-public trait is skipped", private_text, "Quiet");
+
+    // Comments and multiline strings live inside tokens; a line scanner
+    // mis-reads them, the parser does not.
+    let comment_text = render_all(
+        "public type Span(\n" + "    // how far it reaches\n" + "    length UInt,\n" + ");\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render commented type: \(it.message())");
+        exit(1);
+    };
+    t.contains("commented field list keeps its fields", comment_text, "length UInt");
+
+    // Weak references (`?T`) and default values (`name: T = literal`) are part
+    // of a signature's meaning. Both have been dropped here before.
+    let weak_text = render_all(
+        "public intrinsic let downgrade[T mutable](val T) ?T;\n" + "public intrinsic let upgrade[T mutable](val ?T) Option[T];\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render weak refs: \(it.message())");
+        exit(1);
+    };
+    t.contains("weak return type", weak_text, "downgrade[T mutable](val T) ?T;");
+    t.contains("weak parameter type", weak_text, "upgrade[T mutable](val ?T) Option[T];");
+
+    let default_text = render_all(
+        "public trait Reader {\n" + "    read(self, into: List[UInt8], span: Range[UInt] = ..) Result[UInt];\n" + "};\n" + "public type Span(length: UInt = 0, label: String = \"x\");\n",
+    ) or else {
+        eprintln("SELF-TEST FAIL: could not render defaults: \(it.message())");
+        exit(1);
+    };
+    t.contains("range default keeps its elision", default_text, "span: Range[UInt] = ..");
+    t.contains("integer default", default_text, "length: UInt = 0");
+    t.contains("string default", default_text, "label: String = \"x\"");
+
+    if t.failed then {
+        eprintln("SELF-TEST FAILED");
+        exit(1);
+    };
+    println("self-test passed");
+};
+
+// ============================================================================
+// Module naming
+// ============================================================================
+
+/// `io` -> `Io`, `json_value` -> `JsonValue`. File and module names are ASCII
+/// identifiers, so the uppercase is a byte shift and nothing more.
+let to_pascal_case(s String) String = {
+    let mutable out = StringBuilder.new();
+    let mutable upper_next = true;
+    for i in 0..<s.count() then {
+        let ch = s[i];
+        if ch == '_' then {
+            upper_next = true;
+            continue;
+        };
+        if upper_next and ch >= 'a' and ch <= 'z' then {
+            out.push_byte(ch - 'a' + 'A');
+        } else {
+            out.push_byte(ch);
+        };
+        upper_next = false;
+    };
+    return out.to_string();
+};
+
+/// `std/io/io.koral` -> `Std.Io`, `std/std.koral` -> `Std`. The key is the
+/// directory path under the library root; a file name is not part of it, since
+/// a module may span several files.
+let module_key_for_source(source Path, std_root Path) String = {
+    let root_name = to_pascal_case(std_root.base_name());
+    let rel = source.to_string().trim_prefix(std_root.to_string()).trim_prefix("/");
+
+    let mutable parts = List[String].new();
+    for part in rel.split("/") then {
+        parts.push(part);
+    };
+    if parts.count() > 0 then {
+        parts.pop();
+    };
+    if parts.is_empty() then {
+        return root_name;
+    };
+
+    let mutable names = List[String].new();
+    for part in parts then {
+        names.push(to_pascal_case(part));
+    };
+    return root_name + "." + names.join_to_string(".");
+};
+
+let module_name_from_key(key String) String = key;
+
+let file_stem(path Path) String = {
+    let base = path.base_name();
+    let ext = path.ext_name();
+    if ext.is_empty() or base.count() <= ext.count() then {
+        return base;
+    };
+    return base.substring(0..<(base.count() - ext.count()));
+};
+
+let last_segment(key String) String = when key.find_last(".") in {
+    .Some(idx) then key.substring((idx + 1)..),
+    .None() then key,
+};
+
+// ============================================================================
+// Filesystem
+// ============================================================================
 
 let clear_generated_docs_recursive(path Path) Void = {
     let mutable entries = read_dir(path) or else {
@@ -1037,14 +511,26 @@ let find_repo_root() Result[Path] = {
         steps += 1;
     };
 
-    return Result[Path].Error("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly.");
+    return Result[Path].Error(
+        "Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly.",
+    );
 };
+
+// ============================================================================
+// Entry point
+// ============================================================================
 
 let main() Void = {
     let args = args();
-    if args.count() > 1 and args[1] == "--self-test" then {
-        run_self_test();
-        return;
+    let mutable check_only = false;
+    for i in 1..<args.count() then {
+        if args[i] == "--self-test" then {
+            run_self_test();
+            return;
+        };
+        if args[i] == "--check" then {
+            check_only = true;
+        };
     };
 
     let repo_root = find_repo_root() or else {
@@ -1055,8 +541,6 @@ let main() Void = {
     let std_root = repo_root.join("std");
     let docs_root = repo_root.join("docs").join("std");
 
-    clear_generated_docs(docs_root);
-
     let mutable source_files = collect_koral_sources(std_root) or else {
         eprintln("Error collecting std sources: \(it.message())");
         exit(1);
@@ -1064,7 +548,9 @@ let main() Void = {
 
     source_files.sort();
 
-    let grouped = source_files.group_by((source_str) -> module_key_for_source(source_str.into_path(), std_root));
+    let grouped = source_files.group_by(
+        (source_str) -> module_key_for_source(source_str.into_path(), std_root),
+    );
 
     let mutable module_keys = List[String].new();
     let mutable grouped_entries = grouped.iterator();
@@ -1073,12 +559,54 @@ let main() Void = {
     };
     module_keys.sort();
 
+    // `--check` proves the pages on disk are what the tool would write, without
+    // touching them. Generated docs are checked in; a change to `std/` that is
+    // not followed by a regeneration is a stale page, and this is what says so.
+    let mutable stale UInt = 0;
+
+    if not check_only then {
+        clear_generated_docs(docs_root);
+    };
+
     for module_key in module_keys then {
         let files = grouped.get(module_key).unwrap();
-        let _ = write_module_doc(module_key, files, docs_root) or else {
-            eprintln("Error writing doc for \(module_key): \(it.message())");
+        let page = render_module_doc(module_key, files) or else {
+            eprintln("Error rendering doc for \(module_key): \(it.message())");
             exit(1);
         };
+
+        let output = docs_root.join(
+            last_segment(module_key).to_ascii_lowercase() + ".md",
+        );
+        if check_only then {
+            let existing = read_text_file(output) or else {
+                stale += 1;
+                eprintln("STALE: \(output.to_string()) -- \(it.message())");
+                continue;
+            };
+            if existing <> page then {
+                stale += 1;
+                eprintln(
+                    "STALE: \(output.to_string()) does not match what the generator would write",
+                );
+            };
+        } else {
+            let _ = write_text_file(output, content: page) or else {
+                eprintln("Error writing \(output.to_string()): \(it.message())");
+                exit(1);
+            };
+        };
+    };
+
+    if check_only then {
+        if stale > 0 then {
+            eprintln(
+                "\(stale) generated page(s) are out of date; run the generator to refresh them",
+            );
+            exit(1);
+        };
+        println("generated docs are up to date (\(module_keys.count()) modules)");
+        return;
     };
 
     println("Generated \(module_keys.count()) module docs in \(docs_root.to_string())");

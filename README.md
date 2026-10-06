@@ -326,7 +326,7 @@ Deleting the frozen reference would trade the strongest cross-check in the repo 
 
 - `std/` — standard library sources and runtime C files
 - `tests/` — shared integration cases and the shared test runner
-- `toolchain/` — `koral` build tool, `koralfmt` formatter, std API doc generator, VS Code extension
+- `toolchain/` — `koral` build tool, `koral-syntax` (the shared Koral parser/printer), `koralfmt` formatter, std API doc generator, VS Code extension
 - `samples/` — sample programs
 - `docs/` — language docs and the developer guide
 

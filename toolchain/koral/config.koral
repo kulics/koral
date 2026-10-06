@@ -9,10 +9,7 @@ using "std/os";
 /// A module as the manifest declares it. `key` is the package-internal name --
 /// `"."` for the main module, otherwise the subpath. A consumer spells the FULL
 /// name, `package[/subpath]`; the manifest only describes the inside (§5.2).
-public type ModuleConfig(
-    entry String,
-    links List[String],
-);
+public type ModuleConfig(entry String, links List[String]);
 
 /// Four fields (§5.1): `package`, `version`, `modules`, `dependencies`.
 /// No `name` (same thing as `package`), no top-level `entry` (the default build
@@ -28,18 +25,16 @@ public type ProjectConfig(
 /// `source` is the fetch location and the package's identity (§5.3). The key
 /// under which it sits in `dependencies` is the name the SOURCE writes for it,
 /// which is why renaming a dependency is just changing that key.
-public type DepConfig(
-    key String,
-    source String,
-    version String,
-);
+public type DepConfig(key String, source String, version String);
 
 file_private let is_valid_module_segment(segment String) Bool = {
     if segment.count() == 0 then {
         return false;
     };
 
-    let first = segment.get(0) or else { return false;};
+    let first = segment.get(0) or else {
+        return false;
+    };
     if first < 'a' or first > 'z' then {
         return false;
     };
@@ -138,7 +133,9 @@ file_private let load_string_dict_field(
     let mutable iter = obj.iterator();
     while iter.next() is .Some(entry) then {
         let str_value = entry.second.as_string() or else {
-            return .Error("error: '\(field_name).\(entry.first)' in \(context) must be a string");
+            return .Error(
+                "error: '\(field_name).\(entry.first)' in \(context) must be a string",
+            );
         };
         out.insert(entry.first, str_value);
     };
@@ -170,7 +167,9 @@ public let default_target_module(config ProjectConfig) Result[String] = {
     if config.modules.contains_key(".") then {
         return .Ok(config.package);
     };
-    return .Error("error: package has no main module ('modules' key \".\"); pass --module <package/subpath>");
+    return .Error(
+        "error: package has no main module ('modules' key \".\"); pass --module <package/subpath>",
+    );
 };
 
 /// The `modules` key a full name (`package[/subpath]`) refers to.
@@ -190,7 +189,9 @@ public let module_key_for_full_name(config ProjectConfig, full_name String) Resu
     };
 
     if head <> config.package then {
-        return .Error("error: module '\(full_name)' is not in package '\(config.package)'");
+        return .Error(
+            "error: module '\(full_name)' is not in package '\(config.package)'",
+        );
     };
 
     let key = if subpath.is_empty() then "." else subpath;
@@ -200,7 +201,10 @@ public let module_key_for_full_name(config ProjectConfig, full_name String) Resu
     return .Error("error: module '\(full_name)' not found in koral.json");
 };
 
-public let target_module_for_build(config ProjectConfig, flags Dict[String, String]) Result[String] = {
+public let target_module_for_build(
+    config ProjectConfig,
+    flags Dict[String, String],
+) Result[String] = {
     let module_name = flags.get("--module") or else {
         return default_target_module(config);
     };
@@ -213,9 +217,15 @@ public let target_module_for_build(config ProjectConfig, flags Dict[String, Stri
 public let artifact_stem(module_name String) String =
     module_name.replace_all("/", with: "__").replace_all("::", with: "__");
 
-file_private let reject_obsolete_field(json JsonValue, field String, hint String) Result[Void] = {
+file_private let reject_obsolete_field(
+    json JsonValue,
+    field String,
+    hint String,
+) Result[Void] = {
     if json.get_field(field) is .Some(_) then {
-        return .Error("error: koral.json field '\(field)' is no longer supported -- \(hint)");
+        return .Error(
+            "error: koral.json field '\(field)' is no longer supported -- \(hint)",
+        );
     };
     return .Ok({});
 };
@@ -234,9 +244,17 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     };
 
     reject_obsolete_field(json, "name", "renamed to 'package'") or return;
-    reject_obsolete_field(json, "entry", "the default build target is the main module (modules key \".\")") or return;
+    reject_obsolete_field(
+        json,
+        "entry",
+        "the default build target is the main module (modules key \".\")",
+    ) or return;
     reject_obsolete_field(json, "requires", "the module graph comes from 'using'") or return;
-    reject_obsolete_field(json, "module_aliases", "renaming a dependency is its 'dependencies' key") or return;
+    reject_obsolete_field(
+        json,
+        "module_aliases",
+        "renaming a dependency is its 'dependencies' key",
+    ) or return;
     reject_obsolete_field(json, "links", "links belong on the module that needs them") or return;
 
     let package_ref = json.get_field("package") or else {
@@ -246,7 +264,9 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
         return .Error("error: 'package' must be a string in koral.json");
     };
     if not is_valid_package_name(package) then {
-        return .Error("error: invalid package name '\(package)'. Must be a single lowercase identifier");
+        return .Error(
+            "error: invalid package name '\(package)'. Must be a single lowercase identifier",
+        );
     };
     if package == "std" then {
         return .Error("error: package name 'std' is reserved");
@@ -271,26 +291,40 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     while module_iter.next() is .Some(module_entry) then {
         let module_name = module_entry.first;
         if not is_valid_module_key(module_name) then {
-            return .Error("error: invalid module key '\(module_name)'; use '.' or lower_snake segments joined by '/'");
+            return .Error(
+                "error: invalid module key '\(module_name)'; use '.' or lower_snake segments joined by '/'",
+            );
         };
 
         if module_entry.second.as_object() is .None() then {
             return .Error("error: module '\(module_name)' must be an object");
         };
         let module_json = module_entry.second;
-        reject_obsolete_field(module_json, "requires", "the module graph comes from 'using'") or return;
+        reject_obsolete_field(
+            module_json,
+            "requires",
+            "the module graph comes from 'using'",
+        ) or return;
 
         let entry_ref = module_json.get_field("entry") or else {
-            return .Error("error: module '\(module_name)' is missing required field 'entry'");
+            return .Error(
+                "error: module '\(module_name)' is missing required field 'entry'",
+            );
         };
         let module_entry_path = entry_ref.as_string() or else {
-            return .Error("error: module '\(module_name)' field 'entry' must be a string");
+            return .Error(
+                "error: module '\(module_name)' field 'entry' must be a string",
+            );
         };
         if not module_entry_path.ends_with(".koral") then {
             return .Error("error: module '\(module_name)' entry must end with .koral");
         };
 
-        let links = load_optional_string_array_field(module_json, "links", "module '\(module_name)'") or return;
+        let links = load_optional_string_array_field(
+            module_json,
+            "links",
+            "module '\(module_name)'",
+        ) or return;
         modules.insert(module_name, ModuleConfig(module_entry_path, links));
     };
 
@@ -309,31 +343,47 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             let dep_json = dep_entry.second;
 
             if not is_valid_package_name(dep_key) then {
-                return .Error("error: invalid dependency key '\(dep_key)'; it is the name the source writes, a single lowercase identifier");
+                return .Error(
+                    "error: invalid dependency key '\(dep_key)'; it is the name the source writes, a single lowercase identifier",
+                );
             };
             if dep_key == package then {
-                return .Error("error: dependency key '\(dep_key)' collides with this package's own name");
+                return .Error(
+                    "error: dependency key '\(dep_key)' collides with this package's own name",
+                );
             };
             if dep_key == "std" then {
                 return .Error("error: dependency key 'std' is reserved");
             };
 
-            reject_obsolete_field(dep_json, "name", "the key is the name the source writes") or return;
+            reject_obsolete_field(
+                dep_json,
+                "name",
+                "the key is the name the source writes",
+            ) or return;
             reject_obsolete_field(dep_json, "git", "the fetch location is 'source'") or return;
-            reject_obsolete_field(dep_json, "module_aliases", "renaming a dependency is its key") or return;
+            reject_obsolete_field(
+                dep_json,
+                "module_aliases",
+                "renaming a dependency is its key",
+            ) or return;
 
             let source_ref = dep_json.get_field("source") or else {
                 return .Error("error: dependency '\(dep_key)' missing 'source' field");
             };
             let source = source_ref.as_string() or else {
-                return .Error("error: dependency '\(dep_key)' 'source' must be a string");
+                return .Error(
+                    "error: dependency '\(dep_key)' 'source' must be a string",
+                );
             };
 
             let dep_version_ref = dep_json.get_field("version") or else {
                 return .Error("error: dependency '\(dep_key)' missing 'version' field");
             };
             let dep_version = dep_version_ref.as_string() or else {
-                return .Error("error: dependency '\(dep_key)' 'version' must be a string");
+                return .Error(
+                    "error: dependency '\(dep_key)' 'version' must be a string",
+                );
             };
 
             dependencies.insert(dep_key, DepConfig(dep_key, source, dep_version));

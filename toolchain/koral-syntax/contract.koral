@@ -1,0 +1,272 @@
+// ============================================================================
+// Koral Syntax - Formatting Contract
+// ============================================================================
+// What a formatter is allowed to change, and the check that proves it changed
+// nothing else. Lives here rather than in `koralfmt` so the test suite and any
+// other tool that rewrites source assert against the same contract -- and so it
+// cannot be quietly bypassed by calling the raw printer.
+// ============================================================================
+
+/// A token's identity for comparison: its variant tag plus its spelling. The
+/// tag matters because `to_string` is not injective -- `*` is both the reference
+/// prefix and the multiply operator.
+public let token_key(token Token) String =
+    Token.tag(token).to_string() + ":" + token.to_string();
+
+/// The non-layout tokens of a source, in order. Newlines are layout, so they
+/// are the one thing a formatter is allowed to change.
+public let token_keys(source String) Result[List[String]] = {
+    let mutable tokenizer = Tokenizer.new(source);
+    let tokens = tokenizer.tokenize() or return;
+    let mutable keys = List[String].new();
+    for token in tokens then {
+        when token in {
+            .Newline() or .EOF() then {},
+            _ then {
+                keys.push(token_key(token));
+            },
+        };
+    };
+    return .Ok(keys);
+};
+
+/// The contract, checked at two levels:
+///
+///   1. Strip `;` and `,` from both sides and the token sequences are
+///      identical, in order and spelling.
+///   2. Strip whitespace, `;` and `,` from both sides and the remaining
+///      characters are identical, in order.
+///
+/// Everything a reader uses to tell code apart -- names, literals, comments,
+/// operators, delimiters -- is untouched. The second check exists because the
+/// first can only see what the tokenizer knows: a character with no token is
+/// dropped before either side is compared, and the two token lists still agree.
+///
+/// `;` and `,` are the two tokens a rewrite may add or remove, because the
+/// surface syntax makes both optional in ways that carry no meaning:
+///
+///   * `;` -- a statement terminator automatic semicolon insertion would have
+///     supplied. Making it explicit is the point of formatting.
+///   * `,` -- a list separator. A list exploded across lines ends with one so
+///     the next edit is a one-line diff; a list kept on one line does not.
+///
+/// Both are recoverable from the output alone. A dropped separator cannot hide
+/// behind this: it makes the output unparseable, and `format_source_checked`
+/// re-parses what it produced.
+///
+/// Returns `None` when the contract holds.
+public let format_contract_violation(before String, after String) Option[String] = {
+    let before_keys = when token_keys(before) in {
+        .Ok(keys) then keys,
+        .Error(e) then {
+            return .Some("cannot tokenize input: " + e.message());
+        },
+    };
+    let after_keys = when token_keys(after) in {
+        .Ok(keys) then keys,
+        .Error(e) then {
+            return .Some("cannot tokenize output: " + e.message());
+        },
+    };
+
+    let semi_key = token_key(Token.Semi());
+    let comma_key = token_key(Token.Comma());
+
+    let mutable bi UInt = 0;
+    let mutable ai UInt = 0;
+    while bi < before_keys.count() or ai < after_keys.count() then {
+        let b = if bi < before_keys.count() then before_keys[bi] else "";
+        let a = if ai < after_keys.count() then after_keys[ai] else "";
+
+        if b == semi_key or b == comma_key then {
+            if bi < before_keys.count() then {
+                bi += 1;
+            };
+            continue;
+        };
+        if a == semi_key or a == comma_key then {
+            if ai < after_keys.count() then {
+                ai += 1;
+            };
+            continue;
+        };
+
+        if a <> b then {
+            let seen = if bi < before_keys.count() then b else "<end of input>";
+            let got = if ai < after_keys.count() then a else "<end of output>";
+            return .Some(
+                "token changed after formatting: '" + seen + "' became '" + got + "' (input #" + bi.to_string(
+                ) + ", output #" + ai.to_string() + ")",
+            );
+        };
+        bi += 1;
+        ai += 1;
+    };
+
+    // Character-level backstop. The token comparison above can only see what
+    // the tokenizer knows about; a character it does not recognise is dropped
+    // on both sides and the two lists match. That is exactly how a bare `?` in
+    // `?T` used to disappear -- the tokenizer threw it away before anything
+    // looked at it -- so compare the raw runes too, ignoring only whitespace
+    // and the two separators a rewrite may add or remove.
+    when rune_sequence_mismatch(before, after) in {
+        .Some(report) then {
+            return .Some(report);
+        },
+        .None() then {},
+    };
+
+    return .None();
+};
+
+/// `None` when `before` and `after` carry the same non-layout runes in the same
+/// order. Whitespace and `;` / `,` are the only things that may differ.
+let rune_sequence_mismatch(before String, after String) Option[String] = {
+    let left = significant_runes(before);
+    let right = significant_runes(after);
+
+    let mutable i UInt = 0;
+    while i < left.count() and i < right.count() then {
+        if left[i] <> right[i] then {
+            return .Some(
+                "character changed after formatting: '" + left[i].to_string() + "' became '" + right[
+                    i
+                ].to_string() + "' at significant rune " + i.to_string(),
+            );
+        };
+        i += 1;
+    };
+
+    if left.count() <> right.count() then {
+        let longer = if left.count() > right.count() then left else right;
+        let name = if left.count() > right.count() then "input" else "output";
+        let index = if left.count() > right.count() then right.count() else left.count();
+        return .Some(
+            "character count changed after formatting: the " + name + " has '" + longer[
+                index
+            ].to_string() + "' at significant rune " + index.to_string() + " that the other side does not (" + left.count(
+            ).to_string() + " vs " + right.count().to_string() + ")",
+        );
+    };
+
+    return .None();
+};
+
+/// The runes that carry meaning: everything except whitespace and the two
+/// separators.
+let significant_runes(source String) List[Rune] = {
+    let mutable out = List[Rune].new();
+    for r in source.to_runes() then {
+        when r.to_uint32() in {
+            // space, tab, CR, LF, and `;` / `,`
+            32 or 9 or 13 or 10 or 59 or 44 then {},
+            _ then {
+                out.push(r);
+            },
+        };
+    };
+    return out;
+};
+
+/// Format `source`, then prove the result is a layout-only rewrite of it and
+/// that formatting it again changes nothing. The two extra passes are the
+/// difference between "prints something" and "is a formatter": a layout rule
+/// that measures one thing and prints another settles into one shape and then
+/// another, and the second run would rewrite what the first one wrote.
+///
+/// A byte-order mark is a file-level marker rather than language content -- the
+/// tokenizer has no token for it -- so it is set aside before formatting and
+/// put back where it was. Keeping it here rather than in `koralfmt` means the
+/// checked result is exactly what the tool writes to disk.
+public let format_source_checked(source String) Result[String] = {
+    let runes = source.to_runes();
+    let has_bom = runes.count() > 0 and runes[0].to_uint32() == 0xFEFF;
+
+    let body = if has_bom then {
+        let mutable out = StringBuilder.new();
+        for i in 1..<runes.count() then {
+            out.push_string(runes[i].to_string());
+        };
+        out.to_string()
+    } else {
+        source
+    };
+
+    let first_pass = format_source(body) or return;
+
+    when format_contract_violation(body, first_pass) in {
+        .Some(report) then {
+            return .Error("Formatter internal error: " + report);
+        },
+        .None() then {},
+    };
+
+    let second_pass = format_source(first_pass) or return;
+    if first_pass <> second_pass then {
+        return .Error(
+            "Formatter internal error: formatting is not idempotent -- " + first_difference(
+                first_pass,
+                second_pass,
+            ),
+        );
+    };
+
+    if not has_bom then {
+        return .Ok(first_pass);
+    };
+    return .Ok("\u{FEFF}" + first_pass);
+};
+
+/// Names where two formatting passes diverge, so a broken layout rule points at
+/// itself instead of at a bare "not idempotent".
+let first_difference(a String, b String) String = {
+    let left = a.to_runes();
+    let right = b.to_runes();
+
+    let mutable i UInt = 0;
+    while i < left.count() and i < right.count() then {
+        if left[i] <> right[i] then {
+            break;
+        };
+        i += 1;
+    };
+
+    let mutable line UInt = 1;
+    let mutable j UInt = 0;
+    while j < i and j < left.count() then {
+        if left[j].to_uint32() == 10 then {
+            line += 1;
+        };
+        j += 1;
+    };
+
+    let where = "diverge at rune " + i.to_string() + " (about line " + line.to_string() + ")";
+    let sizes = "; first pass " + left.count().to_string() + " runes, second pass " + right.count(
+    ).to_string();
+    let first_line = line_at(left, i);
+    let second_line = line_at(right, i);
+    return where + sizes + "\n  first pass:  " + first_line + "\n  second pass: " + second_line;
+};
+
+/// The whole line containing `offset`, without its newline.
+let line_at(runes List[Rune], offset UInt) String = {
+    let mutable start UInt = 0;
+    let mutable j UInt = 0;
+    while j < offset and j < runes.count() then {
+        if runes[j].to_uint32() == 10 then {
+            start = j + 1;
+        };
+        j += 1;
+    };
+    let mutable stop UInt = start;
+    while stop < runes.count() and runes[stop].to_uint32() <> 10 then {
+        stop += 1;
+    };
+    let mutable out = StringBuilder.new();
+    let mutable k UInt = start;
+    while k < stop then {
+        out.push_string(runes[k].to_string());
+        k += 1;
+    };
+    return out.to_string();
+};

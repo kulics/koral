@@ -2,9 +2,9 @@
 // Koral Formatter - Test Suite
 // ============================================================================
 
-using "./tokenizer.koral";
-using "./parser.koral";
-using "./printer.koral";
+using "koral_syntax";
+
+using "std/os";
 
 type mutable TestRunner(mutable pass_count UInt, mutable fail_count UInt);
 
@@ -59,10 +59,36 @@ given TestRunner {
         };
     };
 
+    /// Formats through `format_source_checked`, so the run also asserts the
+    /// formatting contract (nothing but `;` and `,` moved) and idempotence.
+    /// Anything the raw printer would print by corrupting the source fails here.
+    test_checked(self, name String, input String, expected String) Void = {
+        when format_source_checked(input) in {
+            .Ok(result) then {
+                if result == expected then {
+                    self.pass_count += 1;
+                } else {
+                    self.fail_count += 1;
+                    println("FAIL: " + name);
+                    println("  expected:");
+                    println(expected);
+                    println("  got:");
+                    println(result);
+                };
+            },
+            .Error(e) then {
+                self.fail_count += 1;
+                println("ERROR: " + name + " - " + e.message());
+            },
+        };
+    };
+
     summary(self) Void = {
         let total = self.pass_count + self.fail_count;
         println(self.pass_count.to_string() + "/" + total.to_string() + " tests passed");
-        if self.fail_count > 0 then { exit(1);};
+        if self.fail_count > 0 then {
+            exit(1);
+        };
     };
 };
 
@@ -76,144 +102,564 @@ let main() Void = {
     t.test("public let", "public let x Int=42\n", "public let x Int = 42;\n");
 
     // === Function declarations ===
-    t.test("func decl", "let add(a Int,b Int) Int=a+b\n", "let add(a Int, b Int) Int = a + b;\n");
-    t.test("func with block", "let f() Void={\nlet x=1;\nlet y=2;\n}\n",
-        "let f() Void = {\n    let x = 1;\n    let y = 2;\n};\n");
-    t.test("return stmt", "let f() Int={\nreturn 42;\n}\n", "let f() Int = {\n    return 42;\n};\n");
+    t.test(
+        "func decl",
+        "let add(a Int,b Int) Int=a+b\n",
+        "let add(a Int, b Int) Int = a + b;\n",
+    );
+    t.test(
+        "func with block",
+        "let f() Void={\nlet x=1;\nlet y=2;\n}\n",
+        "let f() Void = {\n    let x = 1;\n    let y = 2;\n};\n",
+    );
+    t.test(
+        "return stmt",
+        "let f() Int={\nreturn 42;\n}\n",
+        "let f() Int = {\n    return 42;\n};\n",
+    );
     t.test("block tail expr", "let f() Int={\n42\n}\n", "let f() Int = {\n    42\n};\n");
-    t.test("defer stmt", "let f() Void={\ndefer close();\n}\n", "let f() Void = {\n    defer close();\n};\n");
-    t.test("block tail expr with stmt", "let f() Int={\nfoo();\n42\n}\n", "let f() Int = {\n    foo();\n    42\n};\n");
-    t.test("defer stmt with semi", "let f() Void={\ndefer close();\n}\n", "let f() Void = {\n    defer close();\n};\n");
-    t.test("block expression stmt only", "let f() Void={\nfoo();\nbar();\n}\n",
-        "let f() Void = {\n    foo();\n    bar();\n};\n");
+    t.test(
+        "defer stmt",
+        "let f() Void={\ndefer close();\n}\n",
+        "let f() Void = {\n    defer close();\n};\n",
+    );
+    t.test(
+        "block tail expr with stmt",
+        "let f() Int={\nfoo();\n42\n}\n",
+        "let f() Int = {\n    foo();\n    42\n};\n",
+    );
+    t.test(
+        "defer stmt with semi",
+        "let f() Void={\ndefer close();\n}\n",
+        "let f() Void = {\n    defer close();\n};\n",
+    );
+    t.test(
+        "block expression stmt only",
+        "let f() Void={\nfoo();\nbar();\n}\n",
+        "let f() Void = {\n    foo();\n    bar();\n};\n",
+    );
 
     // === Using declarations ===
     // One spelling, classified by the specifier's SHAPE (module-design §3.1):
     // `./` or `../` merges a file, anything else imports `package[/subpath]`.
     // `{ .. }` is gone -- an omitted list already means every visible member.
     t.test("using", "using \"foo\"\n", "using \"foo\";\n");
-    t.test("module using", "using \"std/io\"{Reader as IoReader,Writer}\n",
-        "using \"std/io\" { Reader as IoReader, Writer };\n");
+    t.test(
+        "module using",
+        "using \"std/io\"{Reader as IoReader,Writer}\n",
+        "using \"std/io\" { Reader as IoReader, Writer };\n",
+    );
     t.test("module using all public", "using \"std/io\"\n", "using \"std/io\";\n");
     t.test("file merge", "using \"./helpers.koral\"\n", "using \"./helpers.koral\";\n");
-    t.test("file merge parent", "using \"../shared/util.koral\"\n", "using \"../shared/util.koral\";\n");
+    t.test(
+        "file merge parent",
+        "using \"../shared/util.koral\"\n",
+        "using \"../shared/util.koral\";\n",
+    );
 
     // === Type declarations ===
     // `type` / `type mutable` are the two nominal forms the language has
     // (grammar.bnf <type-decl>). `mutable` used to be a parse error here.
     // Raw pointers are `*unsafe T` / `*unsafe mutable T` (grammar.bnf
     // <type-prefix>). The managed `* T` / `*! T` spellings are gone.
-    t.test("raw pointer types", "let f(p *unsafe mutable Int, q *unsafe Int) Void={}\n",
-        "let f(p *unsafe mutable Int, q *unsafe Int) Void = {};\n");
-    t.test("type mutable", "type mutable Counter(mutable count Int)\n", "type mutable Counter(mutable count Int);\n");
-    t.test("generic type mutable", "type mutable Box[R Mark](value R)\n", "type mutable Box[R Mark](value R);\n");
+    t.test(
+        "raw pointer types",
+        "let f(p *unsafe mutable Int, q *unsafe Int) Void={}\n",
+        "let f(p *unsafe mutable Int, q *unsafe Int) Void = {};\n",
+    );
+    t.test(
+        "type mutable",
+        "type mutable Counter(mutable count Int)\n",
+        "type mutable Counter(mutable count Int);\n",
+    );
+    t.test(
+        "generic type mutable",
+        "type mutable Box[R Mark](value R)\n",
+        "type mutable Box[R Mark](value R);\n",
+    );
     // `mutable` in a generic PARAMETER constraint is a type-kind constraint
     // keyword, not a type -- `[T mutable]`.
-    t.test("mutable constraint", "let f[T mutable](v T) Int=0\n", "let f[T mutable](v T) Int = 0;\n");
-    t.test("mutable and trait constraint", "let f[T mutable and Eq](v T) Int=0\n", "let f[T mutable and Eq](v T) Int = 0;\n");
+    t.test(
+        "mutable constraint",
+        "let f[T mutable](v T) Int=0\n",
+        "let f[T mutable](v T) Int = 0;\n",
+    );
+    t.test(
+        "mutable and trait constraint",
+        "let f[T mutable and Eq](v T) Int=0\n",
+        "let f[T mutable and Eq](v T) Int = 0;\n",
+    );
     // Named params are <func-param> form 2, and trait members follow the same
     // rules -- so `name: Type` belongs there too.
     t.test("named param", "let f(a: Int) Int=a\n", "let f(a: Int) Int = a;\n");
     // Defaults are a LITERAL, never an expression (grammar.bnf <field>).
     t.test("named field with default", "type P(x: Int=3)\n", "type P(x: Int = 3);\n");
-    t.test("named param with default", "let f(a: Int=3,b: Int=4) Int=a\n", "let f(a: Int = 3, b: Int = 4) Int = a;\n");
-    t.test("enum field with default", "type E { C(a: Int=2) };\n", "type E {\n    C(a: Int = 2),\n};\n");
+    t.test(
+        "named param with default",
+        "let f(a: Int=3,b: Int=4) Int=a\n",
+        "let f(a: Int = 3, b: Int = 4) Int = a;\n",
+    );
+    t.test(
+        "enum field with default",
+        "type E { C(a: Int=2) };\n",
+        "type E {\n    C(a: Int = 2),\n};\n",
+    );
     // `-3` is not a literal default (the compiler rejects it the same way), and
     // `1 + 2` never reaches the default at all -- both sides stop at the field
     // name after the `+`.
-    t.test_error_contains("default must be a literal", "type P(x: Int=-3)\n", "literal default value");
-    t.test("trait named param", "trait T {\nm(self, a: Int) Int;\n}\n",
-        "trait T {\n    m(self, a: Int) Int;\n};\n");
+    t.test_error_contains(
+        "default must be a literal",
+        "type P(x: Int=-3)\n",
+        "literal default value",
+    );
+    t.test(
+        "trait named param",
+        "trait T {\nm(self, a: Int) Int;\n}\n",
+        "trait T {\n    m(self, a: Int) Int;\n};\n",
+    );
 
-    t.test("public type tuple", "public type Point(x Int,y Int)\n", "public type Point(x Int, y Int);\n");
+    t.test(
+        "public type tuple",
+        "public type Point(x Int,y Int)\n",
+        "public type Point(x Int, y Int);\n",
+    );
 
     // === Trait and Given ===
-    t.test("trait decl", "trait Printable {\nto_string(self) String;\n}\n",
-        "trait Printable {\n    to_string(self) String;\n};\n");
-    t.test("trait mutable receiver", "trait Counter {\nbump(self) Int;\n}\n",
-        "trait Counter {\n    bump(self) Int;\n};\n");
-    t.test("given block", "given Point {\npublic new(x Int,y Int) Point=Point(x,y);\n}\n",
-        "given Point {\n    public new(x Int, y Int) Point = Point(x, y);\n};\n");
-    t.test("given trait impl", "given Point as Eq {\npublic equals(self,other Point) Bool=self.x==other.x;\n}\n",
-        "given Point as Eq {\n    public equals(self, other Point) Bool = self.x == other.x;\n};\n");
+    t.test(
+        "trait decl",
+        "trait Printable {\nto_string(self) String;\n}\n",
+        "trait Printable {\n    to_string(self) String;\n};\n",
+    );
+    t.test(
+        "trait mutable receiver",
+        "trait Counter {\nbump(self) Int;\n}\n",
+        "trait Counter {\n    bump(self) Int;\n};\n",
+    );
+    t.test(
+        "given block",
+        "given Point {\npublic new(x Int,y Int) Point=Point(x,y);\n}\n",
+        "given Point {\n    public new(x Int, y Int) Point = Point(x, y);\n};\n",
+    );
+    t.test(
+        "given trait impl",
+        "given Point as Eq {\npublic equals(self,other Point) Bool=self.x==other.x;\n}\n",
+        "given Point as Eq {\n    public equals(self, other Point) Bool = self.x == other.x;\n};\n",
+    );
 
     // === When/in expressions ===
-    t.test("when/in block", "when x in {\n1 then true,\n_ then false,\n};\n",
-        "when x in {\n    1 then true,\n    _ then false,\n};\n");
+    t.test(
+        "when/in block",
+        "when x in {\n1 then true,\n_ then false,\n};\n",
+        "when x in {\n    1 then true,\n    _ then false,\n};\n",
+    );
 
     // === Operators ===
     t.test("unary minus", "let x=-1\n", "let x = -1;\n");
     t.test("range op", "let r=0..<10\n", "let r = 0..<10;\n");
-    t.test("compound assign", "let f() Void={\nx+=1;\n}\n",
-        "let f() Void = {\n    x += 1;\n};\n");
+    t.test(
+        "compound assign",
+        "let f() Void={\nx+=1;\n}\n",
+        "let f() Void = {\n    x += 1;\n};\n",
+    );
 
     // === Strings ===
     t.test("string interp", "let s=\"hello \\(name)\"\n", "let s = \"hello \\(name)\";\n");
 
     // === Comments ===
     t.test("line comment", "// hello world\n", "// hello world\n");
-    t.test("trailing comment in block", "let f() Void={\nfoo(); // trailing\nbar();\n}\n",
-        "let f() Void = {\n    foo(); // trailing\n    bar();\n};\n");
+    t.test(
+        "trailing comment in block",
+        "let f() Void={\nfoo(); // trailing\nbar();\n}\n",
+        "let f() Void = {\n    foo(); // trailing\n    bar();\n};\n",
+    );
     t.test("crlf normalization", "let x=1\r\nlet y=2\r\n", "let x = 1;\nlet y = 2;\n");
 
     // === Method calls ===
     t.test("method call", "let r=a.add(b)\n", "let r = a.add(b);\n");
 
     // === Mutable and destructuring ===
-    t.test("pair destructuring", "let main() Void={\nlet (a,b)=(1,2);\n}\n",
-        "let main() Void = {\n    let (a, b) = (1, 2);\n};\n");
-    t.test("collection literals", "let main() Void={\nlet xs=[1,2,];\nlet d=[\"a\":1,];\n}\n",
-        "let main() Void = {\n    let xs = [1, 2, ];\n    let d = [\"a\": 1, ];\n};\n");
-    t.test("qualified trait call", "let main() Void={\nlet r=(x as Tag).plus_ten(1,);\n}\n",
-        "let main() Void = {\n    let r = (x as Tag).plus_ten(1, );\n};\n");
-    t.test("named params in declaration", "let connect(host String,port: Int) Void={};\n",
-        "let connect(host String, port: Int) Void = {};\n");
-    t.test("package private access token", "package_private let value Int=1;\n",
-        "package_private let value Int = 1;\n");
-    t.test("given not trait", "given Kind not Deref\n",
-        "given Kind not Deref;\n");
-    t.test("trait parent list", "trait FloatMath Numeric and Div[Self] and Neg {\n}\n",
-        "trait FloatMath Numeric and Div[Self] and Neg {};\n");
+    t.test(
+        "pair destructuring",
+        "let main() Void={\nlet (a,b)=(1,2);\n}\n",
+        "let main() Void = {\n    let (a, b) = (1, 2);\n};\n",
+    );
+    // A list kept on one line has no trailing comma; one the formatter exploded
+    // across lines always does. The author's comma is not preserved -- it is a
+    // separator, and the line shape is what decides it.
+    t.test(
+        "collection literals drop inline trailing comma",
+        "let main() Void={\nlet xs=[1,2,];\nlet d=[\"a\":1,];\n}\n",
+        "let main() Void = {\n    let xs = [1, 2];\n    let d = [\"a\": 1];\n};\n",
+    );
+    t.test(
+        "collection literals",
+        "let main() Void={\nlet xs=[1,2];\n}\n",
+        "let main() Void = {\n    let xs = [1, 2];\n};\n",
+    );
+    t.test(
+        "qualified trait call",
+        "let main() Void={\nlet r=(x as Tag).plus_ten(1,);\n}\n",
+        "let main() Void = {\n    let r = (x as Tag).plus_ten(1);\n};\n",
+    );
+    // Exploded argument lists end in a comma so the next edit is one line.
+    t.test(
+        "exploded call args keep a trailing comma",
+        "let main() Void={\nreturn f(a_very_long_argument_one,a_very_long_argument_two,a_very_long_argument_three,a_very_long_argument_four);\n}\n",
+        "let main() Void = {\n    return f(\n        a_very_long_argument_one,\n        a_very_long_argument_two,\n        a_very_long_argument_three,\n        a_very_long_argument_four,\n    );\n};\n",
+    );
+    t.test(
+        "named params in declaration",
+        "let connect(host String,port: Int) Void={};\n",
+        "let connect(host String, port: Int) Void = {};\n",
+    );
+    t.test(
+        "package private access token",
+        "package_private let value Int=1;\n",
+        "package_private let value Int = 1;\n",
+    );
+    t.test("given not trait", "given Kind not Deref\n", "given Kind not Deref;\n");
+    t.test(
+        "trait parent list",
+        "trait FloatMath Numeric and Div[Self] and Neg {\n}\n",
+        "trait FloatMath Numeric and Div[Self] and Neg {};\n",
+    );
 
     // === Multiple declarations ===
     t.test("multi decl", "let x=1\nlet y=2\n", "let x = 1;\nlet y = 2;\n");
 
     // === Idempotency ===
     t.test("idempotent simple", "let x = 1 + 2;\n", "let x = 1 + 2;\n");
-    t.test("idempotent trait", "trait Foo {\n    bar(self) Int;\n};\n",
-        "trait Foo {\n    bar(self) Int;\n};\n");
+    t.test(
+        "idempotent trait",
+        "trait Foo {\n    bar(self) Int;\n};\n",
+        "trait Foo {\n    bar(self) Int;\n};\n",
+    );
 
     // === Rejected stale syntax ===
-    t.test_error_contains("foreign using removed", "foreign using \"math\"\n", "expected primary expression");
-    t.test_error_contains("using alias removed", "using \"foo\" as Bar\n", "takes no alias");
-    t.test_error_contains("using all public must stand alone", "using \"std/io\" { .., Reader }\n", "'..' is not an import item");
-    t.test_error_contains("using after declaration", "let x=1\nusing \"foo\"\n", "using declarations must appear before other top-level declarations");
-    t.test_error_contains("default fill rejected", "type Button(label String)\nlet make() Button=Button(...);\n", "Default-fill '...' is not supported");
+    t.test_error_contains(
+        "foreign using removed",
+        "foreign using \"math\"\n",
+        "expected primary expression",
+    );
+    t.test_error_contains(
+        "using alias removed",
+        "using \"foo\" as Bar\n",
+        "takes no alias",
+    );
+    t.test_error_contains(
+        "using all public must stand alone",
+        "using \"std/io\" { .., Reader }\n",
+        "'..' is not an import item",
+    );
+    t.test_error_contains(
+        "using after declaration",
+        "let x=1\nusing \"foo\"\n",
+        "using declarations must appear before other top-level declarations",
+    );
+    t.test_error_contains(
+        "default fill rejected",
+        "type Button(label String)\nlet make() Button=Button(...);\n",
+        "Default-fill '...' is not supported",
+    );
     // `name: Type` is a NAMED field -- a different declaration, not an
     // alternate spelling (grammar.bnf <field>: "named field"). It used to be
     // rejected here, which denied documented syntax.
-    t.test("named constructor field", "type Point(x: Int, y: Int)\n", "type Point(x: Int, y: Int);\n");
+    t.test(
+        "named constructor field",
+        "type Point(x: Int, y: Int)\n",
+        "type Point(x: Int, y: Int);\n",
+    );
     // Enum payload fields follow the same <variant-field> rule -- named fields
     // and defaults both belong there.
-    t.test("named enum payload field", "type E { C(a: Int) };\n", "type E {\n    C(a: Int),\n};\n");
+    t.test(
+        "named enum payload field",
+        "type E { C(a: Int) };\n",
+        "type E {\n    C(a: Int),\n};\n",
+    );
     // <variant-list> is `("," <variant>)* ","?`, so the LAST variant may stand
     // without a comma. Requiring one silently reformatted user code.
-    t.test("variant without trailing comma", "type E { A(), B() };\n", "type E {\n    A(),\n    B(),\n};\n");
-    t.test("single variant without comma", "type E { A() };\n", "type E {\n    A(),\n};\n");
+    t.test(
+        "variant without trailing comma",
+        "type E { A(), B() };\n",
+        "type E {\n    A(),\n    B(),\n};\n",
+    );
+    t.test(
+        "single variant without comma",
+        "type E { A() };\n",
+        "type E {\n    A(),\n};\n",
+    );
     // A comment inside a payload documents the field under it. Dropping it is
     // a formatter deleting user prose -- `typed_ast.koral` keeps one there.
-    t.test("comment in enum payload", "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
-        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n");
-    t.test("positional constructor field", "type Point(x Int,y Int)\n", "type Point(x Int, y Int);\n");
+    t.test(
+        "comment in enum payload",
+        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
+        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
+    );
+    t.test(
+        "positional constructor field",
+        "type Point(x Int,y Int)\n",
+        "type Point(x Int, y Int);\n",
+    );
     t.test_error_contains("missing then rejected", "let main() Void = if 1 1;\n", "then");
-    t.test_error_contains("legacy range form rejected", "let x=<...5\n", "expected primary expression");
+    t.test_error_contains(
+        "legacy range form rejected",
+        "let x=<...5\n",
+        "expected primary expression",
+    );
     // `while` and `for` always produce `Void`, so a `Void` binding IS their
     // value position and the language accepts it (document.md: "while and for
     // always produce Void"). These used to assert that the form is rejected --
     // a rule the language does not have -- which is why they could sit red
     // forever without anyone noticing: the harness did not compile at all.
-    t.test("while in Void binding", "let x Void = while true then {}\n", "let x Void = while true then {};\n");
-    t.test("for in Void binding", "let x Void = for item in [1,2] then println(item)\n", "let x Void = for item in [1, 2] then println(item);\n");
+    t.test(
+        "while in Void binding",
+        "let x Void = while true then {}\n",
+        "let x Void = while true then {};\n",
+    );
+    t.test(
+        "for in Void binding",
+        "let x Void = for item in [1,2] then println(item)\n",
+        "let x Void = for item in [1, 2] then println(item);\n",
+    );
+
+    // ====================================================================
+    // Language surface the formatter used to get wrong. Each of these was a
+    // real gap: a form the compiler accepts that this tool either rejected or
+    // rewrote into something else. Keep them -- the corpus gate only sees
+    // whatever happens to be written down today.
+    // ====================================================================
+
+    // Declaration modifiers may be written in any order (grammar.bnf
+    // <decl-modifier>); both spellings compile. The formatter keeps the order
+    // it was given rather than normalising it.
+    t.test(
+        "foreign before access modifier",
+        "foreign public let foo Int;\n",
+        "foreign public let foo Int;\n",
+    );
+    t.test(
+        "access modifier before foreign",
+        "public foreign let foo Int;\n",
+        "public foreign let foo Int;\n",
+    );
+    t.test(
+        "intrinsic before access modifier",
+        "intrinsic public type Foo;\n",
+        "intrinsic public type Foo;\n",
+    );
+
+    // `mutable` on a trait method parameter (grammar.bnf <func-param>). It was
+    // accepted for free functions and rejected inside a trait body.
+    t.test(
+        "mutable param in trait method",
+        "trait T {\ninc(self, mutable value Int) Int;\n}\n",
+        "trait T {\n    inc(self, mutable value Int) Int;\n};\n",
+    );
+    t.test(
+        "mutable param in given method",
+        "type A();\ntrait T {\ninc(self, mutable value Int) Int;\n}\ngiven A as T {\ninc(self, mutable value Int) Int = value;\n}\n",
+        "type A();\ntrait T {\n    inc(self, mutable value Int) Int;\n};\ngiven A as T {\n    inc(self, mutable value Int) Int = value;\n};\n",
+    );
+
+    // Default values are literals, and the literal set includes `..` (the empty
+    // range) and rune literals (grammar.bnf <default-value-literal>).
+    t.test(
+        "empty range default",
+        "type Span(range: Range[Int] = ..)\n",
+        "type Span(range: Range[Int] = ..);\n",
+    );
+    t.test("rune default", "type C(c: Rune = 'x')\n", "type C(c: Rune = 'x');\n");
+
+    // Pair destructuring: `for (a, b) in`, and `(a, b)` as a pattern under
+    // `when` / `is`. All of these were "expected ')', got ','".
+    t.test(
+        "for pair binding",
+        "let main() Void = {\nfor (left, right) in pairs then {\nprintln(left);\n};\n};\n",
+        "let main() Void = {\n    for (left, right) in pairs then {\n        println(left);\n    };\n};\n",
+    );
+    t.test(
+        "pair pattern in when",
+        "let main() Void = {\nlet s = when p in {\n(a, b) then a + b,\n};\n};\n",
+        "let main() Void = {\n    let s = when p in {\n        (a, b) then a + b,\n    };\n};\n",
+    );
+    t.test(
+        "pair pattern in is",
+        "let main() Void = {\nif p is (a, b) then {\nprintln(a);\n};\n};\n",
+        "let main() Void = {\n    if p is (a, b) then {\n        println(a);\n    };\n};\n",
+    );
+
+    // `name Type` binds the matched trait-object implementation; `mutable name
+    // Type` binds it mutably (grammar.bnf <trait-object-type-binding-pattern>).
+    t.test(
+        "trait object type binding pattern",
+        "let f(t T) Int = when t in {\nio ProbeError then 1,\n_ then 0,\n};\n",
+        "let f(t T) Int = when t in {\n    io ProbeError then 1,\n    _ then 0,\n};\n",
+    );
+    t.test(
+        "mutable trait object type binding pattern",
+        "let f(t T) Int = when t in {\nmutable io ProbeError then 1,\n_ then 0,\n};\n",
+        "let f(t T) Int = when t in {\n    mutable io ProbeError then 1,\n    _ then 0,\n};\n",
+    );
+
+    // An import list may span lines; the line breaks are kept, because `using`
+    // is carried through as a token list rather than re-laid out.
+    t.test(
+        "multiline import list",
+        "using \"a/b\" { x as y, z as w,\n    q, };\n",
+        "using \"a/b\" { x as y, z as w,\n    q, };\n",
+    );
+
+    // A comment written on its own line documents what follows. Glueing it to
+    // the previous line turns it into a trailing comment on the wrong item --
+    // the prose survives, the meaning does not.
+    t.test(
+        "own-line comment stays on its own line",
+        "type S(\n    a Int,\n    // documents b\n    b UInt,\n);\n",
+        "type S(\n    a Int,\n    // documents b\n    b UInt,\n);\n",
+    );
+    // Comment text is byte-for-byte the author's, trailing spaces included. The
+    // test runner reads `// EXPECT: ` markers -- trimming one rewrites an
+    // expectation.
+    t.test(
+        "comment trailing space preserved",
+        "let x Int = 1; // note:  \n",
+        "let x Int = 1; // note:  \n",
+    );
+
+    // Multiline strings carry their own column layout; the closing `"""` sets
+    // the indentation that gets stripped at compile time, so re-indenting the
+    // interior would change the value.
+    t.test(
+        "multiline string interior untouched",
+        "let main() Void = {\nlet s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
+        "let main() Void = {\n    let s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
+    );
+
+    // A function declaration without a body needs `foreign` or `intrinsic`.
+    // Parsing it as a variable would drop the parameter list on the floor.
+    t.test_error_contains(
+        "body-less function without modifier rejected",
+        "let bad(x Int) Int;\n",
+        "foreign",
+    );
+
+    // The contract, through the checked entry point: every one of these must
+    // come back byte-identical to its expectation AND survive a second pass.
+    t.test_checked(
+        "checked: foreign modifier order",
+        "foreign public let foo Int;\n",
+        "foreign public let foo Int;\n",
+    );
+    t.test_checked(
+        "checked: pair pattern",
+        "let s = when p in {\n(a, b) then a + b,\n};\n",
+        "let s = when p in {\n    (a, b) then a + b,\n};\n",
+    );
+    t.test_checked(
+        "checked: comment with trailing space",
+        "let x Int = 1; // note:  \n",
+        "let x Int = 1; // note:  \n",
+    );
+    t.test_checked(
+        "checked: multiline string",
+        "let s = \"\"\"\n  a\n  b\n  \"\"\";\n",
+        "let s = \"\"\"\n  a\n  b\n  \"\"\";\n",
+    );
 
     t.summary();
+
+    // The inline assertions above cover the language surface. This covers the
+    // codebase: every `.koral` file under the real source trees has to format
+    // without error, without losing a token, and to a fixed point. Test cases
+    // under `tests/` are deliberately excluded -- a large share of them are
+    // written to be rejected.
+    run_corpus_gate(t);
+};
+
+// ============================================================================
+// Corpus gate
+// ============================================================================
+
+/// The directories that hold real Koral source: the code people edit and ship.
+let corpus_roots() List[String] = ["std", "compiler", "toolchain", "samples"];
+
+let run_corpus_gate(t TestRunner) Void = {
+    let repo_root = find_repo_root() or else {
+        eprintln("CORPUS GATE: \(it.message())");
+        exit(1);
+    };
+
+    let mutable checked UInt = 0;
+    let mutable failed UInt = 0;
+
+    for relative in corpus_roots() then {
+        let root = repo_root.join(relative);
+        if not path_exist(root) then {
+            continue;
+        };
+
+        let mutable walker = walk_dir(root) or else {
+            eprintln("CORPUS GATE: cannot walk \(root.to_string()): \(it.message())");
+            exit(1);
+        };
+
+        while walker.next() is .Some(entry) then {
+            let name = entry.name();
+            if name == ".build" or name == "node_modules" then {
+                continue;
+            };
+            if not entry.is_file() or not name.ends_with(".koral") then {
+                continue;
+            };
+
+            let path = entry.path();
+            // Fixtures under a `test/cases` directory are inputs, not source --
+            // some of them exist precisely to be rejected.
+            if path.to_string().contains("/test/cases/") then {
+                continue;
+            };
+
+            checked += 1;
+            let source = read_text_file(path) or else {
+                failed += 1;
+                eprintln(
+                    "CORPUS GATE FAIL: cannot read \(path.to_string()): \(it.message())",
+                );
+                continue;
+            };
+
+            when format_source_checked(source) in {
+                .Ok(_) then {},
+                .Error(e) then {
+                    failed += 1;
+                    eprintln("CORPUS GATE FAIL: \(path.to_string())");
+                    eprintln("  \(e.message())");
+                },
+            };
+        };
+    };
+
+    println("corpus gate: \(checked) files checked, \(failed) failed");
+    if failed > 0 then {
+        exit(1);
+    };
+};
+
+let find_repo_root() Result[Path] = {
+    let mutable cursor = current_dir() or return;
+
+    let mutable steps UInt = 0;
+    while steps < 12 then {
+        if path_exist(cursor.join("std").join("std.koral")) then {
+            return Result[Path].Ok(cursor);
+        };
+        let parent = cursor.dir_name();
+        if parent.to_string() == cursor.to_string() then {
+            break;
+        };
+        cursor = parent;
+        steps += 1;
+    };
+
+    return Result[Path].Error("cannot locate repo root (missing std/std.koral)");
 };

@@ -1,0 +1,283 @@
+// ============================================================================
+// Koral Syntax - CST Node Types
+// ============================================================================
+// A fully structured concrete syntax tree. Every token that carries spelling
+// (keywords, delimiters, literals, comments) is retained on the node, so the
+// printer can reproduce source without re-deriving spacing from token text.
+// Consumers: the parser builds these, the printer reads them. Tools that only
+// need to understand Koral shape (the API doc generator, for instance) walk
+// them instead of scanning raw lines.
+// ============================================================================
+
+// ============================================================================
+// CST Type Nodes
+// ============================================================================
+
+public type CstType {
+    Named(name Token),
+    SelfType(kw Token),
+    Mutable(inner CstType, kw Token),
+    // A bare `mutable` in a generic PARAMETER constraint (`[T mutable]`). It is
+    // a type-kind constraint keyword, not a type (grammar.bnf <trait-constraint>),
+    // so it carries no inner type.
+    ConstraintKeyword(kw Token),
+    Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
+    Function(func_kw Token, lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
+    Ref(inner CstType, kw Token),
+    Ptr(inner CstType, kw Token),
+    Weakref(inner CstType, kw Token),
+};
+
+// A type argument with optional trailing comma
+public type CstTypeArg(inner CstType, comma Option[Token]);
+
+// ============================================================================
+// CST Expression Nodes
+// ============================================================================
+
+public type CstExpr {
+    // Literals
+    IntLit(token Token),
+    FloatLit(token Token),
+    StrLit(token Token),
+    InterpStr(token Token),
+    BoolLit(token Token),
+    Ident(token Token),
+    SelfExpr(token Token),
+    UnderscoreExpr(token Token),
+    Commented(comments List[Token], inner CstExpr),
+
+    // Operators
+    BinaryOp(left CstExpr, op Token, right CstExpr),
+    UnaryMinus(op Token, operand CstExpr),
+    Deref(op Token, operand CstExpr),
+    AddressOf(op Token, raw_kw Option[Token], mut_kw Option[Token], operand CstExpr),
+    NotExpr(op Token, operand CstExpr),
+    IsExpr(subject CstExpr, is_kw Token, not_kw Option[Token], pattern CstPattern),
+    BitwiseNot(op Token, operand CstExpr),
+    PrefixKw(kw Token, operand CstExpr),
+    TypeCast(lparen Token, cast_type CstType, rparen Token, operand CstExpr),
+    Paren(lparen Token, inner CstExpr, rparen Token),
+    PairExpr(lparen Token, first CstExpr, comma Token, second CstExpr, rparen Token),
+    TraitQualification(lparen Token, base CstExpr, as_kw Token, trait_type CstType, rparen Token),
+
+    // Access and calls
+    FieldAccess(base CstExpr, dot Token, field Token),
+    QualifiedCall(base CstExpr, dot Token, trait_lparen Token, trait_name Token, trait_rparen Token, method_name Token, lparen Token, args List[CstCallArg], rparen Token),
+    Call(callee CstExpr, lparen Token, args List[CstCallArg], rparen Token),
+    SubscriptExpr(base CstExpr, lbracket Token, args List[CstCallArg], rbracket Token),
+    GenericInst(base CstExpr, lbracket Token, type_args List[CstTypeArg], rbracket Token),
+    ImplicitMember(dot Token, name Token, lparen Option[Token], args List[CstCallArg], rparen Option[Token]),
+
+    // Control flow
+    Block(lbrace Token, items List[CstItem], tail_expr Option[CstExpr], rbrace Token),
+    If(kw Token, cond CstExpr, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
+    IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
+    While(kw Token, cond CstExpr, then_kw Token, body CstExpr),
+    WhilePattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, body CstExpr),
+    For(kw Token, binding CstPattern, eq Token, iterable CstExpr, then_kw Token, body CstExpr),
+    When(kw Token, subject CstExpr, is_kw Token, lbrace Token, arms List[CstWhenArm], rbrace Token),
+
+    // Chaining
+    AndThen(left CstExpr, and_kw Token, then_kw Token, right CstExpr),
+    OrElse(left CstExpr, or_kw Token, else_kw Token, right CstExpr),
+    OrReturn(left CstExpr, or_kw Token, return_kw Token),
+
+    // Range
+    RangeExpr(left Option[CstExpr], op Token, right Option[CstExpr]),
+
+    // Collection literals
+    EmptyLiteral(lbracket Token, rbracket Token),
+    CollectionLiteral(lbracket Token, elements List[CstCollectionElement], rbracket Token),
+    DictLiteral(lbracket Token, entries List[CstDictEntry], rbracket Token),
+
+    // Lambda
+    Lambda(lparen Token, params List[CstLambdaParam], rparen Token, ret_type Option[CstType], arrow Token, body CstExpr),
+
+    // Enum variant declaration in type enum body
+    EnumVariant(name Token, lparen Option[Token], fields List[CstEnumField], rparen Option[Token]),
+};
+
+// Call argument with optional trailing comma
+public type CstCallArg {
+    Value(label Option[Token], colon Option[Token], value CstExpr, comma Option[Token]),
+    DefaultFill(leading_comments List[Token], ellipsis Token, comma Option[Token]),
+};
+
+public type CstCollectionElement(value CstExpr, comma Option[Token]);
+
+public type CstDictEntry(key CstExpr, colon Token, value CstExpr, comma Option[Token]);
+
+// Lambda parameter
+public type CstLambdaParam(name Token, param_type Option[CstType], comma Option[Token]);
+
+// Enum variant field: Name(Type) as `fieldName FieldType` or `fieldName: FieldType`
+// `comments` are the comment tokens that preceded the field in source. A
+// formatter that drops them is broken, and `typed_ast.koral` keeps one on its
+// identity slot -- so they travel with the field they document.
+public type CstEnumField(
+    comments List[Token],
+    name Token,
+    colon Option[Token],
+    field_type CstType,
+    default_value Option[CstDefault],
+    comma Option[Token],
+);
+
+// A named field's or parameter's `= <literal>` default (grammar.bnf <field>,
+// <func-param>, <variant-field>). The value is a LITERAL, never an expression:
+// number, bool, string, rune, `[]`, or a bare range -- so the tokens are kept
+// as written.
+public type CstDefault(eq Token, value_tokens List[Token]);
+
+// ============================================================================
+// CST Pattern Nodes
+// ============================================================================
+
+public type CstPattern {
+    Wildcard(token Token),
+    Variable(name Token),
+    MutVariable(mut_kw Token, name Token),
+    PatIntLit(token Token),
+    NegIntLit(minus Token, token Token),
+    PatStrLit(token Token),
+    PatBoolLit(token Token),
+    EnumCase(dot Token, name Token, lparen Option[Token], args List[CstPatternArg], rparen Option[Token]),
+    StructPattern(name Token, lparen Token, args List[CstPatternArg], rparen Token),
+    // `> -5` -- the minus is part of the pattern and must survive a round trip
+    Comparison(op Token, minus Option[Token], value Token),
+    AndPattern(left CstPattern, and_kw Token, right CstPattern),
+    OrPattern(left CstPattern, or_kw Token, right CstPattern),
+    NotPattern(not_kw Token, inner CstPattern),
+    ParenPattern(lparen Token, inner CstPattern, rparen Token),
+    // (a, b) -- pair destructuring, also the `for (a, b) in ...` binding form
+    PairPattern(lparen Token, left CstPattern, comma Token, right CstPattern, rparen Token),
+    // [mutable] name Type -- bind the matched trait-object implementation
+    TypeBinding(mut_kw Option[Token], name Token, bound_type CstType),
+};
+
+public type CstPatternArg(
+    label Option[Token],
+    colon Option[Token],
+    pattern CstPattern,
+    comma Option[Token],
+);
+
+// ============================================================================
+// CST When Arm
+// ============================================================================
+
+public type CstWhenArm(
+    leading_comments List[Token],
+    pattern CstPattern,
+    then_kw Token,
+    body CstExpr,
+    comma Option[Token],
+    trailing_comments List[Token],
+);
+
+// ============================================================================
+// CST Parameter and Generic Parameter
+// ============================================================================
+
+public type CstParam {
+    SelfParam(kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]),
+    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
+};
+
+public type CstGenericParam(name Token, constraints List[CstType], comma Option[Token]);
+
+public type CstGenericParams(
+    lbracket Token,
+    params List[CstGenericParam],
+    rbracket Token,
+);
+
+// ============================================================================
+// CST Statements
+// ============================================================================
+
+public type CstStmt {
+    VarDecl(let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType], eq Token, value CstExpr),
+    PairVarDecl(let_kw Token, lparen Token, first CstPairBinding, comma Token, second CstPairBinding, rparen Token, eq Token, value CstExpr),
+    Assignment(target CstExpr, op Token, value CstExpr),
+    ExprStmt(expr CstExpr, semi Option[Token]),
+    Defer(kw Token, value CstExpr),
+    Return(kw Token, value Option[CstExpr]),
+    Break(kw Token),
+    Continue(kw Token),
+};
+
+public type CstPairBinding(
+    mut_kw Option[Token],
+    name Token,
+    binding_type Option[CstType],
+    is_discard Bool,
+);
+
+// ============================================================================
+// CST Type Body (for type declarations)
+// ============================================================================
+
+public type CstTypeBody {
+    Struct(lparen Token, items List[CstStructBodyItem], rparen Token),
+    Enum(lbrace Token, cases List[CstItem], rbrace Token),
+    Alias(eq Token, target CstType),
+    Empty(),
+};
+
+public type CstStructBodyItem {
+    Field(field CstStructField),
+    Comment(token Token),
+    TrailingComment(token Token),
+    BlankLine(),
+};
+
+public type CstStructField(
+    mut_kw Option[Token],
+    access Option[Token],
+    name Token,
+    colon Option[Token],
+    field_type CstType,
+    default_value Option[CstDefault],
+    comma Option[Token],
+);
+
+// ============================================================================
+// CST Declarations
+// ============================================================================
+
+public type CstDecl {
+    Using(tokens List[Token]),
+    ForeignUsing(foreign_kw Token, tokens List[Token]),
+    Func(vis Option[Token], modifiers List[Token], let_kw Option[Token], mut_kw Option[Token], generic_params Option[CstGenericParams], name Option[Token], lparen Option[Token], params List[CstParam], rparen Option[Token], return_type Option[CstType], eq Token, body CstExpr),
+    ForeignDecl(vis Option[Token], modifiers List[Token], let_kw Option[Token], mut_kw Option[Token], generic_params Option[CstGenericParams], name Option[Token], lparen Option[Token], params List[CstParam], rparen Option[Token], return_type Option[CstType]),
+    Type(vis Option[Token], modifiers List[Token], kw Token, mut_kw Option[Token], generic_params Option[CstGenericParams], name Token, body CstTypeBody),
+    Trait(vis Option[Token], kw Token, generic_params Option[CstGenericParams], name Token, super_traits List[CstType], lbrace Token, members List[CstItem], rbrace Token),
+    Given(vis Option[Token], modifiers List[Token], kw Token, generic_params Option[CstGenericParams], target CstType, as_kw Option[Token], trait_type Option[CstType], lbrace Token, members List[CstItem], rbrace Token),
+    GivenNot(vis Option[Token], modifiers List[Token], kw Token, generic_params Option[CstGenericParams], target CstType, not_kw Token, trait_name Token),
+    Var(vis Option[Token], let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType]),
+    TraitMethod(vis Option[Token], generic_params Option[CstGenericParams], name Token, lparen Token, params List[CstTraitMethodParam], rparen Token, return_type Option[CstType]),
+};
+
+// Trait method parameter
+public type CstTraitMethodParam {
+    // self / *self / *self mutable
+    SelfParam(kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]),
+    // [mutable] name [: Type [= default]]
+    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
+};
+
+// ============================================================================
+// CST Item and File
+// ============================================================================
+
+public type CstItem {
+    Decl(decl CstDecl),
+    Stmt(stmt CstStmt),
+    Comment(token Token),
+    TrailingComment(token Token),
+    BlankLine(),
+};
+
+public type CstFile(items List[CstItem]);
