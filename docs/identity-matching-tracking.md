@@ -41,24 +41,24 @@
 ## 2. 验证链（每步迁移后的固定流程，顺序不可换）
 
 ```bash
-# 1) Swift 全量
+# 1) 种子自检
 ./bin/compiler-test-runner/compiler_runner --compiler swift \
-  --swift-koralc compiler/.build/release/koralc --timeout 60 -j 8
+  --swift-koralc compiler-reference/.build/release/koralc --timeout 60 -j 8
 
-# 2) host 编出 bootstrap（stage1）~83s
-compiler/.build/release/koralc build --package-config bootstrap/koral.json \
-  --target-module koralc -o bin/bootstrap
+# 2) 种子编出 bootstrap（stage1）~83s
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json \
+  --target-module koralc -o bin/compiler
 
 # 3) stage1 全量
 ./bin/compiler-test-runner/compiler_runner --compiler bootstrap \
-  --bootstrap-koralc bin/bootstrap/koralc --timeout 60 -j 8
+  --bootstrap-koralc bin/compiler/koralc --timeout 60 -j 8
 
 # 4) 自举两轮 + 不动点（emit-c ~45s，clang ~40s）
-bin/bootstrap/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o /tmp/s2
+bin/compiler/koralc emit-c --package-config compiler/koral.json --target-module koralc -o /tmp/s2
 clang /tmp/s2/koralc.c std/koral_runtime.c -I std -o /tmp/s2/koralc -Wno-everything -O1
-/tmp/s2/koralc       emit-c --package-config bootstrap/koral.json --target-module koralc -o /tmp/s3
+/tmp/s2/koralc       emit-c --package-config compiler/koral.json --target-module koralc -o /tmp/s3
 clang /tmp/s3/koralc.c std/koral_runtime.c -I std -o /tmp/s3/koralc -Wno-everything -O1
-/tmp/s3/koralc       emit-c --package-config bootstrap/koral.json --target-module koralc -o /tmp/s4
+/tmp/s3/koralc       emit-c --package-config compiler/koral.json --target-module koralc -o /tmp/s4
 cmp /tmp/s3/koralc.c /tmp/s4/koralc.c && echo "FIXED POINT"
 
 # 5) 悬空符号扫描必须为 0
@@ -84,13 +84,13 @@ grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' /tmp/s3/koralc.c
 
 | 文件 | 变更 |
 |---|---|
-| `bootstrap/koralc/typed/types.koral` | `qualified_trait_key` → **`qualified_symbol_key(module_path, name)`**，返回 `module.path.name` |
-| `bootstrap/koralc/sema/scope.koral` | 新增 `define_scoped_type` / `lookup_type_in_module`（先 generic_params，再 qualified，最后 bare） |
-| `bootstrap/koralc/sema/name_collector.koral` | 6 处 `define_scoped_type` |
-| `bootstrap/koralc/sema/type_checker_decls.koral` / `type_checker.koral` | 类型别名同样 dual-key |
-| `bootstrap/koralc/sema/type_checker_resolution.koral` | `resolve_type_name_binding` / `try_resolve_named_type_in_scope_without_diag` / `try_resolve_named_type_without_diag` / `resolve_named_type` 全改走 `lookup_type_in_module`；trait 兜底走 `trait_registry.get_in_module` |
-| `bootstrap/koralc/sema/given_locality.koral` | orphan 规则改查 `get_in_module` + `lookup_type_in_module` |
-| `compiler/Sources/KoralCompiler/Sema/Scope.swift` | 镜像：`typeKey(_:modulePath:)` / `defineScopedType` / `typeInCurrentModule` / `hasTypeDefinition` 改义为「本模块是否声明」/ `defineType` 与 `overwriteType` dual-key |
+| `compiler/koralc/typed/types.koral` | `qualified_trait_key` → **`qualified_symbol_key(module_path, name)`**，返回 `module.path.name` |
+| `compiler/koralc/sema/scope.koral` | 新增 `define_scoped_type` / `lookup_type_in_module`（先 generic_params，再 qualified，最后 bare） |
+| `compiler/koralc/sema/name_collector.koral` | 6 处 `define_scoped_type` |
+| `compiler/koralc/sema/type_checker_decls.koral` / `type_checker.koral` | 类型别名同样 dual-key |
+| `compiler/koralc/sema/type_checker_resolution.koral` | `resolve_type_name_binding` / `try_resolve_named_type_in_scope_without_diag` / `try_resolve_named_type_without_diag` / `resolve_named_type` 全改走 `lookup_type_in_module`；trait 兜底走 `trait_registry.get_in_module` |
+| `compiler/koralc/sema/given_locality.koral` | orphan 规则改查 `get_in_module` + `lookup_type_in_module` |
+| `compiler-reference/Sources/KoralCompiler/Sema/Scope.swift` | 镜像：`typeKey(_:modulePath:)` / `defineScopedType` / `typeInCurrentModule` / `hasTypeDefinition` 改义为「本模块是否声明」/ `defineType` 与 `overwriteType` dual-key |
 
 **看护用例**：`tests/compiler-cases/cross_module_same_name_type_test/`（3 个模块，`mod_a`/`mod_b`
 各声明 `Plain`/`Box`/`Shape`/`Circle`/`Square`）。**注意**：该用例注释里写明
@@ -243,7 +243,7 @@ stage2 自举     557/557
 | variant pattern 不能匹配字面量 | `.Builtin("Ref")` 不可达 | 绑 `.Builtin(kind)` 后 `==` |
 | Dict 键需 `given T as Eq`/`as Hash` | 编译不过 | 补 conformance |
 | 构造实参按位置、顺序敏感 | 字段错位 | 对齐声明顺序；改字段类型时**所有构造点**一起改 |
-| `rm -rf compiler/.build` | 主机编译器没了 | `cd compiler && swift build -c release`（~45s） |
+| `rm -rf compiler-reference/.build` | 种子编译器没了 | `cd compiler-reference && swift build -c release`（~45s） |
 | 脚本按 `};` 匹配替换 | 剪错 `for` 的括号，留孤儿尾巴 | 手工修；避免大范围正则 |
 | `when` 换成 `if` 时漏了收尾 `, .None() then {},` | 编译不过 | 成块替换 |
 
@@ -327,7 +327,7 @@ when x in { .Variant(a) then ..., _ then ... }
 | `Monomorphizer.extensionMethodDefIds` | `MethodInstanceKey` |
 | `MonomorphizedProgram.staticMethodLookup` / `MIRProgram.staticMethodLookup` | `MethodInstanceKey` |
 
-新增 `compiler/Sources/KoralCompiler/Sema/MethodIdentity.swift`：`MethodOwner` /
+新增 `compiler-reference/Sources/KoralCompiler/Sema/MethodIdentity.swift`：`MethodOwner` /
 `MethodInstanceKey` / `methodOwner(of:)` / `methodOwnerAndArgs(of:)` /
 `receiverMethodKey(...)` / `methodOwnerForName(...)`。
 

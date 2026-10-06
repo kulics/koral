@@ -424,10 +424,10 @@ bootstrap 编译器自己的包（约 10 万行）里 **243 个 `Option` 实例�
 
 #### 后续修复：bootstrap 的 `break` 分支边界误判（已修）
 
-原先 `bin/bootstrap/koralc check --package-config bootstrap/koral.json` 会报
+原先 `bin/compiler/koralc check --package-config compiler/koral.json` 会报
 
 ```
-bootstrap/koralc/mono/mono_expr_substitution.koral:1152:65: error: break cannot penetrate through branch boundary
+compiler/koralc/mono/mono_expr_substitution.koral:1152:65: error: break cannot penetrate through branch boundary
 ```
 
 同一个文件 Swift 编译器接受。已确认**不是本次表示层改动引起的**（规则实现在 `mono/` 与 `sema/`，
@@ -585,8 +585,8 @@ case .mutableBorrowedReference: return .byMutRef
 
 ## 2. 实测
 
-测量口径：macOS ARM64，`compiler/.build/release/koralc` 产出 C，同源码 clang `-O1` 构建。
-工作负载 = bootstrap 编译器 `check --package-config bootstrap/koral.json --target-module koralc`
+测量口径：macOS ARM64，`compiler-reference/.build/release/koralc` 产出 C，同源码 clang `-O1` 构建。
+工作负载 = bootstrap 编译器 `check --package-config compiler/koral.json --target-module koralc`
 （9.9 万行 Koral + std）。
 
 ### 2.1 大小
@@ -853,7 +853,7 @@ static const struct __koral_payload_Std_String __koral_lit_42 = { data, len };
 | `struct __koral_Ref` | `koral_runtime.h:14-17` | 值与借用统一为 `void*` |
 | `struct __koral_TraitRef.control` | `koral_runtime.h:25-29` | 由 `ptr` 推出 |
 
-### 类型系统（`compiler/Sources/KoralCompiler` + `bootstrap/koralc`）
+### 类型系统（`compiler-reference/Sources/KoralCompiler` + `compiler/koralc`）
 
 > **第 2 步修正**：`Type.borrowedReference` / `mutableBorrowedReference` 与 `assertNoBorrowedReferenceType`
 > **不删** —— 类型是「借用」的标记，禁令是「借用不逃逸」的保证，两者都是薄指针方案的一部分。

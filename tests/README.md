@@ -8,57 +8,61 @@
 
 ## Prepare compiler binaries
 
-Build the Swift `koralc` first:
+`compiler/` is the primary implementation; `compiler-reference/` is the **frozen** Swift compiler
+(reference oracle + build seed + backup). The suite is gated on `compiler/` first. Note the runner's
+CLI predates these directory names: `--compiler bootstrap` means the self-hosting compiler built
+from `compiler/`, and `--compiler swift` means the frozen seed.
+
+Build the frozen seed (release — debug is ~6x slower at generating C, see
+`docs/developer-guide.md`):
 
 ```bash
-cd compiler
-swift build -c debug
+cd compiler-reference
+swift build -c release
 cd ..
 ```
 
-Build the shared test runner:
+Build the compiler and the shared test runner **with the seed**. This is a trust boundary: if the
+implementation under test built the harness, a codegen defect in it would corrupt the oracle.
 
 ```bash
-compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
-```
-
-If you want to test the bootstrap compiler, build its `koralc` entry too:
-
-```bash
-compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
+compiler-reference/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 ```
 
 ## Parallel execution
 
-The shared runner supports parallel execution with `-j <N>` or `-j=<N>`.
-For bootstrap runs, effective parallelism is currently capped at `6` workers for stability; larger requested values are reduced internally.
+The shared runner supports parallel execution with `-j <N>` or `-j=<N>`; the worker count is what
+`-j` asks for, clamped to the number of cases.
 
-Run against the Swift compiler:
+Run against the primary implementation (the gate — this is the default, so `--compiler bootstrap`
+may be omitted):
 
 ```bash
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
-Run against the bootstrap compiler:
+Seed self-check — the frozen reference compiler:
 
 ```bash
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler-reference/.build/release/koralc -j=8
 ```
 
 Run against a custom compiler binary:
 
 ```bash
-./bin/compiler-test-runner/compiler_runner.exe --compiler custom --compiler-bin <path-to-compiler> -j=8
+./bin/compiler-test-runner/compiler_runner --compiler custom --compiler-bin <path-to-compiler> -j=8
 ```
 
 Useful flags:
 
 - `--cases <dir>`: override the case root, default `tests/compiler-cases`
+- `--compiler <kind>`: `bootstrap` (default) | `swift` | `custom` | `differential`
 - `--filter <substring>`: run only matching cases
 - `--timeout <sec>`: per-case timeout, default `120`
 - `--memory-limit <MB>`: post-exit peak RSS threshold, default `1024`; cases whose recorded peak RSS exceeds the limit are marked `memory_exceeded`
 - `--report-file <path>`: override the stable summary log path
-- `--compare-diagnostics`: with `--compiler differential`, also require the two compilers to say exactly the same thing
+- `--compare-diagnostics`: with `--compiler differential`, also require the two compilers to say exactly the same thing — already the default, kept so existing invocations keep working
 
 `--filter` uses plain substring matching only. It does not accept regular expressions, so focused semantic reruns should pass exact case-name substrings one-by-one.
 
@@ -66,14 +70,15 @@ Useful flags:
 
 Each of the modes above checks one compiler against the `// EXPECT` comments in
 the case file — a hand-written oracle. This mode checks **the two compilers
-against each other**, which is what has to keep holding before the Swift
-compiler can be deleted:
+against each other**. The seed is **frozen, not on death row**: it is the
+standing reference oracle, and this is the cross-check that keeps the two honest.
+It stays mandatory in CI.
 
 ```bash
 ./bin/compiler-test-runner/compiler_runner \
   --compiler differential \
-  --swift-koralc compiler/.build/release/koralc \
-  --bootstrap-koralc bin/bootstrap/koralc \
+  --swift-koralc compiler-reference/.build/release/koralc \
+  --bootstrap-koralc bin/compiler/koralc \
   --timeout 60 -j 8
 ```
 
@@ -91,13 +96,12 @@ both satisfy "output contains `show` then `base`" and still print entirely
 different things in between. Failures name the first line that differs and what
 each side said, rather than just reporting that the outputs differ.
 
-Layer 3 is behind `--compare-diagnostics`. It is off by default because the two
-compilers currently disagree on diagnostic text for a large slice of the corpus
-(210 of 566 cases as of 2026-10-03 — span columns, the `1 error generated.`
-trailer, stage prefixes, and some genuine wording differences). Diagnostic
-*wording* is already cross-checked another way: every `EXPECT-ERROR` case runs
-under both compilers and asserts the same substring. Turn the flag on to get the
-full inventory.
+Layer 3 compares diagnostic text and is **on by default**. It used to be opt-in
+while a backlog of divergences was open (210 of 566 cases as of 2026-10-03 —
+span columns, the `1 error generated.` trailer, stage prefixes, and some genuine
+wording differences). That backlog is closed: as of 2026-10-06 the two compilers
+agree on diagnostic text for the whole 596-case corpus (596/596). A one-sided
+wording drift now fails the gate instead of hiding behind a flag.
 
 The generated artifacts are deliberately **not** compared. The two compilers
 stamp DefIds into C symbol names under different numbering rules, so a textual
@@ -199,12 +203,12 @@ cases=(
 )
 
 for case_name in "${cases[@]}"; do
-	./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler/.build/debug/koralc --filter "$case_name"
+	./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc --filter "$case_name"
 done
 ```
 
-Swap the compiler arguments to rerun the same bucket on bootstrap:
+Swap the compiler arguments to rerun the same bucket as a seed self-check:
 
 ```bash
-./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc --filter "$case_name"
+./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler-reference/.build/release/koralc --filter "$case_name"
 ```

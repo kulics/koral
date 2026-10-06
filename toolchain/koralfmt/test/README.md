@@ -18,8 +18,8 @@
 ## 运行
 
 ```bash
-# 编译（用 release，见 docs/developer-guide.md 的说明）
-compiler/.build/release/koralc build toolchain/koralfmt/test_fmt.koral -o /tmp/fmttest
+# 编译（用主实现；release 口径见 docs/developer-guide.md）
+bin/compiler/koralc build toolchain/koralfmt/test_fmt.koral -o /tmp/fmttest
 
 # 跑
 /tmp/fmttest/test_fmt

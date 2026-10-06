@@ -597,7 +597,7 @@ error: 未知符号 ".."
 | 模块导入 | `using std::io { X }` → `using "std/io" { X }`；`{ .. }` → 省略 | 330 处 / 236 文件 |
 | manifest | 加 `package`；`modules` key `std` → `.`、`std::io` → `io`；`module_aliases` → `dependencies` 的 key | 中 |
 | Swift 编译器 | Parser / ModuleResolver / PackageManifest | 中 |
-| bootstrap 编译器 | `bootstrap/koralc` 的 lexer / parser / module / driver | 大 |
+| 主实现编译器 | `compiler/koralc` 的 lexer / parser / module / driver | 大 |
 | toolchain | `toolchain/koral/config.koral` | 中 |
 | 测试 | `tests/compiler-cases` | 559 用例 |
 | 文档 | `grammar.bnf` / `document.md` / `document-zh.md` | 中 |

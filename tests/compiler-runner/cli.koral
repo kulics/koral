@@ -6,16 +6,20 @@ file_private let is_windows_host() Bool =
 
 file_private let default_bootstrap_koralc_path() Path = {
     if is_windows_host() then {
-        return "bin/bootstrap/koralc.exe".into_path();
+        return "bin/compiler/koralc.exe".into_path();
     };
-    return "bin/bootstrap/koralc".into_path();
+    return "bin/compiler/koralc".into_path();
 };
 
 file_private let default_swift_koralc_path() Path = {
+    // The frozen reference compiler (compiler-reference/) is the seed and the
+    // oracle. Release, matching every documented invocation and CI -- the debug
+    // build is ~6x slower at generating C and is only for stepping through the
+    // compiler itself.
     if is_windows_host() then {
-        return "compiler/.build/debug/koralc.exe".into_path();
+        return "compiler-reference/.build/release/koralc.exe".into_path();
     };
-    return "compiler/.build/debug/koralc".into_path();
+    return "compiler-reference/.build/release/koralc".into_path();
 };
 
 file_private let parse_uint(value String, flag_name String) Result[UInt] = {
@@ -55,7 +59,8 @@ public let print_usage() Void =
           --bootstrap-koralc <path>    bootstrap compiler executable path
           --swift-koralc <path>        swift compiler executable path
           --compare-diagnostics        with --compiler differential, also require the two
-                                       compilers to say exactly the same thing (off by default)
+                                       compilers to say exactly the same thing (already the
+                                       default; accepted so existing invocations keep working)
           --report-file <path>         write stable summary log (default: tests/compiler-cases_output/_reports/latest-summary.log)
           --verbose                    print verbose case command logs
           -h, --help                   show this help
@@ -77,7 +82,11 @@ public let parse_runner_config() Result[RunnerConfig] = {
     let mutable bootstrap_koralc = default_bootstrap_koralc_path();
     let mutable swift_koralc = default_swift_koralc_path();
     let mutable report_file_opt = Option[Path].None();
-    let mutable compare_diagnostics = false;
+    // Diagnostic text is part of what the two compilers must agree on, so the
+    // differential gate compares it by default rather than relying on the caller
+    // to remember a flag. `--compare-diagnostics` is still accepted so existing
+    // invocations keep working; it asserts what is already the default.
+    let mutable compare_diagnostics = true;
     let mutable verbose = false;
 
     let mutable i UInt = 1;

@@ -118,14 +118,16 @@ text 段 163 840 → 接近 98 304。**不接受**「加个白名单把这些名
 固定流程，不可换序：
 
 ```
-1) Swift 套件    ./bin/compiler-test-runner/compiler_runner --compiler swift \
-                   --swift-koralc compiler/.build/release/koralc --timeout 60 -j 8
-2) host→stage1   compiler/.build/release/koralc build --package-config bootstrap/koral.json \
-                   --target-module koralc -o bin/bootstrap
-3) stage1 套件    --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc
+1) 种子自检      ./bin/compiler-test-runner/compiler_runner --compiler swift \
+                   --swift-koralc compiler-reference/.build/release/koralc --timeout 60 -j 8
+2) 种子→stage1   compiler-reference/.build/release/koralc build --package-config compiler/koral.json \
+                   --target-module koralc -o bin/compiler
+3) stage1 套件    --compiler bootstrap --bootstrap-koralc bin/compiler/koralc
 4) 自举两轮 + 不动点（emit-c + clang）+ 悬空扫描（必须为 0）
 5) stage2 套件    --compiler bootstrap --bootstrap-koralc /tmp/s2/koralc
 ```
+
+> 目录名与步骤措辞于 2026-10-06 随角色重组更新（见文末附录）；链的顺序与判据不变。
 
 目标：**559/559 ×3**，诊断一字未改。
 
@@ -550,9 +552,9 @@ lookup 通了，结果撞上这个。**前面那个 panic 把它挡住了**，�
 
 | 文件 | 改动 |
 |---|---|
-| `bootstrap/koralc/codegen/codegen_vtable.koral` | 头字段声明、`._Base =` 初始化 |
-| `bootstrap/koralc/codegen/codegen_mir.koral` | `vtable_prefix_struct_type_for_mir_method` 的内联结构体（照真 vtable 布局捏的，字段名必须逐个对齐） |
-| `compiler/Sources/KoralCompiler/CodeGen/CodeGenVtable.swift` | 同 bootstrap 两处 |
+| `compiler/koralc/codegen/codegen_vtable.koral` | 头字段声明、`._Base =` 初始化 |
+| `compiler/koralc/codegen/codegen_mir.koral` | `vtable_prefix_struct_type_for_mir_method` 的内联结构体（照真 vtable 布局捏的，字段名必须逐个对齐） |
+| `compiler-reference/Sources/KoralCompiler/CodeGen/CodeGenVtable.swift` | 同 bootstrap 两处 |
 | `std/koral_runtime.h` / `.c` | 注释 |
 
 **这个字段没人按名读。** 析构走的是 `((const struct __koral_VTableHeader*)ref->vtable)->destroy`
@@ -930,8 +932,8 @@ public let internal_compiler_error(detail String) String = {
 
 ```
 ./bin/compiler-test-runner/compiler_runner --compiler differential \
-    --swift-koralc compiler/.build/release/koralc \
-    --bootstrap-koralc bin/bootstrap/koralc -j 8
+    --swift-koralc compiler-reference/.build/release/koralc \
+    --bootstrap-koralc bin/compiler/koralc -j 8
 ```
 
 ### 对拍三层，一层比一层深
@@ -1197,3 +1199,67 @@ bootstrap 的 `parse_pattern_primary` 还留着 `.Star() → PatternNode.TraitOb
 Swift 568 · stage1 568 · FIXED POINT + 悬空 0 · stage2 568 · 行为对拍 568
 --compare-diagnostics   568/568
 ```
+
+---
+
+## 附：角色重组 —— 主实现转正、Swift 冻结为种子与预言机（2026-10-06）
+
+### 决定
+
+- **主实现拿正名**：`bootstrap/` → **`compiler/`**，一切开发落这里（自举优先）。
+- **Swift 实现加限定词并冻结**：`compiler/` → **`compiler-reference/`**，
+  参考预言机 + 构建种子 + 备份。
+- **不删 Swift 编译器。** 它从「将被删除的旧实现」转为「永久的第二实现 / 预言机」。
+
+> 目录命名的落点：`compiler/` = 主实现，`compiler-reference/` = 冻结参考。两者并列，名字
+> 自解释。构建产物同步为 `bin/compiler/koralc`。runner 旗标（`--compiler bootstrap` /
+> `--bootstrap-koralc` / `--swift-koralc`）**不变**——它们是对外 API，且 `bootstrap` 在旗标里
+> 指「自举出来的那一个」仍然准确。
+
+本计划正文的「战略前提」（删掉 Swift 之前必须先有独立预言机）以**删除**为终点。预言机
+就位之后的选择是**冻结**，不是删除——冻结反而加强验证：Swift 从「正在开发的第二实现」变成
+golden reference，bootstrap 单侧漂移会被对拍当场抓住。本附录取代该口径；**历史正文不改写**，
+「本期不删 Swift」与「第 4 步」的措辞按当时所写保留。
+
+### 为什么是现在
+
+转正的能力面在 2026-10-06 重新实测过：
+
+| | |
+|---|---|
+| 六步链 | 种子自检 596 · stage1 596 · FIXED POINT + 悬空 0 · stage2 596 · 对拍 596 |
+| `--compare-diagnostics` | **596/596**，诊断分歧已收成 0 |
+| 真实程序 | build-tool / doc-gen / formatter / fmt-tests / sample-cat / sample-expr-eval 两边全过，运行输出逐字节相同 |
+| 生成镜像 | bootstrap 比 Swift **小 8–13%**（`__text` 段） |
+| 编译速度 | build-tool 上 bootstrap **快 4.1×** |
+
+计划自己写的「删 Swift 的前置条件」= 独立对拍预言机，已于 2026-10-03 落地（第 3 步）；
+本计划列的 1a / 1b / 2 / 3 全部标记完成。**计划从未定义「转正」的门槛**（第 4 步在全文里
+没被定义过），所以这不是「差一项验收没过」，而是门槛空着——本次按角色变更处理。
+
+### 信任边界（重述，未放松）
+
+预言机（种子二进制）与测试执行器由**冻结的种子**构建，绝不由被测实现构建。理由不变：
+被测实现若构建测试脚手架，codegen 缺陷会污染预言机本身。
+
+### 具体改动
+
+- `git mv compiler compiler-reference`，然后 `git mv bootstrap compiler`；构建产物
+  `bin/bootstrap` → `bin/compiler`
+- `tests/compiler-runner/cli.koral`：默认 swift 路径改指 `compiler-reference/.build/release`
+  （原 `debug`，与文档/CI 的 release 口径不一致）；`--compare-diagnostics` 改成 differential
+  下**默认开**，让「强制」落在工具里而不是靠每次记得传
+- `toolchain/koral/cmd_build.koral`：`find_koralc()` 搜索序改主实现优先，种子退到最后兜底
+  （原先是 Swift debug 打头，且根本没有 release 路径）
+- CI 六步：0 构建种子(+执行器+stage1) · 1 种子自检 · 2 种子→stage1 · 3 **主闸门** ·
+  4 自举两轮+不动点+悬空 0 · 5 stage2 套件 · 6 对拍预言机（强制）
+- 文档：developer-guide（Repository Structure / 新增 Compiler roles 含旗标对照 / 信任边界 /
+  排序规则 / PR 清单）、tests/README、README、新增 `compiler/README.md` 与
+  `compiler-reference/README.md`
+
+### 不改的东西
+
+- 编译器行为零变化，诊断文本一字不变
+- bootstrap 里「matching Swift / Mirrors Swift / 参照 Swift」对照注释**保留措辞**，只把其中
+  14 处 `compiler/Sources/...` 路径改为 `compiler-reference/Sources/...`
+- CLI 旗标名（`--compiler swift`、`--swift-koralc`）不变——它们准确描述了种子的实现语言

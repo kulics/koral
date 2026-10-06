@@ -2,7 +2,7 @@
 
 Koral is an experimental compiled language that uses a **simplified type system** (`type` / `type mutable`). It targets C to deliver predictable, high-performance compilation without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
 
-This repository contains the compiler, standard library, formatter, language documentation, and sample projects.
+This repository contains two compiler implementations — `compiler/`, the self-hosting primary implementation, and `compiler-reference/`, the frozen Swift compiler serving as reference oracle, build seed, and backup — plus the standard library, formatter, language documentation, and sample projects.
 
 > Status: Koral is in an experimental stage and is not yet production-ready.
 
@@ -314,6 +314,21 @@ let parse_port(text String) Result[Int] = {
 let ok = Result[Int].Ok(42);
 let err = Result[Int].Error("failed");
 ```
+
+## Repository layout
+
+Two compiler implementations live here, and they are not equal:
+
+- **`compiler/`** — the primary compiler implementation, written in Koral and self-hosting. **This is what you develop.**
+- **`compiler-reference/`** — the **frozen** Swift compiler, kept as the reference oracle (the differential gate compares the two), the build seed (it builds `compiler/` from source), and a backup.
+
+Deleting the frozen reference would trade the strongest cross-check in the repo for the weakest: a self-host fixed point proves a compiler is stable under its own output, not that it is right. See [Compiler roles](docs/developer-guide.md#compiler-roles) for when it may be touched.
+
+- `std/` — standard library sources and runtime C files
+- `tests/` — shared integration cases and the shared test runner
+- `toolchain/` — `koral` build tool, `koralfmt` formatter, std API doc generator, VS Code extension
+- `samples/` — sample programs
+- `docs/` — language docs and the developer guide
 
 ## Documentation
 

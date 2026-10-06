@@ -1,23 +1,35 @@
 name: ci
 
+# Roles: `compiler/` is the primary compiler implementation -- the one under
+# development. `compiler-reference/` is the FROZEN Swift compiler, kept as the
+# reference oracle, the build seed, and a backup. See "Compiler roles" in
+# docs/developer-guide.md.
+#
 # The verification chain is fixed-order and must not be reordered -- see
-# docs/bootstrap-productization-plan.md. Each step is a different kind of
-# evidence:
+# docs/bootstrap-productization-plan.md. The order is not "host first": it is
+# that the seed must exist before the compiler it builds, and that the test
+# harness is built by the frozen seed rather than by the implementation under
+# test. Each step is a different kind of evidence:
 #
-#   1. the Swift suite        -- does the reference compiler still pass?
-#   2. host -> stage1         -- can the bootstrap compiler still be built?
-#   3. the stage1 suite       -- does that build pass?
-#   4. self-host + fixed point-- is it stable under its own output? (and does it
-#                               emit no dangling declarations?)
-#   5. the stage2 suite       -- does the self-hosted compiler still pass?
-#   6. the differential gate  -- do the two compilers AGREE?
+#   0. build seed + harness -- the frozen Swift compiler, and the test runner
+#                              built WITH it (trust boundary: if the compiler
+#                              under test built the harness, a codegen defect in
+#                              it would corrupt the thing meant to catch it)
+#   1. seed self-check      -- the frozen seed still behaves as recorded
+#   2. seed -> stage1       -- can the primary implementation still be built?
+#   3. main gate            -- does that build pass? Development is gated here.
+#   4. self-host + fixed point -- is it stable under its own output? (and does it
+#                              emit no dangling declarations?)
+#   5. stage2 suite         -- does the self-hosted compiler still pass?
+#   6. differential oracle  -- do the two compilers AGREE?
 #
-# Step 6 is what has to hold before the Swift compiler can be deleted. Steps
-# 1-5 can all be green while the two compilers disagree -- a self-host fixed
-# point proves stability, not correctness. The oracle compares behaviour
-# (accept/reject, program stdout, exit code) rather than generated C, because
-# the two stamp DefIds into symbol names under different numbering rules and
-# the artifacts can never be byte-identical.
+# Step 6 is what keeps the two honest. Steps 1-5 can all be green while the two
+# compilers disagree -- a self-host fixed point proves stability, not
+# correctness. One-sided drift fails here even when both suites are green. The
+# oracle compares behaviour (accept/reject, program stdout, exit code) and
+# diagnostic text rather than generated C, because the two stamp DefIds into
+# symbol names under different numbering rules and the artifacts can never be
+# byte-identical.
 
 on:
   push:
@@ -49,43 +61,48 @@ jobs:
           clang --version
 
       # ------------------------------------------------------------------
-      # 1) Swift suite
+      # 0) build the frozen seed, then the test harness WITH the seed
       # ------------------------------------------------------------------
-      - name: Build Swift compiler
-        run: swift build -c release --package-path compiler
+      - name: "0. build frozen seed"
+        run: swift build -c release --package-path compiler-reference
 
-      - name: Build test runner
+      # Trust boundary: the harness is built by the frozen reference, never by
+      # the implementation under test.
+      - name: "0. build test harness (with the seed)"
         run: |
-          compiler/.build/release/koralc build \
+          compiler-reference/.build/release/koralc build \
             --package-config tests/compiler-runner/koral.json \
             --target-module compiler_runner \
             -o bin/compiler-test-runner
 
-      - name: "1. Swift suite"
+      # ------------------------------------------------------------------
+      # 1) seed self-check
+      # ------------------------------------------------------------------
+      - name: "1. seed self-check"
         run: |
           ./bin/compiler-test-runner/compiler_runner \
             --compiler swift \
-            --swift-koralc compiler/.build/release/koralc \
+            --swift-koralc compiler-reference/.build/release/koralc \
             --timeout 60 -j 4 \
-            --report-file /tmp/1-swift.log
+            --report-file /tmp/1-seed.log
 
       # ------------------------------------------------------------------
-      # 2-3) host -> stage1, then the stage1 suite
+      # 2-3) build bootstrap from the seed, then the main gate
       # ------------------------------------------------------------------
-      - name: "2. host -> stage1"
+      - name: "2. seed -> stage1"
         run: |
-          compiler/.build/release/koralc build \
-            --package-config bootstrap/koral.json \
+          compiler-reference/.build/release/koralc build \
+            --package-config compiler/koral.json \
             --target-module koralc \
-            -o bin/bootstrap
+            -o bin/compiler
 
-      - name: "3. stage1 suite"
+      - name: "3. main gate"
         run: |
           ./bin/compiler-test-runner/compiler_runner \
             --compiler bootstrap \
-            --bootstrap-koralc bin/bootstrap/koralc \
+            --bootstrap-koralc bin/compiler/koralc \
             --timeout 60 -j 4 \
-            --report-file /tmp/3-stage1.log
+            --report-file /tmp/3-bootstrap.log
 
       # ------------------------------------------------------------------
       # 4) self-host two rounds + fixed point + dangling scan
@@ -93,16 +110,16 @@ jobs:
       - name: "4. self-host + fixed point"
         run: |
           set -euo pipefail
-          bin/bootstrap/koralc emit-c \
-            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s2
+          bin/compiler/koralc emit-c \
+            --package-config compiler/koral.json --target-module koralc -o /tmp/s2
           clang /tmp/s2/koralc.c std/koral_runtime.c -I std -o /tmp/s2/koralc -Wno-everything -O1
 
           /tmp/s2/koralc emit-c \
-            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s3
+            --package-config compiler/koral.json --target-module koralc -o /tmp/s3
           clang /tmp/s3/koralc.c std/koral_runtime.c -I std -o /tmp/s3/koralc -Wno-everything -O1
 
           /tmp/s3/koralc emit-c \
-            --package-config bootstrap/koral.json --target-module koralc -o /tmp/s4
+            --package-config compiler/koral.json --target-module koralc -o /tmp/s4
 
           cmp /tmp/s3/koralc.c /tmp/s4/koralc.c
           echo "FIXED POINT"
@@ -122,19 +139,19 @@ jobs:
             --report-file /tmp/5-stage2.log
 
       # ------------------------------------------------------------------
-      # 6) the cross-compiler oracle
+      # 6) the differential oracle
       #
       # Compiles and runs every case under BOTH compilers and requires them to
-      # behave identically. A single-sided regression -- one compiler drifting
-      # away from the other -- fails here even if each still passes its own
-      # suite against the hand-written `// EXPECT` comments.
+      # behave identically, diagnostic text included. A single-sided regression
+      # -- one compiler drifting away from the other -- fails here even if each
+      # still passes its own suite against the hand-written `// EXPECT` comments.
       # ------------------------------------------------------------------
-      - name: "6. cross-compiler oracle"
+      - name: "6. differential oracle"
         run: |
           ./bin/compiler-test-runner/compiler_runner \
             --compiler differential \
-            --swift-koralc compiler/.build/release/koralc \
-            --bootstrap-koralc bin/bootstrap/koralc \
+            --swift-koralc compiler-reference/.build/release/koralc \
+            --bootstrap-koralc bin/compiler/koralc \
             --timeout 60 -j 4 \
             --report-file /tmp/6-differential.log
 

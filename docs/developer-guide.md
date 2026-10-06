@@ -6,37 +6,71 @@
 
 At repository root:
 
-- `compiler/` — Swift compiler (`koralc`) and tests
+- `compiler/` — **the primary compiler implementation** (`koralc`), written in Koral and self-hosting.
+  This is what you develop.
+- `compiler-reference/` — the **frozen** Swift compiler (`koralc`): reference oracle, bootstrap seed,
+  and backup. Not a development target — see "Compiler roles" below.
 - `std/` — standard library sources and runtime C files
+- `tests/` — shared integration cases (`compiler-cases/`) and the shared Koral test runner (`compiler-runner/`)
+- `toolchain/` — `koral` build tool, `koralfmt` formatter, `doc` std API doc generator, VS Code extension
+- `samples/` — sample programs
 - `docs/` — language docs and this guide
-- `bootstrap/` — self-hosting compiler implementation
-- `toolchain/koralfmt/` — formatter sources
-- `toolchain/doc/` — std API doc generator
-- `toolchain/koral/` — Koral build tool implementation
+
+### Compiler roles
+
+There are two compiler implementations and they are not equal.
+
+- **`compiler/` is the implementation under development.** Every functional change lands here first.
+  It is written in Koral and self-hosts; it builds to `bin/compiler/koralc`.
+- **`compiler-reference/` is frozen.** It is kept as three things at once:
+  1. the **reference oracle** — the differential gate compiles every case under both compilers and
+     requires them to agree, so one-sided drift is caught even when both suites are green;
+  2. the **build seed** — it is what builds `bin/compiler` (and the test runner) from source;
+  3. a **backup** — if the self-hosting chain breaks, this is the compiler that still works.
+
+Deleting it would trade the strongest cross-check in the repo for the weakest: a self-host fixed
+point only proves a compiler is *stable under its own output*, not that it is *right*.
+
+**When you may touch `compiler-reference/`:** only to keep the oracle honest — for example when the
+primary implementation deliberately changes language behaviour and the frozen reference must follow
+so the two can keep being compared. Ordinary language work does **not** go there. A change to
+`compiler-reference/` is exceptional and should be reviewed as such.
+
+> **Naming note.** The test runner's CLI predates these directory names and keeps them: the
+> `--compiler bootstrap` kind and the `--bootstrap-koralc <path>` flag mean **the self-hosting
+> compiler built from `compiler/`** (`bin/compiler/koralc`), and `--compiler swift` /
+> `--swift-koralc` mean the frozen seed in `compiler-reference/`. The flag names describe the
+> implementation language and are stable API; the directories above are the source of truth for
+> where the code lives.
 
 ### Build the Compiler
+
+`compiler/` is the implementation you build and use day to day. It cannot build itself from
+nothing, so the **frozen seed** (`compiler-reference/`) builds it — that is the only reason the
+seed is still on the critical path. Build the seed once (or after it changes), then build
+bootstrap from it.
 
 Both compilers have a **debug** and a **release** build mode. **Use release for running
 tests and for any repeated compilation work**; drop to debug only when you need to step
 through the compiler itself.
 
-The Swift host compiler is built with SwiftPM's two configurations:
+The frozen seed is built with SwiftPM's two configurations:
 
 ```bash
-cd compiler
+cd compiler-reference
 
 # debug   — unoptimized, for debugging the compiler itself
-swift build -c debug       # -> compiler/.build/debug/koralc
+swift build -c debug       # -> compiler-reference/.build/debug/koralc
 
 # release — optimized, for running tests and compiling anything large
-swift build -c release     # -> compiler/.build/release/koralc
+swift build -c release     # -> compiler-reference/.build/release/koralc
 ```
 
 The debug binary is roughly **6x slower** at generating C for a large package and **3.7x
 slower** end-to-end than the release one, so the choice is not cosmetic. Measured on
-`bootstrap/koral.json`:
+`compiler/koral.json`:
 
-| host build | `emit-c` | `build` (codegen + clang) |
+| seed build | `emit-c` | `build` (codegen + clang) |
 |---|---|---|
 | `swift build -c debug` | 264.6 s | 303.1 s |
 | `swift build -c release` | 42.9 s | 81.9 s |
@@ -54,52 +88,60 @@ koralc build app.koral -o out --optimize 3
 
 ### Run Tests
 
+The **primary gate** is the suite against `bin/compiler/koralc`. Build the seed and the compiler once, then run it:
+
 ```bash
-cd compiler && swift build -c release && cd ..
-compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
+cd compiler-reference && swift build -c release && cd ..
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
+compiler-reference/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
-To debug a failing case, rebuild the host compiler with `swift build -c debug` and point
-`--swift-koralc` at `compiler/.build/debug/koralc` instead. Add `--filter <name>` to run a
-single case, and `--verbose` to see the exact compiler command line.
+To debug a failing case, rebuild the seed with `swift build -c debug` and point
+`--swift-koralc` at `compiler-reference/.build/debug/koralc` instead. Add `--filter <name>` to
+run a single case, and `--verbose` to see the exact compiler command line.
 
 ### Run Shared Test Runner
 
-The shared integration test runner is implemented in Koral under `tests/compiler-runner/` and should be built using the Swift host compiler. It can target the Swift compiler, the bootstrap compiler, or a custom compiler binary.
+The shared integration test runner is implemented in Koral under `tests/compiler-runner/`.
+It defaults to `--compiler bootstrap` — the implementation under development. `--compiler swift`
+targets the frozen seed, `--compiler differential` runs both against each other, and
+`--compiler custom` takes any binary via `--compiler-bin`.
 
 Important trust boundary:
 
-- Use the Swift-hosted `koralc` to build the bootstrap compiler executable and the bootstrap test runner executable.
-- Run the host-built runner against the host-built bootstrap compiler.
-- Do not rebuild the bootstrap compiler with itself and then use that next-stage binary as the default test harness; that path is reserved for explicit self-hosting validation and is not assumed stable.
+- **The oracle and the test harness are built by the frozen reference, never by the implementation under test.** Use the seed `koralc` to build both `bin/compiler/koralc` and the test runner executable. If the compiler under test built the harness, a codegen defect in it would corrupt the very thing meant to catch it.
+- Run the seed-built runner against the seed-built `bin/compiler/koralc`.
+- Do not rebuild the compiler with itself and then use that next-stage binary as the default test harness; that path is reserved for explicit self-hosting validation and is not assumed stable.
 
 ```bash
-# 1) Build host compiler (release — see "Build the Compiler" above)
-cd compiler
+# 1) Build the frozen seed (only when it changed or is missing) — see "Build the Compiler"
+cd compiler-reference
 swift build -c release
 cd ..
 
-# 2) Build bootstrap compiler executable
-compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+# 2) Build the compiler and the test runner WITH THE SEED (trust boundary above)
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
+compiler-reference/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 
-# 3) Build shared test runner executable
-compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+# 3) PRIMARY GATE — the suite against bin/compiler/koralc
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 
-# 4) Run shared cases against the host-built bootstrap compiler
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
+# 4) Seed self-check + the differential oracle (when the seed or cross-compiler agreement is in scope)
+./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler-reference/.build/release/koralc -j=8
+./bin/compiler-test-runner/compiler_runner --compiler differential --swift-koralc compiler-reference/.build/release/koralc --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
 Common options:
 
 - `--cases <dir>`: set test case root (default: `tests/compiler-cases`)
-- `--compiler <kind>`: select `bootstrap`, `swift`, or `custom` compiler mode
+- `--compiler <kind>`: select `bootstrap`, `swift`, `custom`, or `differential` compiler mode (default: `bootstrap`)
 - `--filter <substring>`: run only cases whose file name or relative path contains the substring
 - `-j <N>` / `-j=<N>`: worker count for parallel case execution (default: `1`)
 - `--timeout <sec>`: per-case timeout in seconds (default: `120`)
 - `--memory-limit <MB>`: per-case RSS ceiling (default: `1024`)
 - `--compiler-bin <path>`: explicit compiler executable path when `--compiler custom`
-- `--bootstrap-koralc <path>`: explicit bootstrap compiler executable path
+- `--bootstrap-koralc <path>`: explicit path of the self-hosting compiler (built from `compiler/`)
 - `--swift-koralc <path>`: explicit Swift compiler executable path
 - `--report-file <path>`: write stable summary log (default: `tests/compiler-cases_output/_reports/latest-summary.log`)
 - `--verbose`: print per-case command lines
@@ -109,13 +151,13 @@ Examples:
 
 ```bash
 # Run only hello-related cases
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter hello
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc --filter hello
 
-# Run shared cases against the Swift compiler
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
+# Seed self-check — the frozen reference compiler
+./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler-reference/.build/release/koralc -j=8
 
 # Point to a custom compiler path
-./bin/compiler-test-runner/compiler_runner.exe --compiler custom --compiler-bin path/to/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner --compiler custom --compiler-bin path/to/koralc -j=8
 ```
 
 Current expectations syntax in case files:
@@ -129,7 +171,7 @@ Current runner exit codes:
 
 - `0`: all matched cases passed
 - `1`: one or more cases failed (assertion, timeout, or infra failure)
-- `2`: CLI/configuration errors (e.g. invalid flags or missing bootstrap compiler binary)
+- `2`: CLI/configuration errors (e.g. invalid flags or missing compiler binary)
 
 Case names with these prefixes are tagged for conflict grouping metadata:
 
@@ -139,27 +181,45 @@ Case names with these prefixes are tagged for conflict grouping metadata:
 
 Windows notes:
 
-- Default bootstrap compiler path is auto-selected as `bin/bootstrap/koralc.exe` when `OS` contains `Windows`.
+- The default self-hosting compiler path is auto-selected as `bin/compiler/koralc.exe` when `OS` contains `Windows`.
 - Output matching normalizes CRLF to LF before evaluating `EXPECT` comments.
 
 ### Compile Koral Programs
 
+Use the primary implementation (`bin/compiler/koralc`) unless you are specifically exercising the
+seed:
+
 ```bash
 # Build a manifest target module
-swift run koralc build --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc build --package-config path/to/koral.json --target-module app::main
 
 # Type-check only
-swift run koralc check --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc check --package-config path/to/koral.json --target-module app::main
 
 # Build and run
-swift run koralc run --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc run --package-config path/to/koral.json --target-module app::main
 
 # Emit C only
-swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
+bin/compiler/koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
 
 # Disable stdlib preload
-swift run koralc build --package-config path/to/koral.json --target-module app::main --no-std
+bin/compiler/koralc build --package-config path/to/koral.json --target-module app::main --no-std
 ```
+
+The frozen seed is reached the same way, just with its own binary:
+
+```bash
+compiler-reference/.build/release/koralc build --package-config path/to/koral.json --target-module app::main
+# or, once the seed is built:  cd compiler-reference && swift run koralc build ...
+```
+
+Which `koralc` does `koral build` pick? — the Koral build tool (`toolchain/koral`) resolves the
+compiler through `find_koralc()`, and **the primary implementation wins**. Under `$KORAL_HOME` it looks for, in order:
+`bin/compiler/koralc`, `bin/compiler-clone`, `bin/compiler-new`, `bin/koralc`, `$KORAL_HOME/koralc`,
+then — only as a last resort — the seed at `compiler-reference/.build/release/koralc` (or its
+Windows triple dir), and finally `compiler-reference/.build/debug/koralc`. Only if none of those
+exist does it fall back to `PATH`. So a fresh clone resolves to the seed until you build
+`bin/compiler/koralc`, and to the primary implementation from then on.
 
 CLI shape in current implementation:
 
@@ -287,19 +347,19 @@ For late bootstrap failures, do not trust long shell chains that interleave gene
 Recommended flow:
 
 ```bash
-# 1) Build the host bootstrap compiler with the Swift compiler
-compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+# 1) Build stage1 with the frozen seed
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
 
 # 2) Generate stage2 C
-./bin/bootstrap/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage2
+./bin/compiler/koralc emit-c --package-config compiler/koral.json --target-module koralc -o bin/compiler-stage2
 
 # 3) Compile stage2
-clang bin/bootstrap-stage2/koralc.c std/koral_runtime.c -I std -o bin/bootstrap-stage2/koralc -Wno-everything -O1
+clang bin/compiler-stage2/koralc.c std/koral_runtime.c -I std -o bin/compiler-stage2/koralc -Wno-everything -O1
 
 # 4) Generate later stages one step at a time
-./bin/bootstrap-stage2/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage3
-clang bin/bootstrap-stage3/koralc.c std/koral_runtime.c -I std -o bin/bootstrap-stage3/koralc -Wno-everything -O1
-./bin/bootstrap-stage3/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage4
+./bin/compiler-stage2/koralc emit-c --package-config compiler/koral.json --target-module koralc -o bin/compiler-stage3
+clang bin/compiler-stage3/koralc.c std/koral_runtime.c -I std -o bin/compiler-stage3/koralc -Wno-everything -O1
+./bin/compiler-stage3/koralc emit-c --package-config compiler/koral.json --target-module koralc -o bin/compiler-stage4
 ```
 
 What counts as "the chain works":
@@ -307,22 +367,22 @@ What counts as "the chain works":
 1. **Every stage compiles.** Each `koralc.c` must pass `clang` with zero errors,
    and link into a runnable binary. A stage that generates C which does not
    compile is a compiler bug, not a source problem — the same package compiles
-   cleanly under the host Swift compiler.
-2. **A fixed point is reached.** `bin/bootstrap-stage3/koralc.c` and
-   `bin/bootstrap-stage4/koralc.c` must be byte-identical. Stage2 is generated by
-   the host-built compiler and is allowed to differ; stage3 onward must stop
+   cleanly under the frozen seed.
+2. **A fixed point is reached.** `bin/compiler-stage3/koralc.c` and
+   `bin/compiler-stage4/koralc.c` must be byte-identical. Stage2 is generated by
+   the seed-built compiler and is allowed to differ; stage3 onward must stop
    moving. If they differ, diff them — the delta shows which symbol names or
    layouts are not yet stable.
    ```bash
-   cmp bin/bootstrap-stage3/koralc.c bin/bootstrap-stage4/koralc.c && echo "fixed point"
+   cmp bin/compiler-stage3/koralc.c bin/compiler-stage4/koralc.c && echo "fixed point"
    ```
 3. **The next-stage binary still works.** Run the shared suite against it:
    ```bash
-   ./bin/compiler-test-runner/compiler_runner --compiler bootstrap      --bootstrap-koralc bin/bootstrap-stage2/koralc --timeout 60 -j 8
+   ./bin/compiler-test-runner/compiler_runner --compiler bootstrap      --bootstrap-koralc bin/compiler-stage2/koralc --timeout 60 -j 8
    ```
    Use it for validation only — see the note below about not promoting a
    next-stage binary to the default harness.
-4. **No residual scratch state.** Delete `bin/bootstrap-stage*` once validated
+4. **No residual scratch state.** Delete `bin/compiler-stage*` once validated
    (see Cleanup Rules below); they are ~130 MB of C each.
 
 Two invariants the generated C must hold; both have been violated in ways the
@@ -340,7 +400,7 @@ shared suite did not catch, so check them directly when stage2 stops compiling:
   the C symptom, not the spelling:
   ```bash
   # should print 0
-  grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' bin/bootstrap-stage2/koralc.c
+  grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' bin/compiler-stage2/koralc.c
   ```
   Any non-zero count is a dangling symbol, and that is the bug. It is a symptom,
   not a cause: it means an extension method was instantiated for a type whose
@@ -364,7 +424,7 @@ Operational rules:
 ### Cleanup Rules After Bootstrap Debugging
 
 - Remove temporary codegen probe logging after the failing boundary is identified. Keeping those probes in-tree can change ownership/lifetime lowering and create misleading secondary failures.
-- Clean out stale stage directories under `bin/` once a repair is validated. Keep only actively useful entrypoints such as `bin/bootstrap/`, `bin/compiler-test-runner/`, and current user-facing tool outputs.
+- Clean out stale stage directories under `bin/` once a repair is validated. Keep only actively useful entrypoints such as `bin/compiler/`, `bin/compiler-test-runner/`, and current user-facing tool outputs.
 - If a bootstrap fix touches parser, MIR lowering, mono, or codegen, rerun both self-host validation and focused semantic buckets before trusting a full-suite green result.
 
 ### Named-Parameter Guardrail
@@ -405,7 +465,7 @@ cases=(
 )
 
 for case_name in "${cases[@]}"; do
-    ./bin/compiler-test-runner/main --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc --filter "$case_name" --timeout 120
+    ./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc --filter "$case_name" --timeout 120
 done
 ```
 
@@ -776,7 +836,7 @@ case .myNewError(let detail):
 ### Add a New Import Kind
 
 1. Extend `UsingDeclarationKind` only if the language actually gains a new source form.
-2. Update `ParserDeclarations.swift` and `bootstrap/koralc/parser/core_precedence.koral`.
+2. Update `ParserDeclarations.swift` and `compiler/koralc/parser/core_precedence.koral`.
 3. Update `recordImportToGraph()` and the bootstrap counterpart if the new form changes import visibility.
 4. Keep module selection manifest-driven; do not reintroduce directory-inferred module trees.
 
@@ -857,25 +917,24 @@ let main() Void = {
 }
 ```
 
-2. Add a test method in `IntegrationTests.swift`:
-
-```swift
-func test_my_feature() throws { try runCase(named: "my_feature.koral") }
-```
+2. Nothing else. The shared runner **discovers cases by walking `tests/compiler-cases/`** — there is
+   no registry to update. Rebuild nothing; rerun the runner.
 
 For failure cases, add `// EXPECT-ERROR: ...`; the test harness expects a non-zero exit and matching error output substring.
 
 How integration tests run (current behavior):
 
-- Tests execute the prebuilt binary directly: `.build/debug/koralc(.exe)`.
+- The shared runner executes the compiler binary you point it at (`--bootstrap-koralc` /
+  `--swift-koralc` / `--compiler-bin`), which defaults to `bin/compiler/koralc`.
 - Build before running tests:
 
 ```bash
-cd compiler
+cd compiler-reference
 swift build -c release
 cd ..
-compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
+compiler-reference/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
 - Output assertions are comment-based and order-sensitive:
@@ -1002,9 +1061,9 @@ Code alone is not the source of truth. If the behavior changes, the docs must ch
 
 Use these files as the authoritative references:
 
-- `docs/developer-guide.md` — required change workflow, bootstrap/compiler ordering, and validation checklist.
+- `docs/developer-guide.md` — required change workflow, compiler roles and trust boundary, and validation checklist.
 - `tests/README.md` — unified test runner contract, flags, buckets, and rerun guidance.
-- `bootstrap/koral.json`, `tests/compiler-runner/koral.json`, `std/koral.json` — build/package targets for the compiler-side builds.
+- `compiler/koral.json`, `tests/compiler-runner/koral.json`, `std/koral.json` — build/package targets for the compiler-side builds.
 - `toolchain/koralfmt/test/README.md` — formatter regression test contract and execution steps.
 - `README.md` — top-level repo shape, prerequisites, quick start, and public contribution guidance.
 
@@ -1013,53 +1072,54 @@ Use these files as the authoritative references:
 1. **Document first**: update the governing doc in `docs/`, or `tests/README.md` / toolchain docs when behavior, workflow, or validation steps change.
 2. **Update implementation**: change compiler/runtime/toolchain code only after the doc baseline is updated.
 3. **Update tests**: update existing expectations or add regression coverage before merge.
-4. **Validate compiler bootstrap order**: rebuild the host compiler first, then rebuild bootstrap, then run the shared runner against bootstrap and Swift builds.
+4. **Validate the build order**: rebuild the seed if it changed, rebuild the compiler with the seed, then run the shared runner against `bin/compiler/koralc` (primary) and the seed self-check.
 5. **Validate samples**: build representative samples after compiler/runtime changes.
 6. **Validate toolchain**: run formatter and/or doc-generator validation when formatting rules, std surface, or generated docs are affected.
 7. **Self-review**: confirm the diff aligns with the updated docs and the checklist below.
 
 ### Ordering rules
 
-#### Compiler changes (host -> bootstrap -> tests)
+#### Compiler changes (primary first; seed-built artifacts)
 
-Use this order when changing compiler, std, runtime, or test-runner behavior:
+Use this order when changing compiler, std, runtime, or test-runner behavior. The suite you
+optimize for is the **bootstrap** one; the seed builds the artifacts but is not the gate.
 
 ```bash
-# 1) Build Swift host compiler
-cd compiler
+# 1) Build the frozen seed (only when it changed or is missing)
+cd compiler-reference
 swift build -c release
 cd ..
 
-# 2) Build bootstrap compiler using the host-built compiler
-compiler/.build/release/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+# 2) Build bootstrap and the shared test runner WITH THE SEED (trust boundary above)
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json --target-module koralc -o bin/compiler
+compiler-reference/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 
-# 3) Build shared test runner
-compiler/.build/release/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+# 3) PRIMARY GATE — run the suite against bin/compiler/koralc
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 
-# 4) Run tests against bootstrap
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
-
-# 5) Run tests against Swift host compiler
-./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/release/koralc.exe -j=8
+# 4) Seed self-check and the differential oracle, when the seed or cross-compiler agreement is in scope
+./bin/compiler-test-runner/compiler_runner --compiler swift --swift-koralc compiler-reference/.build/release/koralc -j=8
+./bin/compiler-test-runner/compiler_runner --compiler differential --swift-koralc compiler-reference/.build/release/koralc --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
 Do not use a bootstrap-built next-stage binary as the default test harness unless the task is explicitly self-hosting validation.
 
 #### Bootstrap changes
 
-When changing bootstrap sources only, rebuild in the same host-first order:
+When changing `compiler/` sources only, the seed is frozen and does not need rebuilding. Rebuild
+in the same seed-first order:
 
-1. rebuild Swift host compiler,
-2. rebuild bootstrap with host-built compiler,
-3. rerun the shared test runner for `--compiler bootstrap` and relevant buckets.
+1. rebuild the compiler with the frozen seed (skip the seed rebuild unless it changed),
+2. rerun the shared test runner for `--compiler bootstrap` and relevant buckets,
+3. run the self-host chain when parser, MIR lowering, mono, or codegen is touched.
 
 ### Samples verification
 
 After compiler/runtime changes, build representative samples to catch compilation regressions outside the test suite.
 
 ```bash
-# Example: build a sample using the host-built compiler
-compiler/.build/release/koralc build samples/expr-eval/expr_eval.koral -o bin/samples
+# Example: build a sample with the primary compiler
+bin/compiler/koralc build samples/expr-eval/expr_eval.koral -o bin/samples
 ```
 
 Use the repository's sample build/package targets if the sample uses a manifest.
@@ -1070,23 +1130,24 @@ Run these validations when the change affects formatting, std API surface, or ge
 
 ```bash
 # Build formatter regression runner
-compiler/.build/release/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
+bin/compiler/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
 
 # Run formatter regression suite
-toolchain/koralfmt/build/test_fmt.exe
+toolchain/koralfmt/build/test_fmt
 
 # Build std API doc generator
-compiler/.build/release/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
+bin/compiler/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
 
 # Run doc generator from repo root so it can locate std sources
-bin/toolchain-doc-gen/toolchain_doc_gen.exe
+bin/toolchain-doc-gen/generate_std_api_docs
 ```
 
 ### PR/change checklist
 
 - [ ] The governing doc was updated before or alongside the code change.
-- [ ] The change preserves host-first build ordering for compiler/bootstrap flows.
-- [ ] The shared test runner passes for both bootstrap and Swift targets when affected.
+- [ ] The change lands in `compiler/` first; `compiler-reference/` is touched only to keep the frozen oracle honest.
+- [ ] Build provenance holds: the oracle and the test harness are built by the frozen seed, never by the implementation under test.
+- [ ] The shared test runner passes for **`--compiler bootstrap` (the primary implementation)** and the seed self-check when affected.
 - [ ] Samples are built when the compiler/runtime surface changes.
 - [ ] Toolchain validation is rerun when formatting or docs are affected.
 - [ ] The final diff documents the exact verification performed.

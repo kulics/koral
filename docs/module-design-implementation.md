@@ -114,9 +114,12 @@ using "./helpers.koral";            // 文件合并
 
 每阶段结束必须**全绿**，顺序不可换：
 
-1. Swift 全量 2. host→stage1 3. stage1 全量
+1. 种子自检 2. 种子→stage1 3. stage1 全量（主闸门）
 4. 自举两轮 + 不动点（emit-c + clang）+ 悬空扫描 = 0
-5. stage2 全量 6. oracle `--compare-diagnostics` 全同
+5. stage2 全量 6. oracle 全同（含诊断）
+
+> 步骤措辞于 2026-10-06 随角色重组更新（`compiler/` 为主实现，Swift 冻结为种子与预言机）；
+> 链的顺序与判据不变。
 
 外加阶段判据：
 
