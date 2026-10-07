@@ -1,0 +1,355 @@
+// sha256sum.koral: SHA-256 checksum tool (FIPS 180-4).
+//
+// Build:  bin/compiler/koralc build samples/sha256sum/src/sha256sum.koral -o bin/sample-sha256sum
+// Test:   bin/compiler/koralc run samples/sha256sum/test/sha256sum_test.koral -o .
+//
+// Golden reference: the FIPS 180-4 test vectors, asserted in test/sha256sum_test.koral.
+//
+// Scope note: file arguments only. Reading standard input needs stdin shaped as a
+// `Reader`, and none exists — `scanln()` is the only stdin path and it is
+// line-oriented text, which cannot carry binary files. Until that capability lands,
+// refusing to hash stdin is correct; a text-only stand-in would silently give the
+// wrong digest for every binary input.
+
+using "std/os";
+using "std/io";
+using "std/hex";
+
+// ============================================================================
+// SHA-256 core (FIPS 180-4)
+// ============================================================================
+// Every 32-bit step wraps modulo 2^32, so all accumulation goes through
+// `wrapping_add`. Plain `+` would panic on the first overflow.
+
+/// The 64 round constants K[0..63].
+///
+/// These are compile-time constants, but a module-level `let` must carry a
+/// function signature, so a constant table has no place to live at file scope.
+/// It is built once per hasher instead and carried on the state.
+file_private let round_constants() List[UInt32] = {
+    let mutable k = List[UInt32].new();
+    k.push(0x428a2f98);
+    k.push(0x71374491);
+    k.push(0xb5c0fbcf);
+    k.push(0xe9b5dba5);
+    k.push(0x3956c25b);
+    k.push(0x59f111f1);
+    k.push(0x923f82a4);
+    k.push(0xab1c5ed5);
+    k.push(0xd807aa98);
+    k.push(0x12835b01);
+    k.push(0x243185be);
+    k.push(0x550c7dc3);
+    k.push(0x72be5d74);
+    k.push(0x80deb1fe);
+    k.push(0x9bdc06a7);
+    k.push(0xc19bf174);
+    k.push(0xe49b69c1);
+    k.push(0xefbe4786);
+    k.push(0x0fc19dc6);
+    k.push(0x240ca1cc);
+    k.push(0x2de92c6f);
+    k.push(0x4a7484aa);
+    k.push(0x5cb0a9dc);
+    k.push(0x76f988da);
+    k.push(0x983e5152);
+    k.push(0xa831c66d);
+    k.push(0xb00327c8);
+    k.push(0xbf597fc7);
+    k.push(0xc6e00bf3);
+    k.push(0xd5a79147);
+    k.push(0x06ca6351);
+    k.push(0x14292967);
+    k.push(0x27b70a85);
+    k.push(0x2e1b2138);
+    k.push(0x4d2c6dfc);
+    k.push(0x53380d13);
+    k.push(0x650a7354);
+    k.push(0x766a0abb);
+    k.push(0x81c2c92e);
+    k.push(0x92722c85);
+    k.push(0xa2bfe8a1);
+    k.push(0xa81a664b);
+    k.push(0xc24b8b70);
+    k.push(0xc76c51a3);
+    k.push(0xd192e819);
+    k.push(0xd6990624);
+    k.push(0xf40e3585);
+    k.push(0x106aa070);
+    k.push(0x19a4c116);
+    k.push(0x1e376c08);
+    k.push(0x2748774c);
+    k.push(0x34b0bcb5);
+    k.push(0x391c0cb3);
+    k.push(0x4ed8aa4a);
+    k.push(0x5b9cca4f);
+    k.push(0x682e6ff3);
+    k.push(0x748f82ee);
+    k.push(0x78a5636f);
+    k.push(0x84c87814);
+    k.push(0x8cc70208);
+    k.push(0x90befffa);
+    k.push(0xa4506ceb);
+    k.push(0xbef9a3f7);
+    k.push(0xc67178f2);
+    return k;
+};
+
+/// The eight initial hash values H[0..7].
+file_private let initial_state() List[UInt32] = {
+    let mutable h = List[UInt32].new();
+    h.push(0x6a09e667);
+    h.push(0xbb67ae85);
+    h.push(0x3c6ef372);
+    h.push(0xa54ff53a);
+    h.push(0x510e527f);
+    h.push(0x9b05688c);
+    h.push(0x1f83d9ab);
+    h.push(0x5be0cd19);
+    return h;
+};
+
+/// The SHA-256 streaming hasher. Feed bytes with `update`, then ask for `digest`.
+type mutable Sha256(
+    mutable state List[UInt32],
+    mutable pending List[UInt8],
+    mutable total UInt64,
+    mutable k List[UInt32],
+);
+
+given Sha256 {
+
+    public new() Sha256 = {
+        return Sha256(initial_state(), List[UInt8].new(), 0, round_constants());
+    };
+
+    /// Compress one 64-byte block starting at `offset` into `block`.
+    ///
+    /// `state` is the running H[0..7] and is updated in place.
+    file_private compress_block(self, block List[UInt8], offset UInt) Void = {
+        // W[0..15]: the block as 16 big-endian 32-bit words.
+        let mutable w = List[UInt32].with_capacity(64);
+        let mutable i UInt = 0;
+        while i < 16 then {
+            let b = offset + i * 4;
+            let b0 = block[b](UInt32) << 24;
+            let b1 = block[b + 1](UInt32) << 16;
+            let b2 = block[b + 2](UInt32) << 8;
+            let b3 = block[b + 3](UInt32);
+            w.push(b0 | b1 | b2 | b3);
+            i += 1;
+        };
+
+        // W[16..63]: the message schedule.
+        while i < 64 then {
+            let w15 = w[i - 15];
+            let w2 = w[i - 2];
+            let s0 = w15.rotate_right(7) ^ w15.rotate_right(18) ^ (w15 >> 3);
+            let s1 = w2.rotate_right(17) ^ w2.rotate_right(19) ^ (w2 >> 10);
+            w.push(w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1));
+            i += 1;
+        };
+
+        let mutable a = self.state[0];
+        let mutable b = self.state[1];
+        let mutable c = self.state[2];
+        let mutable d = self.state[3];
+        let mutable e = self.state[4];
+        let mutable f = self.state[5];
+        let mutable g = self.state[6];
+        let mutable h = self.state[7];
+
+        i = 0;
+        while i < 64 then {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((~e) & g);
+            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(self.k[i]).wrapping_add(
+                w[i],
+            );
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+
+            i += 1;
+        };
+
+        self.state[0] = self.state[0].wrapping_add(a);
+        self.state[1] = self.state[1].wrapping_add(b);
+        self.state[2] = self.state[2].wrapping_add(c);
+        self.state[3] = self.state[3].wrapping_add(d);
+        self.state[4] = self.state[4].wrapping_add(e);
+        self.state[5] = self.state[5].wrapping_add(f);
+        self.state[6] = self.state[6].wrapping_add(g);
+        self.state[7] = self.state[7].wrapping_add(h);
+    };
+
+    /// Absorb bytes. Any whole block is compressed immediately; the tail is
+    /// held in `pending` until the next call or `digest`.
+    public update(self, bytes List[UInt8], span: Range[UInt] = ..) Void = {
+        let spec = bytes.slice_spec(span);
+        let start = spec.start();
+        let end = spec.end();
+        let mutable i = start;
+        while i < end then {
+            self.pending.push(bytes[i]);
+            self.total += 1;
+            if self.pending.count() == 64 then {
+                self.compress_block(self.pending, 0);
+                self.pending.clear();
+            };
+            i += 1;
+        };
+    };
+
+    /// Finish the digest: FIPS 180-4 padding, then the final block(s).
+    /// Returns the 32-byte hash.
+    public digest(self) List[UInt8] = {
+        let bit_len = self.total * 8;
+
+        // 0x80, then zeros until the length field fits in the last 8 bytes.
+        let mutable pad = List[UInt8].new();
+        pad.push(0x80);
+        while (self.pending.count() + pad.count()) % 64 <> 56 then {
+            pad.push(0);
+        };
+        pad.push((bit_len >> 56)(UInt8));
+        pad.push((bit_len >> 48)(UInt8));
+        pad.push((bit_len >> 40)(UInt8));
+        pad.push((bit_len >> 32)(UInt8));
+        pad.push((bit_len >> 24)(UInt8));
+        pad.push((bit_len >> 16)(UInt8));
+        pad.push((bit_len >> 8)(UInt8));
+        pad.push(bit_len(UInt8));
+
+        self.update(pad);
+
+        // The padding always lands on a block boundary, so nothing is pending.
+        let mutable out = List[UInt8].with_capacity(32);
+        let mutable i UInt = 0;
+        while i < 8 then {
+            let word = self.state[i];
+            out.push((word >> 24)(UInt8));
+            out.push((word >> 16)(UInt8));
+            out.push((word >> 8)(UInt8));
+            out.push(word(UInt8));
+            i += 1;
+        };
+        return out;
+    };
+};
+
+// ============================================================================
+// Hashing a file
+// ============================================================================
+
+/// Stream a file through SHA-256 one chunk at a time. The whole file is never
+/// held in memory — that is the point of the streaming hasher.
+file_private let hash_file(path String) Result[List[UInt8]] = {
+    let file = open_file(path.into_path(), OpenMode.Read()) or else {
+        return Result[List[UInt8]].Error("cannot open `\(path)`: \(it.message())");
+    };
+
+    let hasher = Sha256.new();
+    let buf = make_bytes(8192);
+
+    while true then {
+        let n = file.read(into: buf) or else {
+            return Result[List[UInt8]].Error("cannot read `\(path)`: \(it.message())");
+        };
+        if n == 0 then {
+            break;
+        };
+        hasher.update(buf, span: 0..<(n(UInt)));
+    };
+
+    return Result[List[UInt8]].Ok(hasher.digest());
+};
+
+// ============================================================================
+// Help and Version
+// ============================================================================
+
+file_private let show_help() Void = {
+    let help = """
+        Usage: sha256sum FILE...
+        Print SHA-256 (FIPS 180-4) checksums of each FILE.
+
+        Output format: <checksum>  <file>
+
+        Options:
+          -h, --help       show this help text
+          -v, --version    show version information
+
+        Standard input is not supported yet: reading it needs stdin shaped as a
+        Reader, and the only stdin path today is line-oriented text.
+        """;
+    println(help);
+};
+
+file_private let show_version() Void = {
+    println("koral-sha256sum 1.0.0");
+};
+
+// ============================================================================
+// Entry
+// ============================================================================
+
+public let main() Int = {
+    let argv = args();
+
+    let mutable files = List[String].new();
+    let mutable i UInt = 1;
+    while i < argv.count() then {
+        let arg = argv[i];
+        if arg == "-h" or arg == "--help" then {
+            show_help();
+            return 0;
+        };
+        if arg == "-v" or arg == "--version" then {
+            show_version();
+            return 0;
+        };
+        if arg.starts_with("-") and arg <> "-" then {
+            eprintln("sha256sum: unrecognized option `\(arg)`");
+            eprintln("Try `sha256sum --help` for more information.");
+            return 2;
+        };
+        files.push(arg);
+        i += 1;
+    };
+
+    if files.count() == 0 then {
+        eprintln("sha256sum: missing operand");
+        eprintln("Standard input is not supported yet; name a FILE.");
+        eprintln("Try `sha256sum --help` for more information.");
+        return 2;
+    };
+
+    let mutable had_error = false;
+    for file in files then {
+        let digest = hash_file(file) or else {
+            eprintln("sha256sum: \(it.message())");
+            had_error = true;
+            continue;
+        };
+
+        // GNU coreutils prints two spaces between the digest and a text-mode
+        // file name; the tests assert on that exact shape.
+        let mutable line = StringBuilder.new();
+        line.push_string(encode_hex(digest));
+        line.push_string("  ");
+        line.push_string(file);
+        println(line.to_string());
+    };
+
+    return if had_error then 1 else 0;
+};

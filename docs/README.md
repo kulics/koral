@@ -24,7 +24,7 @@ docs/
     grammar_preview.koral         非权威示例
   api/                         API 文档（生成物）
     README.md                  手写，其余是生成物
-    std/                       13 页 std 模块 API
+    std/                       14 页 std 模块 API
   design/                      设计文档（记「为什么这样设计」）
     README.md                        共同前提 / 分工边界 / 状态登记表
     module-design.md                 模块与导入
@@ -70,7 +70,7 @@ docs/
 
 ## 生成物
 
-`api/std/` 下的 13 页由 `toolchain/doc` 从 `std/` 源码生成：
+`api/std/` 下的 14 页由 `toolchain/doc` 从 `std/` 源码生成：
 
 ```bash
 bin/toolchain-doc-gen/koral_doc --self-test   # 生成器自检

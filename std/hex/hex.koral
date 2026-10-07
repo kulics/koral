@@ -1,0 +1,83 @@
+using "std";
+// ============================================================================
+// std.hex - Hexadecimal encoding
+// ============================================================================
+// Provides: encode_hex, decode_hex
+// Access via: using "std/hex";
+//
+// Encoding always produces lowercase; decoding accepts either case. That is
+// the shape every mainstream library settled on (Rust `hex`, Go `encoding/hex`,
+// Python `bytes.hex`/`fromhex`) -- C# `Convert.ToHexString` emits uppercase and
+// .NET 9 added `ToHexStringLower` to undo it.
+//
+// Two free functions and nothing else: Koral has one byte container and no
+// fixed-size arrays, so the abstractions Rust's `hex` crate offers (`AsRef<[u8]>`,
+// `FromHex for [u8; N]`, `encode_to_slice`) have nothing here to abstract over.
+// They earn their keep when a second byte container or a `[u8; N]` appears.
+// ============================================================================
+
+/// The 16 lowercase hex digits, as a function: a module-level `let` must carry
+/// a function signature, so a constant table has nowhere to live at file scope.
+file_private let nibble_to_char(n UInt) UInt8 = {
+    return if n < 10 then (48 + n)(UInt8) else (97 + n - 10)(UInt8);
+};
+
+/// Decode one ASCII hex digit, either case. `None` for anything else.
+file_private let char_to_nibble(c UInt8) Option[UInt] = {
+    let v = c(UInt);
+    if v >= 48 and v <= 57 then {
+        return Option[UInt].Some(v - 48);
+    };
+    if v >= 97 and v <= 102 then {
+        return Option[UInt].Some(v - 97 + 10);
+    };
+    if v >= 65 and v <= 70 then {
+        return Option[UInt].Some(v - 65 + 10);
+    };
+    return Option[UInt].None();
+};
+
+/// Encode bytes as lowercase hexadecimal text. Two characters per byte, so the
+/// result is always `bytes.count() * 2` long. Never fails.
+public let encode_hex(bytes List[UInt8]) String = {
+    let mutable out = StringBuilder.new();
+    let mutable i UInt = 0;
+    while i < bytes.count() then {
+        let b = bytes[i](UInt);
+        out.push_byte(nibble_to_char(b >> 4));
+        out.push_byte(nibble_to_char(b & 15));
+        i += 1;
+    };
+    return out.to_string();
+};
+
+/// Decode hexadecimal text back to bytes. Accepts uppercase and lowercase.
+///
+/// Fails on an odd number of characters, or on a character that is not a hex
+/// digit; the message says which and where.
+public let decode_hex(s String) Result[List[UInt8]] = {
+    let runes = s.to_bytes();
+    if runes.count() % 2 <> 0 then {
+        return Result[List[UInt8]].Error(
+            "decode_hex: odd-length input of \(runes.count()) characters",
+        );
+    };
+
+    let mutable out = make_bytes(runes.count() / 2);
+    let mutable i UInt = 0;
+    while i < runes.count() then {
+        let hi = char_to_nibble(runes[i]) or else {
+            return Result[List[UInt8]].Error(
+                "decode_hex: invalid hex digit at offset \(i)",
+            );
+        };
+        let lo = char_to_nibble(runes[i + 1]) or else {
+            return Result[List[UInt8]].Error(
+                "decode_hex: invalid hex digit at offset \(i + 1)",
+            );
+        };
+        out[i / 2] = ((hi << 4) | lo)(UInt8);
+        i += 2;
+    };
+    return Result[List[UInt8]].Ok(out);
+};

@@ -7,6 +7,7 @@ using "std";
 // ============================================================================
 
 using "std/text" { Parseable };
+using "std/hex" { encode_hex, decode_hex };
 
 // ============================================================================
 // Ipv4Addr Type Definition
@@ -235,100 +236,82 @@ given Ipv6Addr {
     /// Check if this is a multicast address (ff00::/8).
     public is_multicast(self) Bool = (self.seg_a & 65280(UInt16)) == 65280(UInt16);
 
-    /// Convert a single hex digit character to its numeric value.
-    /// Returns 255 on invalid input.
-    file_private hex_digit_value(b UInt8) UInt = {
-        if b >= '0' and b <= '9' then {
-            return (b - '0')(UInt);
-        };
-        if b >= 'a' and b <= 'f' then {
-            return (b - 'a')(UInt) + 10;
-        };
-        if b >= 'A' and b <= 'F' then {
-            return (b - 'A')(UInt) + 10;
-        };
-        return 255;
-    };
-
     /// Convert a UInt16 value to lowercase hexadecimal string (no leading zeros).
+    /// RFC 5952 §4.3 drops leading zeros inside a group, so this is IPv6
+    /// presentation rather than plain byte-sequence encoding: `encode_hex`
+    /// supplies the digits, the trimming is the address format's own rule.
     file_private hex_string(value UInt16) String = {
-        let v = value(UInt);
-        if v == 0 then {
+        if value == 0 then {
             return "0";
         };
-        let mutable s = StringBuilder.new();
-        // Find the first non-zero nibble
-        let mutable started = false;
-        let nibble3 = (v >> 12) & 15;
-        if nibble3 > 0 then {
-            s.push_byte(Ipv6Addr.hex_char(nibble3));
-            started = true;
+        let mutable bs = make_bytes(2);
+        bs[0] = (value >> 8)(UInt8);
+        bs[1] = value(UInt8);
+        let mutable s = encode_hex(bs);
+        while s.count() > 1 and s.starts_with("0") then {
+            s = s.trim_prefix("0");
         };
-        let nibble2 = (v >> 8) & 15;
-        if nibble2 > 0 or started then {
-            s.push_byte(Ipv6Addr.hex_char(nibble2));
-            started = true;
-        };
-        let nibble1 = (v >> 4) & 15;
-        if nibble1 > 0 or started then {
-            s.push_byte(Ipv6Addr.hex_char(nibble1));
-        };
-        let nibble0 = v & 15;
-        s.push_byte(Ipv6Addr.hex_char(nibble0));
-        return s.to_string();
+        return s;
     };
 
-    /// Convert a nibble (0-15) to its lowercase hex character.
-    file_private hex_char(nibble UInt) UInt8 = {
-        if nibble < 10 then {
-            return nibble(UInt8) + '0';
+    /// One IPv6 group: 1-4 hex digits read as a 16-bit value. The digits go
+    /// through `decode_hex`, so what counts as a hex digit is decided in
+    /// `std/hex` and not spelled again here.
+    file_private group_value(digits String) Result[UInt16] = {
+        if digits.count() == 0 or digits.count() > 4 then {
+            return Result[UInt16].Error("invalid IPv6 address");
         };
-        return (nibble - 10)(UInt8) + 'a';
+        // `decode_hex` reads byte pairs, so a 1- or 3-digit group gets a
+        // leading zero to make up a whole byte. The value is unchanged.
+        let padded = if digits.count() % 2 == 1 then "0" + digits else digits;
+        let bytes = when decode_hex(padded) in {
+            .Ok(bs) then bs,
+            .Error(_) then {
+                return Result[UInt16].Error("invalid IPv6 address");
+            },
+        };
+        let mutable value UInt = 0;
+        for b in bytes then {
+            value = value * 256 + b(UInt);
+        };
+        return Result[UInt16].Ok(value(UInt16));
     };
 
     /// Parse colon-separated hex groups from a substring of s[start..end].
     /// Returns a list of UInt16 values.
     file_private parse_groups(s String, start UInt, end UInt) Result[List[UInt16]] = {
         let mutable groups = List[UInt16].with_capacity(8);
-        let mutable current UInt = 0;
-        let mutable digit_count UInt = 0;
+        let mutable digits = StringBuilder.new();
         let mutable i = start;
 
         while i < end then {
             let b = s[i];
             if b == ':' then {
-                if digit_count == 0 then {
-                    return Result[List[UInt16]].Error("invalid IPv6 address");
+                when Ipv6Addr.group_value(digits.to_string()) in {
+                    .Ok(v) then {
+                        groups.push(v);
+                    },
+                    .Error(e) then {
+                        return Result[List[UInt16]].Error(e);
+                    },
                 };
-                if current > 65535 then {
-                    return Result[List[UInt16]].Error("invalid IPv6 address");
-                };
-                groups.push(current(UInt16));
-                current = 0;
-                digit_count = 0;
+                digits = StringBuilder.new();
                 i += 1;
                 continue;
             };
-            let hex_val = Ipv6Addr.hex_digit_value(b);
-            if hex_val == 255 then {
-                return Result[List[UInt16]].Error("invalid IPv6 address");
-            };
-            current = current * 16 + hex_val;
-            digit_count += 1;
-            if digit_count > 4 then {
-                return Result[List[UInt16]].Error("invalid IPv6 address");
-            };
+            digits.push_byte(b);
             i += 1;
         };
 
         // Handle the last group
-        if digit_count == 0 then {
-            return Result[List[UInt16]].Error("invalid IPv6 address");
+        when Ipv6Addr.group_value(digits.to_string()) in {
+            .Ok(v) then {
+                groups.push(v);
+            },
+            .Error(e) then {
+                return Result[List[UInt16]].Error(e);
+            },
         };
-        if current > 65535 then {
-            return Result[List[UInt16]].Error("invalid IPv6 address");
-        };
-        groups.push(current(UInt16));
 
         return Result[List[UInt16]].Ok(groups);
     };

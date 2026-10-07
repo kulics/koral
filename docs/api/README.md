@@ -12,7 +12,7 @@ api/
     std.md       模块 Std
     io.md        模块 Std.Io
     async.md     模块 Std.Async
-    ...          共 13 个模块
+    ...          共 14 个模块
 ```
 
 将来若有别的包的 API 页，落 `api/<包名>/`，一个包一个叶子目录。
@@ -32,7 +32,7 @@ api/
 
 ```bash
 bin/toolchain-doc-gen/koral_doc --self-test   # 生成器自检
-bin/toolchain-doc-gen/koral_doc               # 重新生成 13 页
+bin/toolchain-doc-gen/koral_doc               # 重新生成 14 页
 bin/toolchain-doc-gen/koral_doc --check       # 过期闸门
 ```
 
@@ -45,7 +45,7 @@ bin/toolchain-doc-gen/koral_doc --check       # 过期闸门
 
 ## 什么算「API 变了」
 
-改 `std/` 的公开声明（签名、默认参数、可见性、新增/删除成员）后，重新生成并把 13 页一并提交。
+改 `std/` 的公开声明（签名、默认参数、可见性、新增/删除成员）后，重新生成并把 14 页一并提交。
 `--check` 会在 CI 之外的 checklist 里被要求跑过。
 
 生成页顶部有机器可读标记：

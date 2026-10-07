@@ -1,0 +1,411 @@
+// sha256sum_test.koral: single-entry test runner for sha256sum (unit + property tests).
+// Run example: koralc run test/sha256sum_test.koral -o .
+// Assumes sha256sum is built to ./bin/sample-sha256sum/sha256sum(.exe) from src/sha256sum.koral.
+//
+// Golden reference: the NIST FIPS 180-4 test vectors. Each digest below is
+// transcribed from the standard, not from this implementation's output.
+
+using "std/os";
+using "std/proc";
+
+type TestResult {
+    Pass(),
+    Fail(message String),
+};
+
+type TestCase(name String, result TestResult);
+
+type ProcessOutput(stdout String, stderr String, exit_code Int);
+
+let pass() TestResult = TestResult.Pass();
+let fail(msg String) TestResult = TestResult.Fail(msg);
+
+let create_temp_text_file(name String, content String) Result[String] = {
+    let path = name.into_path();
+    write_text_file(path, content: content) or return;
+    return Result[String].Ok(name);
+};
+
+let cleanup_temp_file(path String) Void = {
+    let _ = remove_file(path.into_path());
+};
+
+let cleanup_temp_files(paths List[String]) Void = {
+    for path in paths then {
+        cleanup_temp_file(path);
+    };
+};
+
+let run_sha(args List[String]) Result[ProcessOutput] = {
+    let sha_bin = if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-sha256sum/sha256sum.exe"
+    else "./bin/sample-sha256sum/sha256sum";
+    let cmd = Command.new(sha_bin).args(args).set_stdin(IoRedirect.Null());
+    let out = cmd.run_output() or return;
+    let exit_code = out.status.code() or else 0;
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
+};
+
+let assert_eq(actual String, expected String, msg String) TestResult = {
+    if actual == expected then {
+        return pass();
+    };
+    let mutable m = StringBuilder.new();
+    m.push_string(msg);
+    m.push_string(" | expected=");
+    m.push_string(expected);
+    m.push_string(" | actual=");
+    m.push_string(actual);
+    return fail(m.to_string());
+};
+
+let assert_true(cond Bool, msg String) TestResult = {
+    return if cond then pass() else fail(msg);
+};
+
+/// First whitespace-delimited field of the output: the digest itself.
+let digest_of(stdout String) String = {
+    let trimmed = stdout.trim_ascii();
+    let words = trimmed.split_ascii_whitespace();
+    return if words.next() is .Some(first) then first else "";
+};
+
+let normalize_newlines(s String) String = {
+    return s.replace_all("\r\n", with: "\n");
+};
+
+// ============================================================================
+// FIPS 180-4 test vectors
+// ============================================================================
+// One per natural input class the standard defines: empty, one block,
+// multi-block, and a very long message that crosses many blocks.
+
+let nist_empty() String =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+let nist_abc() String = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+let nist_two_block() String =
+    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
+let nist_million_a() String =
+    "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0";
+
+let hash_of_file(path String) TestResult = {
+    let out = run_sha([path]) or else {
+        return fail("failed to run sha256sum: \(it.message())");
+    };
+    if out.exit_code <> 0 then {
+        return fail("exit \(out.exit_code) for \(path): \(out.stderr)");
+    };
+    return pass();
+};
+
+// ---------------------------------------------------------------------------
+// Unit: the standard's vectors
+// ---------------------------------------------------------------------------
+
+let test_nist_empty() TestResult = {
+    let name = "sha_empty.txt";
+    create_temp_text_file(name, "") or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+    let r = assert_eq(digest_of(out.stdout), nist_empty(), "NIST empty string");
+    return r;
+};
+
+let test_nist_abc() TestResult = {
+    let name = "sha_abc.txt";
+    create_temp_text_file(name, "abc") or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+    return assert_eq(digest_of(out.stdout), nist_abc(), "NIST 'abc'");
+};
+
+let test_nist_two_block() TestResult = {
+    let name = "sha_two_block.txt";
+    create_temp_text_file(
+        name,
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+    ) or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+    return assert_eq(digest_of(out.stdout), nist_two_block(), "NIST two-block message");
+};
+
+let test_nist_million_a() TestResult = {
+    let name = "sha_million_a.txt";
+    let mutable content = StringBuilder.new();
+    let mutable i UInt = 0;
+    while i < 1000000 then {
+        content.push_string("a");
+        i += 1;
+    };
+    create_temp_text_file(name, content.to_string()) or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+    return assert_eq(digest_of(out.stdout), nist_million_a(), "NIST one million 'a'");
+};
+
+// ---------------------------------------------------------------------------
+// Unit: output shape and CLI surface
+// ---------------------------------------------------------------------------
+
+/// GNU coreutils prints "<digest>  <file>" with two spaces for a text-mode file.
+let test_output_format() TestResult = {
+    let name = "sha_fmt.txt";
+    create_temp_text_file(name, "abc") or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+
+    let expected = nist_abc() + "  " + name + "\n";
+    return assert_eq(normalize_newlines(out.stdout), expected, "output format");
+};
+
+let test_multiple_files() TestResult = {
+    let a = "sha_multi_a.txt";
+    let b = "sha_multi_b.txt";
+    create_temp_text_file(a, "abc") or else {
+        return fail("temp a: \(it.message())");
+    };
+    create_temp_text_file(b, "") or else {
+        cleanup_temp_file(a);
+        return fail("temp b: \(it.message())");
+    };
+
+    let out = run_sha([a, b]) or else {
+        cleanup_temp_files([a, b]);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_files([a, b]);
+
+    let expected = nist_abc() + "  " + a + "\n" + nist_empty() + "  " + b + "\n";
+    return assert_eq(normalize_newlines(out.stdout), expected, "multiple files");
+};
+
+let test_missing_file() TestResult = {
+    let out = run_sha(["sha_no_such_file.txt"]) or else {
+        return fail("run: \(it.message())");
+    };
+    if out.exit_code == 0 then {
+        return fail("expected non-zero exit for a missing file, got 0");
+    };
+    return assert_true(
+        out.stderr.contains("sha256sum:"),
+        "error goes to stderr with a prefix",
+    );
+};
+
+let test_invalid_option() TestResult = {
+    let out = run_sha(["--not-an-option"]) or else {
+        return fail("run: \(it.message())");
+    };
+    return assert_true(out.exit_code <> 0, "invalid option must not exit 0");
+};
+
+let test_missing_operand() TestResult = {
+    let out = run_sha([]) or else {
+        return fail("run: \(it.message())");
+    };
+    return assert_true(out.exit_code <> 0, "no operands must not exit 0");
+};
+
+let test_help_and_version() TestResult = {
+    let help = run_sha(["--help"]) or else {
+        return fail("help: \(it.message())");
+    };
+    if help.exit_code <> 0 then {
+        return fail("--help must exit 0");
+    };
+    if not help.stdout.contains("Usage:") then {
+        return fail("--help must print usage");
+    };
+
+    let version = run_sha(["--version"]) or else {
+        return fail("version: \(it.message())");
+    };
+    if version.exit_code <> 0 then {
+        return fail("--version must exit 0");
+    };
+    return assert_true(
+        version.stdout.contains("sha256sum"),
+        "--version must name the tool",
+    );
+};
+
+// ---------------------------------------------------------------------------
+// Property: the digest is a stable function of the bytes alone
+// ---------------------------------------------------------------------------
+
+/// Same bytes under a different file name must hash identically — the digest
+/// may not depend on anything but the content.
+let property_name_independent() TestResult = {
+    let a = "sha_prop_a.txt";
+    let b = "sha_prop_b.txt";
+    create_temp_text_file(a, "koral") or else {
+        return fail("temp a: \(it.message())");
+    };
+    create_temp_text_file(b, "koral") or else {
+        cleanup_temp_file(a);
+        return fail("temp b: \(it.message())");
+    };
+
+    let out_a = run_sha([a]) or else {
+        cleanup_temp_files([a, b]);
+        return fail("run a: \(it.message())");
+    };
+    let out_b = run_sha([b]) or else {
+        cleanup_temp_files([a, b]);
+        return fail("run b: \(it.message())");
+    };
+    cleanup_temp_files([a, b]);
+
+    return assert_eq(
+        digest_of(out_a.stdout),
+        digest_of(out_b.stdout),
+        "digest ignores the file name",
+    );
+};
+
+/// Changing a single byte must change the digest. Catches an implementation that
+/// silently stops absorbing input after the first block.
+let property_avalanche() TestResult = {
+    let a = "sha_aval_a.txt";
+    let b = "sha_aval_b.txt";
+    create_temp_text_file(a, "aaaaaaaa") or else {
+        return fail("temp a: \(it.message())");
+    };
+    create_temp_text_file(b, "aaaaaaab") or else {
+        cleanup_temp_file(a);
+        return fail("temp b: \(it.message())");
+    };
+
+    let out_a = run_sha([a]) or else {
+        cleanup_temp_files([a, b]);
+        return fail("run a: \(it.message())");
+    };
+    let out_b = run_sha([b]) or else {
+        cleanup_temp_files([a, b]);
+        return fail("run b: \(it.message())");
+    };
+    cleanup_temp_files([a, b]);
+
+    return assert_true(
+        digest_of(out_a.stdout) <> digest_of(out_b.stdout),
+        "a one-byte change must change the digest",
+    );
+};
+
+/// The digest is always 32 bytes, so always 64 lowercase hex characters.
+let property_digest_shape() TestResult = {
+    let name = "sha_shape.txt";
+    create_temp_text_file(name, "shape check") or else {
+        return fail("temp file: \(it.message())");
+    };
+    let out = run_sha([name]) or else {
+        cleanup_temp_file(name);
+        return fail("run: \(it.message())");
+    };
+    cleanup_temp_file(name);
+
+    let d = digest_of(out.stdout);
+    if d.count() <> 64 then {
+        return fail("digest must be 64 hex chars, got \(d.count())");
+    };
+    for b in d.to_bytes() then {
+        let is_digit = b >= 48 and b <= 57;
+        let is_lower_hex = b >= 97 and b <= 102;
+        if not (is_digit or is_lower_hex) then {
+            return fail("digest must be lowercase hex, got `\(d)`");
+        };
+    };
+    return pass();
+};
+
+// ============================================================================
+// Runner
+// ============================================================================
+
+let run_case(name String, r TestResult) TestCase = {
+    print(name);
+    print(" ... ");
+    when r in {
+        .Pass() then println("PASS"),
+        .Fail(msg) then {
+            println("FAIL");
+            let mutable m = StringBuilder.new();
+            m.push_string("  reason: ");
+            m.push_string(msg);
+            println(m.to_string());
+        },
+    };
+    return TestCase(name, r);
+};
+
+public let main() Int = {
+    println("========================================");
+    println("koral-sha256sum test suite");
+    println("========================================");
+
+    let mutable tests = List[TestCase].new();
+    tests.push(run_case("nist: empty string", test_nist_empty()));
+    tests.push(run_case("nist: 'abc'", test_nist_abc()));
+    tests.push(run_case("nist: two-block message", test_nist_two_block()));
+    tests.push(run_case("nist: one million 'a'", test_nist_million_a()));
+    tests.push(run_case("unit: output format", test_output_format()));
+    tests.push(run_case("unit: multiple files", test_multiple_files()));
+    tests.push(run_case("unit: missing file", test_missing_file()));
+    tests.push(run_case("unit: invalid option", test_invalid_option()));
+    tests.push(run_case("unit: missing operand", test_missing_operand()));
+    tests.push(run_case("unit: help/version", test_help_and_version()));
+    tests.push(run_case("property: name independent", property_name_independent()));
+    tests.push(run_case("property: avalanche", property_avalanche()));
+    tests.push(run_case("property: digest shape", property_digest_shape()));
+
+    let mutable passed UInt = 0;
+    let mutable failed UInt = 0;
+    for test in tests then {
+        when test.result in {
+            .Pass() then {
+                passed += 1;
+            },
+            .Fail(_) then {
+                failed += 1;
+            },
+        };
+    };
+
+    println("----------------------------------------");
+    let mutable summary = StringBuilder.new();
+    summary.push_string("Total: ");
+    summary.push_string((passed + failed).to_string());
+    summary.push_string(", Passed: ");
+    summary.push_string(passed.to_string());
+    summary.push_string(", Failed: ");
+    summary.push_string(failed.to_string());
+    println(summary.to_string());
+    println("========================================");
+
+    return if failed == 0 then 0 else 1;
+};
