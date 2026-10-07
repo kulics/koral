@@ -58,6 +58,14 @@ Reserved words must match too: `it` is reserved (it cannot be a declaration
 name) but stays legal in **expression position** as the implicit lambda
 parameter.
 
+**Newlines carry no meaning.** Only `;` ends a statement, so an expression may
+span lines after *any* token — there is no set of line-leading words that
+"continue" an expression and no other token that "breaks" one. `peek`/`eat`
+skip newlines, and nothing in the parser may consult them to decide where an
+expression or statement ends. A missing `;` is an error, not something the
+printer may supply: a formatter that fills one in rewrites source the compiler
+will refuse. `count_newlines` is for layout only (blank lines between items).
+
 Every one of these has an assertion in `toolchain/koralfmt/test_fmt.koral` under
 "parse parity with the compiler". **When the compiler rejects a new shape, add
 the rejection here and an assertion there in the same change** — the corpus gate
@@ -69,21 +77,22 @@ drift on its own.
 `format_source_checked(source)` formats, then proves two things about the
 result before returning it:
 
-1. **Nothing but `;` and `,` moved.** Strip those two from both sides and the
-   token sequences are identical, in order and spelling. Names, literals,
-   comments, operators and delimiters are untouched.
+1. **Nothing but `,` moved.** Strip that one from both sides and the token
+   sequences are identical, in order and spelling. Names, literals, comments,
+   operators, delimiters and `;` are untouched.
 2. **It settles.** Formatting the output again produces it back.
 
-`;` and `,` may be added or removed because the surface syntax makes both
-optional in ways that carry no meaning:
+`,` may be added or removed because it is a list separator: a list exploded
+across lines ends with one so the next edit is a one-line diff; a list kept on
+one line does not.
 
-- `;` — a terminator automatic semicolon insertion would have supplied.
-  Making it explicit is the point of formatting.
-- `,` — a list separator. A list exploded across lines ends with one so the next
-  edit is a one-line diff; a list kept on one line does not.
-
-Neither can hide a real change: a dropped separator makes the output
-unparseable, and the check re-parses what it produced.
+**`;` is not in that set.** Koral has no automatic semicolon insertion — `;` is
+required on every statement and declaration, and forbidden on a block's tail
+expression (`guide/grammar.bnf`, "Statement Termination"). Adding one turns a
+tail expression into a statement; dropping one makes the output unparseable.
+Both change what the program means, so the contract counts every `;` on both
+sides and the parser rejects input that is missing one rather than letting the
+printer fill it in.
 
 Byte-order marks and line endings are file-level markers rather than language
 content. `koralfmt` folds `\r\n` to `\n` and puts a BOM back where it found

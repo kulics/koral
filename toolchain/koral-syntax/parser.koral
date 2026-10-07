@@ -10,15 +10,11 @@
 // CstParser
 // ============================================================================
 
-public type mutable CstParser(
-    tokens List[Token],
-    mutable pos UInt,
-    mutable line_join_grouping UInt,
-);
+public type mutable CstParser(tokens List[Token], mutable pos UInt);
 
 given CstParser {
 
-    public new(tokens List[Token]) CstParser = CstParser(tokens, 0, 0);
+    public new(tokens List[Token]) CstParser = CstParser(tokens, 0);
 
     // ========================================================================
     // Token helpers
@@ -113,6 +109,28 @@ given CstParser {
     file_private eat(self) Token = {
         self.skip_newlines();
         return self.advance();
+    };
+
+    /// Every declaration ends with `;` -- top-level or member, whatever it
+    /// declares (`grammar.bnf` "Top-level declarations ... must end with `;`").
+    /// Never supply one: a formatter that fills in a missing `;` rewrites source
+    /// into a shape the compiler will then refuse.
+    file_private eat_decl_semi(self) Result[Token] = {
+        if self.peek() is not .Semi() then {
+            return .Error("Parse error: expected ';' after declaration");
+        };
+        return .Ok(self.eat());
+    };
+
+    /// Close a parsed declaration: consume its terminating `;`, then wrap it.
+    file_private finish_decl_item(self, d CstDecl) Result[CstItem] = {
+        when self.eat_decl_semi() in {
+            .Ok(_) then {},
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Decl(d));
     };
 
     file_private eat_comma(self) Option[Token] = {
@@ -252,57 +270,9 @@ given CstParser {
         _ then false,
     };
 
-    // Check if we crossed a newline boundary (for statement termination)
-    file_private at_newline_boundary(self) Bool = {
-        if self.pos == 0 then {
-            return false;
-        };
-        // Check if there's a newline between current pos-1 and the next non-newline
-        let mutable i = self.pos;
-        if i > 0 then {
-            i -= 1;
-            while i > 0 then {
-                when self.tokens[i] in {
-                    .Newline() then {
-                        return true;
-                    },
-                    _ then {
-                        return false;
-                    },
-                };
-            };
-        };
-        return false;
-    };
-
-    // Check if there's a newline before the current peek position
-    file_private newline_before_current(self) Bool = {
-        if self.line_join_grouping > 0 then {
-            return false;
-        };
-        return self.count_newlines() > 0;
-    };
-
-    file_private is_line_join_peek(self) Bool = {
-        return when self.peek() in {
-            .KwAnd() or .KwOr() or .KwIs() or .KwThen() or .KwElse() or .Dot() or .Arrow() then true,
-            _ then false,
-        };
-    };
-
-    file_private should_break_expr_at_peek(self) Bool = {
-        return self.newline_before_current() and not self.is_line_join_peek();
-    };
-
-    file_private enter_line_join_grouping(self) Void = {
-        self.line_join_grouping += 1;
-    };
-
-    file_private leave_line_join_grouping(self) Void = {
-        if self.line_join_grouping > 0 then {
-            self.line_join_grouping -= 1;
-        };
-    };
+    // Newlines carry no meaning for parsing: `peek`/`eat` skip them, and nothing
+    // consults them to decide where an expression or statement ends. `;` is the
+    // only statement terminator. `count_newlines` below is for layout only.
 
     // ========================================================================
     // Type parsing
@@ -675,9 +645,6 @@ given CstParser {
             },
         };
         while self.check(.KwOr()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let next = self.peek_at_skip_nl(1);
             if next is .KwElse() then {
                 break;
@@ -705,9 +672,6 @@ given CstParser {
             },
         };
         while self.check(.KwOr()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let next = self.peek_at_skip_nl(1);
             when next in {
                 .KwElse() then {
@@ -742,9 +706,6 @@ given CstParser {
             },
         };
         while self.check(.KwAnd()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let next = self.peek_at_skip_nl(1);
             when next in {
                 .KwThen() then {
@@ -774,9 +735,6 @@ given CstParser {
             },
         };
         while self.check(.KwAnd()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let next = self.peek_at_skip_nl(1);
             if next is .KwThen() then {
                 break;
@@ -805,9 +763,6 @@ given CstParser {
             },
         };
 
-        if self.should_break_expr_at_peek() then {
-            return .Ok(left);
-        };
         if not self.check(.KwIs()) then {
             return .Ok(left);
         };
@@ -848,9 +803,6 @@ given CstParser {
             },
         };
         while self.check(.Pipe()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let op = self.eat();
             let right = when self.parse_bitwise_xor() in {
                 .Ok(e) then e,
@@ -871,9 +823,6 @@ given CstParser {
             },
         };
         while self.check(.Caret()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let op = self.eat();
             let right = when self.parse_bitwise_and() in {
                 .Ok(e) then e,
@@ -894,9 +843,6 @@ given CstParser {
             },
         };
         while self.check(.Amp()) then {
-            if self.should_break_expr_at_peek() then {
-                break;
-            };
             let op = self.eat();
             let right = when self.parse_shift() in {
                 .Ok(e) then e,
@@ -1006,9 +952,6 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq() then {
-                    if self.should_break_expr_at_peek() then {
-                        break;
-                    };
                     let op = self.eat();
                     let right = when self.parse_bitwise_or() in {
                         .Ok(e) then e,
@@ -1036,9 +979,6 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .LShift() or .RShift() then {
-                    if self.should_break_expr_at_peek() then {
-                        break;
-                    };
                     let op = self.eat();
                     let right = when self.parse_additive() in {
                         .Ok(e) then e,
@@ -1066,9 +1006,6 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .Plus() then {
-                    if self.should_break_expr_at_peek() then {
-                        break;
-                    };
                     let op = self.eat();
                     let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
@@ -1079,9 +1016,6 @@ given CstParser {
                     left = .BinaryOp(left, op, right);
                 },
                 .Minus() then {
-                    if self.should_break_expr_at_peek() then {
-                        break;
-                    };
                     let op = self.eat();
                     let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
@@ -1109,9 +1043,6 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .Star() or .Slash() or .Percent() then {
-                    if self.should_break_expr_at_peek() then {
-                        break;
-                    };
                     let op = self.eat();
                     let right = when self.parse_prefix() in {
                         .Ok(e) then e,
@@ -1238,13 +1169,6 @@ given CstParser {
             },
         };
         while true then {
-            // Stop at newline for non-continuation tokens
-            if self.newline_before_current() then {
-                if self.peek() is not .Dot() then {
-                    break;
-                };
-            };
-
             // Field access: expr.field
             if self.check(.Dot()) then {
                 let dot = self.eat();
@@ -1256,7 +1180,7 @@ given CstParser {
                     },
                 };
                 // Check for method call: expr.field(args)
-                if (not self.newline_before_current()) and self.check(.LParen()) then {
+                if self.check(.LParen()) then {
                     let field_expr = CstExpr.FieldAccess(expr, dot, field);
                     let lp = self.eat();
                     let args = when self.parse_call_args() in {
@@ -1404,7 +1328,6 @@ given CstParser {
 
     file_private parse_call_args(self) Result[List[CstCallArg]] = {
         let mutable args = List[CstCallArg].new();
-        self.enter_line_join_grouping();
         while not self.check(.RParen()) and not self.is_eof() then {
             if self.check(.Semi()) then {
                 self.eat();
@@ -1416,7 +1339,6 @@ given CstParser {
             };
             let before = self.pos;
             if self.check(.Unbounded()) then {
-                self.leave_line_join_grouping();
                 return .Error(
                     "Parse error: Default-fill '...' is not supported; use named parameter defaults instead",
                 );
@@ -1439,11 +1361,9 @@ given CstParser {
             let comma = self.eat_comma();
             args.push(.Value(label, colon, value, comma));
             if self.pos == before then {
-                self.leave_line_join_grouping();
                 return .Error("Parse error: parser made no progress in argument list");
             };
         };
-        self.leave_line_join_grouping();
         return .Ok(args);
     };
 
@@ -1578,7 +1498,6 @@ given CstParser {
                 return .Error(e);
             },
         };
-        self.enter_line_join_grouping();
 
         if self.check(.RBracket()) then {
             let rb = when self.expect(.RBracket(), "']'") in {
@@ -1587,7 +1506,6 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            self.leave_line_join_grouping();
             return .Ok(.EmptyLiteral(lb, rb));
         };
 
@@ -1639,7 +1557,6 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            self.leave_line_join_grouping();
             return .Ok(.DictLiteral(lb, entries, rb));
         };
 
@@ -1663,7 +1580,6 @@ given CstParser {
                 return .Error(e);
             },
         };
-        self.leave_line_join_grouping();
         return .Ok(.CollectionLiteral(lb, elements, rb));
     };
 
@@ -1707,8 +1623,20 @@ given CstParser {
                         .Stmt(stmt) then {
                             when stmt in {
                                 .ExprStmt(expr, semi) then {
-                                    if semi is .None() and self.check(.RBrace()) then {
-                                        tail_expr = .Some(expr);
+                                    // A bare expression is the block's tail
+                                    // expression and must be last. Anything
+                                    // after it needs a `;` on the earlier one;
+                                    // the compiler reports `expected: '}'` here.
+                                    // Never supply that `;` -- it would turn a
+                                    // tail expression into a statement.
+                                    if semi is .None() then {
+                                        if self.check(.RBrace()) then {
+                                            tail_expr = .Some(expr);
+                                        } else {
+                                            return .Error(
+                                                "Parse error: expected ';' after expression statement",
+                                            );
+                                        };
                                     } else {
                                         items.push(item);
                                     };
@@ -1791,11 +1719,9 @@ given CstParser {
             };
             return .Ok(.Ident(.Ident("()")));
         };
-        self.enter_line_join_grouping();
         let inner = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then {
-                self.leave_line_join_grouping();
                 return .Error(e);
             },
         };
@@ -1804,18 +1730,15 @@ given CstParser {
             let second = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then {
-                    self.leave_line_join_grouping();
                     return .Error(e);
                 },
             };
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then {
-                    self.leave_line_join_grouping();
                     return .Error(e);
                 },
             };
-            self.leave_line_join_grouping();
             return .Ok(.PairExpr(lp, inner, comma, second, rp));
         };
         if self.check(.KwAs()) then {
@@ -1823,28 +1746,23 @@ given CstParser {
             let trait_type = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then {
-                    self.leave_line_join_grouping();
                     return .Error(e);
                 },
             };
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then {
-                    self.leave_line_join_grouping();
                     return .Error(e);
                 },
             };
-            self.leave_line_join_grouping();
             return .Ok(.TraitQualification(lp, inner, as_kw, trait_type, rp));
         };
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(e) then {
-                self.leave_line_join_grouping();
                 return .Error(e);
             },
         };
-        self.leave_line_join_grouping();
 
         // Keep one paren layer for readability, but collapse duplicate nesting:
         // ((x)) -> (x)
@@ -2718,7 +2636,11 @@ given CstParser {
     };
 
     file_private parse_top_item(self) Result[CstItem] = {
-        // Using declaration
+        // Using declaration. Its `;` is collected inside the declaration's own
+        // token list, and the compiler does not require one at all -- so it
+        // does not go through `finish_decl_item`. Matching the compiler here
+        // means accepting `using "./x.koral"` without `;`, even though
+        // grammar.bnf writes the `;` as mandatory.
         if self.check(.KwUsing()) then {
             when self.parse_using_decl() in {
                 .Ok(d) then {
@@ -2738,7 +2660,7 @@ given CstParser {
             .KwLet() then {
                 when self.parse_let_decl() in {
                     .Ok(d) then {
-                        return .Ok(.Decl(d));
+                        return self.finish_decl_item(d);
                     },
                     .Error(e) then {
                         return .Error(e);
@@ -2748,7 +2670,7 @@ given CstParser {
             .KwType() then {
                 when self.parse_type_decl() in {
                     .Ok(d) then {
-                        return .Ok(.Decl(d));
+                        return self.finish_decl_item(d);
                     },
                     .Error(e) then {
                         return .Error(e);
@@ -2758,7 +2680,7 @@ given CstParser {
             .KwTrait() then {
                 when self.parse_trait_decl() in {
                     .Ok(d) then {
-                        return .Ok(.Decl(d));
+                        return self.finish_decl_item(d);
                     },
                     .Error(e) then {
                         return .Error(e);
@@ -2768,7 +2690,7 @@ given CstParser {
             .KwGiven() then {
                 when self.parse_given_decl() in {
                     .Ok(d) then {
-                        return .Ok(.Decl(d));
+                        return self.finish_decl_item(d);
                     },
                     .Error(e) then {
                         return .Error(e);
@@ -2788,28 +2710,37 @@ given CstParser {
     // Using declarations
     // ========================================================================
 
+    /// After the specifier (and optional import list) nothing may appear but
+    /// layout, comments, and the one `;` that ends the declaration. The `;` is
+    /// collected into `tokens` rather than consumed by the caller, so it is
+    /// required here instead of by `finish_decl_item`.
     file_private validate_using_trailing_tokens(
         self,
         tokens List[Token],
         start UInt,
         message String,
     ) Result[Void] = {
+        let mutable seen_semi = false;
         let mutable i = start;
         while i < tokens.count() then {
             when tokens[i] in {
-                .Newline() then {
+                .Newline() or .LineComment(_) or .BlockComment(_) then {
                     i += 1;
                 },
                 .Semi() then {
+                    if seen_semi then {
+                        return .Error(message);
+                    };
+                    seen_semi = true;
                     i += 1;
-                },
-                .LineComment(_) or .BlockComment(_) then {
-                    return .Ok({});
                 },
                 _ then {
                     return .Error(message);
                 },
             };
+        };
+        if not seen_semi then {
+            return .Error("Parse error: expected ';' after declaration");
         };
         return .Ok({});
     };
@@ -2916,8 +2847,10 @@ given CstParser {
                     while ai < alias_runes.count() and alias_runes[ai].to_uint32() == 95 then {
                         ai += 1;
                     };
-                    let item_upper = ii < item_runes.count() and item_runes[ii].to_uint32() >= 65 and item_runes[ii].to_uint32() <= 90;
-                    let alias_upper = ai < alias_runes.count() and alias_runes[ai].to_uint32() >= 65 and alias_runes[ai].to_uint32() <= 90;
+                    let item_upper = ii < item_runes.count() and item_runes[ii].to_uint32(
+                    ) >= 65 and item_runes[ii].to_uint32() <= 90;
+                    let alias_upper = ai < alias_runes.count() and alias_runes[ai].to_uint32(
+                    ) >= 65 and alias_runes[ai].to_uint32() <= 90;
                     if item_upper <> alias_upper then {
                         if item_upper then {
                             return .Error(
@@ -3312,9 +3245,7 @@ given CstParser {
         // Enum body: { .Variant1, .Variant2(T) }
         if self.check(.LBrace()) then {
             if mut_kw is .Some(_) then {
-                return .Error(
-                    "Parse error: Enum type cannot be marked mutable",
-                );
+                return .Error("Parse error: Enum type cannot be marked mutable");
             };
             let lb = self.eat();
             let mutable cases = List[CstItem].new();
@@ -3365,9 +3296,7 @@ given CstParser {
         // Alias: = OtherType
         if self.check(.Eq()) then {
             if mut_kw is .Some(_) then {
-                return .Error(
-                    "Parse error: Type alias cannot be marked mutable",
-                );
+                return .Error("Parse error: Type alias cannot be marked mutable");
             };
             let eq = when self.expect(.Eq(), "'='") in {
                 .Ok(t) then t,
@@ -3568,6 +3497,12 @@ given CstParser {
             };
             when self.parse_trait_method_sig() in {
                 .Ok(d) then {
+                    when self.eat_decl_semi() in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            return .Error(e);
+                        },
+                    };
                     members.push(CstItem.Decl(d));
                 },
                 .Error(e) then {
@@ -3792,6 +3727,12 @@ given CstParser {
                 .KwLet() then {
                     when self.parse_let_decl() in {
                         .Ok(d) then {
+                            when self.eat_decl_semi() in {
+                                .Ok(_) then {},
+                                .Error(e) then {
+                                    return .Error(e);
+                                },
+                            };
                             members.push(CstItem.Decl(d));
                         },
                         .Error(e) then {
@@ -3803,6 +3744,12 @@ given CstParser {
                     // Method without let keyword
                     when self.parse_member_no_let() in {
                         .Ok(d) then {
+                            when self.eat_decl_semi() in {
+                                .Ok(_) then {},
+                                .Error(e) then {
+                                    return .Error(e);
+                                },
+                            };
                             members.push(CstItem.Decl(d));
                         },
                         .Error(e) then {

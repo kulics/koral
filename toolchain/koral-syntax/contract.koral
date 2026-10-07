@@ -32,27 +32,26 @@ public let token_keys(source String) Result[List[String]] = {
 
 /// The contract, checked at two levels:
 ///
-///   1. Strip `;` and `,` from both sides and the token sequences are
-///      identical, in order and spelling.
-///   2. Strip whitespace, `;` and `,` from both sides and the remaining
-///      characters are identical, in order.
+///   1. Strip `,` from both sides and the token sequences are identical, in
+///      order and spelling.
+///   2. Strip whitespace and `,` from both sides and the remaining characters
+///      are identical, in order.
 ///
 /// Everything a reader uses to tell code apart -- names, literals, comments,
 /// operators, delimiters -- is untouched. The second check exists because the
 /// first can only see what the tokenizer knows: a character with no token is
 /// dropped before either side is compared, and the two token lists still agree.
 ///
-/// `;` and `,` are the two tokens a rewrite may add or remove, because the
-/// surface syntax makes both optional in ways that carry no meaning:
+/// `,` is the one token a rewrite may add or remove: a list separator. A list
+/// exploded across lines ends with one so the next edit is a one-line diff; a
+/// list kept on one line does not.
 ///
-///   * `;` -- a statement terminator automatic semicolon insertion would have
-///     supplied. Making it explicit is the point of formatting.
-///   * `,` -- a list separator. A list exploded across lines ends with one so
-///     the next edit is a one-line diff; a list kept on one line does not.
-///
-/// Both are recoverable from the output alone. A dropped separator cannot hide
-/// behind this: it makes the output unparseable, and `format_source_checked`
-/// re-parses what it produced.
+/// `;` is NOT in that set. There is no automatic semicolon insertion in Koral
+/// (grammar.bnf "Statement Termination"): `;` is required on every statement and
+/// declaration, and forbidden on a block's tail expression. A rewrite that adds
+/// or drops one changes what the program means -- supplying a `;` turns a tail
+/// expression into a statement -- so the contract counts every `;` on both
+/// sides.
 ///
 /// Returns `None` when the contract holds.
 public let format_contract_violation(before String, after String) Option[String] = {
@@ -69,7 +68,6 @@ public let format_contract_violation(before String, after String) Option[String]
         },
     };
 
-    let semi_key = token_key(Token.Semi());
     let comma_key = token_key(Token.Comma());
 
     let mutable bi UInt = 0;
@@ -78,13 +76,13 @@ public let format_contract_violation(before String, after String) Option[String]
         let b = if bi < before_keys.count() then before_keys[bi] else "";
         let a = if ai < after_keys.count() then after_keys[ai] else "";
 
-        if b == semi_key or b == comma_key then {
+        if b == comma_key then {
             if bi < before_keys.count() then {
                 bi += 1;
             };
             continue;
         };
-        if a == semi_key or a == comma_key then {
+        if a == comma_key then {
             if ai < after_keys.count() then {
                 ai += 1;
             };
@@ -152,14 +150,14 @@ let rune_sequence_mismatch(before String, after String) Option[String] = {
     return .None();
 };
 
-/// The runes that carry meaning: everything except whitespace and the two
-/// separators.
+/// The runes that carry meaning: everything except whitespace and the one
+/// separator a rewrite may add or drop.
 let significant_runes(source String) List[Rune] = {
     let mutable out = List[Rune].new();
     for r in source.to_runes() then {
         when r.to_uint32() in {
-            // space, tab, CR, LF, and `;` / `,`
-            32 or 9 or 13 or 10 or 59 or 44 then {},
+            // space, tab, CR, LF, and `,`
+            32 or 9 or 13 or 10 or 44 then {},
             _ then {
                 out.push(r);
             },
