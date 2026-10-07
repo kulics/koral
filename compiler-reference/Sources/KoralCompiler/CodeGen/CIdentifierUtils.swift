@@ -103,7 +103,7 @@ public func sanitizeCIdentifier(_ name: String) -> String {
 ///
 /// NAME-ONLY, and that is correct here: this is C output. A name is one of the
 /// three places a spelling is legitimate (resolution, display, mangling) -- see
-/// `docs/identity-matching-tracking.md`. Nothing decides identity from it.
+/// `docs/implementation/identity-matching-tracking.md`. Nothing decides identity from it.
 public func generateFileIdentifier(_ sourceFile: String) -> String {
     var hash: UInt32 = 0
     for char in sourceFile.utf8 {

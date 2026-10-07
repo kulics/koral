@@ -9,7 +9,7 @@ This repository contains two compiler implementations — `compiler/`, the self-
 Reference note:
 
 - `README.md` is a high-level overview, not the canonical grammar document.
-- For syntax-sensitive details, use `docs/grammar.bnf` together with the language reference in `docs/document.md` and `docs/document-zh.md`.
+- For syntax-sensitive details, use `docs/guide/grammar.bnf` together with the language reference in `docs/guide/document.md` and `docs/guide/document-zh.md`.
 - When implementation and docs drift, resolve the mismatch by updating the implementation and/or the documents so they converge.
 
 ## The Core Idea: `type` / `type mutable`
@@ -322,18 +322,21 @@ Two compiler implementations live here, and they are not equal:
 - **`compiler/`** — the primary compiler implementation, written in Koral and self-hosting. **This is what you develop.**
 - **`compiler-reference/`** — the **frozen** Swift compiler, kept as the reference oracle (the differential gate compares the two), the build seed (it builds `compiler/` from source), and a backup.
 
-Deleting the frozen reference would trade the strongest cross-check in the repo for the weakest: a self-host fixed point proves a compiler is stable under its own output, not that it is right. See [Compiler roles](docs/developer-guide.md#compiler-roles) for when it may be touched.
+Deleting the frozen reference would trade the strongest cross-check in the repo for the weakest: a self-host fixed point proves a compiler is stable under its own output, not that it is right. See [Compiler roles](docs/implementation/developer-guide.md#compiler-roles) for when it may be touched.
 
 - `std/` — standard library sources and runtime C files
 - `tests/` — shared integration cases and the shared test runner
 - `toolchain/` — `koral` build tool, `koral-syntax` (the shared Koral parser/printer), `koralfmt` formatter, std API doc generator, VS Code extension
 - `samples/` — sample programs
-- `docs/` — language docs and the developer guide
+- `docs/` — documentation, split by audience into `guide/`, `api/`, `design/`, `implementation/`. Start at [`docs/README.md`](docs/README.md).
 
 ## Documentation
 
-- [Language Guide (English)](docs/document.md)
-- [语言文档（中文）](docs/document-zh.md)
-- [Grammar (BNF)](docs/grammar.bnf)
-- [Standard Library API Docs](docs/std/)
-- [Compiler Developer Guide](docs/developer-guide.md)
+Everything under `docs/` is organised by audience — see the [documentation map](docs/README.md) for where each kind of document lives.
+
+- [Language Guide (English)](docs/guide/document.md)
+- [语言文档（中文）](docs/guide/document-zh.md)
+- [Grammar (BNF)](docs/guide/grammar.bnf) — normative
+- [Standard Library API Docs](docs/api/std/) — generated
+- [Design Documents](docs/design/)
+- [Compiler Developer Guide](docs/implementation/developer-guide.md)

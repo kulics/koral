@@ -40,7 +40,7 @@ thing meant to catch it.
 
 ## See also
 
-- [`../docs/developer-guide.md`](../docs/developer-guide.md) — *Compiler roles* and the trust boundary
+- [`../docs/implementation/developer-guide.md`](../docs/implementation/developer-guide.md) — *Compiler roles* and the trust boundary
 - [`../tests/README.md`](../tests/README.md) — the differential oracle contract
-- [`../docs/bootstrap-productization-plan.md`](../docs/bootstrap-productization-plan.md) — the
+- [`../docs/implementation/bootstrap-productization-plan.md`](../docs/implementation/bootstrap-productization-plan.md) — the
   dated appendix recording this role decision

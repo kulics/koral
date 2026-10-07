@@ -19,8 +19,11 @@
 
 <import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"
 
-<import-item> ::= <identifier> <import-alias>?
-<import-alias> ::= "as" <identifier>
+<import-item> ::= (<identifier> | <type-identifier>) <import-alias>?
+<import-alias> ::= "as" (<identifier> | <type-identifier>)
+// 别名必须与被引标识符的大小写类一致：`Reader as IoReader` 合法，
+// `Reader as reader` 报 "alias must start with an uppercase letter because
+// referenced identifier 'Reader' starts with uppercase"（反之亦然）。
 
 // 说明：
 // 1) using "std/io";                        导入 std/io 的全部可见成员
@@ -38,9 +41,14 @@
 // ============================================================================
 
 <global-decl> ::= <decl-modifier>* <let-decl>
+               | <decl-modifier>* <foreign-let-decl>
                | <decl-modifier>* <type-decl>
+               | <decl-modifier>* <foreign-type-decl>
                | <decl-modifier>* <trait-decl>
                | "intrinsic"? <given-decl>
+// <foreign-let-decl> / <foreign-type-decl> 只在 `foreign` 修饰下出现：它们是
+// 「无初值的 let 声明」与「带 cname 的 type 声明」，由 <let-decl> / <type-decl>
+// 推导不出来，所以必须在这里显式挂上。
 
 <decl-modifier> ::= <access-modifier> | "foreign" | "intrinsic"
 // 说明：修饰符顺序不限，`public foreign let` 与 `foreign public let` 都合法
@@ -77,6 +85,8 @@
                | "mutable"? <identifier> ":" <type-annotation>               // named param
                | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named param with default
 // Positional params must come before named params.
+//   — 目前在**调用点**（实参）与**结构体字段列表**两处强制；
+//     **参数声明层尚未强制**（`f(a: Int, b Int)` 会被接受），这是已知缺口。
 // Named params must be called with labels: name: value.
 // Only named params (with colon) can have default values.
 
@@ -117,7 +127,7 @@
           | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named field with default
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
-<variant> ::= <type-identifier> "(" <variant-field-list>? ")"
+<variant> ::= <type-identifier> ("(" <variant-field-list>? ")")?   // 括号可省（`Red` 与 `Red()` 都合法）
 <variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
 <variant-field> ::= <identifier> <type-annotation>                    // positional
                   | <identifier> ":" <type-annotation>                 // named
@@ -162,10 +172,10 @@
                      | <generic-type>
 // 说明：当前 parser 约束里支持三类：
 // 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）
-// 2) 简单 trait 名（如 Any, Eq, Equatable）
+// 2) 简单 trait 名（如 Eq）
 // 3) 泛型 trait（如 Iterator[T]）
 // 约束是必填的：`[T]` 报 `Type parameter 'T' requires a constraint`；
-// 不加约束就写 `[T Any]`。
+// 不加约束就写 `[T Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
 
 // ============================================================================
 // Types
@@ -194,7 +204,7 @@
 //   Func(Int) Int        - (Int) -> Int (one param, returns Int)
 //   Func(Int, Int) Int - (Int, Int) -> Int (two params, returns Int)
 // Module-prefixed type syntax is not part of the language. Import concrete
-// type symbols with `using module::path { TypeName }`, then refer to `TypeName`
+// type symbols with `using "module/path" { TypeName };`, then refer to `TypeName`
 // directly.
 
 <type-list> ::= <type> ("," <type>)* ","?
@@ -228,7 +238,7 @@
 <continue-statement> ::= "continue" ";"
 
 <defer-statement> ::= "defer" <expression> ";"
-// Plain `break` (without expression) exits the nearest enclosing `while`/`for` loop.
+// Plain `break` exits the nearest enclosing `while`/`for` loop.
 
 <expression-statement> ::= <expression> ";"
 

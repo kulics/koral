@@ -7,7 +7,7 @@ Through carefully designed syntax rules, this language can effectively reduce re
 Specification note:
 
 - This document is the user-facing language reference.
-- For grammar-sensitive questions, read this document together with `docs/grammar.bnf`.
+- For grammar-sensitive questions, read this document together with `docs/guide/grammar.bnf`.
 - If examples in this document, the BNF, and the implementation disagree, update the implementation and/or the documents so they converge.
 
 This manual is ordered the way the language is learned: **language basics**, then **control flow**, then **custom types**, then **pattern matching**, then **abstraction**, and finally **external interop**.
@@ -91,7 +91,7 @@ Common options:
 
 - `-o, --output <dir>`: output directory
 - `--package-config <path>`: build from a package manifest
-- `--target-module <name>`: choose the manifest target module
+- `--target-module <full name>`: choose the target module (`package[/subpath]`); defaults to the main module
 - `--requires-root <path>`: dependency root for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading modules declared by `std/koral.json`
@@ -188,7 +188,7 @@ Comments are parts of the code ignored by the compiler, used to provide explanat
 Identifiers are names given to variables, functions, types, etc. The naming rules are:
 
 1. Case sensitive. `Myname` and `myname` are two different identifiers.
-2. **Types** and **Constructors** must start with an **uppercase letter** (e.g., `Int`, `String`, `Point`).
+2. **Types** and **Constructors** must start with an **uppercase letter** (leading `_` is allowed), e.g. `Int`, `String`, `Point`.
 3. **Variables**, **Functions**, **Members** must start with a **lowercase letter** or underscore (e.g., `main`, `println`, `x`).
 4. Other characters in identifiers can be underscores `_`, letters, or numbers.
 5. Within the same `{}`, identifiers with the same name cannot be defined repeatedly.
@@ -495,7 +495,7 @@ Block rules:
 - If a block has a final expression, the block's type and value are the type and value of that expression.
 - If a block has no final expression, or the last expression ends with a semicolon, the block's type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
+- Plain `break` exits the nearest enclosing `while` or `for` loop.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
 Examples:
@@ -768,7 +768,7 @@ Supported default value literals:
 
 | Kind | Examples |
 |------|----------|
-| Integer | `0`, `42`, `-1` |
+| Integer | `0`, `42` |
 | Float | `3.14`, `0.0` |
 | Bool | `true`, `false` |
 | String | `"hello"` |
@@ -1038,7 +1038,7 @@ while true then {
 ### Early Exit: `return`
 
 - `return` leaves the enclosing function with a value (or `Void`).
-- Plain `break` (without expression) exits the nearest enclosing `while` / `for` loop.
+- Plain `break` exits the nearest enclosing `while` / `for` loop.
 
 `break` always binds to the innermost enclosing loop. Branches do not intercept it: an `if`, a `when` arm, an `or else` default, an `and then` transform, or an `if` used as an expression all sit between the `break` and its loop without changing the target. A function or lambda boundary does intercept both statements — `break` or `continue` inside a closure has no loop to bind to and is an error.
 
@@ -1333,7 +1333,7 @@ Restrictions:
 
 - Type aliases do not support generic parameters (e.g., `type Alias[T] = List[T]` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = List[Int]`).
 - Circular references are not allowed (e.g., `type A = A`).
-- Type alias names must start with an uppercase letter.
+- Type alias names must start with an uppercase letter (leading `_` is allowed).
 - A type alias cannot be declared `mutable` — mutability is a property of the nominal declaration, not of an alias.
 
 ### Generics
@@ -1382,7 +1382,9 @@ println(identity("hello"));  // hello
 
 #### Generic Constraints
 
-Generic parameters can specify Trait constraints to limit acceptable types:
+Generic parameters **must** specify Trait constraints to limit acceptable types. A parameter that
+takes no trait constraint is spelled `[T Any]` — `Any` is the *absence* of a constraint, not a
+constraint of its own:
 
 ```koral
 let max_val[T Ord](a T, b T) T = if a > b then a else b;
@@ -1467,8 +1469,8 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 - **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
-- **Raw pointers**: `&unsafe` / `&unsafe mutable` form raw pointers only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
-- **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract is `type` versus `type mutable`, never a managed-reference syntax.
+- **Raw pointers**: the pointer types are `*unsafe T` / `*unsafe mutable T`; `&unsafe` / `&unsafe mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
+- **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
 
 #### `Drop`
 
@@ -2151,7 +2153,7 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### Builtin Subscript Rules
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*unsafe T`, and `*unsafe mutable T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `*unsafe T`, and `*unsafe mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
 - `*unsafe T` supports `*expr` reads only. `*unsafe mutable T` supports both `*expr` reads and writes.
@@ -2291,7 +2293,8 @@ using "std/io" { Reader as IoReader }; // per-name alias
 
 1. `{ ... }` omitted means "every visible member"; if written, it may not be empty
    (`{ .. }` / `{ * }` are no longer spellings of anything);
-2. An item is `Name` or `Name as Alias`, trailing comma allowed;
+2. An item is `Name` or `Name as Alias`, trailing comma allowed. The alias must keep the referenced
+   name's case class: `Reader as IoReader` is valid, `Reader as reader` is an error;
 3. `as` renames one imported symbol, never the module -- a module name is not a
    namespace, so after `using "std/io" { Reader };` you write `Reader`, not `io.Reader`;
 4. Imported names are file-local bindings and are not re-exported;
@@ -2352,11 +2355,12 @@ Package scope follows the manifest graph: the root package, `std`, and each depe
 
 | Declaration | Default |
 |-------------|---------|
-| Global functions, variables, types | `module_private` |
+| Global `let`/variables, functions, types, traits | `module_private` |
 | Struct fields | `public` |
-| Enum constructor fields | `public` |
-| Member functions (in `given` blocks) | `module_private` |
 | Trait methods | `public` |
+| Member functions (in `given` blocks) | `module_private` |
+| Enum cases & case fields | no per-item modifier; visible with the enum type |
+| `using` declaration | file-local (imported bindings are not re-exported) |
 
 Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
 If a type has inaccessible `file_private`/`module_private`/`package_private` fields, use an exposed public factory method.
@@ -2523,4 +2527,4 @@ let counter = Cell(0);
 counter.value = counter.value + 1;
 ```
 
-For complete API reference, see docs under `docs/std/`.
+For complete API reference, see docs under `docs/api/std/`.

@@ -1,8 +1,8 @@
-# `docs/module-design.md` 实施计划与状态
+# `docs/design/module-design.md` 实施计划与状态
 
 状态：进行中（2026-10-05）
 
-本文是 [module-design.md](module-design.md) 的**实施记录**：范围裁定、分阶段顺序、每阶段的验收判据与状态。
+本文是 [module-design.md](../design/module-design.md) 的**实施记录**：范围裁定、分阶段顺序、每阶段的验收判据与状态。
 设计本身看 module-design.md；这里只记「怎么落地、落到哪了」。
 
 ---

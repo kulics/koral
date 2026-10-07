@@ -7,7 +7,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 规范说明：
 
 - 本文档是面向用户的语言参考手册。
-- 涉及文法细节时，请配合 `docs/grammar.bnf` 一起阅读。
+- 涉及文法细节时，请配合 `docs/guide/grammar.bnf` 一起阅读。
 - 如果本文档、BNF 与实现出现不一致，请更新实现和/或文档，使三者收敛。
 
 本手册按学习路线组织：**语言基本元素**，到**控制流**，到**自定义类型**，到**模式匹配**，到**抽象设计**，最后是**外部互操作**。
@@ -495,7 +495,7 @@ a = 2;  // 合法
 - 如果块带有尾表达式，块的类型和值就是该表达式的类型和值。
 - 如果块没有尾表达式，或最后一个表达式写了分号，块的类型是 `Void`。
 - `return`、`break`、`continue` 可以提前结束块，因此让该块的类型是 `Never`。
-- 裸 `break`（不带表达式）退出最近的 `while` 或 `for` 循环。
+- 裸 `break` 退出最近的 `while` 或 `for` 循环。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
 
 示例：
@@ -766,7 +766,7 @@ type Config(
 
 | 种类 | 示例 |
 |------|----------|
-| 整数 | `0`、`42`、`-1` |
+| 整数 | `0`、`42` |
 | 浮点 | `3.14`、`0.0` |
 | 布尔 | `true`、`false` |
 | 字符串 | `"hello"` |
@@ -1033,7 +1033,7 @@ while true then {
 ### 早退出：`return`
 
 - `return` 带值（或 `Void`）离开所在函数。
-- 裸 `break`（不带表达式）退出最近的 `while` / `for` 循环。
+- 裸 `break` 退出最近的 `while` / `for` 循环。
 
 `break` 始终绑定到最内层的循环。分支不会拦截它：`if`、`when` 的分支体、`or else` 的默认值、`and then` 的变换体，以及作为表达式使用的 `if`，都只是位于 `break` 与它的循环之间，不改变绑定目标。函数或 lambda 边界会拦截这两个语句——闭包里的 `break` 或 `continue` 没有可绑定的循环，是错误。
 
@@ -1377,7 +1377,8 @@ println(identity("hello"));  // hello
 
 #### 泛型约束
 
-泛型参数可以用 Trait 约束限定可接受的类型：
+泛型参数**必须**给出 Trait 约束以限定可接受的类型。不需要 trait 约束的参数写成 `[T Any]`
+——`Any` 是「无约束」的写法，它本身不是一种约束：
 
 ```koral
 let max_val[T Ord](a T, b T) T = if a > b then a else b;
@@ -1454,8 +1455,8 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 - **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
-- **raw pointer**：`&unsafe` / `&unsafe mutable` 只从可取地址的存储形成 raw pointer。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
-- **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约是 `type` 与 `type mutable` 之分，绝不是某种托管引用语法。
+- **raw pointer**：指针类型是 `*unsafe T` / `*unsafe mutable T`；`&unsafe` / `&unsafe mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
+- **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
 
 #### `Drop`
 
@@ -2134,7 +2135,7 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### 内建下标规则
 
-- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`*unsafe T` 与 `*unsafe mutable T`。
+- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`*unsafe T` 与 `*unsafe mutable T`。
 - `String[key]` 返回 `UInt8` 字节值。只读且不可取址。
 - `List[T]` 与 `Deque[T]`（均为 `type mutable`）支持值读取、赋值与嵌套 place 更新。
 - `*unsafe T` 只支持 `*expr` 读取。`*unsafe mutable T` 同时支持 `*expr` 读写。
@@ -2316,11 +2317,12 @@ Koral 提供四个访问级别控制符号可见性：
 
 | 声明 | 默认 |
 |-------------|---------|
-| 全局函数、变量、类型 | `module_private` |
+| 全局 `let`/变量、函数、类型、trait | `module_private` |
 | 结构体字段 | `public` |
-| 枚举构造器字段 | `public` |
-| 成员函数（`given` 块中） | `module_private` |
 | Trait 方法 | `public` |
+| 成员函数（`given` 块中） | `module_private` |
+| 枚举 case 与 case 字段 | 无逐项修饰符；随枚举类型可见 |
+| `using` 声明 | 文件局部（导入的绑定不会被再导出） |
 
 直接的结构体构造 `Type(...)` 只有在调用点所有被引用字段都可见时才允许。
 如果类型含有不可访问的 `file_private`/`module_private`/`package_private` 字段，请使用公开的工厂方法。
@@ -2395,7 +2397,7 @@ let x = *p;       // raw 解引用读取
 
 - `&unsafe` 产生 `*unsafe T`；`&unsafe mutable` 产生 `*unsafe mutable T`。
 - `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
-- raw pointer 不是「任意类型到 `*unsafe T`」的通用桥：标准库中交出 raw pointer 的辅助接口只对 plain-of-data 元素类型开放。
+- raw pointer 不是「任意类型到 `*unsafe T`」的通用桥：标准库中交出 raw pointer 的辅助接口只对 plain-old-data（POD）元素类型开放。
 
 ### 外部函数接口
 
@@ -2487,4 +2489,4 @@ let counter = Cell(0);
 counter.value = counter.value + 1;
 ```
 
-完整 API 参考见 `docs/std/` 下的文档。
+完整 API 参考见 `docs/api/std/` 下的文档。

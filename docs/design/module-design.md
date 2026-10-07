@@ -1,15 +1,18 @@
 # Koral 模块与导入设计
 
-状态：已实施（模块与导入部分，见 [module-design-implementation.md](module-design-implementation.md)）
+> **Status**：Implemented（模块与导入部分）
+> **对应实现**：[`module-design-implementation.md`](../implementation/module-design-implementation.md)
+> **体裁**：设计文档 —— 记决定与取舍，不记执行过程。执行过程与验收判据在实现记录里。
 
-## 0. 一句话
+## 摘要 —— 原文「0. 一句话」
 
 > **外部单元是 package，包内含一个或多个 module。**
 > 模块全名 = `包名[/子路径]`，源码写全名；manifest 里声明用包内名。
 > **`using "X";` 一律是「把 X 的全部可见成员带进来」**——X 是文件还是模块，只是路径不同。
 > **单模块包不特殊处理**——它就是只有主模块的包，主模块名 = 包名。
 
-## 1. 概念
+
+## 背景 —— 原文「1. 概念」
 
 | 概念 | 是什么 | 稳定身份 | 例子 |
 | --- | --- | --- | --- |
@@ -38,9 +41,22 @@
 
 三者共用同一套规则：**主模块就是「子路径为空」的那个模块**。单模块包只是恰好只有一个模块。
 
-## 2. 命名
 
-### 2.1 词法
+## 非目标
+
+原文未单列「非目标」。范围边界记在别处，此处只做指引，不代原文另立目标：
+
+- 「## 风险与未决」（原文 §10「边界与待定」）记了边界条件。
+- 「### 尚未覆盖的包管理能力」（原文 §11.4）明确列了本次不做的包管理能力。
+
+## 方案
+
+命名、语法、解析、manifest 与包管理机制共同构成方案。各子节保留原标题与原编号，
+便于与实现记录里的章节号对照。
+
+### 命名 —— 原文「2. 命名」
+
+#### 2.1 词法
 
 ```text
 包名       ::= 标识符                       # 单段：slug、httpr、std
@@ -78,7 +94,7 @@ httpr/conn/json
       ↑ 第一个 /
 ```
 
-### 2.2 边界为什么唯一
+#### 2.2 边界为什么唯一
 
 | 约束 | 推论 |
 | --- | --- |
@@ -87,7 +103,7 @@ httpr/conn/json
 
 ⇒ **第一个 `/` 就是包 / 模块边界**，零启发式、零查表。模块全名是纯 `ident/ident` 序列。
 
-### 2.3 与 Go 的关键差别
+#### 2.3 与 Go 的关键差别
 
 Go 的 import path 是扁平字符串（`github.com/kulics/koral/compiler/parser`），`/` 既分隔域名段又分隔模块段，所以边界看不出来。Go 只好：
 
@@ -96,7 +112,8 @@ Go 的 import path 是扁平字符串（`github.com/kulics/koral/compiler/parser
 
 代价是**同一个字符串在不同 build list 下可能切在不同位置**。Koral 的包名是单段标识符，边界写在字符串里。
 
-## 3. 语法
+
+### 语法 —— 原文「3. 语法」
 
 ```koral
 // 全部带进来
@@ -110,7 +127,7 @@ using "std/io" { Reader as IoReader };
 
 **核心语义统一**：`using "X";` 一律是「把 X 的全部可见成员带进来」，不管 X 是文件还是模块。`{ ... }` 只是**过滤器**——省略即全部。
 
-### 3.1 分类：相对路径 vs 模块
+#### 3.1 分类：相对路径 vs 模块
 
 沿用 ES modules 的惯例：
 
@@ -121,7 +138,7 @@ using "std/io" { Reader as IoReader };
 
 判别只看路径形状，与有没有 `{ }` 无关。
 
-### 3.2 文件合并
+#### 3.2 文件合并
 
 ```koral
 using "./helpers.koral";
@@ -140,7 +157,7 @@ specifier 必须：
 - 不创建新的模块标识，不参与包 / 模块解析；
 - 不允许与 `{ ... }` 导入列表结合（合并就是全部，无从挑选）。
 
-### 3.3 模块导入
+#### 3.3 模块导入
 
 ```koral
 using "std/io";                        // 全部可见符号
@@ -152,6 +169,7 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 
 1. `{ ... }` 省略即「全部可见符号」；出现则不能为空；
 2. 列表项是 **`符号名`** 或 **`符号名 as 新名`**，符号名沿用语言标识符规则；允许尾逗号；
+   **别名必须与被引标识符的大小写类一致**——`Reader as IoReader` 合法，`Reader as reader` 报错；
 3. 同名冲突报错，用 `as` 消歧——**import-all 与本模块定义重名时无法消歧，只能改成显式列表**；
 4. **同一模块在同一文件内只 `using` 一次**：`using "std/io";` 与 `using "std/io" { Reader };` 并存报错。跨文件不重复——各文件各自 `using`；
 5. **模块名不绑定为命名空间**——导入 `Reader` 后写 `Reader`，不写 `io.Reader`；
@@ -160,7 +178,11 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 > **不需要 `*` 通配符**：省略 `{ }` 就是全部，`{ * }` 无从出现。
 > 相对旧写法 `using std::io { .. }`，新写法是 `using "std/io";`。
 
-## 4. 解析
+> 📎 **本节规则在 `../guide/document.md` / `document-zh.md` 的「Using Declarations」里各有一份
+> 用户向镜像（同一批 6 条规则）。改任何一条要三处同批改。**
+
+
+### 解析 —— 原文「4. 解析」
 
 **源码 `using`（只有全名一种写法）**：
 
@@ -199,9 +221,10 @@ resolve(spec):
 | **本包源码名 vs 依赖源码名** | ❌ | `dependencies` 的 key **不得等于本包的 `package`** |
 | `std` vs 用户包名 / 依赖 key | ❌ | `std` 保留，二者都不得占用 |
 
-## 5. manifest
 
-### 5.1 字段（4 个）
+### manifest —— 原文「5. manifest」
+
+#### 5.1 字段（4 个）
 
 | 字段 | 含义 | 必填 |
 | --- | --- | --- |
@@ -236,7 +259,7 @@ resolve(spec):
 
 **没有 `requires`**：模块图从 `using` 派生（§5.4）。
 
-### 5.2 `modules` 的 key：包内名
+#### 5.2 `modules` 的 key：包内名
 
 manifest 描述**包内部**，所以用模块在包内的名字：
 
@@ -249,7 +272,7 @@ manifest 描述**包内部**，所以用模块在包内的名字：
 
 > **`.` 是 npm `exports` 的先例**（`exports: { ".": "./index.js", "./conn": "./conn.js" }`）。它只是 manifest 记法，不是源码语法——源码里主模块就是「包名本身」。
 
-### 5.3 `dependencies`：key 即源码名，source 即身份
+#### 5.3 `dependencies`：key 即源码名，source 即身份
 
 ```json
 "dependencies": {
@@ -282,7 +305,7 @@ manifest 描述**包内部**，所以用模块在包内的名字：
 - 两个不同 `source` 抢同一个 key → manifest 载入期报错；
 - **惯例**：不改名时 key 取该包的 `package`（`"httpr": { "source": "…/httpr", … }`），这样各工程拼写一致、源码可复制。这只是约定，不强制——消费方总要显式写 key。
 
-### 5.4 模块图：从 `using` 派生
+#### 5.4 模块图：从 `using` 派生
 
 **`modules` 里没有 `requires`。** 模块依赖图由该模块所有文件的 `using` 语句并集决定：
 
@@ -303,7 +326,7 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 > **唯一的例外是 `std` 主模块（prelude，见 §5.4.1）**——它是编译器提供的基座，
 > 不是从 `using` 派生出来的边。
 
-#### 5.4.1 `std` 主模块是 prelude
+##### 5.4.1 `std` 主模块是 prelude
 
 **`std` 的主模块对非 `std` 模块是隐式 prelude**：编译器把它编进来并放进作用域，
 不需要写 `using`。其余模块——包括 `std/io`、`std/time`——一律要显式导入。
@@ -330,7 +353,10 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 > `Import it explicitly with using Std::Time { DateTime }`
 > ⇒ **载入 ≠ 进作用域**，导入才进作用域。两条合起来只能是 prelude。
 
-### 5.5 `koral.lock`：整棵依赖树
+#### 5.5 `koral.lock`：整棵依赖树
+
+> ⚠️ **本节是设计稿，尚未实现。** `koral.lock` / `koral lock` / `koral update` 目前只出现在
+> 错误文案里，编译器没有读写 lockfile 的实现。本节描述的是目标形态。
 
 根工程生成、**提交进版本库**，记录解析后的**完整依赖树**：
 
@@ -358,7 +384,138 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 - 生成锁文件是一次显式操作（`koral lock` / 首次 build），刷新需显式（`koral update`）；
 - **`std` 不进 lockfile**——它是 built-in，随工具链分发，身份即工具链版本。
 
-## 6. 示例
+
+### 错误条件 —— 原文「7. 错误条件」
+
+#### 文件合并
+
+1. specifier 未以 `.koral` 结尾；
+2. 目标 `.koral` 文件不存在；
+3. 与 `{ ... }` 导入列表同时出现（合并就是全部，无从挑选）。
+
+#### 模块导入
+
+4. `{ }` 出现但为空；
+5. 模块全名不是合法的 `ident/ident` 序列（空段、`.`、`..`、非法字符）——若写了 `using ".";`，提示「主模块在源码里写包名，`"."` 只是 manifest 记法」；
+6. **未知包名**——若它像旧的裸名文件合并写法，给出迁移提示（§8）；
+7. 包名命中但模块不存在；
+8. 包名命中、子路径为空，但该包没有主模块（列出该包已声明的模块）；
+9. 同一符号被两个模块导入（或与本模块定义重名）且未用 `as` 消歧——import-all 撞名时提示「改为显式列表」；
+10. **同一模块在同一文件内被 `using` 多次**；
+11. **`using` 未位于文件顶部**；
+12. **模块图有环**（列出环路）。
+
+#### manifest
+
+13. 包名不是合法标识符（含 `/`、大小写、数字开头、是保留字）；
+14. `modules` 的 key 既不是 `.` 也不是合法子路径；
+15. ~~同一模块 key 重复~~ —— **不是可检查的错误条件**，与 17 同因。`modules` 也是 JSON 对象，键天然唯一，解析器根本看不见重复键；而 key 只允许 `.` 与小写标识段 `/` 连接，两个不同的合法 key 必然是两个不同的模块，不存在别名（`io/` 会被 14 当非法 key 拒掉，不是 `io` 的另一种拼写）。真正可查的是 14；
+16. **`entry` 文件被两个模块声明**，或不在包根内、或不存在；
+17. ~~同一源码名被两个依赖声明（key 重复）~~ —— **不是可检查的错误条件**。`dependencies` 是 JSON 对象，键天然唯一；解析器根本看不见重复键。§4 歧义表的「包名 vs 包名 | ❌ | key 在本工程内唯一」说的就是这件事，两条原本重复。真正要防的是 18（一个 `source` 两个 key），那条可查；
+18. **一个 `source` 被两个 key 声明**（同一模块会有两种拼写）；
+19. **`dependencies` 的 key 等于本包的 `package`**（自引用与依赖撞车）；
+20. **`dependencies` 的 key 或 `package` 占用保留名 `std`**；
+21. `dependencies` 条目缺 `source` / `version`，或格式非法（`source` 含 ref、`version` 不是 semver 约束）；
+22. **文件合并成环**（`a.koral` ↔ `b.koral`）。
+
+#### 构建期
+
+23. **`koral.lock` 与 manifest 不符**（树里有 manifest 未声明的包 / 版本不满足约束）；
+24. **哈希校验失败**（lockfile 记录的 hash 与实际抓取内容不符）。
+
+
+### 包管理机制 —— 原文「11. 包管理机制」
+
+命名与语法已经闭环；本节是**包管理器本身**的机制决定。
+
+#### 11.1 三件事的分工（已定）
+
+| | 是什么 | 写在哪 |
+| --- | --- | --- |
+| 源码名 | `using` 里写什么 | `dependencies` 的 key |
+| **位置 / 身份** | 去哪下载、是不是同一个包 | `dependencies[*].source`（**不含 ref**） |
+| **版本约束** | 能接受哪一版 | `dependencies[*].version`（semver 区间） |
+| **精确版本 + 哈希** | 用的是哪一版、有没有被篡改 | **`koral.lock`**（覆盖全树） |
+
+`source` 只管位置，`version` 只管约束，两者不重叠；ref（tag / commit）不写进 manifest，由 lockfile 的解析结果决定。
+
+#### 11.2 完整性覆盖全树（已定）
+
+`koral.lock`（§5.5）记录**整棵依赖树**的 `source` + `version` + `hash`，根工程生成并提交。
+
+| | 机制 | 消费方首次抓取就校验 | 覆盖范围 |
+| --- | --- | --- | --- |
+| Zig | `build.zig.zon` 的 `.hash` | ✓（哈希在 manifest） | 直接依赖 |
+| **Koral** | **`koral.lock`** | ✗（首次生成时记录） | **全树** |
+| Go | `go.sum` | ✗ | 全树 |
+| npm | `package-lock.json` | ✗ | 全树 |
+
+> Koral 与 Go / npm 同档：**首次生成 lockfile 时不校验，其后每次校验**。
+> 好处是哈希只需在根工程写一次、覆盖全树；代价是新增依赖的第一次抓取无保护。
+
+`dependencies[*].hash` **已删除**——哈希只活在 lockfile 里，一处真相。
+
+#### 11.3 模块图从 `using` 派生（已定）
+
+`modules` 里没有 `requires`（§5.4）。一处真相，不存在「manifest 说依赖 X、源码没用」的漂移。
+
+#### 11.4 尚未覆盖的包管理能力
+
+以下暂缺，**本次不做**，是否进 v1 需另行定：
+
+- **dev-dependencies**（只供测试 / 示例用）
+- **workspace / monorepo**（多包共用一份 lockfile）
+- **feature / optional dependency**
+- **版本区间与升级策略**（含传递依赖版本冲突的裁决，见 §10.2）
+
+
+## 迁移 —— 原文「8. 迁移」
+
+不保留兼容层，但错误信息必须把旧写法指清楚。
+
+```koral
+using "utils";            // 旧：裸名文件合并
+```
+
+被分类为模块导入（不以 `./` 开头），查不到包名 `utils`，报：
+
+```text
+error: 未知包名 "utils"
+  想做文件合并 → using "./utils.koral";
+  想导入模块   → 先在 koral.json 的 dependencies 里声明该包
+```
+
+```koral
+using "std/io" { .. };    // 旧：.. 表全部
+```
+
+```text
+error: 未知符号 ".."
+  导入全部可见符号请省略列表 → using "std/io";
+```
+
+**风险窗口**：裸名写法会落到模块查询。若恰好存在同名包（如 `dependencies` 里把某包改名成 `utils`），会**静默解析到无关包**。
+
+- 迁移期：迁移脚本必须一次改完 243 处裸名，不留尾巴；
+- 迁移后：源码里不应再有裸名文件合并，风险消失。
+
+### 迁移面
+
+| 对象 | 内容 | 量级 |
+| --- | --- | --- |
+| 文件合并 | `using "x"` → `using "./x.koral"`；`using "./x"` → 补 `.koral` | 243 处（脚本化） |
+| 模块导入 | `using std::io { X }` → `using "std/io" { X }`；`{ .. }` → 省略 | 330 处 / 236 文件 |
+| manifest | 加 `package`；`modules` key `std` → `.`、`std::io` → `io`；`module_aliases` → `dependencies` 的 key | 中 |
+| Swift 编译器 | Parser / ModuleResolver / PackageManifest | 中 |
+| 主实现编译器 | `compiler/koralc` 的 lexer / parser / module / driver | 大 |
+| toolchain | `toolchain/koral/config.koral` | 中 |
+| 测试 | `tests/compiler-cases` | 559 用例 |
+| 文档 | `grammar.bnf` / `document.md` / `document-zh.md` | 中 |
+
+> bootstrap 目前 semantic 通过率 139/456。语法面变更应等它稳定后再动，或并行推进并单独验收。
+
+
+## 示例 —— 原文「6. 示例」
 
 ### 6.1 单模块包
 
@@ -439,7 +596,7 @@ using "koral";                        // ✗ 该包没有主模块
 
 ### 6.4 标准库 `std`
 
-现状 [std/koral.json](../std/koral.json) 的 `std` / `std::io` / `std::json` …，**`std` 成为 `"."`，`std::io` 成为 `io`**：
+现状 [std/koral.json](../../std/koral.json) 的 `std` / `std::io` / `std::json` …，**`std` 成为 `"."`，`std::io` 成为 `io`**：
 
 | 现状 module 名 | manifest key | 源码 |
 | --- | --- | --- |
@@ -521,90 +678,8 @@ using "std";
 - `models` 用到了 `slug`，所以它必须在 `dependencies`——**用到就要声明**；
 - **身份看 `source`**：`http` 与 `slug` 是两个不同的包，去重与传递依赖合并都不看名字。
 
-## 7. 错误条件
 
-### 文件合并
-
-1. specifier 未以 `.koral` 结尾；
-2. 目标 `.koral` 文件不存在；
-3. 与 `{ ... }` 导入列表同时出现（合并就是全部，无从挑选）。
-
-### 模块导入
-
-4. `{ }` 出现但为空；
-5. 模块全名不是合法的 `ident/ident` 序列（空段、`.`、`..`、非法字符）——若写了 `using ".";`，提示「主模块在源码里写包名，`"."` 只是 manifest 记法」；
-6. **未知包名**——若它像旧的裸名文件合并写法，给出迁移提示（§8）；
-7. 包名命中但模块不存在；
-8. 包名命中、子路径为空，但该包没有主模块（列出该包已声明的模块）；
-9. 同一符号被两个模块导入（或与本模块定义重名）且未用 `as` 消歧——import-all 撞名时提示「改为显式列表」；
-10. **同一模块在同一文件内被 `using` 多次**；
-11. **`using` 未位于文件顶部**；
-12. **模块图有环**（列出环路）。
-
-### manifest
-
-13. 包名不是合法标识符（含 `/`、大小写、数字开头、是保留字）；
-14. `modules` 的 key 既不是 `.` 也不是合法子路径；
-15. ~~同一模块 key 重复~~ —— **不是可检查的错误条件**，与 17 同因。`modules` 也是 JSON 对象，键天然唯一，解析器根本看不见重复键；而 key 只允许 `.` 与小写标识段 `/` 连接，两个不同的合法 key 必然是两个不同的模块，不存在别名（`io/` 会被 14 当非法 key 拒掉，不是 `io` 的另一种拼写）。真正可查的是 14；
-16. **`entry` 文件被两个模块声明**，或不在包根内、或不存在；
-17. ~~同一源码名被两个依赖声明（key 重复）~~ —— **不是可检查的错误条件**。`dependencies` 是 JSON 对象，键天然唯一；解析器根本看不见重复键。§4 歧义表的「包名 vs 包名 | ❌ | key 在本工程内唯一」说的就是这件事，两条原本重复。真正要防的是 18（一个 `source` 两个 key），那条可查；
-18. **一个 `source` 被两个 key 声明**（同一模块会有两种拼写）；
-19. **`dependencies` 的 key 等于本包的 `package`**（自引用与依赖撞车）；
-20. **`dependencies` 的 key 或 `package` 占用保留名 `std`**；
-21. `dependencies` 条目缺 `source` / `version`，或格式非法（`source` 含 ref、`version` 不是 semver 约束）；
-22. **文件合并成环**（`a.koral` ↔ `b.koral`）。
-
-### 构建期
-
-23. **`koral.lock` 与 manifest 不符**（树里有 manifest 未声明的包 / 版本不满足约束）；
-24. **哈希校验失败**（lockfile 记录的 hash 与实际抓取内容不符）。
-
-## 8. 迁移
-
-不保留兼容层，但错误信息必须把旧写法指清楚。
-
-```koral
-using "utils";            // 旧：裸名文件合并
-```
-
-被分类为模块导入（不以 `./` 开头），查不到包名 `utils`，报：
-
-```text
-error: 未知包名 "utils"
-  想做文件合并 → using "./utils.koral";
-  想导入模块   → 先在 koral.json 的 dependencies 里声明该包
-```
-
-```koral
-using "std/io" { .. };    // 旧：.. 表全部
-```
-
-```text
-error: 未知符号 ".."
-  导入全部可见符号请省略列表 → using "std/io";
-```
-
-**风险窗口**：裸名写法会落到模块查询。若恰好存在同名包（如 `dependencies` 里把某包改名成 `utils`），会**静默解析到无关包**。
-
-- 迁移期：迁移脚本必须一次改完 243 处裸名，不留尾巴；
-- 迁移后：源码里不应再有裸名文件合并，风险消失。
-
-### 迁移面
-
-| 对象 | 内容 | 量级 |
-| --- | --- | --- |
-| 文件合并 | `using "x"` → `using "./x.koral"`；`using "./x"` → 补 `.koral` | 243 处（脚本化） |
-| 模块导入 | `using std::io { X }` → `using "std/io" { X }`；`{ .. }` → 省略 | 330 处 / 236 文件 |
-| manifest | 加 `package`；`modules` key `std` → `.`、`std::io` → `io`；`module_aliases` → `dependencies` 的 key | 中 |
-| Swift 编译器 | Parser / ModuleResolver / PackageManifest | 中 |
-| 主实现编译器 | `compiler/koralc` 的 lexer / parser / module / driver | 大 |
-| toolchain | `toolchain/koral/config.koral` | 中 |
-| 测试 | `tests/compiler-cases` | 559 用例 |
-| 文档 | `grammar.bnf` / `document.md` / `document-zh.md` | 中 |
-
-> bootstrap 目前 semantic 通过率 139/456。语法面变更应等它稳定后再动，或并行推进并单独验收。
-
-## 9. 与主流语言对照
+## 替代方案 —— 原文「9. 与主流语言对照」
 
 | | Go | npm/Node | Rust | **Koral** |
 | --- | --- | --- | --- | --- |
@@ -634,7 +709,8 @@ error: 未知符号 ".."
 | `using "X";` 省略列表即全部 | 文件合并语义的自然推广 |
 | 声明用包内名、引用用全名 | Java（类名 vs import） |
 
-## 10. 边界与待定
+
+## 风险与未决 —— 原文「10. 边界与待定」
 
 1. **`source` 的取值形式**：URL、git、`path:`；**不含 ref**（§5.3）。具体协议（`https:` / `git+https:` / `path:`）待定。
 2. **传递依赖**：需定义间接依赖版本冲突的裁决规则。身份看 `source`，所以两个不同 `source` 撞同一个源码名时报错；两个相同 `source` 的版本冲突则按 semver 合并（或报错）。
@@ -643,46 +719,12 @@ error: 未知符号 ".."
 5. **改名的连带影响**：换 `dependencies` 的 key 就改了源码名，`modules` key 是包内名、不动；但消费方源码里的全名会变，需一次性脚本替换。
 6. **包的自称与消费方源码名可能不一致**：包写 `package: "httpr"`，消费方写 `"http"`。前者只用于该包自己的源码自引用，后者用于消费方。两者不必相同。
 
-## 11. 包管理机制
 
-命名与语法已经闭环；本节是**包管理器本身**的机制决定。
+## 实施
 
-### 11.1 三件事的分工（已定）
+设计本身到「## 方案」为止。**怎么落地、落到哪了**记在实现记录，不在本文重复：
 
-| | 是什么 | 写在哪 |
-| --- | --- | --- |
-| 源码名 | `using` 里写什么 | `dependencies` 的 key |
-| **位置 / 身份** | 去哪下载、是不是同一个包 | `dependencies[*].source`（**不含 ref**） |
-| **版本约束** | 能接受哪一版 | `dependencies[*].version`（semver 区间） |
-| **精确版本 + 哈希** | 用的是哪一版、有没有被篡改 | **`koral.lock`**（覆盖全树） |
+- [`module-design-implementation.md`](../implementation/module-design-implementation.md)
+  —— 范围裁定、分阶段顺序、每阶段的验收判据与状态，以及 2026-10-05 的复核。
 
-`source` 只管位置，`version` 只管约束，两者不重叠；ref（tag / commit）不写进 manifest，由 lockfile 的解析结果决定。
-
-### 11.2 完整性覆盖全树（已定）
-
-`koral.lock`（§5.5）记录**整棵依赖树**的 `source` + `version` + `hash`，根工程生成并提交。
-
-| | 机制 | 消费方首次抓取就校验 | 覆盖范围 |
-| --- | --- | --- | --- |
-| Zig | `build.zig.zon` 的 `.hash` | ✓（哈希在 manifest） | 直接依赖 |
-| **Koral** | **`koral.lock`** | ✗（首次生成时记录） | **全树** |
-| Go | `go.sum` | ✗ | 全树 |
-| npm | `package-lock.json` | ✗ | 全树 |
-
-> Koral 与 Go / npm 同档：**首次生成 lockfile 时不校验，其后每次校验**。
-> 好处是哈希只需在根工程写一次、覆盖全树；代价是新增依赖的第一次抓取无保护。
-
-`dependencies[*].hash` **已删除**——哈希只活在 lockfile 里，一处真相。
-
-### 11.3 模块图从 `using` 派生（已定）
-
-`modules` 里没有 `requires`（§5.4）。一处真相，不存在「manifest 说依赖 X、源码没用」的漂移。
-
-### 11.4 尚未覆盖的包管理能力
-
-以下暂缺，**本次不做**，是否进 v1 需另行定：
-
-- **dev-dependencies**（只供测试 / 示例用）
-- **workspace / monorepo**（多包共用一份 lockfile）
-- **feature / optional dependency**
-- **版本区间与升级策略**（含传递依赖版本冲突的裁决，见 §10.2）
+本文与该记录按文件名词干配对：`module-design.md` / `module-design-implementation.md`。

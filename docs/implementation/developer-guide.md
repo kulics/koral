@@ -14,7 +14,9 @@ At repository root:
 - `tests/` — shared integration cases (`compiler-cases/`) and the shared Koral test runner (`compiler-runner/`)
 - `toolchain/` — `koral` build tool, `koral-syntax` shared parser/printer package, `koralfmt` formatter, `doc` std API doc generator, VS Code extension
 - `samples/` — sample programs
-- `docs/` — language docs and this guide
+- `docs/` — documentation, split by audience into `guide/` (language reference + normative grammar),
+  `api/` (generated std API), `design/` (design decisions), `implementation/` (this guide + records).
+  Start at `docs/README.md`.
 
 ### Compiler roles
 
@@ -30,6 +32,16 @@ There are two compiler implementations and they are not equal.
 
 Deleting it would trade the strongest cross-check in the repo for the weakest: a self-host fixed
 point only proves a compiler is *stable under its own output*, not that it is *right*.
+
+**Why the oracle is shaped this way** (operational contract: [`../../tests/README.md`](../../tests/README.md)):
+
+- The two compilers must agree **in order of how damning the disagreement is**: accept/reject, then
+  exact stdout and exit code, then verbatim diagnostic text. Layer 2 is *exact* rather than a
+  subsequence match because two compilers can both satisfy "output contains X then Y" and still
+  print entirely different things in between.
+- **Generated artifacts are deliberately not compared.** The two compilers stamp `DefId`s into C
+  symbol names under different numbering rules, so a textual diff of the generated C would be pure
+  noise. Behaviour is the contract; the C text is not.
 
 **When you may touch `compiler-reference/`:** only to keep the oracle honest — for example when the
 primary implementation deliberately changes language behaviour and the frozen reference must follow
@@ -191,25 +203,25 @@ seed:
 
 ```bash
 # Build a manifest target module
-bin/compiler/koralc build --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc build --package-config path/to/koral.json --target-module app/main
 
 # Type-check only
-bin/compiler/koralc check --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc check --package-config path/to/koral.json --target-module app/main
 
 # Build and run
-bin/compiler/koralc run --package-config path/to/koral.json --target-module app::main
+bin/compiler/koralc run --package-config path/to/koral.json --target-module app/main
 
 # Emit C only
-bin/compiler/koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
+bin/compiler/koralc emit-c --package-config path/to/koral.json --target-module app/main -o output/
 
 # Disable stdlib preload
-bin/compiler/koralc build --package-config path/to/koral.json --target-module app::main --no-std
+bin/compiler/koralc build --package-config path/to/koral.json --target-module app/main --no-std
 ```
 
 The frozen seed is reached the same way, just with its own binary:
 
 ```bash
-compiler-reference/.build/release/koralc build --package-config path/to/koral.json --target-module app::main
+compiler-reference/.build/release/koralc build --package-config path/to/koral.json --target-module app/main
 # or, once the seed is built:  cd compiler-reference && swift run koralc build ...
 ```
 
@@ -261,59 +273,37 @@ Notes:
 
 ## Module System Rules That Commonly Drift
 
-- Module entry file names must be valid module names: start with a lowercase letter, then continue with lowercase letters, digits, or `_`.
-- `using "file"` resolves relative to the current file's directory, not the module root.
-- `using "file"` merges the target file into the current module; it does not create a submodule or alias.
-- Cross-module imports must use explicit module syntax such as `using std::io { Reader }` or `using std::io { .. }`.
-- `..` must be the only item inside a module import list.
-- Imported symbols are file-local bindings and are not re-exported automatically.
-- Module imports bind symbols only; they must not create a source-level module namespace or support `module.Symbol` access.
-- Module names come from `koral.json` / `std/koral.json`; 
+The module and import rules are the design's own; their canonical text is
+[`../design/module-design.md`](../design/module-design.md) (命名 / 语法 / manifest) and the
+normative grammar is [`../guide/grammar.bnf`](../guide/grammar.bnf). This guide does not restate them.
+
+When checking for drift, what most often goes wrong:
+
+- import spelling — has the superseded `using std::io { .. }` form crept back in? The grammar has
+  no module-path form and no `..` import item.
+- `using "file"` — is it being treated as a submodule declaration or an alias rather than a merge?
+- module names — is anything inferring them from the directory tree instead of `koral.json`? 
 
 ## Language Rules That Commonly Drift
 
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
 - Type aliases must start with an uppercase letter.
-- `[]` is builtin syntax only for `String`, `List`, `Deque`, `*unsafe`, and `*unsafe mutable`; custom traits do not define subscript behavior.
-- `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
-- Generic trait identity includes trait arguments. Do not compare only the base trait name on conformance, witness, vtable, or generic-bound paths.
-- Trait-object exact type patterns use the concrete type name directly and operate on the erased trait-object subject; they do not auto-deref to the concrete value type.
-- Trait-object exact type patterns are open-world checks. In `when`, they do not make a match exhaustive; keep a default `_` arm.
-- Trait objects are direct trait-name types; no `Object` marker trait is required.
-- Weak capability is expressed with the `mutable` type-parameter constraint plus `?T`, not via a `Weak` marker trait.
+- `[]` is builtin syntax only for `String`, `List`, `Deque`, `Dict`, `*unsafe`, and `*unsafe mutable`; custom traits do not define subscript behavior.
+- `docs/guide/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/guide/grammar.bnf`, parser code, and tests as authoritative.
 
-## Simplified Reference and ARC Semantics
+The trait / trait-object / weak rules that used to live here are design rulings; their canonical text
+is [`../design/traits-and-givens.md`](../design/traits-and-givens.md). What drifts, and what to check:
 
-The active model is the simplified, declaration-site mutability design:
+- trait identity — does any path compare only the base trait name, dropping the trait arguments?
+- trait-object patterns — does anything treat them as exhaustive, or auto-deref them?
+- trait objects — has an `Object` marker trait been reintroduced?
+- weak capability — has it been turned into a marker trait instead of a constraint?
 
-- managed refs are removed: no `*T`, `*mutable T`, `?*T`, `?*mutable T`, no `&`, no `&mutable`, and no `box()`
-- raw pointers remain: `*unsafe T`, `*unsafe mutable T`, `&unsafe`, `&unsafe mutable`
-- `type mutable` controls nominal shared-object semantics, not field-by-field mutability for ordinary types
-- non-`type mutable` nominal types must keep all fields immutable; only `type mutable` types may declare `mutable` fields
-- `Clone` is explicitly shallow-copy semantics: duplicate the object handle or backing storage, not a recursive deep copy
+## Type Semantics and Drop Semantics
 
-The compiler may still use ARC and hidden storage for implementation, but those choices are not user-visible semantics. The language contract is about shared identity and field mutability, not whether a value happened to be heap-backed or box-optimized.
-
-```koral
-type Vec(x Int, y Int);
-
-type mutable Counter(mutable value Int, id UInt);
-
-let c = Counter(0);
-c.value = 1;    // valid because Counter declares a mutable field
-
-let v = Vec(1, 2);
-// v.x = 3;     // invalid: Vec is not type mutable and its fields are immutable
-```
-
-## Drop Semantics
-
-- `Drop` uses `drop(self) Void`.
-- `Drop` is a normal trait requirement with a compiler-reserved finalization context; it is not a user-invoked method.
-- A type that implements `Drop` must behave as an ARC-backed object at runtime, even when the compiler's layout analysis may optimize away some extra layers for a local value.
-- `Drop` is separate from weak capability; trait objects are gated by object safety rather than an `Object` marker trait.
-- The compiler may perform finalization in an internal managed-lifetime context and still hide the raw address details from user code.
-- Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
+The declaration-site mutability model, the memory-model contract, `Clone` shallow-copy semantics and
+the `Drop` contract live in [`../design/type-semantics.md`](../design/type-semantics.md). That is the
+canonical text; this guide does not restate it.
 
 ## Bootstrap Self-Hosting Repair Notes
 
@@ -471,216 +461,10 @@ done
 
 ## Standard Library Receiver Design
 
-When designing standard-library APIs, `self` is the only receiver form. Whether `self` acts as an immutable or mutable receiver depends entirely on the type declaration:
-
-- For `type` (immutable types), `self` is an immutable receiver. Fields are all immutable and there is no shared-object identity.
-- For `type mutable` (mutable types), `self` is a mutable receiver on the shared object. Fields can be mutated in place if declared `mutable`.
-
-There is no `*self` or `*mutable self`. There is no auto-ref or auto-deref. The type declaration determines the receiver behavior.
-
-Primary rule:
-
-- On `type`, `self` is naturally suited for observation, derivation, and transformation that returns new values, since the receiver is immutable and there is no shared-object aliasing concern.
-- On `type mutable`, `self` provides shared access to the mutable object. Methods that modify in place (such as `push` on `List`) and methods that observe (such as `count` on `List`) both use `self`; the difference is in what the method body does, not the receiver form.
-- On either kind, `self` may semantically consume the receiver when the method is a terminal extraction, ownership conversion, or linear builder step.
-
-### Default Receiver Choices
-
-Use `self` on `type` when the call should leave the original value logically usable by the caller. Since `type` is immutable, all methods naturally preserve the caller's value.
-
-Common cases on `type`:
-
-- predicates such as `is_empty`, `contains`, `starts_with`
-- accessors and getters such as `count`, `name`, `pattern`
-- formatting and display such as `to_string`, `message`
-- pure derived values such as `dir_name`, `base_name`, `components`
-- view-producing methods that do not consume the source
-- transformation methods that return new values, such as `trim`, `normalize`, `to_ascii_uppercase`
-
-Use `self` on `type mutable` for both mutation and observation.
-
-Common mutation cases on `type mutable`:
-
-- container updates such as `push`, `insert`, `remove`, `clear`
-- stateful cursor updates
-- mutation APIs returning removed values, such as `pop` or `take_at`
-
-Common observation cases on `type mutable`:
-
-- accessors and getters such as `count`, `peek`, `is_empty`
-- predicates and display methods
-
-Use `self` on either kind of type when consuming the receiver is part of the API contract.
-
-Common consumption cases:
-
-- terminal extraction such as `unwrap`, `expect`, `into_list`
-- transforming combinators on ownership-carrying enums such as `Option.map` and `Result.map`
-- iterator adapters or terminal operations that must consume iteration state
-- linear builders such as `Task.set_name(...).set_stack_size(...).spawn()`
-- explicit ownership-conversion methods with `into_*` naming
-
-Builder-style APIs need one extra distinction:
-
-- keep `self` when the builder is intentionally modeled as a linear fluent pipeline whose chained calls conceptually move from one configuration stage to the next
-- on `type mutable`, builders naturally support chaining via the shared handle, so methods that configure and return the same handle are idiomatic
-- on `type`, a builder that needs repeated configuration should use a consuming `self` pipeline if the chaining behavior is part of the public contract
-
-### Returned New Values Do Not Consume the Receiver
-
-Returning a new value is not, by itself, a reason to consume the receiver.
-
-On `type`, all methods naturally leave the original value usable because `type` is immutable. Transformation methods such as path manipulation, string trimming, and structural projections return new values while the original remains unchanged.
-
-On `type mutable`, methods that return new values while preserving the shared object (such as `pop` returning a removed element) also do not consume the receiver.
-
-Consume the receiver only when the API is intentionally framed as consuming or forwarding ownership, such as `into_*` methods or terminal combinators.
-
-### Small Pure Value Types
-
-For compact immutable value types, receiver design may prioritize value-style ergonomics over strict borrow minimality.
-
-Examples include:
-
-- `Duration`
-- `Date`
-- `ClockTime`
-- `MonoTime`
-- sometimes `DateTime` when treated as a compact timestamp value rather than a heavy handle
-- compact address or identifier values such as `Ipv4Addr`, `Ipv6Addr`, `IpAddr`, and `SocketAddr`
-- compact bitflag wrappers such as `RegexFlag`
-
-For such types, it is acceptable to keep observation and pure derivation methods on `self` when all of the following are true:
-
-- the type is cheap to copy relative to the surrounding API
-- the methods conceptually behave like arithmetic or scalar queries
-- the family already uses value receivers consistently
-- borrowing would add signature noise without unlocking important mutation or aliasing guarantees
-
-Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where shared-object semantics materially improve reuse expectations for callers.
-
-This exception can also cover "sum-of-small-values" enums and tiny wrappers whose payloads are still plain value data rather than handles or heap ownership. Network address values and regex flag bitmasks fit this category; JSON values, strings, paths, and collections generally do not.
-
-### Handle Types and Interior Mutation
-
-Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by OS resources. These are `type mutable` types.
-
-For such handle types, `self` provides shared access to the handle, and methods that change underlying state (such as advancing a file cursor or buffering new data) model shared handle mutation, not direct value mutation of the outer type.
-
-This pattern is inherent to `type mutable`. Do not generalize interior-mutation reasoning to `type` types such as containers, strings, or path values, which must remain semantically immutable.
-
-### Borrowed Methods Implemented via Iteration
-
-Do not let an iterator implementation detail force a method to appear consuming.
-
-If a method is semantically observational or purely derived, its public API should reflect that, even when the easiest implementation strategy is to iterate.
-
-Prefer the following order:
-
-1. Implement the method directly with traversal over storage or fields.
-2. If the type can cheaply create an iterator snapshot without semantically consuming the value, construct that iterator internally and keep the method observational.
-3. Only expose a consuming method when iteration truly consumes unique state as part of the API contract.
-
-This distinction matters because many iterators are consuming in the iterator sense while their source container is not consuming in the API sense. On `type mutable` containers, creating an iterator passes the shared handle and does not consume the container.
-
-Examples:
-
-- a `List` or `String` method may remain observational even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
-- a stream, generator, or one-shot parser should not expose observation methods that secretly consume its progression state
-
-### Iterable as a Borrowed Protocol
-
-`Iterator` itself is inherently consuming: `next(self)` advances the iterator's internal cursor and may exhaust the iteration.
-
-`Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not a change to it.
-
-For `type mutable` containers, `iterator(self)` naturally models this: the call passes the shared handle to the container, creates an iterator that snapshots the container's storage and cursor state, and the container itself remains reusable. The `type mutable` declaration ensures the container has shared-object identity, and the iterator is an independent cursor over that shared storage.
-
-For `type` values (such as range-like values), `iterator(self)` is equally appropriate since `type` is inherently non-consuming.
-
-Typical `Iterable` cases where the source remains reusable:
-
-- containers such as `List`, `Set`, `Dict`, `Deque`, `Queue`, `Stack`, and `PriorityQueue` (all `type mutable`)
-- range-like values where the range is a reusable description and the iterator carries the advancing cursor (typically `type`)
-
-Typical consuming `Iterable`-like cases would be one-shot sources such as generators, streams, or parsers whose progression state lives in the source value itself.
-
-This design also means observational methods such as set algebra should not be treated as consuming merely because they happen to call `iterator()`. If the source collection is `type mutable`, the public API naturally preserves the shared handle.
-
-### Arithmetic Traits and Arithmetic-Like APIs
-
-Do not equate "returns a new value" or "looks like an operator" with consuming ownership.
-
-Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` describe pure value algebra and should generally stay value-based. They primarily model scalar algebra over small immutable values, and redesigning them would impose broad signature churn across numeric APIs for little semantic gain.
-
-Use this distinction:
-
-- arithmetic traits describe pure value algebra and may remain `self` / value-parameter based
-- non-trait methods that merely resemble algebra should still choose receivers by the actual source type's ownership semantics
-
-Apply that rule to API design as follows:
-
-- for small pure value types such as `Duration`, `Date`, `ClockTime`, and `MonoTime`, arithmetic-style methods and nearby derived operations may stay on `self`
-- for heavier values or handle-adjacent types such as `DateTime`, follow the type's own `type` or `type mutable` semantics when the method is observational or derived
-- for heap-owning containers (typically `type mutable`), set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` follow the container's own semantics even though they are mathematically operator-like
-
-`duration_to` should be classified by type semantics, not by name alone:
-
-- on scalar-like time values (typically `type`), `duration_to(self, other)` is naturally value-style
-- on heavier timestamp-like types, follow the type's own declaration semantics
-
-Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal observation semantics for containers.
-
-For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so the current language design naturally supports `self + value operand` as the right balance for APIs like set algebra and random generation helpers.
-
-If implementing an observation method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the method should be consuming.
-
-When migrating existing methods to the new `type` / `type mutable` model, recheck two common implementation leftovers:
-
-- branches that still pass or return the receiver by value when the method should preserve it
-- helper or iterator constructors that still consume the receiver when they only need observation access
-
-In both cases, the fix is often to adjust the implementation to work with the shared handle rather than consuming the value. This is a migration detail, not a reason to change the public API design.
-
-If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
-
-- add a helper that traverses storage directly
-- add a dedicated borrowed-view iterator type or borrowed-producing helper
-- keep the method consuming only if the operation is genuinely consumption-oriented
-
-The public API design should be driven by ownership semantics at the call site, not by the convenience of a specific iterator implementation.
-
-### Trait Design Guidance
-
-For new traits, the receiver semantics are determined by the implementing type's declaration:
-
-- for `type` implementors, `self` provides immutable access suitable for observation traits
-- for `type mutable` implementors, `self` provides shared mutable access suitable for mutation traits
-- consuming traits use `self` on either kind of type when the method semantically consumes the receiver
-- trait-object upcasting uses direct trait names and object safety instead of an `Object` marker trait
-- weak capability is opt-in via `mutable` constraints and `?T`
-
-Existing core traits are not fully uniform today. In particular, observation traits such as `ToString` and `Error` already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
-
-`Formattable` should currently be treated the same way: it remains rooted in scalar formatting and inherited widely across numeric types. Do not use its scalar-value design as evidence that unrelated derived or observational APIs should follow the same pattern.
-
-### Naming Guidance
-
-Receiver choice and method naming should reinforce each other:
-
-- prefer `into_*` for consuming conversions and ownership-moving adapters
-- prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for observation or derivation
-- avoid naming a borrowed method in a way that suggests linear consumption
-
-### Review Checklist
-
-Before adding or changing a method in `std/`, ask:
-
-1. After this call, should the caller still expect to use the original receiver value? (Almost always yes; the caller retains the original.)
-2. Is the receiver `type` or `type mutable`? (This determines whether `self` is immutable or mutable.)
-3. Does the method name match the ownership behavior of the receiver and the method body?
-
-If the type is `type`, all methods are observation or transformation by nature. If the type is `type mutable`, both mutation and observation methods use `self`; verify that the method body matches the stated intent. If the method semantically consumes the receiver, ensure that consumption is part of the public contract (e.g., `into_*` naming).
+Receiver form, consumption semantics, naming contract and trait design guidance for `std`
+APIs live in [`../design/std-api-design.md`](../design/std-api-design.md). That is the canonical
+text; this guide does not restate it. Use its "Review Checklist" when adding or changing a
+`std` API.
 
 ## Adding a New Type
 
@@ -838,7 +622,8 @@ case .myNewError(let detail):
 1. Extend `UsingDeclarationKind` only if the language actually gains a new source form.
 2. Update `ParserDeclarations.swift` and `compiler/koralc/parser/core_precedence.koral`.
 3. Update `recordImportToGraph()` and the bootstrap counterpart if the new form changes import visibility.
-4. Keep module selection manifest-driven; do not reintroduce directory-inferred module trees.
+4. Keep module selection manifest-driven; do not reintroduce directory-inferred module trees
+   (the ruling is in [`../design/name-resolution.md`](../design/name-resolution.md)).
 
 ### Module Resolution Flow
 
@@ -855,14 +640,8 @@ resolveModule(entryFile:)
 
 ### Access Control Defaults
 
-| Declaration | Default Access |
-|-------------|----------------|
-| global function/type/trait | `module_private` |
-| struct field | `public` |
-| enum case | `public` |
-| trait method | `public` |
-| given method | `module_private` |
-| using declaration | file-local (imported bindings are not re-exported) |
+The default-access table is a design ruling; its canonical text is
+[`../design/name-resolution.md`](../design/name-resolution.md). This guide does not restate it.
 
 ## Code Generation Development
 
@@ -1005,22 +784,22 @@ print(diagnosticError.renderForCLI())
 ### Inspect Generated C
 
 ```bash
-swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
+swift run koralc emit-c --package-config path/to/koral.json --target-module app/main -o output/
 ```
 
 ## FAQ
 
 ### How are cyclic type references handled?
 
-`Type` uses `DefId` indexing instead of embedding recursive type payloads directly. Pass 1 registers names and allocates `DefId`, Pass 2 resolves full details and fills `DefIdMap`.
+Design ruling — see [`../design/generics-and-monomorphization.md`](../design/generics-and-monomorphization.md).
 
 ### How are generic parameter scopes handled?
 
-Use `UnifiedScope.defineGenericParameter()` to register generic parameters. Lookup prioritizes generic parameters over ordinary names.
+Design ruling — see [`../design/name-resolution.md`](../design/name-resolution.md).
 
 ### How is C identifier uniqueness guaranteed?
 
-Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier()` to handle module path, private symbol file isolation, C keyword escaping, and collision resolution.
+Design ruling — see [`../design/name-resolution.md`](../design/name-resolution.md).
 
 ### How do I add a new trait?
 
@@ -1061,15 +840,20 @@ Code alone is not the source of truth. If the behavior changes, the docs must ch
 
 Use these files as the authoritative references:
 
-- `docs/developer-guide.md` — required change workflow, compiler roles and trust boundary, and validation checklist.
+- `docs/README.md` — the documentation map: which document goes where, and each category's conventions.
+- `docs/implementation/developer-guide.md` (this file) — required change workflow, compiler roles and trust boundary, and validation checklist.
+- `docs/design/` — **why the language and std are shaped the way they are.** Each design doc is the
+  canonical text for its rulings; do not restate them here. Start at `docs/design/README.md`, which
+  also carries the shared premise (identity is the declaration's `DefId`) and the de-duplication rule.
 - `tests/README.md` — unified test runner contract, flags, buckets, and rerun guidance.
 - `compiler/koral.json`, `tests/compiler-runner/koral.json`, `std/koral.json` — build/package targets for the compiler-side builds.
 - `toolchain/koralfmt/test/README.md` — formatter gate: language assertions plus the corpus check, and how to run both.
+- `toolchain/koral-syntax/README.md` — the formatter's contract (the reason its gate is a gate).
 - `README.md` — top-level repo shape, prerequisites, quick start, and public contribution guidance.
 
 ### Required change workflow
 
-1. **Document first**: update the governing doc in `docs/`, or `tests/README.md` / toolchain docs when behavior, workflow, or validation steps change.
+1. **Document first**: update the governing doc in `docs/` (which one is decided by `docs/README.md`), or `tests/README.md` / toolchain docs when behavior, workflow, or validation steps change.
 2. **Update implementation**: change compiler/runtime/toolchain code only after the doc baseline is updated.
 3. **Update tests**: update existing expectations or add regression coverage before merge.
 4. **Validate the build order**: rebuild the seed if it changed, rebuild the compiler with the seed, then run the shared runner against `bin/compiler/koralc` (primary) and the seed self-check.
@@ -1145,11 +929,12 @@ bin/toolchain-doc-gen/koral_doc --check
 bin/toolchain-doc-gen/koral_doc
 ```
 
-The formatter's contract is the reason its gate can be a gate: it re-tokenizes
-every result and requires the input's tokens in the same order and spelling,
-with only `;` and `,` added or removed, and requires formatting to reach a fixed
-point. A layout rule that drops a comment or reorders a token fails here, on
-real code, rather than the next time someone runs `koral format`.
+The formatter's contract is why its gate can be a gate. The canonical text is
+[`../../toolchain/koral-syntax/README.md`](../../toolchain/koral-syntax/README.md); this guide does
+not restate it. That is also where the product-binary rebuild lives — the two
+targets above are the *gate*, not `bin/koralfmt` itself, and running a stale
+formatter is how a rejected spelling silently survives in a tree that passes
+every assertion here.
 
 ### PR/change checklist
 

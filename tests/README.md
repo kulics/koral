@@ -14,7 +14,7 @@ CLI predates these directory names: `--compiler bootstrap` means the self-hostin
 from `compiler/`, and `--compiler swift` means the frozen seed.
 
 Build the frozen seed (release — debug is ~6x slower at generating C, see
-`docs/developer-guide.md`):
+`docs/implementation/developer-guide.md`):
 
 ```bash
 cd compiler-reference

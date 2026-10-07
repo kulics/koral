@@ -36,5 +36,5 @@ The primary suite gate is this implementation:
 ```
 
 Self-hosting validation (two rounds, fixed point, dangling-call scan) and the cross-compiler
-differential gate live in [`../docs/developer-guide.md`](../docs/developer-guide.md) and
+differential gate live in [`../docs/implementation/developer-guide.md`](../docs/implementation/developer-guide.md) and
 [`../tests/README.md`](../tests/README.md).

@@ -1,7 +1,7 @@
 # bootstrap 产品化收尾规划
 
 > 前置结论见本文「0. 现状」。身份改造（名字只留在解析/显示/mangling）已收口，
-> 记录在 `docs/identity-matching-tracking.md`（24 节）。
+> 记录在 `docs/implementation/identity-matching-tracking.md`（24 节）。
 
 ## 0. 现状
 
