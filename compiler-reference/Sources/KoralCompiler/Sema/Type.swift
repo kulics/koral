@@ -369,9 +369,13 @@ public indirect enum Type: CustomStringConvertible {
       }
       return "enum(\(defId.id))"
     case .reference(let inner):
-      return "*\(inner.description)"
+      // A trait object is spelled as the trait name alone (document.md "Trait
+      // Objects") and a `type mutable` as its own name: neither exposes a
+      // wrapper in the surface. The managed `*T` spelling is gone from the
+      // language, so printing it here shows a type no one can write.
+      return inner.description
     case .mutableReference(let inner):
-      return "*mutable \(inner.description)"
+      return inner.description
     case .borrowedReference(let inner):
       return "ref \(inner.description)"
     case .mutableBorrowedReference(let inner):
@@ -381,9 +385,11 @@ public indirect enum Type: CustomStringConvertible {
     case .mutablePointer(let element):
       return "*unsafe mutable \(element.description)"
     case .weakReference(let inner):
-      return "?*\(inner.description)"
+      // Surface weak is `?T` (grammar.bnf <type-prefix>); `?*T` is legacy and
+      // rejected on sight.
+      return "?\(inner.description)"
     case .mutableWeakReference(let inner):
-      return "?*mutable \(inner.description)"
+      return "?\(inner.description)"
     case .genericParameter(let name):
       return name
     case .genericStruct(let tplDefId, let args):

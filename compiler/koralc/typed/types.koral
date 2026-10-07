@@ -469,8 +469,23 @@ given DefIdMap {
     };
 
     // Returns a human-readable display name for a type, using real names for struct/enum.
+    /// The name a user sees for `t`, with declaration names resolved at every
+    /// nesting level. Wrapper prefixes come from `type_string_prefixes` -- the
+    /// one spelling table -- and this function only decides what the base type
+    /// is called.
+    ///
+    /// Delegating the whole type to `type_to_string` is what used to print
+    /// `?*struct#111` for `?C`: the inner structure fell through to the
+    /// id-based spelling, because `type_to_string` is a free function with no
+    /// access to the name table.
     public type_display_name(self, t Type) String = {
-        return when t in {
+        let chain = split_type_string_wrappers(t);
+        return type_string_prefixes(chain) + self.type_base_name(chain.inner);
+    };
+
+    /// The innermost type's name, resolved through the declaration name table.
+    file_private type_base_name(self, inner Type) String = {
+        return when inner in {
             .StructureType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
                 .None() then {
@@ -489,7 +504,7 @@ given DefIdMap {
                     out.to_string()
                 },
             },
-            _ then type_to_string(t),
+            _ then type_to_string(inner),
         };
     };
 
@@ -967,7 +982,7 @@ public type Type {
     Unknown(),
 };
 
-file_private type TypeStringWrapperKind {
+module_private type TypeStringWrapperKind {
     Reference(),
     MutableReference(),
     BorrowedReference(),
@@ -978,12 +993,12 @@ file_private type TypeStringWrapperKind {
     MutableWeakReference(),
 };
 
-file_private type TypeStringWrapperChain(
+module_private type TypeStringWrapperChain(
     wrappers List[TypeStringWrapperKind],
     inner Type,
 );
 
-file_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
+module_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
     let mutable wrappers = List[TypeStringWrapperKind].new();
     let mutable current = t;
     while true then {
@@ -1028,17 +1043,41 @@ file_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
     return TypeStringWrapperChain(wrappers, current);
 };
 
-file_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
+/// How a wrapper layer is spelled to a user. Only `*unsafe` / `*unsafe mutable`
+/// and `?` have surface syntax (grammar.bnf `<type-prefix>`); the managed `*T`
+/// and `*mutable T` spellings are gone, and weak is `?T`, not the legacy `?*T`.
+///
+/// `Reference` and `MutableReference` are the internal handle behind a trait
+/// object or a `type mutable` value. Neither exposes a wrapper in the surface
+/// -- a trait object is written as the trait name alone (document.md "Trait
+/// Objects") and a `type mutable` as its own name -- so they contribute nothing.
+module_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
     return when kind in {
-        .Reference() then "*",
-        .MutableReference() then "*mutable ",
+        .Reference() then "",
+        .MutableReference() then "",
         .BorrowedReference() then "ref ",
         .MutableBorrowedReference() then "ref mutable ",
         .Pointer() then "*unsafe ",
         .MutablePointer() then "*unsafe mutable ",
-        .WeakReference() then "?*",
-        .MutableWeakReference() then "?*mutable ",
+        .WeakReference() then "?",
+        .MutableWeakReference() then "?",
     };
+};
+
+/// The wrapper layers of an already-split type, spelled from the one table.
+/// Pair it with `TypeStringWrapperChain.inner` for the base.
+///
+/// This is the only place a wrapper prefix is decided. Every path that prints a
+/// type -- `type_to_string` (id spelling), `DefIdMap.type_display_name` and
+/// `TypeChecker.display_type_name` (declaration names) -- peels with
+/// `split_type_string_wrappers` and prefixes with this, then renders the base
+/// its own way. Three tables meant three answers to "how is `?T` spelled".
+module_private let type_string_prefixes(chain TypeStringWrapperChain) String = {
+    let mutable out = StringBuilder.new();
+    for wrapper in chain.wrappers then {
+        out.push_string(type_string_wrapper_prefix(wrapper));
+    };
+    return out.to_string();
 };
 
 file_private let join_type_ref_list(types List[Type]) String = {
@@ -1324,16 +1363,7 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
         .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
     };
-    if chain.wrappers.is_empty() then {
-        return inner_string;
-    };
-
-    let mutable out = StringBuilder.new();
-    for wrapper in chain.wrappers then {
-        out.push_string(type_string_wrapper_prefix(wrapper));
-    };
-    out.push_string(inner_string);
-    return out.to_string();
+    return type_string_prefixes(chain) + inner_string;
 };
 
 public let stable_hash_combine_value(seed UInt, value UInt) UInt = {

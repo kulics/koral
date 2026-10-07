@@ -345,7 +345,7 @@ extension TypeChecker {
         }
         
         // Build recursion detection key
-        let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+        let recursionKey = "\(base)<\(resolvedArgs.map { $0.stableKey }.joined(separator: ","))>"
         
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref (e.g., type [T]Node(value T, next ref [T]Node))
@@ -383,7 +383,7 @@ extension TypeChecker {
         }
         
         // Build recursion detection key
-        let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+        let recursionKey = "\(base)<\(resolvedArgs.map { $0.stableKey }.joined(separator: ","))>"
         
         // Check for recursion - if we're already resolving this type, return parameterized type
         // This allows recursive types through ref
@@ -500,7 +500,7 @@ extension TypeChecker {
       let constraintsKey = param.constraints.map { boundIdentity($0) }.joined(separator: "&")
       return "\(param.name):\(constraintsKey)"
     }.joined(separator: ",")
-    let argsKey = args.map { $0.description }.joined(separator: ",")
+    let argsKey = args.map { $0.stableKey }.joined(separator: ",")
     let cacheKey = "\(paramKey)<\(argsKey)>"
     if genericConstraintCache.contains(cacheKey) { return }
     

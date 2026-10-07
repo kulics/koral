@@ -23,6 +23,7 @@
 | [`module-design-implementation.md`](module-design-implementation.md) | 模块设计的落地计划、验收判据、复核 |
 | [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）改造的执行记录 |
 | [`bootstrap-productization-plan.md`](bootstrap-productization-plan.md) | bootstrap 产品化的计划与各期取证 |
+| [`samples-capability-plan.md`](samples-capability-plan.md) | 用样本程序验证语言能力的计划与下沉裁决 |
 
 写法：
 

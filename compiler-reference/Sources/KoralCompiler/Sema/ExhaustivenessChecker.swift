@@ -66,7 +66,7 @@ extension ExhaustivenessChecker {
     private func checkUnreachablePatterns() throws {
         var catchallIndex: Int? = nil
         var catchallPattern: String? = nil
-        var coveredTraitObjectTypes: Set<String> = []
+        var coveredTraitObjectTypes: Set<Type> = []
         var remainingFiniteSpace = initialFinitePatternSpace()
         var seenPatterns: Set<String> = []
         
@@ -122,7 +122,7 @@ extension ExhaustivenessChecker {
                 continue
             }
 
-            let traitObjectTypesInPattern = collectTraitObjectTypeKeys(pattern)
+            let traitObjectTypesInPattern = collectTraitObjectTypes(pattern)
             if !traitObjectTypesInPattern.isEmpty {
                 let alreadyCovered = traitObjectTypesInPattern.intersection(coveredTraitObjectTypes)
                 if let repeated = alreadyCovered.first {
@@ -139,10 +139,14 @@ extension ExhaustivenessChecker {
         }
     }
 
-    private func collectTraitObjectTypeKeys(_ pattern: TypedPattern) -> Set<String> {
-        var keys: Set<String> = []
-        collectTraitObjectTypeKeys(pattern, into: &keys)
-        return keys
+    /// The trait-object types a pattern covers. Held as `Type`, not as a key
+    /// string: `Type` is `Hashable` on identity (`stableHashKey`), while the
+    /// message that reports a repeat names the type in display form. Keying
+    /// this set on text is what made that report print the identity spelling.
+    private func collectTraitObjectTypes(_ pattern: TypedPattern) -> Set<Type> {
+        var types: Set<Type> = []
+        collectTraitObjectTypes(pattern, into: &types)
+        return types
     }
     
     private func isCatchallPattern(_ pattern: TypedPattern) -> Bool {
@@ -526,15 +530,15 @@ extension ExhaustivenessChecker {
         }
     }
 
-    private func collectTraitObjectTypeKeys(_ pattern: TypedPattern, into keys: inout Set<String>) {
+    private func collectTraitObjectTypes(_ pattern: TypedPattern, into types: inout Set<Type>) {
         switch pattern {
         case .traitObjectType(let targetType):
-            keys.insert(targetType.description)
+            types.insert(targetType)
         case .traitObjectTypeBinding(_, let targetType):
-            keys.insert(targetType.description)
+            types.insert(targetType)
         case .orPattern(let left, let right):
-            collectTraitObjectTypeKeys(left, into: &keys)
-            collectTraitObjectTypeKeys(right, into: &keys)
+            collectTraitObjectTypes(left, into: &types)
+            collectTraitObjectTypes(right, into: &types)
         default:
             break
         }
