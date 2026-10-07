@@ -31,6 +31,39 @@ using "koral_syntax";                                    // everything
 using "koral_syntax" { CstParser, Printer, format_source_checked };
 ```
 
+## Parse parity with the compiler
+
+**This parser must accept exactly what `compiler/koralc` accepts.** It is not a
+lenient front end for a strict compiler, and it is not a strict one for a lenient
+compiler: the same program either parses on both or on neither.
+
+The reason is the formatter. If koral-syntax accepts `*T` and the compiler
+rejects it, the formatter will happily rewrite source the compiler will then
+refuse — and the formatting contract cannot save you, because the contract only
+says the tokens survive, not that they were legal.
+
+Where the compiler has a dedicated diagnostic, this parser reuses its wording
+verbatim, so a toolchain error and a compiler error say the same thing:
+
+| rejected form | message |
+|---|---|
+| `*T`, `*mutable T` | `managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'` |
+| `?*T` | `Weak reference syntax is '?T', not legacy '?*T'` |
+| `*self`, `*self mutable` | `Invalid receiver parameter syntax: use 'self' only` |
+| default on a positional param/field | `Default values are only allowed for named parameters (use 'name: Type = value' syntax)` |
+| `type mutable` on an alias / enum | `Type alias cannot be marked mutable` / `Enum type cannot be marked mutable` |
+| import alias case mismatch | `Using alias '<a>' is invalid: alias must start with an upper\|lowercase letter because referenced identifier '<n>' starts with upper\|lowercase` |
+
+Reserved words must match too: `it` is reserved (it cannot be a declaration
+name) but stays legal in **expression position** as the implicit lambda
+parameter.
+
+Every one of these has an assertion in `toolchain/koralfmt/test_fmt.koral` under
+"parse parity with the compiler". **When the compiler rejects a new shape, add
+the rejection here and an assertion there in the same change** — the corpus gate
+only covers code that already compiles, so it will never catch this class of
+drift on its own.
+
 ## The formatting contract
 
 `format_source_checked(source)` formats, then proves two things about the
@@ -73,7 +106,16 @@ page is the syntax `koralfmt` would write for it.
 
 ## Checking it
 
+Rebuild **both** the product binary and its test binary after any change to
+parsing. The test binary is not a proxy for the product: it is a separate
+target. A stale `bin/koralfmt` keeps accepting what the compiler rejects and
+rewrites source into a shape the compiler will then refuse — silently, because
+the running binary simply predates the fix, and `--check` still exits 0.
+
 ```bash
+# the formatter people actually run
+bin/compiler/koralc build --package-config toolchain/koralfmt/koral.json --target-module koralfmt -o bin/koralfmt
+
 # formatter: language assertions + every real .koral file in the repo
 bin/compiler/koralc build --package-config toolchain/koralfmt/koral.json --target-module koralfmt/test -o bin/koralfmt-test
 bin/koralfmt-test/koralfmt__test

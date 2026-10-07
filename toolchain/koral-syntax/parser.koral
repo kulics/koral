@@ -94,11 +94,17 @@ given CstParser {
     file_private is_type_start(self, t Token) Bool = when t in {
         .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         .Ident(name) then {
+            // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf): leading
+            // underscores are allowed, the first letter is not.
             let runes = name.to_runes();
-            if runes.count() == 0 then {
+            let mutable idx UInt = 0;
+            while idx < runes.count() and runes[idx].to_uint32() == 95 then {
+                idx += 1;
+            };
+            if idx >= runes.count() then {
                 return false;
             };
-            let first = runes[0].to_uint32();
+            let first = runes[idx].to_uint32();
             first >= 65 and first <= 90
         },
         _ then false,
@@ -307,23 +313,6 @@ given CstParser {
     };
 
     file_private parse_type_node(self) Result[CstType] = {
-        if self.check(.KwPtr()) then {
-            let kw = self.eat();
-            let mutable mut_kw = Option[Token].None();
-            if self.check(.KwMut()) then {
-                mut_kw = .Some(self.eat());
-            };
-            let inner = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            if mut_kw is .Some(mk) then {
-                return .Ok(.Mutable(CstType.Ptr(inner, kw), mk));
-            };
-            return .Ok(.Ptr(inner, kw));
-        };
         if self.check(.Star()) then {
             let kw = self.eat();
             if self.check(.KwUnsafe()) then {
@@ -346,35 +335,23 @@ given CstParser {
                 };
                 return .Ok(.Ptr(inner, ptr_kw));
             };
-            let mutable mut_kw = Option[Token].None();
-            if self.check(.KwMut()) then {
-                mut_kw = .Some(self.eat());
-            };
-            let inner = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            if mut_kw is .Some(mk) then {
-                return .Ok(.Mutable(CstType.Ref(inner, kw), mk));
-            };
-            return .Ok(.Ref(inner, kw));
+            // `*` is a raw pointer and nothing else. Managed references are
+            // gone from the language model, so `*T` is not a spelling of
+            // anything. Matches the compiler's rejection.
+            return .Error(
+                "Parse error: Unexpected token: *, expected: managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'",
+            );
         };
         if self.check(.KwWeakref()) then {
             let kw = self.eat();
-            let mutable mut_kw = Option[Token].None();
-            if self.check(.KwMut()) then {
-                mut_kw = .Some(self.eat());
-            };
+            // `?` takes a type and nothing else: `?mutable T` is not a spelling
+            // (weak capability is a `mutable` type-parameter constraint plus
+            // `?T`, not a mutable weak reference). `mutable` fails as a type.
             let inner = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then {
                     return .Error(e);
                 },
-            };
-            if mut_kw is .Some(mk) then {
-                return .Ok(.Mutable(CstType.Weakref(inner, kw), mk));
             };
             return .Ok(.Weakref(inner, kw));
         };
@@ -398,7 +375,18 @@ given CstParser {
                 if runes.count() == 0 then {
                     return .Error("Parse error: empty type name");
                 } else {
-                    let first = runes[0].to_uint32();
+                    // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf):
+                    // leading underscores are allowed, the first letter is not.
+                    let mutable idx UInt = 0;
+                    while idx < runes.count() and runes[idx].to_uint32() == 95 then {
+                        idx += 1;
+                    };
+                    if idx >= runes.count() then {
+                        return .Error(
+                            "Parse error: type name must start with uppercase, got '\(n)'",
+                        );
+                    };
+                    let first = runes[idx].to_uint32();
                     if first < 65 or first > 90 then {
                         return .Error(
                             "Parse error: type name must start with uppercase, got '\(n)'",
@@ -511,7 +499,7 @@ given CstParser {
             };
         } else {
             when self.peek() in {
-                .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() or .Range() then {
+                .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse() or .Range() then {
                     value_tokens.push(self.eat());
                 },
                 _ then {
@@ -583,28 +571,18 @@ given CstParser {
         let mutable params = List[CstParam].new();
         let mutable first UInt = 1;
         while not self.check(.RParen()) and not self.is_eof() then {
-            // Method-first-param support: self / *self / *self mutable
+            // `self` is the only receiver form. `*self` / `*self mutable` are
+            // gone with managed refs -- the receiver's mutability follows the
+            // type declaration. Matches the compiler's rejection.
             if first == 1 and self.check(.Star()) then {
-                let ref_kw = self.eat();
-                let mutable mut_kw = Option[Token].None();
-                if self.check(.KwMut()) then {
-                    mut_kw = .Some(self.eat());
-                };
-                let kw = when self.expect(.KwSelf(), "'self'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let comma = self.eat_comma();
-                params.push(.SelfParam(kw, mut_kw, .Some(ref_kw), comma));
-                first = 0;
-                continue;
+                return .Error(
+                    "Parse error: Invalid receiver parameter syntax: use 'self' only",
+                );
             };
             if first == 1 and self.check(.KwSelf()) then {
                 let kw = self.eat();
                 let comma = self.eat_comma();
-                params.push(.SelfParam(kw, .None(), .None(), comma));
+                params.push(.SelfParam(kw, .None(), comma));
                 first = 0;
                 continue;
             };
@@ -637,6 +615,12 @@ given CstParser {
                 .Error(e) then {
                     return .Error(e);
                 },
+            };
+            // Only named parameters (with a colon) may carry a default.
+            if colon is .None() and self.check(.Eq()) then {
+                return .Error(
+                    "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                );
             };
             let default_value = when self.parse_default_value() in {
                 .Ok(d) then d,
@@ -1561,6 +1545,14 @@ given CstParser {
 
         // Self type used as expression
         if self.check(.KwSelfType()) then {
+            return .Ok(.Ident(self.eat()));
+        };
+
+        // `it` is reserved (not a valid declaration name) but legal in
+        // expression position: it names the implicit lambda parameter
+        // (`or else { .Error(it) }`). The compiler parses it as
+        // `Expr.Identifier("it")`; this keeps the spelling verbatim.
+        if self.check(.KwIt()) then {
             return .Ok(.Ident(self.eat()));
         };
 
@@ -2893,6 +2885,10 @@ given CstParser {
                 );
             };
             saw_item = true;
+            let item_name = when tokens[i] in {
+                .Ident(n) then n,
+                _ then "",
+            };
             i += 1;
 
             i = CstParser.skip_newline_tokens(tokens, i);
@@ -2900,6 +2896,38 @@ given CstParser {
                 i = CstParser.skip_newline_tokens(tokens, i + 1);
                 if i >= tokens.count() or tokens[i] is not .Ident(_) then {
                     return .Error("Parse error: expected an alias name after 'as'");
+                };
+                let alias_name = when tokens[i] in {
+                    .Ident(n) then n,
+                    _ then "",
+                };
+                // The alias must keep the referenced name's case class.
+                // Matches the compiler's rejection exactly.
+                let item_runes = item_name.to_runes();
+                let alias_runes = alias_name.to_runes();
+                if item_runes.count() > 0 and alias_runes.count() > 0 then {
+                    // Mirrors the compiler's `is_upper_first`: leading
+                    // underscores are skipped, the first letter decides.
+                    let mutable ii UInt = 0;
+                    while ii < item_runes.count() and item_runes[ii].to_uint32() == 95 then {
+                        ii += 1;
+                    };
+                    let mutable ai UInt = 0;
+                    while ai < alias_runes.count() and alias_runes[ai].to_uint32() == 95 then {
+                        ai += 1;
+                    };
+                    let item_upper = ii < item_runes.count() and item_runes[ii].to_uint32() >= 65 and item_runes[ii].to_uint32() <= 90;
+                    let alias_upper = ai < alias_runes.count() and alias_runes[ai].to_uint32() >= 65 and alias_runes[ai].to_uint32() <= 90;
+                    if item_upper <> alias_upper then {
+                        if item_upper then {
+                            return .Error(
+                                "Parse error: Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(item_name)' starts with uppercase",
+                            );
+                        };
+                        return .Error(
+                            "Parse error: Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(item_name)' starts with lowercase",
+                        );
+                    };
                 };
                 i += 1;
             };
@@ -3243,6 +3271,12 @@ given CstParser {
                         return .Error(e);
                     },
                 };
+                // Only named fields (with a colon) may carry a default.
+                if field_colon is .None() and self.check(.Eq()) then {
+                    return .Error(
+                        "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                    );
+                };
                 let default_value = when self.parse_default_value() in {
                     .Ok(d) then d,
                     .Error(e) then {
@@ -3277,6 +3311,11 @@ given CstParser {
 
         // Enum body: { .Variant1, .Variant2(T) }
         if self.check(.LBrace()) then {
+            if mut_kw is .Some(_) then {
+                return .Error(
+                    "Parse error: Enum type cannot be marked mutable",
+                );
+            };
             let lb = self.eat();
             let mutable cases = List[CstItem].new();
             while not self.check(.RBrace()) and not self.is_eof() then {
@@ -3325,6 +3364,11 @@ given CstParser {
 
         // Alias: = OtherType
         if self.check(.Eq()) then {
+            if mut_kw is .Some(_) then {
+                return .Error(
+                    "Parse error: Type alias cannot be marked mutable",
+                );
+            };
             let eq = when self.expect(.Eq(), "'='") in {
                 .Ok(t) then t,
                 .Error(e) then {
@@ -3384,6 +3428,12 @@ given CstParser {
                     .Error(e) then {
                         return .Error(e);
                     },
+                };
+                // Only named fields (with a colon) may carry a default.
+                if field_colon is .None() and self.check(.Eq()) then {
+                    return .Error(
+                        "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                    );
                 };
                 let default_value = when self.parse_default_value() in {
                     .Ok(d) then d,
@@ -3551,28 +3601,16 @@ given CstParser {
         let mutable params = List[CstTraitMethodParam].new();
         let mutable first UInt = 1;
         while not self.check(.RParen()) and not self.is_eof() then {
-            // self / *self / *self mutable
+            // `self` is the only receiver form -- see the note in parse_params.
             if first == 1 and self.check(.Star()) then {
-                let ref_kw = self.eat();
-                let mutable mut_kw = Option[Token].None();
-                if self.check(.KwMut()) then {
-                    mut_kw = .Some(self.eat());
-                };
-                let kw = when self.expect(.KwSelf(), "'self'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let comma = self.eat_comma();
-                params.push(.SelfParam(kw, mut_kw, .Some(ref_kw), comma));
-                first = 0;
-                continue;
+                return .Error(
+                    "Parse error: Invalid receiver parameter syntax: use 'self' only",
+                );
             };
             if self.peek() is .KwSelf() then {
                 let kw = self.eat();
                 let comma = self.eat_comma();
-                params.push(.SelfParam(kw, .None(), .None(), comma));
+                params.push(.SelfParam(kw, .None(), comma));
                 first = 0;
                 continue;
             };
@@ -3599,6 +3637,12 @@ given CstParser {
                 .Error(e) then {
                     return .Error(e);
                 },
+            };
+            // Only named parameters (with a colon) may carry a default.
+            if colon is .None() and self.check(.Eq()) then {
+                return .Error(
+                    "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                );
             };
             let default_value = when self.parse_default_value() in {
                 .Ok(d) then d,

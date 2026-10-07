@@ -406,6 +406,99 @@ let main() Void = {
         "let x=<...5\n",
         "expected primary expression",
     );
+    // ── parse parity with the compiler ──────────────────────────────────
+    // The formatter's parser must accept exactly what `koralc` accepts. Each
+    // case below was verified to be rejected by the compiler; the message text
+    // is the compiler's own where it has one. If one of these goes green
+    // again, koral-syntax has drifted behind the compiler.
+    t.test_error_contains(
+        "managed ref `*T` rejected",
+        "type T(a Int);\nlet f(x *T) Int = 0;\n",
+        "managed refs are removed",
+    );
+    t.test_error_contains(
+        "managed ref `*mutable T` rejected",
+        "type T(a Int);\nlet f(x *mutable T) Int = 0;\n",
+        "managed refs are removed",
+    );
+    t.test_error_contains(
+        "legacy `?*T` rejected",
+        "type T(a Int);\nlet f(x ?*T) Int = 0;\n",
+        "Weak reference syntax is '?T', not legacy '?*T'",
+    );
+    t.test_error_contains(
+        "`?mutable T` rejected",
+        "type mutable T(a Int);\nlet f(x ?mutable T) Int = 0;\n",
+        "expected type name",
+    );
+    t.test_error_contains(
+        "`*self` receiver rejected",
+        "type T(a Int);\ngiven T {\n    f(*self) Int = 0;\n};\n",
+        "use 'self' only",
+    );
+    t.test_error_contains(
+        "`*self mutable` receiver rejected",
+        "type mutable T(a Int);\ngiven T {\n    f(*self mutable) Int = 0;\n};\n",
+        "use 'self' only",
+    );
+    t.test_error_contains(
+        "positional param default rejected",
+        "let f(x Int = 5) Int = 0;\n",
+        "Default values are only allowed for named parameters",
+    );
+    t.test_error_contains(
+        "positional field default rejected",
+        "type T(x Int = 5);\n",
+        "Default values are only allowed for named parameters",
+    );
+    t.test_error_contains(
+        "positional variant-field default rejected",
+        "type E {\n    R(x Int = 5),\n};\n",
+        "Default values are only allowed for named parameters",
+    );
+    t.test_error_contains(
+        "mutable type alias rejected",
+        "type mutable U = Int;\n",
+        "Type alias cannot be marked mutable",
+    );
+    t.test_error_contains(
+        "mutable enum rejected",
+        "type mutable E {\n    A,\n    B,\n};\n",
+        "Enum type cannot be marked mutable",
+    );
+    t.test_error_contains(
+        "import alias case-class mismatch rejected",
+        "using \"std/io\" { Reader as reader };\n",
+        "alias must start with an uppercase letter",
+    );
+    // Forms the compiler DOES accept -- these must keep formatting.
+    t.test(
+        "named variant-field default accepted",
+        "type E {\n    R(x: Int = 5),\n};\n",
+        "type E {\n    R(x: Int = 5),\n};\n",
+    );
+    t.test(
+        "variant without parens accepted",
+        "type E { A, B };\n",
+        "type E {\n    A,\n    B,\n};\n",
+    );
+    t.test(
+        "leading underscore in type name accepted",
+        "type _Foo(a Int);\n",
+        "type _Foo(a Int);\n",
+    );
+    // `it` is reserved but legal in expression position (the implicit lambda
+    // parameter). `let it ...` is a declaration, so it is rejected.
+    t.test_error_contains(
+        "`it` as declaration name rejected",
+        "let it Int = 0;\n",
+        "expected declaration name",
+    );
+    t.test(
+        "`it` in expression position accepted",
+        "let g(r Result[Int]) Int = {\n    let x = r or else {\n        let _ = it;\n        return 0;\n    };\n    return x;\n};\n",
+        "let g(r Result[Int]) Int = {\n    let x = r or else {\n        let _ = it;\n        return 0;\n    };\n    return x;\n};\n",
+    );
     // `while` and `for` always produce `Void`, so a `Void` binding IS their
     // value position and the language accepts it (document.md: "while and for
     // always produce Void"). These used to assert that the form is rejected --

@@ -205,12 +205,6 @@ given Printer {
         .ConstraintKeyword(kw) then self.write_token(kw),
         .Mutable(inner, kw) then {
             when inner in {
-                .Ref(ref_inner, ref_kw) then {
-                    self.write_token(ref_kw);
-                    self.write_token(kw);
-                    self.write_space();
-                    self.print_type(ref_inner);
-                },
                 .Ptr(ptr_inner, ptr_kw) then {
                     self.write_token(ptr_kw);
                     self.write_space();
@@ -257,10 +251,6 @@ given Printer {
             self.write_token(rp);
             self.write_space();
             self.print_type(return_type);
-        },
-        .Ref(inner, kw) then {
-            self.write_token(kw);
-            self.print_type(inner);
         },
         .Ptr(inner, kw) then {
             self.write_token(kw);
@@ -1350,8 +1340,8 @@ given Printer {
             self.write_token(lp);
             for param in params then {
                 when param in {
-                    .SelfParam(kw, mut_kw, ref_kw, comma) then {
-                        self.print_self_param(kw, mut_kw, ref_kw, comma);
+                    .SelfParam(kw, mut_kw, comma) then {
+                        self.print_self_param(kw, mut_kw, comma);
                     },
                     .NamedParam(pname, mut_kw, colon, pt, default_value, comma) then {
                         if mut_kw is .Some(mk) then {
@@ -1658,8 +1648,8 @@ given Printer {
 
     file_private print_param_multiline(self, param CstParam) Void = {
         when param in {
-            .SelfParam(kw, mut_kw, ref_kw, _) then {
-                self.print_self_param(kw, mut_kw, ref_kw, .None());
+            .SelfParam(kw, mut_kw, _) then {
+                self.print_self_param(kw, mut_kw, .None());
                 self.write(",");
             },
             .NamedParam(name, mut_kw, colon, param_type, default_value, _) then {
@@ -1681,40 +1671,18 @@ given Printer {
         };
     };
 
+    // `self` is the only receiver form; there is no `*self` spelling left to
+    // print (grammar.bnf <method-first-param>).
     file_private print_self_param(
         self,
         kw Token,
         mut_kw Option[Token],
-        ref_kw Option[Token],
         comma Option[Token],
     ) Void = {
-        when ref_kw in {
-            .Some(rk) then when rk in {
-                .Star() or .KwRef() then {
-                    self.write_token(rk);
-                    if mut_kw is .Some(mk) then {
-                        self.write_token(mk);
-                        self.write_space();
-                    };
-                    self.write_token(kw);
-                },
-                _ then {
-                    self.write_token(kw);
-                    self.write_space();
-                    self.write_token(rk);
-                    if mut_kw is .Some(mk) then {
-                        self.write_space();
-                        self.write_token(mk);
-                    };
-                },
-            },
-            .None() then {
-                self.write_token(kw);
-                if mut_kw is .Some(mk) then {
-                    self.write_space();
-                    self.write_token(mk);
-                };
-            },
+        self.write_token(kw);
+        if mut_kw is .Some(mk) then {
+            self.write_space();
+            self.write_token(mk);
         };
         if comma is .Some(c) then {
             self.write_separator(c);
@@ -1742,8 +1710,8 @@ given Printer {
 
     file_private print_param(self, param CstParam) Void = {
         when param in {
-            .SelfParam(kw, mut_kw, ref_kw, comma) then {
-                self.print_self_param(kw, mut_kw, ref_kw, comma);
+            .SelfParam(kw, mut_kw, comma) then {
+                self.print_self_param(kw, mut_kw, comma);
             },
             .NamedParam(name, mut_kw, colon, param_type, default_value, comma) then {
                 if mut_kw is .Some(mk) then {
@@ -2337,7 +2305,6 @@ given Printer {
         .ConstraintKeyword(kw) then kw.to_string().count(),
         .SelfType(_) then 4,
         .Mutable(inner, _) then when inner in {
-            .Ref(ref_inner, _) then self.estimate_type_length(ref_inner) + 5,
             .Ptr(ptr_inner, _) then self.estimate_type_length(ptr_inner) + 15,
             .Weakref(weak_inner, _) then self.estimate_type_length(weak_inner) + 6,
             _ then self.estimate_type_length(inner) + 4,
@@ -2363,7 +2330,6 @@ given Printer {
             len += self.estimate_type_length(return_type);
             len
         },
-        .Ref(inner, _) then self.estimate_type_length(inner) + 1,
         .Ptr(inner, _) then self.estimate_type_length(inner) + 7,
         .Weakref(inner, _) then self.estimate_type_length(inner) + 2,
     };
@@ -2418,12 +2384,9 @@ given Printer {
             len += 2; // ( )
             for param in params then {
                 when param in {
-                    .SelfParam(_, mut_kw, ref_kw, comma) then {
+                    .SelfParam(_, mut_kw, comma) then {
                         len += 4;
                         if mut_kw is .Some(_) then {
-                            len += 4;
-                        };
-                        if ref_kw is .Some(_) then {
                             len += 4;
                         };
                         if comma is .Some(_) then {
@@ -2701,8 +2664,8 @@ given Printer {
                     self.write_space();
                 };
                 when params[i] in {
-                    .SelfParam(kw, mut_kw, ref_kw, _) then {
-                        self.print_self_param(kw, mut_kw, ref_kw, .None());
+                    .SelfParam(kw, mut_kw, _) then {
+                        self.print_self_param(kw, mut_kw, .None());
                     },
                     .NamedParam(pname, mut_kw, colon, pt, default_value, _) then {
                         if mut_kw is .Some(mk) then {
