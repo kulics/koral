@@ -1226,18 +1226,13 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
             out.push_string(type_to_string_impl(return_type, next_depth));
             return out.to_string();
         },
-        .StructureType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("struct#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
-        .EnumType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("enum#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
+        // Declaration names, like the generic and trait-object cases above
+        // already do. `struct#N` / `enum#N` are what `stable_type_key` is for
+        // (`S#N` / `E#N`): an identity spelling, and `bootstrap-productization-plan`
+        // records "用户不该看见 `struct#N`". A name is read from the declaration
+        // whenever one is registered; the id form is the last resort.
+        .StructureType(def_id) then def_id_spelling(def_id),
+        .EnumType(def_id) then def_id_spelling(def_id),
         .ReferenceType(inner) then {
             if depth > 200(UInt) then {
                 return "...";
@@ -1308,12 +1303,7 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
             out.push_string(type_to_string_impl(inner, depth + 1(UInt)));
             out.to_string()
         },
-        .OpaqueType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("opaque#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
+        .OpaqueType(def_id) then def_id_spelling(def_id),
         .GenericParameter(name) then name,
         .GenericStruct(template_def_id, args) then {
             let template = def_id_spelling(template_def_id);

@@ -559,3 +559,59 @@ typed/types.koral
 `struct#N` 泄漏已由 `bootstrap-productization-plan.md` 记为**既修过的缺陷类**
 （「用户不该看见 `struct#N`」），要根治应让 `type_to_string` 对结构体/枚举也走
 `def_id_spelling`，并统一 `Fn`/`Func` —— 属后续一批。
+
+---
+
+## 附：`struct#N` 收口（2026-10-08）
+
+### 先更正一条误判
+
+上一节把 `Fn(` / `Func(` 记成「函数类型两套拼法」。**不是缺陷**：
+
+- `stable_type_key` 印 `Fn(Int)->Int` —— 那是**身份键**
+- `type_to_string_impl` / `display_type_base_name` 印 `Func(Int) Int` —— **显示**
+
+grammar `<function-type> ::= "Func" "(" … ")" <type>`，表层是 `Func(...)`，显示侧一直是对的。
+身份键故意用不同拼法，正是显示与身份该有的分开。**本轮未改。**
+
+### `struct#N` 只能是兜底
+
+`bootstrap-productization-plan.md` 已记「用户不该看见 `struct#N`」。显示路径里它是**首选**的还有几处：
+
+| 路径 | 处置 |
+|---|---|
+| `type_to_string_impl` 的 `.StructureType`/`.EnumType`/`.OpaqueType` | 改 `def_id_spelling`（与同函数的泛型/trait object 一致） |
+| `unification_type_summary` 的同三处 | 同上 |
+| `type_base_name` / `display_type_base_name` / `mono_type_name` / `typed_printer` | **本就正确**：先查名字，`struct#N` 只兜底 |
+
+`typed_printer.koral` 是 Typed AST **调试转储**，不是用户诊断，`struct#N` 在那里可接受。
+
+### 顺带：第四套拼法表（上一节的「零残留」结论是错的）
+
+`sema/unifier.koral` 的 `unification_type_summary` 自带**整套**前缀拼法，
+`grep` 上次的模式漏了 `push_string("* ")` 这类带空格的写法：
+
+| 形态 | 它印 | 表层 |
+|---|---|---|
+| `ReferenceType` | `* ` | （无） |
+| `MutableReferenceType` | `mutable ` | （无） |
+| `PointerType` | `unsafe ` | `*unsafe ` |
+| `WeakReferenceType` | `?* ` | `?` |
+| `MutableWeakReferenceType` | `?mutable ` | `?` |
+
+已改走 `split_type_string_wrappers` + `type_string_prefixes`，与其余三处同源。
+拆成 `unification_type_summary_with_depth`（剥层 + 前缀）+ `unification_base_summary`（基名 + 深度截断）。
+
+### 顺带：`mono_types.koral` 两处注释说谎
+
+`layout_key` 用 `struct_<id>`，注释却写「与 `type_to_string` 同格式」「(struct#N)」。
+两处都是错的（下划线 vs 井号），且「同格式」这个说法本身就不该有——`layout_key` 是身份键，
+本就不该跟显示同格式。注释已改为说明它是 DefId 身份键。
+
+### 判据
+
+| | |
+|---|---|
+| 显示 | `expected Rune or UInt8, got C`（原 `got struct#N`）· `?C` · `Box[Int]` · 合一 `expected Box[String], got Box[Int]` |
+| 六步链 | 种子 **599** · 主门禁 **599** · `FIXED POINT` + `dangling=0` · stage2 **599** · **差分 599** |
+| 格式化器 / 样本 / `koral_doc` | 116/116 + corpus 220/0 · 13/13 · 14 模块未过期 |

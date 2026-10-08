@@ -15,9 +15,9 @@
 //   - FunctionType:    "fn_<param1>_<param2>_<ret>"
 //   - GenericStruct:   "<TemplateName>_<arg1>_<arg2>"
 //   - GenericEnum:    "<TemplateName>_<arg1>_<arg2>"
-//   - StructureType:   use the struct's DefId-based name (struct#N)
-//   - EnumType:       use the enum's DefId-based name (enum#N)
-//   - OpaqueType:      use the opaque's DefId-based name (opaque#N)
+//   - StructureType:   DefId alone ("struct_<id>")
+//   - EnumType:        DefId alone ("union_<id>")
+//   - OpaqueType:      DefId alone ("opaque_<id>")
 //   - GenericParameter: use the parameter name directly
 //   - TraitObject:     use the trait name directly
 //   - TypeVar / Unknown: "?"
@@ -179,9 +179,12 @@ public let layout_key(t Type) String = {
             if info.module_path.is_empty() then "Module"
             else info.module_path.join_to_string("_")
         },
-        // Concrete struct/enum/opaque: use the DefId-based representation.
-        // The Monomorphizer stores the real name in the DefIdMap; here we use
-        // the same format as type_to_string so keys remain consistent.
+        // Concrete struct/enum/opaque: identity, on the DefId alone. The
+        // Monomorphizer stores the real name in the DefIdMap, but a key must
+        // not depend on it -- two same-named declarations would collide, and a
+        // rename would invalidate every key already stored. Display spelling
+        // lives in `type_to_string`, which is a different thing; this is the
+        // same split `stable_type_key` makes (`S#N` there, `struct_N` here).
         .StructureType(def_id) then "struct_\(def_id.id)",
         .EnumType(def_id) then "union_\(def_id.id)",
         .OpaqueType(def_id) then "opaque_\(def_id.id)",

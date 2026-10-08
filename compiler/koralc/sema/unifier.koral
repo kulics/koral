@@ -51,54 +51,40 @@ file_private let unification_type_summary(t Type) String = {
     return unification_type_summary_with_depth(t, 0(UInt));
 };
 
+/// A short rendering of `t` for unification diagnostics. Wrapper prefixes come
+/// from `type_string_prefixes`, the one spelling table; this function only
+/// decides how much of the base type to show.
+///
+/// It used to carry its own prefix table -- `* `, `mutable `, `unsafe `,
+/// `?* `, `?mutable ` -- which is how a diagnostic came to spell `?T` as `?*T`
+/// and a trait object as `*Error`. Peeling first also keeps a name under `?`
+/// or `*unsafe` resolved to its declaration rather than `struct#N`.
 file_private let unification_type_summary_with_depth(t Type, depth UInt) String = {
+    let chain = split_type_string_wrappers(t);
+    return type_string_prefixes(chain) + unification_base_summary(chain.inner, depth);
+};
+
+file_private let unification_base_summary(inner Type, depth UInt) String = {
     if depth >= 8(UInt) then {
-        return when t in {
+        return when inner in {
             .FunctionType(_, _) then "Func(...) ...",
-            .ReferenceType(_) then "ref ...",
-            .MutableReferenceType(_) then "ref mutable ...",
-            .PointerType(_) then "ptr ...",
-            .MutablePointerType(_) then "ptr mutable ...",
-            .WeakReferenceType(_) then "weakref ...",
-            .MutableWeakReferenceType(_) then "weakref mutable ...",
             .GenericStruct(template_def_id, _) then {
-                let mutable out = StringBuilder.new();
-                out.push_string(def_id_spelling(template_def_id));
-                out.push_string("[...]");
-                out.to_string()
+                def_id_spelling(template_def_id) + "[...]"
             },
             .GenericEnum(template_def_id, _) then {
-                let mutable out = StringBuilder.new();
-                out.push_string(def_id_spelling(template_def_id));
-                out.push_string("[...]");
-                out.to_string()
+                def_id_spelling(template_def_id) + "[...]"
             },
-            .StructureType(def_id) then {
-                let mutable out = StringBuilder.new();
-                out.push_string("struct#");
-                out.push_string(def_id.id.to_string());
-                out.to_string()
-            },
-            .EnumType(def_id) then {
-                let mutable out = StringBuilder.new();
-                out.push_string("enum#");
-                out.push_string(def_id.id.to_string());
-                out.to_string()
-            },
-            .OpaqueType(def_id) then {
-                let mutable out = StringBuilder.new();
-                out.push_string("opaque#");
-                out.push_string(def_id.id.to_string());
-                out.to_string()
-            },
+            .StructureType(def_id) then def_id_spelling(def_id),
+            .EnumType(def_id) then def_id_spelling(def_id),
+            .OpaqueType(def_id) then def_id_spelling(def_id),
             .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             .TypeVar(tv_ref) then tv_ref.display(),
             .Unknown() then "?",
-            _ then type_to_string(t),
+            _ then type_to_string(inner),
         };
     };
 
-    return when t in {
+    return when inner in {
         .IntType() then "Int",
         .Int8Type() then "Int8",
         .Int16Type() then "Int16",
@@ -135,72 +121,9 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
             out.push_string(unification_type_summary_with_depth(ret, depth + 1(UInt)));
             out.to_string()
         },
-        .StructureType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("struct#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
-        .EnumType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("enum#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
-        .ReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("* ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .MutableReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("mutable ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .PointerType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("unsafe ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .MutablePointerType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("unsafe mutable ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .WeakReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("?* ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .MutableWeakReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("?mutable ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .BorrowedReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("ref ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .MutableBorrowedReferenceType(inner) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("ref mutable ");
-            out.push_string(unification_type_summary_with_depth(inner, depth + 1(UInt)));
-            out.to_string()
-        },
-        .OpaqueType(def_id) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("opaque#");
-            out.push_string(def_id.id.to_string());
-            out.to_string()
-        },
+        .StructureType(def_id) then def_id_spelling(def_id),
+        .EnumType(def_id) then def_id_spelling(def_id),
+        .OpaqueType(def_id) then def_id_spelling(def_id),
         .GenericParameter(name) then name,
         .GenericStruct(tplDefId, args) then {
             let mutable out = StringBuilder.new();
@@ -243,6 +166,10 @@ file_private let unification_type_summary_with_depth(t Type, depth UInt) String 
         .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv_ref) then tv_ref.display(),
         .Unknown() then "?",
+        // Wrapper forms are peeled before we get here, so this is only reached
+        // for one the peel does not recognise. `type_to_string` renders those
+        // from the same spelling table, which is the right answer anyway.
+        _ then type_to_string(inner),
     };
 };
 
