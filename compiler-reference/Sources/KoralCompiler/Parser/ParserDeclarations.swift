@@ -7,8 +7,6 @@ extension Parser {
   private struct TopLevelDeclFlags {
     let access: AccessModifier
     let explicitAccess: AccessModifier?
-    let isIntrinsic: Bool
-    let isForeign: Bool
   }
 
   private func parseSelfReceiverType() throws -> TypeNode {
@@ -40,11 +38,13 @@ extension Parser {
     let flags = try parseTopLevelDeclFlags()
     let explicitAccess = flags.explicitAccess
     let access = flags.access
-    let isIntrinsic = flags.isIntrinsic
-    let isForeign = flags.isForeign
 
     if currentToken === .letKeyword {
+      let keywordSpan = currentSpan
       try match(.letKeyword)
+      let quals = try parseDeclQualifiers(keywordSpan: keywordSpan)
+      let isIntrinsic = quals.isIntrinsic
+      let isForeign = quals.isForeign
 
       // Check for mutable keyword first
       var mutable = false
@@ -111,7 +111,11 @@ extension Parser {
           name: name, mutable: false, access: access, span: startSpan, nameSpan: nameSpan)
       }
     } else if currentToken === .typeKeyword {
+      let keywordSpan = currentSpan
       try match(.typeKeyword)
+      let quals = try parseDeclQualifiers(keywordSpan: keywordSpan)
+      let isIntrinsic = quals.isIntrinsic
+      let isForeign = quals.isForeign
 
       // New declaration-site mutability: type mutable Name { ... }
       // Only nominal types are mutable; enums and aliases remain non-mutable.
@@ -141,6 +145,15 @@ extension Parser {
 
       let typeParams = try parseTypeParameters()
 
+      // `type foreign` and `type mutable` are mutually exclusive: mutability is
+      // a property of Koral's own nominal declarations, and an external type's
+      // layout is C's, not ours. Anchored where koralc anchors it.
+      if isNominalMutable && isForeign {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Foreign type cannot be marked mutable"
+        )
+      }
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
         if isNominalMutable {
@@ -192,14 +205,14 @@ extension Parser {
         throw ParserError.unexpectedToken(
           span: currentSpan, got: "Access modifier on given declaration")
       }
-      if isIntrinsic {
+      let keywordSpan = currentSpan
+      try match(.givenKeyword)
+      let quals = try parseDeclQualifiers(keywordSpan: keywordSpan)
+      if quals.isIntrinsic {
         return try parseIntrinsicGivenDeclaration(span: startSpan)
       }
       return try parseGivenDeclaration(span: startSpan)
     } else if currentToken === .traitKeyword {
-      if isIntrinsic {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "intrinsic trait not supported")
-      }
       return try parseTraitDeclaration(access: access, span: startSpan)
     } else {
       throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
@@ -355,7 +368,8 @@ extension Parser {
   // MARK: - Given Declarations
   
   private func parseIntrinsicGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
-    try match(.givenKeyword)
+    // The `given` keyword and its `intrinsic` qualifier were already consumed
+    // by `parseGlobalDeclaration`, which routes here on that qualifier.
     let typeParams = try parseTypeParameters()
     let type = try parseType()
     try match(.leftBrace)
@@ -471,7 +485,8 @@ extension Parser {
   }
 
   private func parseGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
-    try match(.givenKeyword)
+    // The `given` keyword (and any qualifier) was already consumed by
+    // `parseGlobalDeclaration`.
     let typeParams = try parseTypeParameters()
     let type = try parseType()
     var trait: TypeNode? = nil
@@ -597,12 +612,13 @@ extension Parser {
     currentToken === .publicKeyword || currentToken === .filePrivateKeyword || currentToken === .modulePrivateKeyword || currentToken === .packagePrivateKeyword
   }
 
+  /// Reads the leading access modifier only. `foreign` / `intrinsic` are NOT
+  /// prefix modifiers: they qualify the thing being declared and sit in the
+  /// slot right after the declaration keyword -- the slot `type mutable` and
+  /// `let mutable` established -- where `parseDeclQualifiers` reads them.
   private func parseTopLevelDeclFlags() throws -> TopLevelDeclFlags {
     var explicitAccess: AccessModifier? = nil
     var access: AccessModifier = .module_private
-
-    var isIntrinsic = false
-    var isForeign = false
 
     while true {
       if isCurrentAccessModifierToken() {
@@ -617,33 +633,51 @@ extension Parser {
         continue
       }
 
-      if currentToken === .intrinsicKeyword {
-        if isIntrinsic {
-          throw ParserError.duplicateDeclarationModifier(span: currentSpan, modifier: "intrinsic")
-        }
-        try match(.intrinsicKeyword)
-        isIntrinsic = true
-      } else if currentToken === .foreignKeyword {
-        if isForeign {
-          throw ParserError.duplicateDeclarationModifier(span: currentSpan, modifier: "foreign")
-        }
-        try match(.foreignKeyword)
-        isForeign = true
-      } else {
-        break
-      }
-
-      if isIntrinsic && isForeign {
-        throw ParserError.foreignAndIntrinsicConflict(span: currentSpan)
-      }
+      break
     }
 
     return TopLevelDeclFlags(
       access: access,
-      explicitAccess: explicitAccess,
-      isIntrinsic: isIntrinsic,
-      isForeign: isForeign
+      explicitAccess: explicitAccess
     )
+  }
+
+  /// Read the `foreign` / `intrinsic` qualifiers written immediately after a
+  /// declaration's keyword. They qualify the thing being declared -- where its
+  /// definition lives -- so they sit in the slot right after the keyword, the
+  /// slot `type mutable` and `let mutable` established. Access modifiers stay
+  /// in the prefix slot: they say who can see the declaration, not what kind of
+  /// thing it is. The two are mutually exclusive and may not repeat.
+  ///
+  /// The pinned diagnostics anchor on the declaration keyword (`keywordSpan`),
+  /// which is where the reference parser reports them.
+  private func parseDeclQualifiers(keywordSpan: SourceSpan) throws -> (isIntrinsic: Bool, isForeign: Bool) {
+    var isIntrinsic = false
+    var isForeign = false
+    while true {
+      if currentToken === .foreignKeyword {
+        if isForeign {
+          throw ParserError.duplicateDeclarationModifier(span: keywordSpan, modifier: "foreign")
+        }
+        if isIntrinsic {
+          throw ParserError.foreignAndIntrinsicConflict(span: keywordSpan)
+        }
+        try match(.foreignKeyword)
+        isForeign = true
+      } else if currentToken === .intrinsicKeyword {
+        if isIntrinsic {
+          throw ParserError.duplicateDeclarationModifier(span: keywordSpan, modifier: "intrinsic")
+        }
+        if isForeign {
+          throw ParserError.foreignAndIntrinsicConflict(span: keywordSpan)
+        }
+        try match(.intrinsicKeyword)
+        isIntrinsic = true
+      } else {
+        break
+      }
+    }
+    return (isIntrinsic: isIntrinsic, isForeign: isForeign)
   }
 
   private func ensureNoTrailingAccessModifier(after accessText: String) throws {

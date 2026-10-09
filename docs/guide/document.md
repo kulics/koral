@@ -1419,7 +1419,7 @@ it from the type's own declaration.
   weak references require (`downgrade` / `upgrade` spell it).
 - `T foreign` — the subject's representation is fixed outside Koral's layout
   freedom and may cross the FFI boundary: a built-in scalar, a `*unsafe` /
-  `*unsafe mutable` pointer, a `foreign type` declaration, or std's `Rune`. It is
+  `*unsafe mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
   a **closed set**; a Koral `type` is not in it, because the compiler chooses its
   layout. This is what `List.borrow_ptr` / `borrow_mut_ptr` require.
 
@@ -2507,14 +2507,22 @@ Native libraries are declared in package or module `links` inside `koral.json` /
 
 The compiler adds linker flags from the resolved manifest graph. `libc` is implicitly linked by default and does not need to be declared.
 
+> **Where the qualifier goes.** `foreign` and `intrinsic` are written
+> **immediately after the keyword** — `let foreign`, `type foreign`, `type
+> intrinsic`, `given intrinsic` — the same slot `type mutable` and `let mutable`
+> already occupy. Access modifiers are the only prefix modifiers: they say who
+> can see a declaration, not what kind of thing it is. The two qualifiers are
+> mutually exclusive, and they come before `mutable`, which describes the
+> binding (`let foreign mutable errno Int32;`).
+
 #### Foreign Functions
 
 Declare external C functions. Foreign functions use positional parameters only; named parameters (colon syntax) are not supported.
 
 ```koral
-foreign let sin(x Float64) Float64;
-foreign let exit(code Int) Never;
-foreign let abort() Never;
+let foreign sin(x Float64) Float64;
+let foreign exit(code Int) Never;
+let foreign abort() Never;
 ```
 
 #### Foreign Types
@@ -2523,20 +2531,20 @@ Declare external C types:
 
 ```koral
 // Opaque type (no fields)
-foreign type CFile {};
+type foreign CFile {};
 
 // FFI struct with fields (aligned with C layout)
-foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
+type foreign KoralTimespec(tv_sec Int64, tv_nsec Int64);
 ```
 
-A foreign type cannot be declared `mutable` — mutability is a property of Koral's own nominal declarations.
+A `type foreign` cannot be declared `mutable` — mutability is a property of Koral's own nominal declarations.
 
 ### Intrinsic Declarations
 
 The `intrinsic` keyword declares types and functions built into the compiler:
 
 ```koral
-public intrinsic type Int;
+type intrinsic Int;
 ```
 
 Intrinsics are reserved for the standard library.

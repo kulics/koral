@@ -1401,7 +1401,7 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
 - `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`downgrade` / `upgrade` 亦然）。
-- `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` / `*unsafe mutable` 指针、`foreign type` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
+- `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` / `*unsafe mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
@@ -2457,12 +2457,18 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 
 #### Foreign 函数
 
+> **限定词写在哪。** `foreign` 与 `intrinsic` 写在**关键字紧后**——`let foreign`、
+> `type foreign`、`type intrinsic`、`given intrinsic`——也就是 `type mutable` 与
+> `let mutable` 已经占住的那个位置。访问修饰符是唯一的**前缀**修饰符：它们说的是
+> 「谁看得见这个声明」，不是「声明的是个什么东西」。两者互斥，且排在 `mutable` 之前
+> （`mutable` 描述绑定）：`let foreign mutable errno Int32;`。
+
 声明外部 C 函数。foreign 函数只使用位置参数；不支持命名参数（冒号语法）。
 
 ```koral
-foreign let sin(x Float64) Float64;
-foreign let exit(code Int) Never;
-foreign let abort() Never;
+let foreign sin(x Float64) Float64;
+let foreign exit(code Int) Never;
+let foreign abort() Never;
 ```
 
 #### Foreign 类型
@@ -2471,10 +2477,10 @@ foreign let abort() Never;
 
 ```koral
 // 不透明类型（无字段）
-foreign type CFile {};
+type foreign CFile {};
 
 // 与 C 布局对齐的 FFI 结构体
-foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64);
+type foreign KoralTimespec(tv_sec Int64, tv_nsec Int64);
 ```
 
 foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明。
@@ -2484,7 +2490,7 @@ foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nom
 `intrinsic` 关键字声明编译器内建的类型和函数：
 
 ```koral
-public intrinsic type Int;
+type intrinsic Int;
 ```
 
 intrinsic 保留给标准库使用。

@@ -193,43 +193,35 @@ given CstParser {
         return .None();
     };
 
-    /// Declaration modifiers may be written in any order -- `public foreign let`
-    /// and `foreign public let` are both accepted by the compiler.
+    /// The `foreign` / `intrinsic` qualifiers written immediately after a
+    /// declaration's keyword -- `let foreign`, `type foreign`, `given intrinsic`.
+    /// They qualify the thing being declared, so they sit in the slot right
+    /// after the keyword, the slot `type mutable` and `let mutable` established.
+    /// Access modifiers stay in the prefix slot.
     ///
-    /// Printing `vis` and then `mods` must reproduce the source order exactly:
-    /// `vis` is the leading access modifier and is only set when it leads, and
-    /// `mods` holds the remaining modifier tokens in source order. When an
-    /// access modifier does not lead, it lands in `mods` instead, so nothing is
-    /// reordering or dropped on the way through the CST.
-    ///
-    /// Callers that only need to know what kind of declaration follows should
-    /// use `modifier_token_count` instead of assuming access-then-kind order.
-    file_private eat_decl_modifiers(self) Pair[Option[Token], List[Token]] = {
-        let mutable vis = Option[Token].None();
+    /// Printing `vis`, then the keyword, then `mods` must reproduce the source
+    /// order exactly; nothing is reordered or dropped on the way through the
+    /// CST.
+    file_private eat_kind_modifiers(self) List[Token] = {
         let mutable mods = List[Token].new();
         while true then {
-            let is_kind_mod = self.check(.KwForeign()) or self.check(.KwIntrinsic());
-            let is_access = self.is_access_mod();
-            if not is_kind_mod and not is_access then {
-                return Pair(vis, mods);
-            };
-            let eaten = self.eat();
-            if is_access and vis is .None() and mods.is_empty() then {
-                vis = .Some(eaten);
+            if self.check(.KwForeign()) or self.check(.KwIntrinsic()) then {
+                mods.push(self.eat());
             } else {
-                mods.push(eaten);
+                return mods;
             };
         };
-        return Pair(vis, mods);
+        return mods;
     };
 
-    /// How many leading tokens are declaration modifiers (access and/or
-    /// `foreign` / `intrinsic`), in whatever order they were written.
+    /// How many leading tokens are access modifiers, before the declaration
+    /// keyword. `foreign` / `intrinsic` are not prefix modifiers -- they sit
+    /// after the keyword and are read by `eat_kind_modifiers` there.
     file_private modifier_token_count(self) UInt = {
         let mutable offset UInt = 0;
         while true then {
             when self.peek_at_skip_nl(offset) in {
-                .KwForeign() or .KwIntrinsic() or .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then {
+                .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then {
                     offset += 1;
                 },
                 _ then {
@@ -2664,10 +2656,22 @@ given CstParser {
             };
         };
 
-        // Determine declaration kind by peeking past every leading modifier,
-        // in whatever order the access and kind modifiers were written.
+        // Determine declaration kind by peeking past every leading access
+        // modifier.
         let offset UInt = self.modifier_token_count();
         let decl_kw = self.peek_at_skip_nl(offset);
+        // `foreign` / `intrinsic` qualify the declaration keyword (`let foreign`),
+        // not the prefix; a leading one is the old spelling. Name the token the
+        // way the compiler's declaration dispatch does.
+        when decl_kw in {
+            .KwForeign() then {
+                return .Error("Parse error: Unexpected token: foreign");
+            },
+            .KwIntrinsic() then {
+                return .Error("Parse error: Unexpected token: intrinsic");
+            },
+            _ then {},
+        };
         when decl_kw in {
             .KwLet() then {
                 when self.parse_let_decl() in {
@@ -3013,13 +3017,16 @@ given CstParser {
     // ========================================================================
 
     file_private parse_let_decl(self) Result[CstDecl] = {
-        let (vis, mods) = self.eat_decl_modifiers();
+        let vis = self.eat_vis();
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then {
                 return .Error(e);
             },
         };
+        // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
+        // `let foreign mutable errno Int32;`.
+        let mods = self.eat_kind_modifiers();
         let mutable mut_kw = Option[Token].None();
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
@@ -3136,13 +3143,15 @@ given CstParser {
     // ========================================================================
 
     file_private parse_type_decl(self) Result[CstDecl] = {
-        let (vis, mods) = self.eat_decl_modifiers();
+        let vis = self.eat_vis();
         let kw = when self.expect(.KwType(), "'type'") in {
             .Ok(t) then t,
             .Error(e) then {
                 return .Error(e);
             },
         };
+        // `foreign` / `intrinsic` sit immediately after `type`: `type foreign`.
+        let mods = self.eat_kind_modifiers();
         // `type` `mutable`? — the two nominal forms the language has
         // (grammar.bnf `<type-decl>`). `mutable` applies to structs only.
         let mutable mut_kw = Option[Token].None();
@@ -3653,13 +3662,15 @@ given CstParser {
     // ========================================================================
 
     file_private parse_given_decl(self) Result[CstDecl] = {
-        let (vis, mods) = self.eat_decl_modifiers();
+        let vis = self.eat_vis();
         let kw = when self.expect(.KwGiven(), "'given'") in {
             .Ok(t) then t,
             .Error(e) then {
                 return .Error(e);
             },
         };
+        // `intrinsic` sits immediately after `given`: `given intrinsic Int`.
+        let mods = self.eat_kind_modifiers();
         let gp = when self.parse_generic_params() in {
             .Ok(g) then g,
             .Error(e) then {
@@ -3790,8 +3801,9 @@ given CstParser {
     };
 
     file_private parse_member_no_let(self) Result[CstDecl] = {
-        let (vis, mods) = self.eat_decl_modifiers();
-        // Generic params and name are handled by finish_func_or_var
-        return self.finish_func_or_var(vis, mods, .None(), .None(), true);
+        let vis = self.eat_vis();
+        // Generic params and name are handled by finish_func_or_var. Members
+        // carry no `foreign` / `intrinsic` qualifiers.
+        return self.finish_func_or_var(vis, List[Token].new(), .None(), .None(), true);
     };
 };

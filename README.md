@@ -276,8 +276,11 @@ Module rules summary:
 
 ### FFI
 
-- `foreign let` for binding C functions
-- `foreign type` for opaque or layout-compatible C types
+Declaration qualifiers sit **immediately after the keyword** — the slot `type mutable` and `let mutable` occupy. Access modifiers are the only prefix modifiers: they say who can see a declaration, not what kind of thing it is.
+
+- `let foreign` for binding C functions
+- `type foreign` for opaque or layout-compatible C types
+- `let intrinsic` / `type intrinsic` for declarations built into the compiler (standard library only)
 - Native library linking is configured in `koral.json` / `std/koral.json` via `links`, not via source syntax
 - Raw pointers: `*unsafe T` (read-only), `*unsafe mutable T` (read-write); formed with `&unsafe` / `&unsafe mutable`
 - Weak references: `?T` (requires `mutable` constraint); `downgrade(T)` / `upgrade(?T)`

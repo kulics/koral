@@ -1070,6 +1070,10 @@ given Parser {
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
+        // `given intrinsic T { ... };` -- the qualifier sits right after `given`.
+        let decl_qualifiers = self.parse_decl_qualifiers();
+        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
+        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
         let type_params = self.parse_type_parameters() or return;
         let mutable target_type = self.parse_type() or return;
 
@@ -1089,7 +1093,7 @@ given Parser {
             },
         };
 
-        let members = self.parse_given_members(not is_intrinsic) or return;
+        let members = self.parse_given_members(not decl_is_intrinsic) or return;
         let base = if trait_type is .Some(t) then Decl.GivenTraitDecl(
             target_type,
             type_params,
@@ -1100,7 +1104,7 @@ given Parser {
         else Decl.GivenDecl(target_type, type_params, members, self.span_from_start(
             start,
         ));
-        return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+        return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
     };
 
     module_private parse_top_level_decl(self) Result[Decl] = {
@@ -1121,19 +1125,48 @@ given Parser {
             );
         };
 
+        // `foreign` / `intrinsic` are written immediately after the keyword,
+        // not before it. Peek past the keyword to read them without disturbing
+        // the branch parser that consumes it.
+        let saved_after_flags = self.save_state();
+        let mutable qualifiers = DeclQualifiers(false, false, Option[String].None());
+        when self.current().kind in {
+            .KwLet() or .KwType() or .KwGiven() then {
+                self.advance();
+                qualifiers = self.parse_decl_qualifiers();
+            },
+            _ then {},
+        };
+        self.restore_state(saved_after_flags);
+        when qualifiers.invalid_message in {
+            .Some(message) then {
+                return .Error(self.parser_error_at_current(message));
+            },
+            .None() then {},
+        };
+        let decl_is_foreign = flags.is_foreign or qualifiers.is_foreign;
+        let decl_is_intrinsic = flags.is_intrinsic or qualifiers.is_intrinsic;
+        if decl_is_foreign and decl_is_intrinsic then {
+            return .Error(
+                self.parser_error_at_current(
+                    "foreign and intrinsic cannot be used together",
+                ),
+            );
+        };
+
         when self.current().kind in {
             .KwLet() then {
                 return self.parse_let_decl(
                     flags.access,
-                    flags.is_foreign,
-                    flags.is_intrinsic,
+                    decl_is_foreign,
+                    decl_is_intrinsic,
                 );
             },
             .KwType() then {
                 return self.parse_type_decl(
                     flags.access,
-                    flags.is_foreign,
-                    flags.is_intrinsic,
+                    decl_is_foreign,
+                    decl_is_intrinsic,
                 );
             },
             .KwUsing() then {
@@ -1144,15 +1177,15 @@ given Parser {
                 return self.parse_using_decl(
                     using_access,
                     flags.has_explicit_access,
-                    flags.is_foreign,
-                    flags.is_intrinsic,
+                    decl_is_foreign,
+                    decl_is_intrinsic,
                 );
             },
             .KwTrait() then {
                 return self.parse_trait_decl(
                     flags.access,
-                    flags.is_foreign,
-                    flags.is_intrinsic,
+                    decl_is_foreign,
+                    decl_is_intrinsic,
                 );
             },
             .KwGiven() then {

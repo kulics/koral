@@ -15,35 +15,35 @@ public let make_bytes(count UInt) List[UInt8];
 
 public let make_uninitialized_bytes(count UInt) List[UInt8];
 
-public intrinsic let alloc_memory[T Any](capacity UInt) *unsafe mutable T;
+public let intrinsic alloc_memory[T Any](capacity UInt) *unsafe mutable T;
 
-public intrinsic let dealloc_memory[T Any](p *unsafe T) Void;
+public let intrinsic dealloc_memory[T Any](p *unsafe T) Void;
 
-public intrinsic let copy_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
+public let intrinsic copy_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
 
-public intrinsic let move_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
+public let intrinsic move_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
 
-public intrinsic let init_memory[T Any](p *unsafe mutable T, value T) Void;
+public let intrinsic init_memory[T Any](p *unsafe mutable T, value T) Void;
 
-public intrinsic let deinit_memory[T Any](p *unsafe mutable T) Void;
+public let intrinsic deinit_memory[T Any](p *unsafe mutable T) Void;
 
-public intrinsic let take_memory[T Any](p *unsafe mutable T) T;
+public let intrinsic take_memory[T Any](p *unsafe mutable T) T;
 
-public intrinsic let null_ptr[T Any]() *unsafe mutable T;
+public let intrinsic null_ptr[T Any]() *unsafe mutable T;
 
-public intrinsic let spawn_thread(out_handle *unsafe mutable *unsafe mutable UInt8, out_tid *unsafe mutable UInt64, f Func() Void, stack_size UInt64) Int32;
+public let intrinsic spawn_thread(out_handle *unsafe mutable *unsafe mutable UInt8, out_tid *unsafe mutable UInt64, f Func() Void, stack_size UInt64) Int32;
 
-public intrinsic let downgrade[T mutable](val T) ?T;
+public let intrinsic downgrade[T mutable](val T) ?T;
 
-public intrinsic let upgrade[T mutable](val ?T) Option[T];
+public let intrinsic upgrade[T mutable](val ?T) Option[T];
 
 public let max[T Ord](a T, b T) T;
 
 public let min[T Ord](a T, b T) T;
 
-public foreign let exit(code Int) Never;
+public let foreign exit(code Int) Never;
 
-public foreign let abort() Never;
+public let foreign abort() Never;
 
 public let last_error_message() String;
 
@@ -202,33 +202,33 @@ public type Option[T Any] {
     Some(value T),
 };
 
-public intrinsic type Bool;
+public type intrinsic Bool;
 
-public intrinsic type Never;
+public type intrinsic Never;
 
-public intrinsic type Int;
+public type intrinsic Int;
 
-public intrinsic type Int8;
+public type intrinsic Int8;
 
-public intrinsic type Int16;
+public type intrinsic Int16;
 
-public intrinsic type Int32;
+public type intrinsic Int32;
 
-public intrinsic type Int64;
+public type intrinsic Int64;
 
-public intrinsic type UInt;
+public type intrinsic UInt;
 
-public intrinsic type UInt8;
+public type intrinsic UInt8;
 
-public intrinsic type UInt16;
+public type intrinsic UInt16;
 
-public intrinsic type UInt32;
+public type intrinsic UInt32;
 
-public intrinsic type UInt64;
+public type intrinsic UInt64;
 
-public intrinsic type Float32;
+public type intrinsic Float32;
 
-public intrinsic type Float64;
+public type intrinsic Float64;
 
 public type Range[T Ord] {
     // Bound ranges (4 kinds)

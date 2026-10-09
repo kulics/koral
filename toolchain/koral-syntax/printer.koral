@@ -1426,12 +1426,13 @@ given Printer {
             self.write_token(v);
             self.write_space();
         };
-        for mod in mods then {
-            self.write_token(mod);
-            self.write_space();
-        };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
+        for mod in mods then {
+            self.write_token(mod);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -1543,12 +1544,13 @@ given Printer {
             self.write_token(v);
             self.write_space();
         };
-        for mod in mods then {
-            self.write_token(mod);
-            self.write_space();
-        };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
+        for mod in mods then {
+            self.write_token(mod);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -1706,12 +1708,13 @@ given Printer {
             self.write_token(v);
             self.write_space();
         };
+        self.write_token(kw);
+        self.write_space();
+        // `foreign` / `intrinsic` sit right after the keyword: `type foreign`.
         for mod in mods then {
             self.write_token(mod);
             self.write_space();
         };
-        self.write_token(kw);
-        self.write_space();
         if mut_kw is .Some(m) then {
             self.write_token(m);
             self.write_space();
@@ -2029,11 +2032,13 @@ given Printer {
             self.write_token(v);
             self.write_space();
         };
-        for mod in mods then {
-            self.write_token(mod);
-            self.write_space();
-        };
         self.write_token(kw);
+        // `foreign` / `intrinsic` sit right after the keyword: `given intrinsic`.
+        // Before `[...]` they stay tight, like `given[X Any]` always has.
+        for mod in mods then {
+            self.write_space();
+            self.write_token(mod);
+        };
         if gp is .Some(g) then {
             self.print_generic_params(g);
             self.write_space();
@@ -2498,12 +2503,12 @@ given Printer {
                 self.write_token(v);
                 self.write_space();
             };
+            self.write_token(kw);
+            self.write_space();
             for mod in mods then {
                 self.write_token(mod);
                 self.write_space();
             };
-            self.write_token(kw);
-            self.write_space();
             if mut_kw is .Some(m) then {
                 self.write_token(m);
                 self.write_space();
@@ -2625,12 +2630,13 @@ given Printer {
             self.write_token(v);
             self.write_space();
         };
-        for mod in mods then {
-            self.write_token(mod);
-            self.write_space();
-        };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
+        for mod in mods then {
+            self.write_token(mod);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -2761,34 +2767,18 @@ given Printer {
         .None() then true,
     };
 
-    /// The access modifier on a declaration, wherever it sits in the modifier
-    /// list -- `foreign public let` and `public foreign let` are both legal.
-    public decl_visibility(d CstDecl) Option[Token] = {
-        let (vis, mods) = when d in {
-            .Func(v, ms, _, _, _, _, _, _, _, _, _, _) then Pair(v, ms),
-            .ForeignDecl(v, ms, _, _, _, _, _, _, _, _) then Pair(v, ms),
-            .Type(v, ms, _, _, _, _, _) then Pair(v, ms),
-            .Given(v, ms, _, _, _, _, _, _, _, _) then Pair(v, ms),
-            .Var(v, _, _, _, _) then Pair(v, List[Token].new()),
-            .Trait(v, _, _, _, _, _, _, _) then Pair(v, List[Token].new()),
-            .TraitMethod(v, _, _, _, _, _, _) then Pair(v, List[Token].new()),
-            .Using(_) or .ForeignUsing(_, _) then Pair(
-                Option[Token].None(),
-                List[Token].new(),
-            ),
-        };
-        if vis is .Some(t) then {
-            return .Some(t);
-        };
-        for m in mods then {
-            when m in {
-                .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then {
-                    return .Some(m);
-                },
-                _ then {},
-            };
-        };
-        return .None();
+    /// The access modifier on a declaration. It sits in the prefix slot only;
+    /// the `foreign` / `intrinsic` qualifiers sit after the declaration keyword
+    /// and never carry visibility.
+    public decl_visibility(d CstDecl) Option[Token] = when d in {
+        .Func(v, _, _, _, _, _, _, _, _, _, _, _) then v,
+        .ForeignDecl(v, _, _, _, _, _, _, _, _, _) then v,
+        .Type(v, _, _, _, _, _, _) then v,
+        .Given(v, _, _, _, _, _, _, _, _, _) then v,
+        .Var(v, _, _, _, _) then v,
+        .Trait(v, _, _, _, _, _, _, _) then v,
+        .TraitMethod(v, _, _, _, _, _, _) then v,
+        .Using(_) or .ForeignUsing(_, _) then Option[Token].None(),
     };
 
     /// Flush the last line, then collapse runs of blank lines to at most one

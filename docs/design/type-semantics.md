@@ -108,13 +108,13 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
 - 裸指针：`*unsafe T`、`*unsafe mutable T`
-- `foreign type` 声明（布局就是 C 的那个）
+- `type foreign` 声明（布局就是 C 的那个）
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 
 **用户声明不能认领 `foreign`。** 这正是它取代 `Pod` 的理由：`Pod` 是空 marker trait，
 用户可以写 `given MyType as Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
 而 Koral `type` 的布局由编译器选，跨边界的裸指针对它没有意义；要跨 FFI 的结构体应当
-写 `foreign type`。
+写 `type foreign`。
 
 被删掉的形态：`Pod` marker trait 及其 `given ... as Pod {}` 实现。
 

@@ -40,26 +40,24 @@
 // Global Declarations
 // ============================================================================
 
-<global-decl> ::= <decl-modifier>* <let-decl>
-               | <decl-modifier>* <foreign-let-decl>
-               | <decl-modifier>* <type-decl>
-               | <decl-modifier>* <foreign-type-decl>
-               | <decl-modifier>* <trait-decl>
-               | "intrinsic"? <given-decl>
-// <foreign-let-decl> / <foreign-type-decl> 只在 `foreign` 修饰下出现：它们是
-// 「无初值的 let 声明」与「带 cname 的 type 声明」，由 <let-decl> / <type-decl>
-// 推导不出来，所以必须在这里显式挂上。
-
-<decl-modifier> ::= <access-modifier> | "foreign" | "intrinsic"
-// 说明：修饰符顺序不限，`public foreign let` 与 `foreign public let` 都合法
-// （两个编译器都接受）。`foreign` / `intrinsic` 互斥；`given` 不接受访问修饰符。
-// 声明体的有无仍由修饰符决定：`foreign` / `intrinsic` 声明没有函数体，
-// 其余形式见 <let-decl> 与 <foreign-let-decl>。
+<global-decl> ::= <access-modifier>* <let-decl>
+               | <access-modifier>* <type-decl>
+               | <access-modifier>* <trait-decl>
+               | <given-decl>
 
 <access-modifier> ::= "public"
                     | "file_private"
                     | "module_private"
                     | "package_private"
+// 访问修饰符是唯一的**前缀**修饰符：它们说的是「谁看得见这个声明」。
+// 其余限定词说的是「声明的是个什么东西」，一律紧跟关键字——也就是
+// `type mutable` / `let mutable` 已经确立的那个位置。
+
+<decl-qualifier> ::= "foreign" | "intrinsic"
+// 声明的定义在哪里：在 C，或在编译器里。两者互斥，也不能重复。
+// 它们排在 `mutable` 之前，因为 `mutable` 描述的是绑定：
+// `let foreign mutable errno Int32;`。
+// `foreign` / `intrinsic` 声明没有函数体；`given` 只接受 `intrinsic`。
 
 // ============================================================================
 // Let Declarations (Variables and Functions)
@@ -67,11 +65,10 @@
 
 <let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"
              | "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"
-             | "let" <identifier> <generic-params>? <function-signature> ";"  // intrinsic function
-// 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）
-
-<foreign-let-decl> ::= "let" "mutable"? <identifier> <type-annotation> ";"
-                     | "let" <identifier> "(" <positional-param-list>? ")" <type-annotation> ";"
+             | "let" <decl-qualifier> <identifier> <generic-params>? <function-signature> ";"   // body-less function
+             | "let" "foreign" "mutable"? <identifier> <type-annotation> ";"                    // body-less variable
+// 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）。
+// 带 <decl-qualifier> 的形式没有函数体；不带的必须有。
 <positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
 <positional-param> ::= "mutable"? <identifier> <type-annotation>
 // 说明：
@@ -107,21 +104,22 @@
 // ============================================================================
 
 <type-decl> ::= "type" "mutable"? <type-identifier> <generic-params>? <type-body> ";"
-              | "type" <type-identifier> <generic-params>? ";"          // intrinsic type (no body)
+              | "type" "foreign" <string-literal>? <type-identifier> <foreign-type-body> ";"
+              | "type" "intrinsic" <type-identifier> ";"                // body-less (built into the compiler)
               | "type" <type-identifier> "=" <type> ";"                 // type alias
-// 说明：`mutable` 仅对 struct 有效，枚举和别名不支持
+// 说明：`mutable` 仅对 struct 有效，枚举和别名不支持。
+// `type foreign` 与 `type mutable` 互斥——外部类型的可变性不属于 Koral 自己的
+// nominal 声明。可选 string-literal 是 C 侧类型名（cname）。
 // 类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 List[Int]）
 // 类型别名在语义检查阶段被完全消除，后续阶段无需感知其存在
 <type-body> ::= "(" <field-list>? ")"                 // struct
               | "{" <variant-list>? "}"                // enum (sum type)
 
-<foreign-type-decl> ::= "type" <string-literal>? <type-identifier> <foreign-type-body> ";"
 <foreign-type-body> ::= "(" <field-list>? ")"    // FFI struct with fields
                       | "{" "}"                   // opaque type (empty enum, no variants)
 // 说明：
-// 1) 可选 string-literal 为 C 侧类型名（cname）
-// 2) foreign type 可以有字段（用于 FFI 结构体布局对齐），也可以用空大括号表示不透明类型
-// 3) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
+// 1) `type foreign` 可以有字段（用于 FFI 结构体布局对齐），也可以用空大括号表示不透明类型
+// 2) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
 
 <field-list> ::= <field> ("," <field>)* ","?
 <field> ::= <access-modifier>? "mutable"? <identifier> <type-annotation>                    // positional field
@@ -151,9 +149,10 @@
 // Given Declarations (Type Implementations)
 // ============================================================================
 
-<given-decl> ::= "given" <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}" ";"
+<given-decl> ::= "given" <decl-qualifier>? <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}" ";"
+// `given` 只接受 `intrinsic`（实现在编译器里）。`given intrinsic T { ... };`
 <given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> "=" <expression> ";"
-                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // intrinsic given method
+                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // body-less given method
 // Given implementations must match the trait's named/positional parameter classification.
 // If the trait declares defaults, the given implementation must NOT redeclare them.
 // If the trait declares no defaults, the given implementation cannot add them.
@@ -178,7 +177,7 @@
 //    主体必须声明为 `type mutable`
 // 2) 类型种类约束关键字 `foreign`（同样不是 trait 名）——主体的表示由
 //    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` 指针、
-//    `foreign type` 声明，以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
+//    `type foreign` 声明，以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
 //    用户声明不能认领（`type` 的布局由编译器选，不在其中）
 // 3) 简单 trait 名（如 Eq）
 // 4) 泛型 trait（如 Iterator[T]）

@@ -1,5 +1,11 @@
 using "std/os";
 
+public type DeclQualifiers(
+    is_foreign Bool,
+    is_intrinsic Bool,
+    invalid_message Option[String],
+);
+
 file_private type ParseDeclFlags(
     access AccessModifier,
     has_explicit_access Bool,
@@ -528,6 +534,66 @@ given Parser {
         );
     };
 
+    /// Read the `foreign` / `intrinsic` qualifiers written immediately after a
+    /// declaration's keyword. They qualify the thing being declared -- where its
+    /// definition lives -- so they sit in the slot right after the keyword, the
+    /// slot `type mutable` and `let mutable` established. Access modifiers stay
+    /// in the prefix slot: they say who can see the declaration, not what kind
+    /// of thing it is. The two are mutually exclusive and may not repeat.
+    module_private parse_decl_qualifiers(self) DeclQualifiers = {
+        let mutable is_foreign = false;
+        let mutable is_intrinsic = false;
+        let mutable invalid_message = Option[String].None();
+        while true then {
+            when self.current().kind in {
+                .KwForeign() then {
+                    if is_foreign then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "Duplicate declaration modifier: foreign",
+                            );
+                        };
+                        break;
+                    };
+                    if is_intrinsic then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "foreign and intrinsic cannot be used together",
+                            );
+                        };
+                        break;
+                    };
+                    is_foreign = true;
+                    self.advance();
+                },
+                .KwIntrinsic() then {
+                    if is_intrinsic then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "Duplicate declaration modifier: intrinsic",
+                            );
+                        };
+                        break;
+                    };
+                    if is_foreign then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "foreign and intrinsic cannot be used together",
+                            );
+                        };
+                        break;
+                    };
+                    is_intrinsic = true;
+                    self.advance();
+                },
+                _ then {
+                    break;
+                },
+            };
+        };
+        return DeclQualifiers(is_foreign, is_intrinsic, invalid_message);
+    };
+
     module_private parse_decl_flags(self) ParseDeclFlags = {
         let mutable access = AccessModifier.ModulePrivate();
         let mutable has_explicit_access = false;
@@ -613,41 +679,23 @@ given Parser {
                     access = AccessModifier.FilePrivate();
                     self.advance();
                 },
-                .KwForeign() then {
-                    if is_foreign then {
-                        if invalid_access_message is .None() then {
-                            invalid_access_message = .Some(
-                                "Duplicate declaration modifier: foreign",
-                            );
-                        };
-                        break;
-                    };
-                    is_foreign = true;
-                    self.advance();
-                },
-                .KwIntrinsic() then {
-                    if is_intrinsic then {
-                        if invalid_access_message is .None() then {
-                            invalid_access_message = .Some(
-                                "Duplicate declaration modifier: intrinsic",
-                            );
-                        };
-                        break;
-                    };
-                    is_intrinsic = true;
-                    self.advance();
-                },
                 _ then {
                     break;
                 },
             };
         };
 
+        // `foreign` / `intrinsic` are NOT prefix modifiers. They qualify the
+        // thing being declared, so they sit in the slot right after the
+        // keyword -- the slot `type mutable` and `let mutable` established --
+        // and are read by `parse_decl_qualifiers` there. Access modifiers stay
+        // in the prefix slot; they say who can see the declaration, not what
+        // kind of thing it is.
         return ParseDeclFlags(
             access,
             has_explicit_access,
-            is_foreign,
-            is_intrinsic,
+            false,
+            false,
             invalid_access_message,
         );
     };
@@ -1254,6 +1302,12 @@ given Parser {
         let start = self.current();
         self.advance();
 
+        // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
+        // `let foreign mutable errno Int32;`.
+        let decl_qualifiers = self.parse_decl_qualifiers();
+        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
+        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
+
         let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
             is_mut = true;
@@ -1287,7 +1341,7 @@ given Parser {
                 );
             };
 
-            if is_foreign and not type_params.is_empty() then {
+            if decl_is_foreign and not type_params.is_empty() then {
                 return .Error(
                     self.parser_error_at_current(
                         "foreign function does not support generics",
@@ -1296,7 +1350,7 @@ given Parser {
             };
 
             self.advance();
-            let params = self.parse_param_list(name, is_foreign) or return;
+            let params = self.parse_param_list(name, decl_is_foreign) or return;
 
             when self.current().kind in {
                 .RParen() then {},
@@ -1322,9 +1376,9 @@ given Parser {
             };
             let mutable return_type = self.parse_type() or return;
 
-            if is_foreign or is_intrinsic then {
+            if decl_is_foreign or decl_is_intrinsic then {
                 if self.current().kind is .Assign() then {
-                    if is_foreign then {
+                    if decl_is_foreign then {
                         return .Error(
                             self.parser_error_at_current(
                                 "foreign function cannot have a body",
@@ -1349,7 +1403,7 @@ given Parser {
                     span,
                     self.token_span(name_token),
                 );
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+                return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
             };
 
             if self.current().kind is .Eof() then {
@@ -1377,7 +1431,7 @@ given Parser {
                 self.span_from_start(start),
                 self.token_span(name_token),
             );
-            return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+            return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
         };
 
         // Variable declaration
@@ -1389,7 +1443,7 @@ given Parser {
             );
         };
 
-        if is_foreign then {
+        if decl_is_foreign then {
             if not self.is_type_start() then {
                 return .Error(
                     self.parser_error_at_current(
@@ -1409,7 +1463,7 @@ given Parser {
                 span,
                 self.token_span(name_token),
             );
-            return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+            return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
         };
 
         let mutable type_name = Option[TypeNode].None();
@@ -1441,7 +1495,7 @@ given Parser {
             self.span_from_start(start),
             self.token_span(name_token),
         );
-        return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+        return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
     };
 
     module_private parse_type_decl(
@@ -1453,6 +1507,12 @@ given Parser {
         let start = self.current();
         self.advance();
 
+        // `foreign` / `intrinsic` sit immediately after `type`, alongside
+        // `mutable`: `type foreign ...`, `type intrinsic T;`.
+        let decl_qualifiers = self.parse_decl_qualifiers();
+        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
+        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
+
         let mutable is_nominal_mutable = false;
         if self.current().kind is .KwMut() then {
             is_nominal_mutable = true;
@@ -1460,7 +1520,7 @@ given Parser {
         };
 
         let mutable foreign_cname = Option[String].None();
-        if is_foreign then {
+        if decl_is_foreign then {
             if self.current().kind is .StringLiteral(v) then {
                 foreign_cname = .Some(v);
                 self.advance();
@@ -1475,6 +1535,15 @@ given Parser {
             );
         };
         let type_params = self.parse_type_parameters() or return;
+
+        // `type foreign` and `type mutable` are mutually exclusive: mutability
+        // is a property of Koral's own nominal declarations, and an external
+        // type's layout is C's, not ours.
+        if is_nominal_mutable and decl_is_foreign then {
+            return .Error(
+                self.parser_error_at_current("Foreign type cannot be marked mutable"),
+            );
+        };
 
         when self.current().kind in {
             .Assign() then {
@@ -1495,10 +1564,10 @@ given Parser {
                     self.span_from_start(start),
                     self.token_span(name_token),
                 );
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+                return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
             },
             .LParen() then {
-                if is_nominal_mutable and is_intrinsic then {
+                if is_nominal_mutable and decl_is_intrinsic then {
                     return .Error(
                         self.parser_error_at_current(
                             "intrinsic type cannot be marked mutable",
@@ -1653,7 +1722,7 @@ given Parser {
                     };
                 };
                 let _ = self.require_semicolon() or return;
-                if is_foreign then {
+                if decl_is_foreign then {
                     return .Ok(
                         Decl.ForeignTypeDecl(
                             access,
@@ -1674,7 +1743,7 @@ given Parser {
                     self.span_from_start(start),
                     self.token_span(name_token),
                 );
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+                return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
             },
             .LBrace() then {
                 if is_nominal_mutable then {
@@ -1684,7 +1753,7 @@ given Parser {
                         ),
                     );
                 };
-                if is_foreign then {
+                if decl_is_foreign then {
                     self.advance();
                     if self.current().kind is .RBrace() then {
                         self.advance();
@@ -1932,17 +2001,17 @@ given Parser {
                     self.span_from_start(start),
                     self.token_span(name_token),
                 );
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+                return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
             },
             .Semicolon() then {
-                if is_foreign then {
+                if decl_is_foreign then {
                     return .Error(
                         self.parser_error_at_current(
                             "foreign type cannot be declared without a body",
                         ),
                     );
                 };
-                if is_intrinsic then {
+                if decl_is_intrinsic then {
                     let _ = self.require_semicolon() or return;
                     return .Ok(
                         Decl.IntrinsicTypeDecl(
@@ -1959,14 +2028,14 @@ given Parser {
                 );
             },
             _ then {
-                if is_foreign then {
+                if decl_is_foreign then {
                     return .Error(
                         self.parser_error_at_current(
                             "foreign type cannot be declared without a body",
                         ),
                     );
                 };
-                if is_intrinsic then {
+                if decl_is_intrinsic then {
                     return .Ok(
                         Decl.IntrinsicTypeDecl(
                             access,
