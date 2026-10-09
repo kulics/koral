@@ -398,12 +398,14 @@ private func bindingElementDescription(_ binding: PairBindingElement) -> String 
 /// A let-style binding pattern used by `for ... in ...`.
 public enum BindingPatternNode: CustomStringConvertible {
   case binding(PairBindingElement)
-  case pair(first: PairBindingElement, second: PairBindingElement, span: SourceSpan)
+  /// `(a, b, c)` -- positional destructuring of a struct with exactly that many
+  /// fields, in declaration order. N >= 2; `(x)` is a parenthesized binding.
+  case tuple(bindings: [PairBindingElement], span: SourceSpan)
 
   public var span: SourceSpan {
     switch self {
     case .binding(let binding): return binding.span
-    case .pair(_, _, let span): return span
+    case .tuple(_, let span): return span
     }
   }
 
@@ -411,8 +413,8 @@ public enum BindingPatternNode: CustomStringConvertible {
     switch self {
     case .binding(let binding):
       return bindingElementDescription(binding)
-    case .pair(let first, let second, _):
-      return "(\(bindingElementDescription(first)), \(bindingElementDescription(second)))"
+    case .tuple(let bindings, _):
+      return "(\(bindings.map(bindingElementDescription).joined(separator: ", ")))"
     }
   }
 }
@@ -420,8 +422,10 @@ public enum BindingPatternNode: CustomStringConvertible {
 public indirect enum StatementNode {
   case variableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
-  case pairVariableDeclaration(
-    first: PairBindingElement, second: PairBindingElement, value: ExpressionNode, span: SourceSpan)
+  /// `let (a, b, c) = expr;` -- positional destructuring of a struct with
+  /// exactly that many fields, in declaration order. N >= 2.
+  case tupleVariableDeclaration(
+    bindings: [PairBindingElement], value: ExpressionNode, span: SourceSpan)
   case assignment(
     target: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
   case expression(ExpressionNode, span: SourceSpan)
@@ -436,7 +440,7 @@ extension StatementNode {
   public var span: SourceSpan {
     switch self {
     case .variableDeclaration(_, _, _, _, let span): return span
-    case .pairVariableDeclaration(_, _, _, let span): return span
+    case .tupleVariableDeclaration(_, _, let span): return span
     case .assignment(_, _, _, let span): return span
     case .expression(_, let span): return span
     case .return(_, let span): return span
@@ -711,6 +715,11 @@ public indirect enum PatternNode: CustomStringConvertible {
   case traitObjectTypeBinding(name: String, mutable: Bool, targetType: TypeNode, span: SourceSpan)
   /// Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
   case structPattern(typeName: String, elements: [PatternArg], span: SourceSpan)
+  /// Positional destructuring pattern: `(a, b, c)` against a STRUCT with
+  /// exactly that many fields, in declaration order. N >= 2; `(p)` is a
+  /// parenthesized pattern. `Pair` is destructured this way too -- it is simply
+  /// a two-field struct. Identity comes from the subject's declaration.
+  case tuplePattern(elements: [PatternArg], span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -760,6 +769,9 @@ public indirect enum PatternNode: CustomStringConvertible {
         }
       }.joined(separator: ", ")
       return "\(typeName)(\(args))"
+    case .tuplePattern(let elements, _):
+      let args = elements.map { $0.pattern.description }.joined(separator: ", ")
+      return "(\(args))"
     }
   }
   
@@ -781,6 +793,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .traitObjectType(_, let span): return span
     case .traitObjectTypeBinding(_, _, _, let span): return span
     case .structPattern(_, _, let span): return span
+    case .tuplePattern(_, let span): return span
     }
   }
 }

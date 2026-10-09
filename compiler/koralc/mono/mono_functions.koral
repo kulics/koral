@@ -48,6 +48,10 @@ file_private let skip_instantiation_with_unsatisfied_constraints(
         let param = template.type_parameters[i];
         let mutable actual_type = resolve_parameterized_type(mono, (args[i]));
         for constraint in param.constraints then {
+            // Shape bounds (`mutable` / `foreign`) do not suppress instantiation
+            // here: sema already rejects a call that violates one, and skipping
+            // the instantiation of a function the compiler itself still needs
+            // leaves a hole in the emitted C.
             when bound_trait_name(constraint) in {
                 .Some(trait_name) then {
                     if not type_satisfies_trait_constraint(mono, actual_type, trait_name) then {
@@ -1916,21 +1920,12 @@ public let instantiate_extension_method_from_entry(
                     (tool_trait_args[tool_idx]),
                 );
                 for constraint in tool_param.constraints then {
-                    when bound_trait_name(constraint) in {
-                        .Some(trait_name) then {
-                            if not type_satisfies_trait_constraint(
-                                mono,
-                                bound_type,
-                                trait_name,
-                            ) then {
-                                return Symbol(
-                                    DefId(0(UInt)),
-                                    Type.Unknown(),
-                                    SymbolKind.Function(),
-                                );
-                            };
-                        },
-                        .None() then {},
+                    if not type_satisfies_bound_constraint(mono, bound_type, constraint) then {
+                        return Symbol(
+                            DefId(0(UInt)),
+                            Type.Unknown(),
+                            SymbolKind.Function(),
+                        );
                     };
                 };
                 tool_idx += 1;
@@ -3132,6 +3127,56 @@ file_private let primitive_extension_template_name(t Type) Option[String] = {
     };
 };
 
+/// Whether `actual_type` satisfies one bound. Dispatches on the bound's KIND,
+/// never on its spelling: a trait bound asks the conformance registry, a shape
+/// bound (`mutable` / `foreign`) asks the type's own declaration. Ignoring a
+/// shape bound here is what let `given[T foreign]` methods vanish from the
+/// emitted C while the call still compiled.
+file_private let type_satisfies_bound_constraint(
+    mono Monomorphizer,
+    actual_type Type,
+    constraint Bound,
+) Bool = {
+    return when constraint in {
+        .Trait(_, _, _) then type_satisfies_trait_constraint(
+            mono,
+            actual_type,
+            bound_base_name(constraint),
+        ),
+        .Mutable() then type_satisfies_mutable_bound(mono, actual_type),
+        .Foreign() then type_satisfies_foreign_bound(mono, actual_type),
+    };
+};
+
+file_private let type_satisfies_mutable_bound(mono Monomorphizer, actual_type Type) Bool = {
+    let t = resolve_parameterized_type(mono, actual_type);
+    return when t in {
+        .StructureType(def_id) then mono.storage.context.is_struct_mutable(def_id),
+        .GenericStruct(template_def_id, _) then mono.storage.context.is_struct_mutable(
+            template_def_id,
+        ),
+        _ then false,
+    };
+};
+
+/// The same CLOSED set `satisfies_foreign_constraint` checks in sema: built-in
+/// scalars (including std's `Rune`), raw pointers, and `foreign type` decls.
+file_private let type_satisfies_foreign_bound(mono Monomorphizer, actual_type Type) Bool = {
+    let t = resolve_parameterized_type(mono, actual_type);
+    return when t in {
+        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .Float32Type() or .Float64Type() or .BoolType() then true,
+        .PointerType(_) or .MutablePointerType(_) then true,
+        .StructureType(def_id) then {
+            if mono.storage.context.is_foreign_struct(def_id) then {
+                true
+            } else {
+                is_std_rune_def_id(mono.storage.context, def_id)
+            }
+        },
+        _ then false,
+    };
+};
+
 file_private let type_satisfies_trait_constraint(
     mono Monomorphizer,
     actual_type Type,
@@ -3306,11 +3351,7 @@ public let extension_type_args_satisfy_constraints(
         let param = template.type_params[i];
         let mutable actual_type = resolve_parameterized_type(mono, (type_args[i]));
         for constraint in param.constraints then {
-            if not type_satisfies_trait_constraint(
-                mono,
-                actual_type,
-                bound_base_name(constraint),
-            ) then {
+            if not type_satisfies_bound_constraint(mono, actual_type, constraint) then {
                 return false;
             };
         };

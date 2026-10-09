@@ -37,6 +37,7 @@ Koral 的 nominal 类型只有两种形态，在声明处决定。语言里的�
 - **没有 identity**：字段相同的两个值可以互换。
 - **内存布局由编译器决定**。内联存储、隐藏间接层、共享 backing 都是实现细节，版本之间可能不同。
 - **值语义不属于语言契约**。复制、传参与存储可以共享 backing。正因该类型浅层不可变，这种共享不可观察——所以编译器可以自由地把它优化掉。
+- **实现 `Drop` 的类型是例外**。析构只在最后一个持有句柄消亡时跑一次，因此「有几个句柄」是可观察的。这样的类型与 `type mutable` 同档：identity 是语义的一部分，编译器不许把共享优化掉。它仍然声明为 `type`——仍然不能声明 `mutable` 字段。
 
 **`type mutable` —— 共享对象类型。**
 
@@ -56,7 +57,7 @@ c.value = 5;      // ok: Counter 是 `type mutable` 且 `value` 是 mutable 字�
 // c.id = 2;     // error: `id` 不是 mutable 字段
 ```
 
-编译器可能在内部对两种形态使用引用计数与隐藏存储。这些都不是用户可见语义：语言契约是 `type` 与 `type mutable` 之分，绝不是某种托管引用语法。
+编译器可能在内部对两种形态使用引用计数与隐藏存储。这些都不是用户可见语义：语言契约是 `type` 与 `type mutable` 之分，绝不是某种托管引用语法。唯一跨越这条线的是 `Drop`——见上文。
 
 ### 安装与使用
 
@@ -177,8 +178,8 @@ let main() Void = println("Hello, world!");
 // 这是单行注释，从双斜杠开始直到行尾
 
 /*
-    这是块注释。;
-    它可以跨越多行。;
+    这是块注释。
+    它可以跨越多行。
     /* Koral 支持嵌套块注释 */
 */
 ```
@@ -334,14 +335,14 @@ println("Sum \(1 + (2 * 3))");                 // Sum 7
 let message = """
     Hello, Koral!
     Welcome to multiline strings.
-    """
+    """;
 // 等价于 "Hello, Koral!\nWelcome to multiline strings."
 
 let name = "World";
 let greeting = """
     Hello, \(name)!
     Have a great day.
-    """
+    """;
 // 等价于 "Hello, World!\nHave a great day."
 ```
 
@@ -351,7 +352,7 @@ let greeting = """
 let s = """
         indented content
         second line
-    """
+    """;
 // 结尾 """ 缩进 4 空格，内容缩进 8 空格。
 // 剥离 4 空格后："    indented content\n    second line"
 ```
@@ -463,16 +464,23 @@ let mutable a Int = 5;   // 显式类型标注
 let mutable b = 123;     // 自动类型推断
 ```
 
-#### Pair 解构绑定
+#### 元组解构绑定
 
-当右侧表达式是 `Pair` 时，可以用圆括号语法把每个元素绑定到独立变量。每个绑定位置支持 `_`（丢弃）、`mutable`（可变）和可选的类型标注。
+圆括号绑定按**位置**解构一个**结构体**：绑定位置的数量必须等于字段数，并按声明顺序绑定。每个绑定位置支持 `_`（丢弃）、`mutable`（可变绑定）和可选的类型标注。至少要两个绑定位置——`(x)` 是加了括号的绑定，不是解构。
+
+`Pair` 就是一个两字段结构体，所以它也是这样拆开的。
 
 ```koral
-let (a, b) = (1, 2);                  // 类型推断
-let (c Int, d String) = (3, "hello");  // 显式类型标注
-let (mutable e, f) = (10, 20);             // 可变绑定
-let (_, g) = (1, 2);                   // 丢弃第一个元素
+let (a, b) = Pair(1, 2);                    // 两字段结构体
+let (c Int, d String) = Pair(3, "hello");   // 显式类型标注
+let (mutable e, f) = Pair(10, 20);          // 可变绑定
+let (_, g) = Pair(1, 2);                    // 丢弃第一个字段
+
+type Point3(x Int, y Int, z Int);
+let (px, py, pz) = Point3(1, 2, 3);         // 任意字段数
 ```
+
+**没有元组 / pair 字面量。** 用构造器构造 `Pair`，和其它类型一样：`Pair[Int, String](1, "a")`。
 
 ### 赋值
 
@@ -646,14 +654,15 @@ y >>= 2;     // y = y >> 2
 11. 模式测试：`is`、`is not`
 12. 逻辑非：`not`
 13. 可选链：`and then`
-14. 逻辑与：`and`
-15. 值合并 / 早返回传播：`or else`、`or return`
+14. 值合并 / 早返回传播：`or else`、`or return`
+15. 逻辑与：`and`
 16. 逻辑或：`or`
 
-在同一表达式中混用 `and then`、`or else` 与 `or return` 时，请用圆括号让意图明确。这几个流程关键词并不处于同一优先级，不加括号的写法很少符合作者本意：
+这三个流程关键词不在同一优先级。从紧到松依次是 `and then`，然后 `or else` / `or return`，然后 `and`，最后 `or`：
 
-- `and then` 比 `and` 结合**更紧**。
-- `or else` / `or return` 比 `or` 结合**更紧**，但比 `and` **更松**。
+- `and then` 比 `or else` / `or return` 结合**更紧**：`f() and then g(it) or else h()` 按 `(f() and then g(it)) or else h()` 分组。
+- `or else` / `or return` 比 `and` 结合**更紧**：`a and b or else c` 按 `a and (b or else c)` 分组。
+- `and` 比 `or` 结合**更紧**：`a or b and c` 按 `a or (b and c)` 分组。
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
@@ -666,19 +675,14 @@ let bad = opt and then it == 1 and false;
 // 变换体才是 `and` 的预期作用域——显式写出来：
 let good = opt and then (it == 1 and false);   // Some(false)
 
-// 左侧同样有这个陷阱。`and then` 仍然更紧，所以
-//   ready and opt and then it > 0
-// 按 ready and (opt and then it > 0) 解析，同样失败。
+// 自然写法无需括号：先 `and then`，再合并 `or else`，最后逻辑 `and`。
 let ready Bool = true;
-let bad2 = ready and opt and then it > 0;
-
-// 先把流程结果归约回 Bool，再参与组合：
 let good2 = ready and (opt and then it > 0 or else false);   // true
 ```
 
 注意 `(ready and opt)` 并不是修法：`and` 两侧都要求 `Bool`，流程结果必须先归约成 `Bool`（如 `good2`）才能参与逻辑 `and`。
 
-`or else` 则相反——它比 `or` 更紧，所以 `a or b or else c` 按 `(a or b) or else c` 分组，而不是 `a or (b or else c)`。
+`or else` 则比 `or` 更紧，所以 `a or b or else c` 按 `a or (b or else c)` 分组，而不是 `(a or b) or else c`。
 
 ### 函数
 
@@ -966,7 +970,7 @@ let label = if score >= 90 then {
 
 ### 循环
 
-#### while 语句
+#### while 表达式
 
 在 Koral 中，循环结构使用 `while` 语法。`while` 后跟判断条件。条件为 `true` 时执行后面的 body，然后控制回到条件进行下一次迭代。`while` 是产生 `Void` 的表达式。
 
@@ -1098,12 +1102,12 @@ defer {
 Koral 为 `Option` 和 `Result` 类型提供三个特殊操作符：
 
 - `or else`：值合并。左侧为 `None` 或 `Error` 时返回右侧默认值。
-- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换。若右侧本身产出相同 kind 的 `Option` / `Result`，结果会自动拍平一层。
+- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换，并把结果**包装**回同一种 `Option` / `Result`。因此结果类型恒为 `Option[U]` / `Result[U]`，其中 `U` 是变换体的返回类型——**不拍平**：右侧本身返回 `Option[V]` 时结果是 `Option[Option[V]]`。
 - `or return`：早返回传播语法糖。它解包 `Some` / `Ok`，遇到 `None` / `Error` 则从所在函数返回。
 
 在 `and then` 与 `or else` 表达式中，关键字 `it` 指代被解包的值：对 `and then`，`it` 是内层的 `Some` 或 `Ok` 值；对作用于 `Result` 的 `or else`，`it` 是 `Error` 值。
 
-其优先级与解析器一致：`and then` 高于逻辑 `and`；`or else` / `or return` 高于逻辑 `or`，但低于逻辑 `and`。
+其优先级与解析器一致：`and then` 最紧，然后是 `or else` / `or return`，然后是逻辑 `and`，最后是逻辑 `or`。
 
 ```koral
 let opt = Option[Int].Some(42);
@@ -1113,6 +1117,9 @@ let none = Option[Int].None();
 let val2 = none or else 0;         // 0（因为 none 是 None）
 
 let mapped = opt and then it * 2;  // Some(84)
+
+// 不拍平：变换体的结果原样包装。
+let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
@@ -1136,7 +1143,7 @@ Koral 提供强大的类型系统，允许你定义自己的数据结构。用 `
 
 ### `type`：浅层不可变的 Nominal
 
-`type` 声明引入字段全部不可变的 nominal 类型。`type` 的值**没有 identity**，布局由编译器决定——内联、隐藏间接层或共享 backing 均可。不承诺值语义：拷贝可以共享存储，正因该类型浅层不可变，这种共享不可观察。
+`type` 声明引入字段全部不可变的 nominal 类型。`type` 的值**没有 identity**，布局由编译器决定——内联、隐藏间接层或共享 backing 均可。不承诺值语义：拷贝可以共享存储，正因该类型浅层不可变，这种共享不可观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察。
 
 结构体字段可以是位置字段或命名字段。命名字段用冒号语法，可以带默认值。
 
@@ -1391,11 +1398,17 @@ let contains[T Eq](list List[T], value T) Bool = list.contains(value);
 let describe[T ToString and Hash](value T) String = value.to_string();
 ```
 
-约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及弱引用使用的特殊 `mutable` 约束（它要求 `type mutable` 类型，`downgrade` / `upgrade` 亦然）：
+约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
+
+- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`downgrade` / `upgrade` 亦然）。
+- `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` / `*unsafe mutable` 指针、`foreign type` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
+let read_bytes[T foreign](buf List[T]) *unsafe T = buf.borrow_ptr();
 ```
+
+泛型参数把自己的约束带进调用：在 `f[T Any]` 里调用要求 `T mutable` 的函数会被拒绝，因为裸 `T` 并未声明为 `mutable`；在 `g[T mutable]` 里同样的调用可以通过。
 
 带约束的扩展块只在约束真正成立的类型上贡献成员。给定
 
@@ -1453,7 +1466,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 #### 内存模型
 
-- **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。
+- **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察，这里按 `type mutable` 对待。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
 - **raw pointer**：指针类型是 `*unsafe T` / `*unsafe mutable T`；`&unsafe` / `&unsafe mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
 - **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
@@ -1469,6 +1482,31 @@ trait Drop {
 ```
 
 `Drop.drop` 是仅由编译器调用的析构入口，运行在 finalization 上下文中。它不能作为普通用户方法调用。实现 `Drop` 的类型必然是引用计数的，其 `drop` 在最后一个持有句柄消亡时触发。
+
+由于析构对每个对象只跑一次，`Drop` 类型的共享是**可观察的**——见[内存模型](#内存模型)。在这一点上它与 `type mutable` 同档。
+
+**`self` 不许逃出 `drop` 体。** 对象正在被销毁；让它跑出去等于复活垂死的值，或把字段从析构过程里搬走。在 `drop` 里，`self` **只能作为接收者**出现：字段读写（`self.x`、`self.x = v`）或方法调用（`self.close()`）。它不能被返回、绑定到新名字、存进字段/集合/全局、作为普通实参传给函数，也不能被 lambda 捕获。
+
+```koral
+trait Drop {
+    drop(self) Void;
+};
+
+type mutable File(mutable fd Int);
+
+given File as Drop {
+    drop(self) Void = {
+        let n = self.fd;   // 可以：字段读
+        self.fd = n;       // 可以：字段写（字段是 `mutable`）
+        // stash(self);    // 错误：`self` 逃出析构
+    };
+};
+```
+
+> **已知缺口。** 按本规则，`drop` 里对 `self` 的方法调用（`self.close()`）是合法的，
+> 但目前会在代码生成阶段失败——析构的 `self` 以指针传入，调用点没有解引用。
+> 在修好之前，请改用字段读写，或把字段传给自由函数。
+
 
 #### `clone()`
 
@@ -1516,7 +1554,7 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 - 变量绑定模式：`x`（匹配任意值并绑定到 x）、`mutable x`（可变绑定）
 - 比较模式：`> 5`、`< 0`、`>= 10`、`<= -1`
 - 结构体解构模式：`Point(x, y)`、`Rect(Point(a, b), w, h)`
-- Pair 解构模式：`(a, b)`（等价于 `Pair(a, b)` 模式）
+- 元组解构模式：`(a, b, c)`——按位置解构字段数正好这么多的结构体（`Pair` 也是，它就是两字段结构体）；至少两个绑定位置
 - 枚举变体模式：`.Some(v)`、`.None()`
 - trait object 精确类型模式：`IoError`、`err IoError`
 - 逻辑模式：`pattern and pattern`、`pattern or pattern`、`not pattern`

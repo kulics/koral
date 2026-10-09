@@ -123,24 +123,19 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
-    case .pairVariableDeclaration(let pairSymbol, let pairValue,
-                            let firstSymbol, _, let firstMutable,
-                            let secondSymbol, _, let secondMutable):
-      print("\(indent)PairVariableDeclaration:")
-      print("\(indent)  PairTemp: \(symbolLabel(pairSymbol)): \(pairSymbol.type)")
-      if let first = firstSymbol {
-        print("\(indent)  First: \(symbolLabel(first)): \(first.type) (mutable: \(firstMutable))")
-      } else {
-        print("\(indent)  First: _ (discarded)")
-      }
-      if let second = secondSymbol {
-        print("\(indent)  Second: \(symbolLabel(second)): \(second.type) (mutable: \(secondMutable))")
-      } else {
-        print("\(indent)  Second: _ (discarded)")
+    case .tupleVariableDeclaration(let tupleSymbol, let tupleValue, let bindings):
+      print("\(indent)TupleVariableDeclaration:")
+      print("\(indent)  TupleTemp: \(symbolLabel(tupleSymbol)): \(tupleSymbol.type)")
+      for binding in bindings {
+        if let symbol = binding {
+          print("\(indent)  Binding: \(symbolLabel(symbol)): \(symbol.type) (mutable: \(symbol.isMutable()))")
+        } else {
+          print("\(indent)  Binding: _ (discarded)")
+        }
       }
       print("\(indent)  Value:")
       withIndent {
-        printTypedExpression(pairValue)
+        printTypedExpression(tupleValue)
       }
 
     case .assignment(let target, let op, let value):

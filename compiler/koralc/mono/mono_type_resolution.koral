@@ -4466,39 +4466,30 @@ file_private let resolve_types_in_statement(
                 span,
             )
         },
-        .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
+        .TupleLetStmt(pair_type, symbols, value, span) then {
             let resolved_pair_type = resolve_parameterized_type(mono, pair_type);
             let resolved_value = resolve_types_in_expression(mono, value);
-            let new_first_symbol = when first_symbol in {
-                .Some(symbol) then {
-                    let resolved_symbol = resolve_symbol_type(mono, symbol);
-                    Option[Symbol].Some(
-                        Symbol(
-                            resolved_symbol.def_id,
-                            resolved_symbol.symbol_type,
-                            resolved_symbol.kind,
-                        ),
-                    )
-                },
-                .None() then Option[Symbol].None(),
+            let new_symbols = List[Option[Symbol]].new();
+            for symbol_opt in symbols then {
+                new_symbols.push(
+                    when symbol_opt in {
+                        .Some(symbol) then {
+                            let resolved_symbol = resolve_symbol_type(mono, symbol);
+                            Option[Symbol].Some(
+                                Symbol(
+                                    resolved_symbol.def_id,
+                                    resolved_symbol.symbol_type,
+                                    resolved_symbol.kind,
+                                ),
+                            )
+                        },
+                        .None() then Option[Symbol].None(),
+                    },
+                );
             };
-            let new_second_symbol = when second_symbol in {
-                .Some(symbol) then {
-                    let resolved_symbol = resolve_symbol_type(mono, symbol);
-                    Option[Symbol].Some(
-                        Symbol(
-                            resolved_symbol.def_id,
-                            resolved_symbol.symbol_type,
-                            resolved_symbol.kind,
-                        ),
-                    )
-                },
-                .None() then Option[Symbol].None(),
-            };
-            TypedStatement.PairLetStmt(
+            TypedStatement.TupleLetStmt(
                 resolved_pair_type,
-                new_first_symbol,
-                new_second_symbol,
+                new_symbols,
                 resolved_value,
                 span,
             )
@@ -7461,7 +7452,7 @@ file_private let mono_register_pattern_binding_types_in_statement(
             value,
             bindings,
         ),
-        .PairLetStmt(_, _, _, value, _) then mono_register_pattern_binding_types_in_expr(
+        .TupleLetStmt(_, _, value, _) then mono_register_pattern_binding_types_in_expr(
             mono,
             value,
             bindings,

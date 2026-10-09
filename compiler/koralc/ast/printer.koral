@@ -261,6 +261,20 @@ file_private let pattern_text(p PatternNode) String = {
             out.push_byte(')');
             return out.to_string();
         },
+        .TuplePattern(elements, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_byte('(');
+            let mutable first = true;
+            for element in elements then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(pattern_element_text(element));
+                first = false;
+            };
+            out.push_byte(')');
+            return out.to_string();
+        },
         .ComparisonPattern(op, value, _) then {
             let op_str = when op in {
                 .Greater() then ">",
@@ -549,7 +563,7 @@ file_private let print_expr(expr Expr, level UInt) Void = {
             };
         },
         .TraitQualificationExpr(base, trait_type, _) then {
-            println("\(pad)TraitQualificationExpr: as \(type_text(trait_type))");
+            println("\(pad)TraitQualificationExpr: Type(\(type_text(trait_type)))");
             println("\(pad)  Base:");
             print_expr(base, level + 2);
         },
@@ -623,10 +637,11 @@ file_private let print_stmt(stmt Statement, level UInt) Void = {
             println("\(pad)LetStmt: \(name)\(type_note) (is_mutable=\(is_mutable))");
             print_expr(value, level + 1);
         },
-        .PairLetStmt(first, second, value, _) then {
-            println("\(pad)PairLetStmt:");
-            println("\(pad)  First: \(pair_binding_text(first))");
-            println("\(pad)  Second: \(pair_binding_text(second))");
+        .TupleLetStmt(bindings, value, _) then {
+            println("\(pad)TupleLetStmt:");
+            for binding in bindings then {
+                println("\(pad)  Binding: \(pair_binding_text(binding))");
+            };
             println("\(pad)  Value:");
             print_expr(value, level + 2);
         },
@@ -673,7 +688,20 @@ file_private let pair_binding_text(binding PairBindingElement) String = {
 file_private let for_binding_pattern_text(pattern ForBindingPattern) String = {
     return when pattern in {
         .Single(binding) then pair_binding_text(binding),
-        .Pair(first, second, _) then "(\(pair_binding_text(first)), \(pair_binding_text(second)))",
+        .Tuple(bindings, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_byte('(');
+            let mutable first = true;
+            for binding in bindings then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(pair_binding_text(binding));
+                first = false;
+            };
+            out.push_byte(')');
+            out.to_string()
+        },
     };
 };
 

@@ -21,6 +21,18 @@ module_private type mutable TypeCheckerStorage(
     mutable constraint_solver ConstraintSolver,
     mutable trait_registry TraitRegistry,
     mutable generic_param_constraints Dict[String, List[GenericConstraintBound]],
+    /// Shape bounds on a type parameter -- `T mutable`, `T foreign` -- keyed by
+    /// parameter name. These are not traits and cannot live in
+    /// `generic_param_constraints`; without them a bare `T` would appear to
+    /// satisfy every shape bound, which is how `f[T Any]` used to call
+    /// `g[T mutable]` unchecked.
+    mutable generic_param_shape_bounds Dict[String, List[Bound]],
+    /// A method's OWN type parameters -- `get[T mutable]` inside a `given` --
+    /// keyed by the method symbol's declaration identity. The call site holds a
+    /// `Symbol`; this is the only way back to the bound list it must enforce.
+    /// Registered whenever a method symbol is built from a declaration that
+    /// carries type parameters; empty lists are never stored.
+    mutable method_type_params Dict[DefId, List[TypeParameterDecl]],
     mutable generic_templates GenericTemplateRegistry,
     mutable instantiation_requests Set[InstantiationRequest],
     mutable import_graph Option[ImportGraph],
@@ -85,6 +97,7 @@ public type GenericConstraintBound(
 
 module_private type GenericConstraintSnapshot(
     previous_constraints Dict[String, Option[List[GenericConstraintBound]]],
+    previous_shape_bounds Dict[String, Option[List[Bound]]],
 );
 
 /// A blanket/direct conformance pattern. `trait_def_id` is the trait
@@ -233,6 +246,8 @@ given TypeChecker {
             ConstraintSolver.new(context),
             TraitRegistry.new(),
             Dict[String, List[GenericConstraintBound]].new(),
+            Dict[String, List[Bound]].new(),
+            Dict[DefId, List[TypeParameterDecl]].new(),
             GenericTemplateRegistry.new(),
             Set[InstantiationRequest].new(),
             Option[ImportGraph].None(),
@@ -1121,7 +1136,7 @@ given TypeChecker {
                 }
             } else when statements[0(UInt)] in {
                 .LetStmt(_, _, span) then span,
-                .PairLetStmt(_, _, _, _, span) then span,
+                .TupleLetStmt(_, _, _, span) then span,
                 .AssignmentStmt(_, _, span) then span,
                 .ExprStmt(_, span) then span,
                 .IfStmt(_, _, _, span) then span,
@@ -1187,7 +1202,7 @@ given TypeChecker {
     module_private statement_span(self, stmt Statement) SourceSpan = {
         return when stmt in {
             .LetStmt(_, _, _, _, span) then span,
-            .PairLetStmt(_, _, _, span) then span,
+            .TupleLetStmt(_, _, span) then span,
             .AssignmentStmt(_, _, _, span) then span,
             .ExprStmt(_, span) then span,
             .ReturnStmt(_, span) then span,
@@ -4029,6 +4044,11 @@ given TypeChecker {
                 "mutable",
                 List[Type].new(),
             ),
+            .Foreign() then GenericConstraintBound(
+                DefId(0(UInt)),
+                "foreign",
+                List[Type].new(),
+            ),
         };
     };
 
@@ -4155,6 +4175,7 @@ given TypeChecker {
     ) GenericConstraintSnapshot = {
         let mutable previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new(
         );
+        let mutable previous_shape_bounds = Dict[String, Option[List[Bound]]].new();
         for tp in type_params then {
             let previous = when self.storage.generic_param_constraints.get(tp.name) in {
                 .Some(existing) then {
@@ -4169,8 +4190,21 @@ given TypeChecker {
                 .None() then Option[List[GenericConstraintBound]].None(),
             };
             previous_constraints.insert(tp.name, previous);
+            let previous_shape = when self.storage.generic_param_shape_bounds.get(
+                tp.name,
+            ) in {
+                .Some(existing) then {
+                    let mutable copied = List[Bound].with_capacity(existing.count());
+                    for bound in existing then {
+                        copied.push(bound);
+                    };
+                    Option[List[Bound]].Some(copied)
+                },
+                .None() then Option[List[Bound]].None(),
+            };
+            previous_shape_bounds.insert(tp.name, previous_shape);
         };
-        return GenericConstraintSnapshot(previous_constraints);
+        return GenericConstraintSnapshot(previous_constraints, previous_shape_bounds);
     };
 
     module_private register_generic_constraints(
@@ -4190,6 +4224,17 @@ given TypeChecker {
                 tp.name,
                 self.constraint_bounds_for_type_param(tp, param_names),
             );
+            // Shape bounds (`mutable`, `foreign`) are kept apart from trait
+            // bounds: `satisfies_mutable_constraint` must be able to tell a
+            // parameter declared `T mutable` from a bare `T`.
+            let mutable shape_bounds = List[Bound].new();
+            for constraint in tp.constraints then {
+                when constraint in {
+                    .Mutable() or .Foreign() then shape_bounds.push(constraint),
+                    .Trait(_, _, _) then {},
+                };
+            };
+            self.storage.generic_param_shape_bounds.insert(tp.name, shape_bounds);
         };
     };
 
@@ -4206,6 +4251,16 @@ given TypeChecker {
                     previous,
                 ),
                 .None() then self.storage.generic_param_constraints.remove(name),
+            };
+        };
+        for entry in snapshot.previous_shape_bounds then {
+            let name = entry.first;
+            when entry.second in {
+                .Some(previous) then self.storage.generic_param_shape_bounds.insert(
+                    name,
+                    previous,
+                ),
+                .None() then self.storage.generic_param_shape_bounds.remove(name),
             };
         };
     };

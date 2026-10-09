@@ -438,6 +438,105 @@ extension TypeChecker {
       }
       
       return (.structPattern(typeName: typeName, elements: typedSubPatterns), bindings)
+
+    case .tuplePattern(let elements, let span):
+      // `(a, b, c)` -- positional destructuring of a struct with exactly that
+      // many fields, in declaration order. The SUBJECT decides which struct
+      // this is, so no name is written and none is looked up: identity comes
+      // from the type being matched, never from a spelling.
+      let innerType = unwrapTupleSubjectType(subjectType)
+      guard let members = try tupleDestructuringMembers(of: innerType) else {
+        throw SemanticError(
+          .typeMismatch(expected: "a struct", got: innerType.description),
+          span: span
+        )
+      }
+      guard elements.count == members.count else {
+        throw SemanticError(
+          .typeMismatch(
+            expected: "\(members.count) pattern elements",
+            got: "\(elements.count)"
+          ),
+          span: span
+        )
+      }
+      for arg in elements {
+        if let label = arg.label {
+          throw SemanticError(
+            .generic(
+              "Type mismatch: tuple destructuring is positional, got a named element '\(label)'"
+            ),
+            span: span
+          )
+        }
+      }
+      var typedSubPatterns: [TypedPattern] = []
+      for (idx, arg) in elements.enumerated() {
+        let fieldType = members[idx].type
+        let (typedSub, subBindings) = try checkPattern(arg.pattern, subjectType: fieldType)
+        typedSubPatterns.append(typedSub)
+        bindings.append(contentsOf: subBindings)
+      }
+      // The name here is display-only (exhaustiveness messages); the match
+      // itself is against the subject's declaration identity.
+      return (.structPattern(typeName: innerType.description, elements: typedSubPatterns), bindings)
+    }
+  }
+
+  /// The matched value behind a positional destructuring: a reference subject
+  /// is destructured at its pointee, exactly like the named struct pattern.
+  func unwrapTupleSubjectType(_ subjectType: Type) -> Type {
+    switch subjectType {
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
+      return inner
+    default:
+      return subjectType
+    }
+  }
+
+  /// The ordered fields of a struct subject, for positional destructuring.
+  /// The SUBJECT's own DECLARATION decides which struct this is. A
+  /// `GenericStruct` subject's field types come from the template's fields with
+  /// the type arguments substituted. `nil` when the subject is not a struct at
+  /// all; `[]` when it is a struct whose fields are not registered.
+  func tupleDestructuringMembers(of subjectType: Type) throws ->
+    [(name: String, type: Type)]? {
+    switch subjectType {
+    case .structure(let defId):
+      guard let members = context.getStructMembers(defId) else {
+        return []
+      }
+      return members.map { (name: $0.name, type: $0.type) }
+
+    case .genericStruct(let tplDefId, let typeArgs):
+      // Identity: the template's DECLARATION, carried on the type.
+      guard let template = currentScope.genericStructTemplate(defId: tplDefId) else {
+        return []
+      }
+      var substitution: [String: Type] = [:]
+      for (index, param) in template.typeParameters.enumerated() where index < typeArgs.count {
+        substitution[param.name] = typeArgs[index]
+      }
+      var resolved: [(name: String, type: Type)] = []
+      resolved.reserveCapacity(template.parameters.count)
+      for param in template.parameters {
+        let resolvedType = try withNewScope {
+          for (paramName, paramType) in substitution {
+            try currentScope.defineType(paramName, type: paramType)
+          }
+          return try resolveTypeNode(param.type)
+        }
+        resolved.append((name: param.name, type: resolvedType))
+      }
+      return resolved
+
+    default:
+      return nil
     }
   }
 

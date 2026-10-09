@@ -297,7 +297,7 @@ extension Parser {
           seenNamedParam = true
           try match(.colon)
         } else if seenNamedParam {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
@@ -421,7 +421,7 @@ extension Parser {
           seenNamedParam = true
           try match(.colon)
         } else if seenNamedParam {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
@@ -535,7 +535,7 @@ extension Parser {
           seenNamedParam = true
           try match(.colon)
         } else if seenNamedParam {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional parameter '\(pname)' cannot appear after named parameters")
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
@@ -716,7 +716,7 @@ extension Parser {
         // A type parameter must carry at least one constraint. `Any` is the
         // vacuous one, so `[T]` is not accepted in its place -- say that, rather
         // than letting the constraint parser fail on the closing bracket.
-        if currentToken !== .mutableKeyword && !isTypeStart(currentToken) {
+        if currentToken !== .mutableKeyword && currentToken !== .foreignKeyword && !isTypeStart(currentToken) {
           throw ParserError.missingTypeParameterConstraint(
             span: currentSpan, name: paramName)
         }
@@ -750,6 +750,11 @@ extension Parser {
       let keywordSpan = currentSpan
       try match(.mutableKeyword)
       return .identifier("mutable", span: keywordSpan)
+    }
+    if currentToken === .foreignKeyword {
+      let keywordSpan = currentSpan
+      try match(.foreignKeyword)
+      return .identifier("foreign", span: keywordSpan)
     }
     // Trait constraints now share the full type surface, including postfix generics.
     if canStartTypeSyntax() {
@@ -796,7 +801,7 @@ extension Parser {
         seenNamedParam = true
         try match(.colon)
       } else if seenNamedParam {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+        throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional parameter '\(pname)' cannot appear after named parameters")
       }
       let paramType = try parseType()
       // Parse optional default value for named parameters
@@ -881,7 +886,7 @@ extension Parser {
         seenNamedParam = true
         try match(.colon)
       } else if seenNamedParam {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Positional parameter '\(pname)' cannot appear after named parameters")
+        throw ParserError.rejectedConstruct(span: currentSpan, message: "Positional parameter '\(pname)' cannot appear after named parameters")
       }
       if isNamed {
         throw ParserError.rejectedConstruct(span: nameSpan, message: "Named parameters are not supported in foreign declarations")

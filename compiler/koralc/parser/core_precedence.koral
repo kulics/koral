@@ -437,7 +437,7 @@ given Parser {
         return self.parse_is();
     };
 
-    // `and then` binds tighter than logical `and`.
+    // `and then` binds tightest of the three Option/Result flow operators.
     module_private parse_and_then(self) Result[Expr] = {
         let mutable expr = self.parse_logical_not() or return;
 
@@ -455,32 +455,18 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_and(self) Result[Expr] = {
-        let mutable expr = self.parse_and_then() or return;
-
-        while self.current().kind is .KwAnd() then {
-            let next_is_then = self.next_is_then();
-            if next_is_then then {
-                break;
-            };
-            self.advance();
-            let rhs = self.parse_and_then() or return;
-            expr = Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr));
-        };
-
-        return .Ok(expr);
-    };
-
-    // `or else` / `or return` bind tighter than logical `or` but looser than `and`.
+    // `or else` / `or return` sit between `and then` and logical `and`:
+    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
+    // and `a and b or else c` groups as `a and (b or else c)`.
     module_private parse_option_flow(self) Result[Expr] = {
-        let mutable expr = self.parse_and() or return;
+        let mutable expr = self.parse_and_then() or return;
 
         while self.current().kind is .KwOr() then {
             // Same as `is`: `x or return` begins at `x`, so the span does too.
             if self.next_is_else() then {
                 self.advance();
                 self.advance();
-                let rhs = self.parse_and() or return;
+                let rhs = self.parse_and_then() or return;
                 expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
                 continue;
             };
@@ -496,8 +482,24 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_or(self) Result[Expr] = {
+    module_private parse_and(self) Result[Expr] = {
         let mutable expr = self.parse_option_flow() or return;
+
+        while self.current().kind is .KwAnd() then {
+            let next_is_then = self.next_is_then();
+            if next_is_then then {
+                break;
+            };
+            self.advance();
+            let rhs = self.parse_option_flow() or return;
+            expr = Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr));
+        };
+
+        return .Ok(expr);
+    };
+
+    module_private parse_or(self) Result[Expr] = {
+        let mutable expr = self.parse_and() or return;
 
         while self.current().kind is .KwOr() then {
             let next_is_else = self.next_is_else();
@@ -509,7 +511,7 @@ given Parser {
                 break;
             };
             self.advance();
-            let rhs = self.parse_option_flow() or return;
+            let rhs = self.parse_and() or return;
             expr = Expr.OrExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 

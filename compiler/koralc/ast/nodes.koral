@@ -63,6 +63,11 @@ public type Bound {
     /// `T mutable` -- the subject must have been declared `type mutable`.
     /// A shape requirement on the type itself, so it is not a trait.
     Mutable(),
+    /// `T foreign` -- the subject's representation is fixed outside Koral's
+    /// layout freedom and may cross the FFI boundary: a built-in scalar, a raw
+    /// pointer, or a `foreign type` declaration. A shape requirement, not a
+    /// trait: no user declaration can claim it.
+    Foreign(),
 };
 
 /// Recognise a bound from its source spelling. `Any` produces no bound at all
@@ -100,7 +105,7 @@ public let bound_from_type_node(node TypeNode) Option[Bound] = {
 public let bound_trait_name(b Bound) Option[String] = {
     return when b in {
         .Trait(_, name, _) then Option[String].Some(name),
-        .Mutable() then Option[String].None(),
+        .Mutable() or .Foreign() then Option[String].None(),
     };
 };
 
@@ -109,7 +114,7 @@ public let bound_trait_name(b Bound) Option[String] = {
 public let bound_trait_args(b Bound) List[TypeNode] = {
     return when b in {
         .Trait(_, _, args) then args,
-        .Mutable() then List[TypeNode].new(),
+        .Mutable() or .Foreign() then List[TypeNode].new(),
     };
 };
 
@@ -118,6 +123,7 @@ public let bound_base_name(b Bound) String = {
     return when b in {
         .Trait(_, name, _) then name,
         .Mutable() then "mutable",
+        .Foreign() then "foreign",
     };
 };
 
@@ -181,6 +187,7 @@ public let bound_display(b Bound) String = {
             }
         },
         .Mutable() then "mutable",
+        .Foreign() then "foreign",
     };
 };
 
@@ -416,6 +423,9 @@ public type PatternNode {
     TraitObjectTypeBinding(name String, is_mutable Bool, target_type TypeNode, span SourceSpan),
     EnumCase(case_name String, elements List[PatternElement], span SourceSpan),
     StructPattern(type_name String, elements List[PatternElement], span SourceSpan),
+    /// `(a, b, c)` -- positional destructuring of a struct with exactly that
+    /// many fields. No type name is written, so identity comes from the subject.
+    TuplePattern(elements List[PatternElement], span SourceSpan),
     ComparisonPattern(op ComparisonPatternOperator, value String, span SourceSpan),
     AndPattern(left PatternNode, right PatternNode, span SourceSpan),
     OrPattern(left PatternNode, right PatternNode, span SourceSpan),
@@ -432,12 +442,16 @@ public type mutable PairBindingElement(
 
 public type ForBindingPattern {
     Single(binding PairBindingElement),
-    Pair(first PairBindingElement, second PairBindingElement, span SourceSpan),
+    /// `(a, b, c)` -- positional destructuring of a struct with exactly that
+    /// many fields.
+    Tuple(bindings List[PairBindingElement], span SourceSpan),
 };
 
 public type Statement {
     LetStmt(name String, is_mutable Bool, type_name Option[TypeNode], value Expr, span SourceSpan),
-    PairLetStmt(first PairBindingElement, second PairBindingElement, value Expr, span SourceSpan),
+    /// `let (a, b, c) = expr;` -- positional destructuring of a struct with
+    /// exactly that many fields.
+    TupleLetStmt(bindings List[PairBindingElement], value Expr, span SourceSpan),
     AssignmentStmt(target Expr, op Option[CompoundAssignmentOperator], value Expr, span SourceSpan),
     ExprStmt(expr Expr, span SourceSpan),
     ReturnStmt(value Option[Expr], span SourceSpan),
@@ -508,6 +522,7 @@ public let pattern_span(pattern PatternNode) SourceSpan = {
         .TraitObjectTypeBinding(_, _, _, span) then span,
         .EnumCase(_, _, span) then span,
         .StructPattern(_, _, span) then span,
+        .TuplePattern(_, span) then span,
         .ComparisonPattern(_, _, span) then span,
         .AndPattern(_, _, span) then span,
         .OrPattern(_, _, span) then span,

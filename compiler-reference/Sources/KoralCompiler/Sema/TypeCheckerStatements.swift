@@ -167,7 +167,7 @@ extension TypeChecker {
       return cases.contains { $0.body.type != .never }
     case .whileStatement, .whilePatternStatement:
       return true
-    case .variableDeclaration, .pairVariableDeclaration, .assignment, .deferStatement:
+    case .variableDeclaration, .tupleVariableDeclaration, .assignment, .deferStatement:
       return true
     }
   }
@@ -390,76 +390,57 @@ extension TypeChecker {
         mutable: mutable
       )
 
-    case .pairVariableDeclaration(let first, let second, let value, let span):
+    case .tupleVariableDeclaration(let bindings, let value, let span):
       self.currentSpan = span
 
       // Type-check the value expression
       let typedValue = try inferTypedExpression(value)
-      let valueType = typedValue.type
 
-      // Verify the value is a Pair type
-      guard case .genericStruct(let templateDefId, let typeArgs) = valueType,
-            context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
-            typeArgs.count == 2 else {
-        throw SemanticError(.typeMismatch(
-          expected: "Pair", got: valueType.description))
+      // Positional destructuring: the number of slots equals the number of
+      // fields, and slot i binds field i. Field types come from the subject's
+      // DECLARATION, never from a name.
+      let innerType = unwrapTupleSubjectType(typedValue.type)
+      guard let members = try tupleDestructuringMembers(of: innerType),
+            members.count == bindings.count else {
+        throw SemanticError(
+          .typeMismatch(
+            expected: "a struct with \(bindings.count) fields",
+            got: innerType.description
+          ),
+          span: span
+        )
       }
 
-      let firstType = typeArgs[0]
-      let secondType = typeArgs[1]
+      // Synthetic symbol for the temporary holding the destructured value.
+      let tupleSymbol = nextSynthSymbol(prefix: "tuple_tmp", type: typedValue.type)
 
-      // Create a synthetic symbol for the temporary pair variable
-      let pairSymbol = nextSynthSymbol(prefix: "pair_tmp", type: valueType)
-
-      // Create member symbols for .first and .second field access
-      let firstMemberSym = makeLocalSymbol(
-        name: "first", type: firstType, kind: .variable(.Value))
-      let secondMemberSym = makeLocalSymbol(
-        name: "second", type: secondType, kind: .variable(.Value))
-
-      // Create symbols for the user-visible bindings (if not discarded)
-      var firstSymbol: Symbol? = nil
-      if !first.isDiscard {
+      var slotSymbols: [Symbol?] = []
+      for (index, binding) in bindings.enumerated() {
+        let fieldType = members[index].type
+        if binding.isDiscard {
+          slotSymbols.append(nil)
+          continue
+        }
         // Validate type annotation if present
-        if let typeNode = first.type {
+        if let typeNode = binding.type {
           let annotatedType = try resolveTypeNode(typeNode)
-          if annotatedType != firstType {
+          if annotatedType != fieldType {
             throw SemanticError(.typeMismatch(
-              expected: annotatedType.description, got: firstType.description))
+              expected: annotatedType.description, got: fieldType.description))
           }
         }
         let sym = makeLocalSymbol(
-          name: first.name,
-          type: firstType,
-          kind: first.mutable ? .variable(.MutableValue) : .variable(.Value)
+          name: binding.name,
+          type: fieldType,
+          kind: binding.mutable ? .variable(.MutableValue) : .variable(.Value)
         )
-        try currentScope.defineLocal(first.name, defId: sym.defId, span: span)
-        firstSymbol = sym
+        try currentScope.defineLocal(binding.name, defId: sym.defId, span: span)
+        slotSymbols.append(sym)
       }
 
-      var secondSymbol: Symbol? = nil
-      if !second.isDiscard {
-        // Validate type annotation if present
-        if let typeNode = second.type {
-          let annotatedType = try resolveTypeNode(typeNode)
-          if annotatedType != secondType {
-            throw SemanticError(.typeMismatch(
-              expected: annotatedType.description, got: secondType.description))
-          }
-        }
-        let sym = makeLocalSymbol(
-          name: second.name,
-          type: secondType,
-          kind: second.mutable ? .variable(.MutableValue) : .variable(.Value)
-        )
-        try currentScope.defineLocal(second.name, defId: sym.defId, span: span)
-        secondSymbol = sym
-      }
-
-      return .pairVariableDeclaration(
-        pairSymbol: pairSymbol, pairValue: typedValue,
-        firstSymbol: firstSymbol, firstMember: firstMemberSym, firstMutable: first.mutable,
-        secondSymbol: secondSymbol, secondMember: secondMemberSym, secondMutable: second.mutable
+      return .tupleVariableDeclaration(
+        tupleSymbol: tupleSymbol, tupleValue: typedValue,
+        bindings: slotSymbols
       )
 
     case .assignment(let target, let op, let value, let span):

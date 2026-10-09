@@ -719,13 +719,6 @@ given TypeChecker {
         };
     };
 
-    /// Whether `t` is std's `Option`/`Result` named by `template_name`.
-    /// Declaration identity only -- a user enum with `Some`/`Ok`/`Error` cases
-    /// is a different type and must not be flattened by `and then`/`or else`.
-    module_private is_option_result_wrapper(self, t Type, template_name String) Bool = {
-        return self.is_std_flow_enum(t, template_name);
-    };
-
     /// The generic-enum template `t` was built from, when `t` is one of std's
     /// flow enums. Identity only -- the spelling is never consulted.
     module_private option_result_template_def_id(self, t Type, template_name String) DefId = {
@@ -739,7 +732,14 @@ given TypeChecker {
         };
     };
 
-    /// Result type of `operand and then transform`, with flattening.
+    /// Result type of `operand and then transform`.
+    ///
+    /// The transform's value is always wrapped in the operand's own flow enum:
+    /// `Option[U]` for an `Option` operand, `Result[U]` for a `Result` one,
+    /// where `U` is whatever the transform returns. There is NO flattening -- a
+    /// transform that itself returns `Option[V]` yields `Option[Option[V]]` --
+    /// because flattening makes the result type depend on the SHAPE of the
+    /// transform's type, which a generic transform does not have yet.
     ///
     /// Which of the two flow enums the operand is decides everything, and that
     /// is a question about the operand's DECLARATION identity -- never about
@@ -750,9 +750,6 @@ given TypeChecker {
         transform_result_type Type,
     ) Type = {
         if self.is_std_flow_enum(operand_type, "Result") then {
-            if self.is_option_result_wrapper(transform_result_type, "Result") then {
-                return transform_result_type;
-            };
             let mutable args = List[Type].new();
             args.push(transform_result_type);
             // Std's `Result` is a LANG ITEM, reached by declaration.
@@ -762,9 +759,6 @@ given TypeChecker {
             );
         };
         if self.is_std_flow_enum(operand_type, "Option") then {
-            if self.is_option_result_wrapper(transform_result_type, "Option") then {
-                return transform_result_type;
-            };
             let mutable args = List[Type].new();
             args.push(transform_result_type);
             return Type.GenericEnum(
@@ -773,32 +767,6 @@ given TypeChecker {
             );
         };
         return transform_result_type;
-    };
-
-    module_private refine_and_then_result_type_from_expected(
-        self,
-        operand_type Type,
-        computed_type Type,
-        expected Option[Type],
-    ) Type = {
-        return when expected in {
-            .Some(expected_type) then {
-                if self.is_std_flow_enum(operand_type, "Result") and self.is_option_result_wrapper(
-                    expected_type,
-                    "Result",
-                ) then {
-                    return expected_type;
-                };
-                if self.is_std_flow_enum(operand_type, "Option") and self.is_option_result_wrapper(
-                    expected_type,
-                    "Option",
-                ) then {
-                    return expected_type;
-                };
-                return computed_type;
-            },
-            .None() then computed_type,
-        };
     };
 
     module_private resolve_member_type_ref(self, base_type_ref Type, member String) Type = {
@@ -1758,17 +1726,20 @@ given TypeChecker {
                 bindings,
             ),
         };
-        return Option[Symbol].Some(
-            self.make_method_callable_symbol_with_visibility(
-                template.method.name,
-                typed_params,
-                return_type,
-                template.method.access,
-                template.module_path,
-                template.source_file,
-                template.package_id,
-            ),
+        let method_symbol = self.make_method_callable_symbol_with_visibility(
+            template.method.name,
+            typed_params,
+            return_type,
+            template.method.access,
+            template.module_path,
+            template.source_file,
+            template.package_id,
         );
+        self.register_method_symbol_type_params(
+            method_symbol,
+            template.method.type_params,
+        );
+        return Option[Symbol].Some(method_symbol);
     };
 
     module_private resolve_extension_template_signature(
@@ -1848,17 +1819,20 @@ given TypeChecker {
                         entry.method.return_type,
                         bindings,
                     );
-                    return Option[Symbol].Some(
-                        self.make_method_callable_symbol_with_visibility(
-                            entry.method.name,
-                            typed_params,
-                            return_type,
-                            entry.method.access,
-                            entry.module_path,
-                            entry.source_file,
-                            entry.package_id,
-                        ),
+                    let method_symbol = self.make_method_callable_symbol_with_visibility(
+                        entry.method.name,
+                        typed_params,
+                        return_type,
+                        entry.method.access,
+                        entry.module_path,
+                        entry.source_file,
+                        entry.package_id,
                     );
+                    self.register_method_symbol_type_params(
+                        method_symbol,
+                        self.to_template_type_params(entry.method.type_params),
+                    );
+                    return Option[Symbol].Some(method_symbol);
                 },
                 .None() then Option[Symbol].None(),
             },
@@ -2642,17 +2616,20 @@ given TypeChecker {
                     bindings,
                 ),
             };
-            return Option[Symbol].Some(
-                self.make_method_callable_symbol_with_visibility(
-                    method_name,
-                    typed_params,
-                    return_type,
-                    template.method.access,
-                    template.module_path,
-                    template.source_file,
-                    template.package_id,
-                ),
+            let method_symbol = self.make_method_callable_symbol_with_visibility(
+                method_name,
+                typed_params,
+                return_type,
+                template.method.access,
+                template.module_path,
+                template.source_file,
+                template.package_id,
             );
+            self.register_method_symbol_type_params(
+                method_symbol,
+                template.method.type_params,
+            );
+            return Option[Symbol].Some(method_symbol);
         };
 
         return Option[Symbol].None();
@@ -3437,17 +3414,20 @@ given TypeChecker {
                                     bindings,
                                 ),
                             };
-                            Option[Symbol].Some(
-                                self.make_method_callable_symbol_with_visibility(
-                                    method_name,
-                                    typed_params,
-                                    return_type,
-                                    template.method.access,
-                                    template.module_path,
-                                    template.source_file,
-                                    template.package_id,
-                                ),
-                            )
+                            let method_symbol = self.make_method_callable_symbol_with_visibility(
+                                method_name,
+                                typed_params,
+                                return_type,
+                                template.method.access,
+                                template.module_path,
+                                template.source_file,
+                                template.package_id,
+                            );
+                            self.register_method_symbol_type_params(
+                                method_symbol,
+                                template.method.type_params,
+                            );
+                            Option[Symbol].Some(method_symbol)
                         }
                     },
                     .None() then Option[Symbol].None(),
@@ -4100,6 +4080,59 @@ given TypeChecker {
         return resolved;
     };
 
+    /// Enforce the bounds on a method's OWN type parameters against the type
+    /// arguments the call site bound them to. Mirrors the free-function path
+    /// (`validate_generic_function_call_constraints` -> `enforce_bound_requirement`)
+    /// so the diagnostics are the same ones a free function would produce.
+    /// Bounds dispatch on their KIND inside `enforce_bound_requirement`; this
+    /// only pairs each parameter with its bound type.
+    ///
+    /// Every parameter must have been bound before any bound is checked --
+    /// Swift's `enforceGenericConstraints` is all-or-nothing on the same
+    /// (`guard typeParameters.count == args.count`), and a half-inferred call
+    /// is not evidence that a bound failed. Unresolved argument types are
+    /// skipped for the same reason a failed coercion is: they agree with
+    /// nothing and have already been reported.
+    module_private validate_method_type_arg_constraints(
+        self,
+        method Symbol,
+        bindings Dict[String, Type],
+        span SourceSpan,
+    ) Void = {
+        when self.storage.method_type_params.get(method.def_id) in {
+            .Some(type_params) then {
+                if type_params.is_empty() then {
+                    return;
+                };
+                for tp in type_params then {
+                    when bindings.get(tp.name) in {
+                        .Some(_) then {},
+                        .None() then {
+                            return;
+                        },
+                    };
+                };
+                for tp in type_params then {
+                    let bound_type = bindings.get(tp.name) or else Type.Unknown();
+                    if not self.is_unresolved_expr_type(bound_type) then {
+                        for constraint in tp.constraints then {
+                            if not self.enforce_bound_requirement(
+                                bound_type,
+                                constraint,
+                                tp.name,
+                                bindings,
+                                span,
+                            ) then {
+                                return;
+                            };
+                        };
+                    };
+                };
+            },
+            .None() then {},
+        };
+    };
+
     module_private resolve_method_type_args_for_call_with_expected(
         self,
         base_type Type,
@@ -4107,6 +4140,7 @@ given TypeChecker {
         args List[TypedExpr],
         method_type_args List[Type],
         expected Option[Type],
+        span SourceSpan,
     ) List[Type] = {
         let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
         let receiver_bindings = self.resolve_signature_method_type_bindings(
@@ -4158,6 +4192,7 @@ given TypeChecker {
             ),
             .None() then {},
         };
+        self.validate_method_type_arg_constraints(method, bindings, span);
 
         let mutable resolved = List[Type].new();
         for name in ordered then {
@@ -4953,6 +4988,16 @@ given TypeChecker {
                 };
             },
             .MemberPath(base, path) then if not path.is_empty() then {
+                // The member may be a FIELD of function type rather than a
+                // method -- `self.mapper(it)` calls the stored closure. Its
+                // result type is the function's own result type; there is no
+                // method to look up.
+                when callee.expr_type in {
+                    .FunctionType(_, ret) then {
+                        return ret;
+                    },
+                    _ then {},
+                };
                 return self.resolve_method_return_type(
                     base.expr_type,
                     self.context().symbol_name(path[path.count() - 1]),

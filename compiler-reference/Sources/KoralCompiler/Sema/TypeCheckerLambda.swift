@@ -268,10 +268,11 @@ extension TypeChecker {
         case .variableDeclaration(let name, _, let value, _, _):
           try collectCapturedVariables(expr: value, localNames: blockLocalNames, captures: &captures)
           blockLocalNames.insert(name)
-        case .pairVariableDeclaration(let first, let second, let value, _):
+        case .tupleVariableDeclaration(let bindings, let value, _):
           try collectCapturedVariables(expr: value, localNames: blockLocalNames, captures: &captures)
-          collectBindingElementName(first, into: &blockLocalNames)
-          collectBindingElementName(second, into: &blockLocalNames)
+          for binding in bindings {
+            collectBindingElementName(binding, into: &blockLocalNames)
+          }
         default:
           try collectCapturedVariablesFromStatement(stmt: stmt, localNames: blockLocalNames, captures: &captures)
         }
@@ -452,9 +453,10 @@ extension TypeChecker {
     switch pattern {
     case .binding(let binding):
       collectBindingElementName(binding, into: &names)
-    case .pair(let first, let second, _):
-      collectBindingElementName(first, into: &names)
-      collectBindingElementName(second, into: &names)
+    case .tuple(let bindings, _):
+      for binding in bindings {
+        collectBindingElementName(binding, into: &names)
+      }
     }
   }
 
@@ -466,7 +468,9 @@ extension TypeChecker {
     case .traitObjectTypeBinding(let name, _, _, _):
       guard name != "_" else { return }
       names.insert(name)
-    case .enumCase(_, let elements, _), .structPattern(_, let elements, _):
+    case .enumCase(_, let elements, _),
+         .structPattern(_, let elements, _),
+         .tuplePattern(let elements, _):
       for element in elements {
         collectPatternBindingNames(element.pattern, into: &names)
       }
@@ -489,7 +493,7 @@ extension TypeChecker {
     switch stmt {
     case .variableDeclaration(_, _, let value, _, _):
       try collectCapturedVariables(expr: value, localNames: localNames, captures: &captures)
-    case .pairVariableDeclaration(_, _, let value, _):
+    case .tupleVariableDeclaration(_, let value, _):
       try collectCapturedVariables(expr: value, localNames: localNames, captures: &captures)
     case .assignment(let target, _, let value, _):
       try collectCapturedVariables(expr: target, localNames: localNames, captures: &captures)

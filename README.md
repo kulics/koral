@@ -16,7 +16,7 @@ Reference note:
 
 Koral's nominal types come in exactly two forms, chosen at the declaration site:
 
-- **`type`** — a shallowly immutable nominal type. Fields cannot be mutated after construction, values have **no identity**, and the compiler decides the layout. **Value semantics is not promised**: copies may share backing storage, which is unobservable precisely because the type is shallowly immutable.
+- **`type`** — a shallowly immutable nominal type. Fields cannot be mutated after construction, values have **no identity**, and the compiler decides the layout. **Value semantics is not promised**: copies may share backing storage, which is unobservable precisely because the type is shallowly immutable. A type that implements `Drop` is the exception — its destructor runs once per object, so the sharing is observable and the type is treated like `type mutable` on that axis.
 - **`type mutable`** — a shared object type. Assignment and argument passing hand out handles to the **same** object. Fields are immutable by default; only explicitly declared `mutable` fields can be modified in place.
 
 ```koral
@@ -200,9 +200,9 @@ let result = list.iterator()
 ### Control Flow
 
 - `if / then / else` expressions (with pattern matching via `is`)
-- `while` statements (with pattern matching via `is`)
-- `for` statements over any `Iterable`
-- `when` expressions/statements for exhaustive pattern matching
+- `while` expressions (with pattern matching via `is`)
+- `for` expressions over any `Iterable`
+- `when` expressions for exhaustive pattern matching
 - `defer` for deterministic cleanup
 - `break`, `continue`, `return`
 - Value-producing `if` / `when`: the branch's final expression becomes the branch value
@@ -210,7 +210,7 @@ let result = list.iterator()
 ### Pattern Matching
 
 - Wildcard (`_`), literal, variable binding, comparison (`> n`, `<= n`)
-- Struct/Pair/Enum destructuring (including nested)
+- Struct/Enum destructuring and tuple destructuring (including nested)
 - Logical patterns: `or`, `and`, `not`
 
 ### Traits and Generics
@@ -225,13 +225,12 @@ let result = list.iterator()
 ### Functions and Lambdas
 
 - Top-level and generic functions
-- Call labels and defaults: the declaration fixes the call shape with no optional-label form — a positional parameter (`name Type`) is passed by position and never by label, a named parameter (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Constructors, free functions, methods and static methods all follow the same rules
+- Call labels and defaults: the declaration fixes the call shape with no optional-label form — a positional parameter (`name Type`) is passed by position and never by label, a named parameter (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Positional parameters must come before named ones, at declarations and at call sites. Constructors, free functions, methods and static methods all follow the same rules
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
 - Duration suffix literals: `10s`, `250ms`, `150us`, `42ns`
-- Pair literal: `(a, b)` (equivalent to `Pair(a, b)`)
-- Pair destructuring: `let (a, b) = pair` (binds Pair fields to separate variables)
+- Tuple destructuring: `let (a, b, c) = s` binds a struct's fields by position (any field count; `Pair` is just a two-field struct). There is no tuple literal — build a `Pair` with its constructor.
 - Collection literals:
     - List: `[1, 2, 3]` (defaults to `List[T]` when no explicit type context exists)
     - Set: `let s Set[Int] = [1, 2, 3]`
@@ -260,21 +259,19 @@ c.count = c.count + 1;
 
 Module rules summary:
 
-- `using "path"` merges another file into the current module scope.
-- `using module::path { Symbol, Other as Alias }` imports explicit symbols visible to the importing file: `public` from any package, plus `package_private` when importing from the same package.
-- `using module::path { .. }` imports all symbols visible to the importing file from that module, and `..` must be the only item.
-- Module imports bind symbols only; they do not bind a module name or namespace. Use `Symbol`, not `module.Symbol`.
-- Entry file basenames must match `[a-z][a-z0-9_]*`.
-
-- File merge (`using "file_name"` / `using "./helpers"` / `using "../shared/format"`) is resolved relative to the current file directory
-- Modules are declared in `koral.json`; `std` modules are declared in `std/koral.json`
-- Top-level manifest `entry` is the default target module name (for example `app::main`), not a source file path
-- Per-module dependency edges use `requires`; non-`std` packages do not need to list `std` manually
+- `using` has one form; the specifier is a string, and its **shape** decides what it means: starting with `./` or `../` is a **file merge**, anything else is a **module import**.
+- File merge (`using "./helpers.koral";` / `using "../shared/format.koral";`) resolves against the current file's directory, must end in `.koral`, and merges the target's top-level definitions into the current module. It takes no part in package/module resolution and may not be combined with `{ ... }`.
+- Module import (`using "std/io";` / `using "std/io" { Reader, Writer };` / `using "std/io" { Reader as IoReader };`) binds symbols only. `{ ... }` omitted means every visible member; if written, it may not be empty — `{ .. }` and `{ * }` are no longer spellings of anything.
+- Module imports do not bind a module name or namespace. Use `Symbol`, not `module.Symbol`; `as` renames one imported symbol, never the module.
+- Imported names are file-local bindings and are never re-exported; a name collision is an error and `as` disambiguates.
+- Modules are declared in `koral.json`; `std` modules are declared in `std/koral.json`. `modules` maps a package-internal name (`.`, `conn`, `compiler/parser`) to `{ entry, links }`, and `entry` is the entry **file** relative to the package root.
+- The module graph is the union of the modules' `using` statements. There is no `requires` and no top-level `entry` — the default build target is the main module.
+- Module full names are `package[/subpath]`; a package name is a single identifier segment. `/` separates subpaths.
+- The `std` main module is the prelude and is in scope without being named; every other module needs an explicit import.
 - Imports are file-local bindings and never re-export automatically
 - Access control: `public`, `package_private` (same-package), `module_private` (same module, default for top-level declarations), `file_private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
-- Module entry file basename must match `[a-z][a-z0-9_]*`
-- String in `using "file"` is the literal file name (no case conversion); file is resolved relative to the current file's directory
+- A module entry file's stem must start with a lowercase letter and continue with lowercase letters, digits or `_`
 - Type aliases must start with an uppercase letter (`type Name = ...`)
 
 ### FFI

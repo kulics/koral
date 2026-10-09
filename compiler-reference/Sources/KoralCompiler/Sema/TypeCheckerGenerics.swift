@@ -18,6 +18,10 @@ extension TypeChecker {
           bounds.append(bound)
           continue
         }
+        if case .foreign = bound {
+          bounds.append(bound)
+          continue
+        }
         try validateTraitName(bound.baseName)
         bounds.append(resolveBound(bound))
       }
@@ -99,7 +103,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable:
+          case .mutable, .foreign:
             continue
           }
         }
@@ -275,7 +279,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable:
+          case .mutable, .foreign:
             continue
           }
         }

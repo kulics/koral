@@ -282,10 +282,23 @@ let main() Void = {
     t.test("method call", "let r=a.add(b);\n", "let r = a.add(b);\n");
 
     // === Mutable and destructuring ===
+    // A pair is built with its constructor; `(a, b, c)` destructures a struct
+    // by position at any field count.
     t.test(
-        "pair destructuring",
-        "let main() Void={\nlet (a,b)=(1,2);\n};\n",
-        "let main() Void = {\n    let (a, b) = (1, 2);\n};\n",
+        "tuple destructuring",
+        "let main() Void={\nlet (a,b)=Pair(1,2);\n};\n",
+        "let main() Void = {\n    let (a, b) = Pair(1, 2);\n};\n",
+    );
+    t.test(
+        "tuple destructuring three slots",
+        "let main() Void={\nlet (a,_,c)=Point3(1,2,3);\n};\n",
+        "let main() Void = {\n    let (a, _, c) = Point3(1, 2, 3);\n};\n",
+    );
+    // There is no pair literal. A `Pair` is built with its own constructor.
+    t.test_error_contains(
+        "pair literal rejected",
+        "let main() Void={\nlet p=(1,2);\n};\n",
+        "pair literal",
     );
     // A list kept on one line has no trailing comma; one the formatter exploded
     // across lines always does. The author's comma is not preserved -- it is a
@@ -302,8 +315,8 @@ let main() Void = {
     );
     t.test(
         "qualified trait call",
-        "let main() Void={\nlet r=(x as Tag).plus_ten(1,);\n};\n",
-        "let main() Void = {\n    let r = (x as Tag).plus_ten(1);\n};\n",
+        "let main() Void={\nlet r=Num(Tag).plus_ten(n,);\n};\n",
+        "let main() Void = {\n    let r = Num(Tag).plus_ten(n);\n};\n",
     );
     // Exploded argument lists end in a comma so the next edit is one line.
     t.test(
@@ -321,7 +334,11 @@ let main() Void = {
         "package_private let value Int=1;\n",
         "package_private let value Int = 1;\n",
     );
-    t.test("given not trait", "given Kind not Deref;\n", "given Kind not Deref;\n");
+    t.test_error_contains(
+        "given not trait rejected",
+        "given Kind not Deref;\n",
+        "expected '{', got 'not'",
+    );
     t.test(
         "trait parent list",
         "trait FloatMath Numeric and Div[Self] and Neg {\n};\n",
@@ -460,6 +477,14 @@ let main() Void = {
         "type E {\n    R(x Int = 5),\n};\n",
         "Default values are only allowed for named parameters",
     );
+    // The only written form of a qualified call is `Type(Trait).method(...)`
+    // (grammar.bnf <qualified-path-suffix>). The `(expr as Trait)` spelling was
+    // never documented and the compiler never supported it.
+    t.test_error_contains(
+        "`expr as Trait` rejected",
+        "let main() Void={\nlet r=(x as Tag).plus_ten(1);\n};\n",
+        "expected ')', got 'as'",
+    );
     t.test_error_contains(
         "mutable type alias rejected",
         "type mutable U = Int;\n",
@@ -515,10 +540,18 @@ let main() Void = {
         "type E {\n    R(x: Int = 5),\n};\n",
         "type E {\n    R(x: Int = 5),\n};\n",
     );
-    t.test(
-        "variant without parens accepted",
+    // A variant declaration always writes its parens (`Red()`), so that the
+    // declaration, the expression (`.Red()`) and the pattern (`.Red()`) all
+    // spell the case the same way.
+    t.test_error_contains(
+        "variant without parens rejected",
         "type E { A, B };\n",
-        "type E {\n    A,\n    B,\n};\n",
+        "expected '(', got ','",
+    );
+    t.test(
+        "zero-field variant keeps its parens",
+        "type E { A(), B() };\n",
+        "type E {\n    A(),\n    B(),\n};\n",
     );
     t.test(
         "leading underscore in type name accepted",
@@ -622,20 +655,25 @@ let main() Void = {
     );
     t.test("rune default", "type C(c: Rune = 'x');\n", "type C(c: Rune = 'x');\n");
 
-    // Pair destructuring: `for (a, b) in`, and `(a, b)` as a pattern under
-    // `when` / `is`. All of these were "expected ')', got ','".
+    // Tuple destructuring: `for (a, b, c) in`, and `(a, b, c)` as a pattern
+    // under `when` / `is`. All of these were "expected ')', got ','".
     t.test(
-        "for pair binding",
+        "for tuple binding",
         "let main() Void = {\nfor (left, right) in pairs then {\nprintln(left);\n};\n};\n",
         "let main() Void = {\n    for (left, right) in pairs then {\n        println(left);\n    };\n};\n",
     );
     t.test(
-        "pair pattern in when",
+        "for tuple binding three slots",
+        "let main() Void = {\nfor (x, _, z) in points then {\nprintln(x);\n};\n};\n",
+        "let main() Void = {\n    for (x, _, z) in points then {\n        println(x);\n    };\n};\n",
+    );
+    t.test(
+        "tuple pattern in when",
         "let main() Void = {\nlet s = when p in {\n(a, b) then a + b,\n};\n};\n",
         "let main() Void = {\n    let s = when p in {\n        (a, b) then a + b,\n    };\n};\n",
     );
     t.test(
-        "pair pattern in is",
+        "tuple pattern in is",
         "let main() Void = {\nif p is (a, b) then {\nprintln(a);\n};\n};\n",
         "let main() Void = {\n    if p is (a, b) then {\n        println(a);\n    };\n};\n",
     );
@@ -703,7 +741,7 @@ let main() Void = {
         "foreign public let foo Int;\n",
     );
     t.test_checked(
-        "checked: pair pattern",
+        "checked: tuple pattern",
         "let s = when p in {\n(a, b) then a + b,\n};\n",
         "let s = when p in {\n    (a, b) then a + b,\n};\n",
     );

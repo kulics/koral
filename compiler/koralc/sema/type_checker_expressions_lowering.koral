@@ -1218,21 +1218,17 @@ given TypeChecker {
     ) PatternNode = {
         return when pattern in {
             .Single(binding) then self.lower_for_binding_element_shape(binding),
-            .Pair(first, second, span) then {
+            .Tuple(bindings, span) then {
                 let mutable elements = List[PatternElement].new();
-                elements.push(
-                    PatternElement(
-                        Option[String].None(),
-                        self.lower_for_binding_element_shape(first),
-                    ),
-                );
-                elements.push(
-                    PatternElement(
-                        Option[String].None(),
-                        self.lower_for_binding_element_shape(second),
-                    ),
-                );
-                PatternNode.StructPattern("Pair", elements, span)
+                for binding in bindings then {
+                    elements.push(
+                        PatternElement(
+                            Option[String].None(),
+                            self.lower_for_binding_element_shape(binding),
+                        ),
+                    );
+                };
+                PatternNode.TuplePattern(elements, span)
             },
         };
     };
@@ -1286,12 +1282,72 @@ given TypeChecker {
             .Single(binding) then {
                 let _ = self.bind_pair_let_symbol(binding, element_type, scope);
             },
-            .Pair(first, second, span) then {
-                let pair_types = self.for_pair_binding_types(element_type, span);
-                let _ = self.bind_pair_let_symbol(first, pair_types.first, scope);
-                let _ = self.bind_pair_let_symbol(second, pair_types.second, scope);
+            .Tuple(bindings, span) then {
+                let field_types = self.for_tuple_binding_types(
+                    element_type,
+                    bindings.count(),
+                    span,
+                );
+                let mutable i UInt = 0;
+                while i < bindings.count() then {
+                    let field_type = when field_types.get(i) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    };
+                    let _ = self.bind_pair_let_symbol(bindings[i], field_type, scope);
+                    i += 1;
+                };
             },
         };
+    };
+
+    /// The element type's field types, in declaration order, for positional
+    /// destructuring. The count must match the number of binding slots.
+    module_private for_tuple_binding_types(
+        self,
+        element_type Type,
+        count UInt,
+        span SourceSpan,
+    ) List[Type] = {
+        let inner_type = when element_type in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            _ then element_type,
+        };
+        // Identity comes from the subject's own DECLARATION, never from a name.
+        let pattern_def_id = when inner_type in {
+            .StructureType(def_id) then self.struct_pattern_decl_def_id(def_id),
+            .GenericStruct(template_def_id, _) then self.struct_pattern_decl_def_id(
+                template_def_id,
+            ),
+            _ then def_id_invalid(),
+        };
+        let field_types = if pattern_def_id == def_id_invalid() then {
+            List[Type].new()
+        } else {
+            self.get_struct_pattern_field_types(element_type, pattern_def_id)
+        };
+        let mutable out = List[Type].new();
+        if field_types.is_empty() or field_types.count() <> count then {
+            self.push_diagnostic_at_span(
+                "Type mismatch: expected a struct with \(count) fields, got \(type_to_string(inner_type))",
+                span,
+            );
+            let mutable i UInt = 0;
+            while i < count then {
+                out.push(Type.Unknown());
+                i += 1;
+            };
+            return out;
+        };
+        for t in field_types then {
+            out.push(t);
+        };
+        return out;
     };
 
     /// `for x in a..<b` 的专用降低：把迭代状态摊平成本地计数器，完全不走迭代器协议。
@@ -1347,7 +1403,7 @@ given TypeChecker {
             .Single(binding) then {
                 binding_opt = Option[PairBindingElement].Some(binding);
             },
-            .Pair(_, _, _) then {},
+            .Tuple(_, _) then {},
         };
         if binding_opt is .None() then {
             return Option[TypedExpr].None();

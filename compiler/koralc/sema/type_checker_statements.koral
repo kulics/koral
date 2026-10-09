@@ -1455,7 +1455,7 @@ given TypeChecker {
                 scope.define(self.context(), sym);
                 return TypedStatement.LetStmt(sym, typed_binding_value, span);
             },
-            .PairLetStmt(first, second, value, span) then {
+            .TupleLetStmt(bindings, value, span) then {
                 let raw_typed_val = self.check_expr_scoped_ref(value, .None(), scope);
                 let mutable initial_pair_type = self.concretize_default_literal_type(
                     raw_typed_val.expr_type,
@@ -1468,54 +1468,27 @@ given TypeChecker {
                 let typed_val = if pair_type == raw_typed_val.expr_type then raw_typed_val
                 else retype_typed_expr(raw_typed_val, pair_type);
 
-                let mutable first_type = self.get_pair_binding_type(pair_type, "first");
-                let mutable second_type = self.get_pair_binding_type(pair_type, "second");
-                if self.pair_binding_type_needs_literal_inference(first_type) or self.pair_binding_type_needs_literal_inference(
-                    second_type,
-                ) then {
-                    let literal_first_type = self.infer_pair_literal_binding_type(
-                        value,
-                        first,
-                        0(UInt),
-                        scope,
-                    );
-                    let literal_second_type = self.infer_pair_literal_binding_type(
-                        value,
-                        second,
-                        1(UInt),
-                        scope,
-                    );
-                    if self.pair_binding_type_needs_literal_inference(first_type) and literal_first_type is .Some(_) then {
-                        first_type = literal_first_type;
-                    };
-                    if self.pair_binding_type_needs_literal_inference(second_type) and literal_second_type is .Some(_) then {
-                        second_type = literal_second_type;
-                    };
-                };
-                if first_type is .None() or second_type is .None() then {
-                    self.push_diagnostic_at_span(
-                        "Type mismatch: expected Pair, got \(type_to_string(pair_type))",
-                        span,
-                    );
-                };
-
-                let first_symbol = self.bind_pair_let_symbol(
-                    first,
-                    first_type or else Type.Unknown(),
-                    scope,
-                );
-                let second_symbol = self.bind_pair_let_symbol(
-                    second,
-                    second_type or else Type.Unknown(),
-                    scope,
-                );
-                return TypedStatement.PairLetStmt(
+                // Positional destructuring: the number of slots equals the
+                // number of fields, and slot i binds field i. Field types come
+                // from the subject's DECLARATION, never from a name.
+                let field_types = self.for_tuple_binding_types(
                     pair_type,
-                    first_symbol,
-                    second_symbol,
-                    typed_val,
+                    bindings.count(),
                     span,
                 );
+                let mutable symbols = List[Option[Symbol]].new();
+                let mutable i UInt = 0;
+                while i < bindings.count() then {
+                    let field_type = when field_types.get(i) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    };
+                    symbols.push(
+                        self.bind_pair_let_symbol(bindings[i], field_type, scope),
+                    );
+                    i += 1;
+                };
+                return TypedStatement.TupleLetStmt(pair_type, symbols, typed_val, span);
             },
             .AssignmentStmt(target, op, value, span) then {
                 let typed_target = self.check_assignment_target_expr_ref(target, scope);

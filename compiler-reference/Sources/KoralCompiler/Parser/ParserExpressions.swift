@@ -198,25 +198,27 @@ extension Parser {
   // MARK: - Logical Expressions
 
   private func parseOrExpression() throws -> ExpressionNode {
-    var left = try parseOptionFlowExpression()
+    var left = try parseAndExpression()
 
     while currentToken === .orKeyword {
       try match(.orKeyword)
-      let right = try parseOptionFlowExpression()
+      let right = try parseAndExpression()
       left = .orExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
 
-  /// `or else` / `or return` bind tighter than logical `or` but looser than `and`.
+  /// `or else` / `or return` sit between `and then` and logical `and`:
+  /// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
+  /// and `a and b or else c` groups as `a and (b or else c)`.
   private func parseOptionFlowExpression() throws -> ExpressionNode {
-    var left = try parseAndExpression()
+    var left = try parseAndThenExpression()
 
     while currentToken === .orKeyword {
       if lexer.peekNextToken() === .elseKeyword {
         try match(.orKeyword)
         try match(.elseKeyword)
-        let defaultExpr = try parseAndExpression()
+        let defaultExpr = try parseAndThenExpression()
         left = .orElseExpression(operand: left, defaultExpr: defaultExpr,
                                 span: SourceSpan(start: left.span.start, end: defaultExpr.span.end))
         continue
@@ -237,12 +239,12 @@ extension Parser {
   }
 
   private func parseAndExpression() throws -> ExpressionNode {
-    var left = try parseAndThenExpression()
+    var left = try parseOptionFlowExpression()
 
     while currentToken === .andKeyword {
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
-      let right = try parseAndThenExpression()
+      let right = try parseOptionFlowExpression()
       left = .andExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
@@ -1217,10 +1219,13 @@ extension Parser {
       currentToken = savedToken
       let first = try expression()
       if currentToken === .comma {
-        try match(.comma)
-        let second = try expression()
-        try match(.rightParen)
-        return .call(callee: .identifier("Pair", span: first.span), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)], span: SourceSpan(start: first.span.start, end: currentSpan.end))
+        // There is no tuple/pair literal. A `Pair` is built with its own
+        // constructor, like any other type. The blame lands on the `,` -- the
+        // token that says "literal" here.
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "A pair literal is not an expression: construct a Pair with 'Pair(first, second)'"
+        )
       }
       try match(.rightParen)
       return first

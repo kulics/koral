@@ -1,3 +1,287 @@
+// ============================================================================
+// `self` must not escape a `drop` body
+// ============================================================================
+//
+// `drop(self)` runs while the object is being destroyed. Letting `self` out --
+// returning it, storing it, passing it on, capturing it in a closure -- either
+// resurrects a dying value or moves fields out from under the destructor. So
+// inside a `drop` body `self` may appear ONLY as the receiver of a member
+// access (`self.x`, `self.x = v`) or a method call (`self.close()`). Every
+// other occurrence is an escape. A lambda body is a special case: anything the
+// lambda mentions it captures, so ANY `self` there escapes.
+
+/// The span of the first `self` in `e` that escapes the destructor, if any.
+///
+/// "Escapes" is structural: `self` is legal ONLY as the base of a member path
+/// (`self.x`, `self.x.y`) or as the receiver of a method call (`self.m(...)`).
+/// Everywhere else -- an argument, a `let` initializer, a return value -- it is
+/// a bare value and escapes. Under a lambda (`in_lambda`) even a receiver use
+/// escapes, because the closure captures it.
+module_private let drop_self_escape_span(e Expr) Option[SourceSpan] = {
+    return drop_self_escape_span_in(e, false);
+};
+
+/// Whether `base` is a legal receiver use of `self`.
+module_private let drop_self_receiver_span(base Expr, in_lambda Bool) Option[SourceSpan] = {
+    if in_lambda then {
+        return drop_self_escape_span_in(base, in_lambda);
+    };
+    return when base in {
+        .Identifier(name, span) then if name == "self" then {
+            Option[SourceSpan].None()
+        } else {
+            drop_self_escape_span_in(base, in_lambda)
+        },
+        _ then drop_self_escape_span_in(base, in_lambda),
+    };
+};
+
+module_private let drop_self_escape_span_in(e Expr, in_lambda Bool) Option[SourceSpan] = {
+    return when e in {
+        .Identifier(name, span) then if name == "self" then {
+            Option[SourceSpan].Some(span)
+        } else {
+            Option[SourceSpan].None()
+        },
+        // `self.x` / `self.x.y` -- the whole path is one receiver use.
+        .MemberPath(base, _, _) then drop_self_receiver_span(base, in_lambda),
+        // The callee of a call is a value use -- `self()` escapes -- but the
+        // base of `self.m(...)` / `self.m[T](...)` is a receiver.
+        .Call(callee, args, _) then {
+            when drop_self_escape_span_in(callee, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_list(args, in_lambda),
+            }
+        },
+        .GenericMethodCall(base, _, _, args, _) then {
+            when drop_self_receiver_span(base, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_list(args, in_lambda),
+            }
+        },
+        // `Type(Trait).method(recv, ...)` -- the base is the TYPE name and the
+        // receiver travels in the argument list, so every part of it is an
+        // ordinary use. Only `self.m(...)` makes `self` a receiver.
+        .QualifiedMethodCall(base, _, _, args, _) then {
+            when drop_self_escape_span_in(base, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_list(args, in_lambda),
+            }
+        },
+        .QualifiedGenericMethodCall(base, _, _, _, args, _) then {
+            when drop_self_escape_span_in(base, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_list(args, in_lambda),
+            }
+        },
+        // A closure captures whatever it mentions; `self` may not be captured.
+        .LambdaExpr(_, _, body, _) then drop_self_escape_span_in(body, true),
+        .CastExpr(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .Unary(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .RefExpr(inner, _, _) then drop_self_escape_span_in(inner, in_lambda),
+        .WeakrefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .PtrExpr(inner, _, _) then drop_self_escape_span_in(inner, in_lambda),
+        .DerefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .UnsafeDerefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .NamedArgument(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .TraitQualificationExpr(base, _, _) then drop_self_escape_span_in(
+            base,
+            in_lambda,
+        ),
+        .OrReturnExpr(operand, _) then drop_self_escape_span_in(operand, in_lambda),
+        .IsExpr(subject, _, _) then drop_self_escape_span_in(subject, in_lambda),
+        .IsNotExpr(subject, _, _) then drop_self_escape_span_in(subject, in_lambda),
+        .StaticMethodCall(_, _, _, args, _) then drop_self_escape_in_list(
+            args,
+            in_lambda,
+        ),
+        .ImplicitMemberExpr(_, args, _) then drop_self_escape_in_list(args, in_lambda),
+        .CollectionLiteral(elements, _) then drop_self_escape_in_list(
+            elements,
+            in_lambda,
+        ),
+        .ComparisonChainExpr(operands, _, _) then drop_self_escape_in_list(
+            operands,
+            in_lambda,
+        ),
+        .DictLiteral(entries, _) then drop_self_escape_in_pairs(entries, in_lambda),
+        .InterpolatedString(parts, _) then drop_self_escape_in_parts(parts, in_lambda),
+        .Block(statements, tail_expression, _) then {
+            when drop_self_escape_in_statements(statements, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then when tail_expression in {
+                    .Some(inner) then drop_self_escape_span_in(inner, in_lambda),
+                    .None() then Option[SourceSpan].None(),
+                },
+            }
+        },
+        .SubscriptExpr(base, args, _) then {
+            when drop_self_escape_span_in(base, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_list(args, in_lambda),
+            }
+        },
+        // Binary operators are one arm each: an `or`-pattern that mixes case
+        // shapes with different payload layouts binds from the first case and
+        // reads the wrong slot on the others.
+        .OrElseExpr(operand, default_expr, _) or .AndThenExpr(operand, default_expr, _) or .AndExpr(operand, default_expr, _) or .OrExpr(operand, default_expr, _) then {
+            when drop_self_escape_span_in(operand, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_span_in(default_expr, in_lambda),
+            }
+        },
+        .ArithmeticExpr(operand, _, right, _) or .ComparisonExpr(operand, _, right, _) or .BitwiseExpr(operand, _, right, _) then {
+            when drop_self_escape_span_in(operand, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_span_in(right, in_lambda),
+            }
+        },
+        .RangeExpr(_, left, right, _) then {
+            let found = when left in {
+                .Some(inner) then drop_self_escape_span_in(inner, in_lambda),
+                .None() then Option[SourceSpan].None(),
+            };
+            when found in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then when right in {
+                    .Some(inner) then drop_self_escape_span_in(inner, in_lambda),
+                    .None() then Option[SourceSpan].None(),
+                },
+            }
+        },
+        .IfExpr(condition, then_branch, else_branch, _) then {
+            when drop_self_escape_span_in(condition, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then {
+                    when drop_self_escape_span_in(then_branch, in_lambda) in {
+                        .Some(span) then Option[SourceSpan].Some(span),
+                        .None() then when else_branch in {
+                            .Some(inner) then drop_self_escape_span_in(inner, in_lambda),
+                            .None() then Option[SourceSpan].None(),
+                        },
+                    }
+                },
+            }
+        },
+        .WhileExpr(condition, body, _) then {
+            when drop_self_escape_span_in(condition, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_span_in(body, in_lambda),
+            }
+        },
+        .ForExpr(_, iterable, body, _) then {
+            when drop_self_escape_span_in(iterable, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_span_in(body, in_lambda),
+            }
+        },
+        .WhenExpr(subject, arms, _) then {
+            when drop_self_escape_span_in(subject, in_lambda) in {
+                .Some(span) then Option[SourceSpan].Some(span),
+                .None() then drop_self_escape_in_arms(arms, in_lambda),
+            }
+        },
+        // Literals, the empty literal and generic instantiations carry no
+        // expression that could name `self`.
+        .IntegerLiteral(_, _) or .FloatLiteral(_, _) or .StringLiteral(_, _) or .RuneLiteral(_, _) or .BoolLiteral(_, _) or .EmptyLiteral(_) or .GenericInstantiation(_, _, _) then Option[SourceSpan].None(
+        ),
+    };
+};
+
+module_private let drop_self_escape_in_list(
+    exprs List[Expr],
+    in_lambda Bool,
+) Option[SourceSpan] = {
+    for e in exprs then {
+        let found = drop_self_escape_span_in(e, in_lambda);
+        if found is .Some(_) then {
+            return found;
+        };
+    };
+    return Option[SourceSpan].None();
+};
+
+module_private let drop_self_escape_in_pairs(
+    entries List[ExprPair],
+    in_lambda Bool,
+) Option[SourceSpan] = {
+    for entry in entries then {
+        let found = drop_self_escape_span_in(entry.first, in_lambda);
+        if found is .Some(_) then {
+            return found;
+        };
+        let found_second = drop_self_escape_span_in(entry.second, in_lambda);
+        if found_second is .Some(_) then {
+            return found_second;
+        };
+    };
+    return Option[SourceSpan].None();
+};
+
+module_private let drop_self_escape_in_parts(
+    parts List[InterpolatedStringPart],
+    in_lambda Bool,
+) Option[SourceSpan] = {
+    for part in parts then {
+        let found = when part in {
+            .Literal(_) then Option[SourceSpan].None(),
+            .Expression(e) then drop_self_escape_span_in(e, in_lambda),
+        };
+        if found is .Some(_) then {
+            return found;
+        };
+    };
+    return Option[SourceSpan].None();
+};
+
+module_private let drop_self_escape_in_arms(
+    arms List[WhenArm],
+    in_lambda Bool,
+) Option[SourceSpan] = {
+    for arm in arms then {
+        let found = drop_self_escape_span_in(arm.body, in_lambda);
+        if found is .Some(_) then {
+            return found;
+        };
+    };
+    return Option[SourceSpan].None();
+};
+
+module_private let drop_self_escape_in_statements(
+    statements List[Statement],
+    in_lambda Bool,
+) Option[SourceSpan] = {
+    for statement in statements then {
+        let found = when statement in {
+            .LetStmt(_, _, _, value, _) then drop_self_escape_span_in(value, in_lambda),
+            .TupleLetStmt(_, value, _) then drop_self_escape_span_in(value, in_lambda),
+            // `self.x = v` is a receiver write; anything else in the target
+            // position is a use like any other.
+            .AssignmentStmt(target, _, value, _) then {
+                let target_found = when target in {
+                    .MemberPath(base, _, _) then drop_self_receiver_span(base, in_lambda),
+                    _ then drop_self_escape_span_in(target, in_lambda),
+                };
+                when target_found in {
+                    .Some(span) then Option[SourceSpan].Some(span),
+                    .None() then drop_self_escape_span_in(value, in_lambda),
+                }
+            },
+            .ExprStmt(expr, _) then drop_self_escape_span_in(expr, in_lambda),
+            .ReturnStmt(value, _) then when value in {
+                .Some(inner) then drop_self_escape_span_in(inner, in_lambda),
+                .None() then Option[SourceSpan].None(),
+            },
+            .BreakStmt(_) or .ContinueStmt(_) then Option[SourceSpan].None(),
+            .DeferStmt(expr, _) then drop_self_escape_span_in(expr, in_lambda),
+        };
+        if found is .Some(_) then {
+            return found;
+        };
+    };
+    return Option[SourceSpan].None();
+};
+
 given TypeChecker {
     module_private validate_drop_member_signature(
         self,
@@ -37,6 +321,34 @@ given TypeChecker {
             };
             if member.return_type is not .VoidType() then {
                 self.push_diagnostic("drop must return Void", unknown_span());
+            };
+            return;
+        };
+    };
+
+    /// `self` in a `drop` body may only be the receiver of a field access or a
+    /// method call. Everything else -- returning it, binding it, storing it,
+    /// passing it on, capturing it -- would let a dying object outlive its own
+    /// destructor. See `docs/guide/document.md` "Drop".
+    module_private validate_drop_member_body_escape(
+        self,
+        members List[GivenMember],
+    ) Void = {
+        for member in members then {
+            if member.name <> "drop" then {
+                continue;
+            };
+            let body = member.body or else {
+                continue;
+            };
+            when drop_self_escape_span(body) in {
+                .Some(span) then {
+                    self.push_diagnostic_at_span(
+                        "'self' cannot escape a drop body: it may only be the receiver of a field access or a method call",
+                        span,
+                    );
+                },
+                .None() then {},
             };
             return;
         };
@@ -898,6 +1210,7 @@ given TypeChecker {
                             resolved_target,
                             typed_members,
                         );
+                        self.validate_drop_member_body_escape(members);
                         // Mark the target type as having explicit Drop conformance.
                         // This is needed for nominal layout analysis: types with explicit Drop
                         // must use managed nominal representation (ARC-backed).
@@ -1208,10 +1521,10 @@ given TypeChecker {
             return false;
         };
         let (base_name, args) = when target_type in {
-            .Generic(base, args, span) then (base, args),
-            .Reference(_, _, span) then ("Ref", List[TypeNode].new()),
-            .Pointer(_, _, span) then ("Ptr", List[TypeNode].new()),
-            .WeakReference(_, _, _) then ("WeakRef", List[TypeNode].new()),
+            .Generic(base, args, span) then Pair(base, args),
+            .Reference(_, _, span) then Pair("Ref", List[TypeNode].new()),
+            .Pointer(_, _, span) then Pair("Ptr", List[TypeNode].new()),
+            .WeakReference(_, _, _) then Pair("WeakRef", List[TypeNode].new()),
             _ then {
                 self.push_diagnostic(
                     "Invalid operation generic given on non-generic type between types  and ",

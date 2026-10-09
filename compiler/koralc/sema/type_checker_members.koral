@@ -123,6 +123,30 @@ given TypeChecker {
         return method_symbol;
     };
 
+    /// Remember a method's OWN type parameters so a call site can enforce their
+    /// bounds. The symbol a lookup hands out may be rebuilt per call; the bound
+    /// list lives on the declaration. This is the bridge: registered under the
+    /// declaration's `DefId` (and under any rebuilt symbol that carries another
+    /// id), consulted by `validate_method_type_arg_constraints`.
+    module_private register_method_type_params_for_def(
+        self,
+        method_def_id DefId,
+        type_params List[TypeParameterDecl],
+    ) Void = {
+        if type_params.is_empty() then {
+            return;
+        };
+        self.storage.method_type_params.insert(method_def_id, type_params);
+    };
+
+    module_private register_method_symbol_type_params(
+        self,
+        method_symbol Symbol,
+        type_params List[TypeParameterDecl],
+    ) Void = {
+        self.register_method_type_params_for_def(method_symbol.def_id, type_params);
+    };
+
     module_private make_method_callable_symbol_with_param_types(
         self,
         method_def_id DefId,
@@ -1145,6 +1169,10 @@ given TypeChecker {
                     typed_params,
                 );
                 context.set_param_specs(generic_method_def_id, param_specs);
+                self.register_method_type_params_for_def(
+                    generic_method_def_id,
+                    self.to_template_type_params(m.type_params),
+                );
                 context.register_method_param_specs(
                     self.extension_template_key(target_type),
                     method_name,
@@ -1235,6 +1263,10 @@ given TypeChecker {
                         typed_params,
                     );
                     context.set_param_specs(method_def_id, param_specs);
+                    self.register_method_type_params_for_def(
+                        method_def_id,
+                        self.to_template_type_params(m.type_params),
+                    );
                     context.register_method_param_specs(
                         self.extension_template_key(target_type),
                         method_name,

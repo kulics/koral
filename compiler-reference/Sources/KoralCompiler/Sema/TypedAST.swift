@@ -166,12 +166,13 @@ public struct TypedStatementMatchCase {
 }
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
-  /// Pair variable declaration: `let (a, b) = expr`
-  /// Desugared into: temp = expr, a = temp.first, b = temp.second
-  case pairVariableDeclaration(
-    pairSymbol: Symbol, pairValue: TypedExpressionNode,
-    firstSymbol: Symbol?, firstMember: Symbol, firstMutable: Bool,
-    secondSymbol: Symbol?, secondMember: Symbol, secondMutable: Bool)
+  /// Tuple variable declaration: `let (a, _, c) = expr`
+  /// Desugared into: temp = expr, then each slot binds the struct field at the
+  /// same position. The fields come from the SUBJECT's declaration order; `nil`
+  /// marks a discarded slot.
+  case tupleVariableDeclaration(
+    tupleSymbol: Symbol, tupleValue: TypedExpressionNode,
+    bindings: [Symbol?])
   case assignment(
     target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
   case expression(TypedExpressionNode)

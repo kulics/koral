@@ -109,6 +109,72 @@ given TypeChecker {
         return msg.to_string();
     };
 
+    /// Whether the type parameter `name` was itself declared `T foreign`.
+    module_private generic_param_is_foreign_bounded(self, name String) Bool = {
+        return when self.storage.generic_param_shape_bounds.get(name) in {
+            .Some(bounds) then {
+                for bound in bounds then {
+                    when bound in {
+                        .Foreign() then {
+                            return true;
+                        },
+                        _ then {},
+                    };
+                };
+                false
+            },
+            .None() then false,
+        };
+    };
+
+    /// Whether `target_type`'s representation is fixed outside Koral's layout
+    /// freedom and may therefore cross the FFI boundary.
+    ///
+    /// A CLOSED set, decided by the compiler and not claimable by any user
+    /// declaration: the built-in scalars (including std's `Rune`), raw pointers,
+    /// and `foreign type` declarations. A Koral `type` is not in it -- its
+    /// layout is chosen by the compiler, so a raw pointer to one carries no
+    /// meaning across the boundary. Write `foreign type` for a struct whose
+    /// layout is the C one. See `docs/design/type-semantics.md`.
+    module_private satisfies_foreign_constraint(self, target_type Type) Bool = {
+        return when target_type in {
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .Float32Type() or .Float64Type() or .BoolType() then true,
+            .PointerType(_) or .MutablePointerType(_) then true,
+            .StructureType(def_id) then {
+                if self.context().is_foreign_struct(def_id) then {
+                    true
+                } else {
+                    // std's `Rune` is the one nominal type in the `foreign`
+                    // set: nominal only so it can carry methods, with the fixed
+                    // Unicode scalar representation. Identity only.
+                    is_std_rune_def_id(self.context(), def_id)
+                }
+            },
+            .GenericParameter(name) then self.generic_param_is_foreign_bounded(name),
+            _ then false,
+        };
+    };
+
+    module_private foreign_constraint_violation_message(
+        self,
+        target_type Type,
+        context String,
+    ) String = {
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type '");
+        msg.push_string(self.context().type_display_name(target_type));
+        msg.push_string("' does not satisfy the 'foreign' constraint");
+        if not context.is_empty() then {
+            msg.push_string(" (");
+            msg.push_string(context);
+            msg.push_string(")");
+        };
+        msg.push_string(
+            ". Only built-in scalars, raw pointers and 'foreign type' declarations cross the FFI boundary.",
+        );
+        return msg.to_string();
+    };
+
     module_private mutable_constraint_violation_message(
         self,
         target_type Type,
@@ -129,6 +195,26 @@ given TypeChecker {
         return msg.to_string();
     };
 
+    /// Whether the type parameter `name` was itself declared `T mutable`.
+    /// A bare `T` gets no free pass -- otherwise `f[T Any]` could satisfy a
+    /// `g[T mutable]` requirement by forwarding its own unconstrained `T`.
+    module_private generic_param_is_mutable_bounded(self, name String) Bool = {
+        return when self.storage.generic_param_shape_bounds.get(name) in {
+            .Some(bounds) then {
+                for bound in bounds then {
+                    when bound in {
+                        .Mutable() then {
+                            return true;
+                        },
+                        _ then {},
+                    };
+                };
+                false
+            },
+            .None() then false,
+        };
+    };
+
     module_private satisfies_mutable_constraint(self, target_type Type) Bool = {
         return when target_type in {
             .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(
@@ -138,7 +224,7 @@ given TypeChecker {
             .GenericStruct(template_def_id, _) then self.context().def_id_map.is_struct_mutable(
                 template_def_id,
             ),
-            .GenericParameter(_) then true,
+            .GenericParameter(name) then self.generic_param_is_mutable_bounded(name),
             _ then false,
         };
     };
@@ -941,6 +1027,7 @@ given TypeChecker {
     ) Bool = {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
+            .Foreign() then self.satisfies_foreign_constraint(subject),
             .Trait(_, trait_name, _) then self.satisfies_trait_requirement_with_args(
                 subject,
                 trait_name,
@@ -961,6 +1048,7 @@ given TypeChecker {
     ) Bool = {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
+            .Foreign() then self.satisfies_foreign_constraint(subject),
             .Trait(_, trait_name, _) then self.trait_bound_may_hold(
                 subject,
                 trait_name,
@@ -989,6 +1077,20 @@ given TypeChecker {
                         self.mutable_constraint_violation_message(
                             bound_type,
                             "checking constraint \(param_name): mutable",
+                        ),
+                        span,
+                    );
+                    false
+                }
+            },
+            .Foreign() then {
+                if self.satisfies_foreign_constraint(bound_type) then {
+                    true
+                } else {
+                    self.push_diagnostic_at_span(
+                        self.foreign_constraint_violation_message(
+                            bound_type,
+                            "checking constraint \(param_name): foreign",
                         ),
                         span,
                     );

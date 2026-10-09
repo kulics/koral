@@ -68,6 +68,8 @@ let v = Vec(1, 2);
 
 - `type` **不承诺值语义**。拷贝、传参、存储都可能共享底仓。这个共享**不可观察**——正因为类型
   浅不可变，编译器才可以自由把它优化掉。
+  **例外**：带 `Drop` 的 `type` 不在这条承诺里——析构跑几次取决于句柄数，共享因此可观察。
+  见下「`Drop` 让共享可观察」。
 - `type mutable` 的**身份是语义的一部分**。赋值与传参交出同一个对象的句柄。
 - **引用计数是实现细节**。两种形态内部都可能用 ARC 与隐藏存储。
 
@@ -95,11 +97,37 @@ let v = Vec(1, 2);
 weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 `downgrade(T)` 得 `?T`，`upgrade(?T)` 回 `Option[T]`。弱引用不保活。
 
-### `Pod` 是 FFI 边界
+### `foreign` 是 FFI 边界
 
-`Pod` 是空的标记 trait，标记**可安全跨 FFI 的值**。`borrow_ptr` / `borrow_mut_ptr` 这类把托管值
-变成裸指针的逃生舱**只对 `Pod` 开放**——否则就成了「任意类型 → 裸指针」的桥，绕过所有权。
-出处：`std/traits.koral`。
+`foreign` 是**类型种类约束**，与 `mutable` 同类（写在约束位：`[T foreign]`），不是 trait，
+也不是 marker trait。它标记**表示由 Koral 的布局自由之外决定、可以跨 FFI 的值**。
+`borrow_ptr` / `borrow_mut_ptr` 这类把托管值变成裸指针的逃生舱**只对 `foreign` 开放**——
+否则就成了「任意类型 → 裸指针」的桥，绕过所有权。
+
+它满足的是一个**封闭集合**，由编译器判定：
+
+- 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
+- 裸指针：`*unsafe T`、`*unsafe mutable T`
+- `foreign type` 声明（布局就是 C 的那个）
+- std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
+
+**用户声明不能认领 `foreign`。** 这正是它取代 `Pod` 的理由：`Pod` 是空 marker trait，
+用户可以写 `given MyType as Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
+而 Koral `type` 的布局由编译器选，跨边界的裸指针对它没有意义；要跨 FFI 的结构体应当
+写 `foreign type`。
+
+被删掉的形态：`Pod` marker trait 及其 `given ... as Pod {}` 实现。
+
+### `Drop` 让共享可观察
+
+`type` 的内存模型承诺是「共享不可观察」——正因为类型浅不可变，编译器才可以把共享优化掉。
+**带 `Drop` 的类型不享有这条**：析构在最后一个句柄消失时跑一次，所以「有几个句柄」是可观察的。
+带 `Drop` 的 `type` 因此进入与 `type mutable` 同一档——**身份是语义的一部分**，
+运行时必须按 ARC 支撑的对象对待（`has_explicit_drop` 强制 managed 布局，见
+`compiler/koralc/sema/compiler_context.koral`）。
+
+这是一条**契约**层的裁定：它约束的是「用户能依赖什么」和「编译器不许优化掉什么」，
+不改变声明语法——带 `Drop` 的类型仍然是 `type`，仍然不能声明 `mutable` 字段。
 
 ## 替代方案
 

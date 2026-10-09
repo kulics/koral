@@ -213,10 +213,12 @@ public func printAST(_ node: ASTNode) {
         printExpression(value)
       }
 
-    case .pairVariableDeclaration(let first, let second, let value, _):
-      print("\(indent)PairVariableDeclaration:")
-      print("\(indent)  First: \(first.isDiscard ? "_" : first.name)\(first.mutable ? " (mutable)" : "")")
-      print("\(indent)  Second: \(second.isDiscard ? "_" : second.name)\(second.mutable ? " (mutable)" : "")")
+    case .tupleVariableDeclaration(let bindings, let value, _):
+      print("\(indent)TupleVariableDeclaration:")
+      for binding in bindings {
+        let slot = binding.isDiscard ? "_" : binding.name
+        print("\(indent)  Binding: \(slot)\(binding.mutable ? " (mutable)" : "")")
+      }
       withIndent {
         printExpression(value)
       }

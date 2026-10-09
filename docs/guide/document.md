@@ -37,6 +37,7 @@ Koral's nominal types come in exactly two forms, chosen at the declaration site.
 - Values have **no identity**: two values with equal fields are interchangeable.
 - The **layout is chosen by the compiler**. Inline storage, hidden indirection and shared backing are all implementation details and may differ from release to release.
 - **Value semantics is not part of the language contract.** Copying, argument passing and storage may share backing storage. That sharing is unobservable precisely because the type is shallowly immutable — so the compiler is free to optimize it away.
+- **A type that implements `Drop` is the exception.** Its destructor runs once, when the last owning handle dies, so how many handles exist *is* observable. Such a type sits in the same class as `type mutable`: identity is part of its semantics, and the compiler must not optimize the sharing away. It is still declared `type` — it still cannot declare `mutable` fields.
 
 **`type mutable` — a shared object type.**
 
@@ -56,7 +57,7 @@ c.value = 5;      // ok: Counter is `type mutable` and `value` is a mutable fiel
 // c.id = 2;     // error: `id` is not a mutable field
 ```
 
-The compiler may use reference counting and hidden storage internally for either form. Those choices are not user-visible semantics: the language contract is `type` versus `type mutable`, never a managed-reference syntax.
+The compiler may use reference counting and hidden storage internally for either form. Those choices are not user-visible semantics: the language contract is `type` versus `type mutable`, never a managed-reference syntax. The one thing that crosses the line is `Drop` — see above.
 
 ### Installation and Usage
 
@@ -112,7 +113,7 @@ Statement termination rules:
 - There is no automatic semicolon insertion (ASI).
 - There is no join token or line continuation concept.
 - `()` and `[]` are grouping structures only; they do not provide newline termination semantics.
-- `if`, `when`, `for`, and `while` used as statements must end with `;`.
+- A bare `if`, `when`, `for`, or `while` expression in statement position must end with `;`.
 - Top-level declarations (functions, types, traits, given implementations) must end with `;`.
 
 ```koral
@@ -177,8 +178,8 @@ Comments are parts of the code ignored by the compiler, used to provide explanat
 // This is a single-line comment, starting from double slashes to the end of the line
 
 /*
-    This is a block comment.;
-    It can span multiple lines.;
+    This is a block comment.
+    It can span multiple lines.
     /* Koral supports nested block comments */
 */
 ```
@@ -334,14 +335,14 @@ Use `"""` delimiters to write strings that span multiple lines, following the sa
 let message = """
     Hello, Koral!
     Welcome to multiline strings.
-    """
+    """;
 // Equivalent to "Hello, Koral!\nWelcome to multiline strings."
 
 let name = "World";
 let greeting = """
     Hello, \(name)!
     Have a great day.
-    """
+    """;
 // Equivalent to "Hello, World!\nHave a great day."
 ```
 
@@ -351,7 +352,7 @@ The indentation of the closing `"""` determines how much is stripped:
 let s = """
         indented content
         second line
-    """
+    """;
 // Closing """ is indented 4 spaces, content is indented 8 spaces.
 // After stripping 4 spaces: "    indented content\n    second line"
 ```
@@ -463,16 +464,28 @@ let mutable a Int = 5;   // Explicit type annotation
 let mutable b = 123;     // Automatic type inference
 ```
 
-#### Pair Destructuring
+#### Tuple Destructuring
 
-When the right-hand side expression is a `Pair`, you can use parenthesized syntax to bind each element to a separate variable. Each binding position supports `_` (discard), `mutable` (mutable), and an optional type annotation.
+A parenthesized binding destructures a **struct by position**: the number of
+binding slots must equal the number of fields, and they bind in declaration
+order. Each slot supports `_` (discard), `mutable` (mutable binding), and an
+optional type annotation. There must be at least two slots — `(x)` is a
+parenthesized binding, not a destructuring.
+
+`Pair` is just a two-field struct, so this is how a `Pair` is taken apart too.
 
 ```koral
-let (a, b) = (1, 2);                  // Type inference
-let (c Int, d String) = (3, "hello");  // Explicit type annotations
-let (mutable e, f) = (10, 20);             // Mutable binding
-let (_, g) = (1, 2);                   // Discard first element
+let (a, b) = Pair(1, 2);                    // a two-field struct
+let (c Int, d String) = Pair(3, "hello");   // explicit type annotations
+let (mutable e, f) = Pair(10, 20);          // mutable binding
+let (_, g) = Pair(1, 2);                    // discard the first field
+
+type Point3(x Int, y Int, z Int);
+let (px, py, pz) = Point3(1, 2, 3);         // any field count
 ```
+
+There is no tuple/pair **literal**. Build a `Pair` with its constructor, like any
+other type: `Pair[Int, String](1, "a")`.
 
 ### Assignment
 
@@ -646,14 +659,15 @@ Operator precedence from high to low:
 11. Pattern test: `is`, `is not`
 12. Logical NOT: `not`
 13. Optional chaining: `and then`
-14. Logical AND: `and`
-15. Value coalescing / early-return propagation: `or else`, `or return`
+14. Value coalescing / early-return propagation: `or else`, `or return`
+15. Logical AND: `and`
 16. Logical OR: `or`
 
-When mixing `and then`, `or else`, and `or return` in one expression, use parentheses to make intent explicit. The flow keywords do not sit at one precedence level, so the unparenthesized form rarely matches what the author meant:
+The three flow keywords do not sit at one precedence level. From tightest to loosest they order `and then`, then `or else` / `or return`, then `and`, then `or`:
 
-- `and then` binds **tighter** than `and`.
-- `or else` / `or return` bind **tighter** than `or` but **looser** than `and`.
+- `and then` binds **tighter** than `or else` / `or return`: `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
+- `or else` / `or return` bind **tighter** than `and`: `a and b or else c` groups as `a and (b or else c)`.
+- `and` binds **tighter** than `or`: `a or b and c` groups as `a or (b and c)`.
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
@@ -666,19 +680,15 @@ let bad = opt and then it == 1 and false;
 // The transform is the intended scope of `and` — say so:
 let good = opt and then (it == 1 and false);   // Some(false)
 
-// Same trap with `and` on the left. `and then` still binds tighter, so
-//   ready and opt and then it > 0
-// parses as ready and (opt and then it > 0) and fails the same way.
+// The natural reading needs no parentheses: `and then` runs first, then the
+// coalescing `or else`, then the logical `and`.
 let ready Bool = true;
-let bad2 = ready and opt and then it > 0;
-
-// Reduce the flow back to a Bool before combining it:
 let good2 = ready and (opt and then it > 0 or else false);   // true
 ```
 
 Note that `(ready and opt)` is not a fix: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
 
-`or else` in the other direction — it binds tighter than `or`, so `a or b or else c` groups as `(a or b) or else c`, not `a or (b or else c)`.
+`or else` in the other direction — it binds tighter than `or`, so `a or b or else c` groups as `a or (b or else c)`, not `(a or b) or else c`.
 
 ### Functions
 
@@ -949,7 +959,7 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-When we don't need to handle the `else` branch, we can omit it. In that case the construct is a statement and does not produce a value; its block branch still defaults to `Void`.
+When we don't need to handle the `else` branch, we can omit it. The single-branch form is still an expression, but it produces `Void`: its block branch defaults to `Void`.
 
 ```koral
 let main() Void = if 1 == 1 then println("yes");
@@ -971,7 +981,7 @@ let label = if score >= 90 then {
 
 ### Loops
 
-#### while Statement
+#### while Expression
 
 In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is an expression that produces `Void`.
 
@@ -1103,12 +1113,12 @@ defer {
 Koral provides three special operators for working with `Option` and `Result` types:
 
 - `or else`: Value coalescing. Returns the right-hand default value when the left side is `None` or `Error`.
-- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`. If the right-hand side already produces the same `Option` / `Result` kind, the result is flattened by one layer.
+- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`, and **wraps the result** in the same `Option` / `Result` kind. The result type is therefore always `Option[U]` / `Result[U]`, where `U` is the transform's return type — there is no flattening, so a transform that itself returns `Option[V]` produces `Option[Option[V]]`.
 - `or return`: Early-return propagation sugar. It unwraps `Some` / `Ok`, and on `None` / `Error` returns from the enclosing function.
 
 In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
 
-Precedence follows the parser: `and then` binds tighter than logical `and`, while `or else` / `or return` bind tighter than logical `or` but looser than logical `and`.
+Precedence follows the parser: `and then` binds tightest, then `or else` / `or return`, then logical `and`, then logical `or`.
 
 ```koral
 let opt = Option[Int].Some(42);
@@ -1118,6 +1128,9 @@ let none = Option[Int].None();
 let val2 = none or else 0;         // 0 (because none is None)
 
 let mapped = opt and then it * 2;  // Some(84)
+
+// No flattening: the transform's result is wrapped as-is.
+let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
@@ -1398,12 +1411,26 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 ```
 
 Constraints can also use generic trait forms (for example `Iterator[T]`), and the
-special `mutable` constraint used by weak references (it requires a `type mutable`
-type, as `downgrade` / `upgrade` do):
+two **shape constraints**. A shape constraint is a keyword, not a trait: no
+declaration can implement it, and the compiler decides whether a type satisfies
+it from the type's own declaration.
+
+- `T mutable` — the subject must have been declared `type mutable`. This is what
+  weak references require (`downgrade` / `upgrade` spell it).
+- `T foreign` — the subject's representation is fixed outside Koral's layout
+  freedom and may cross the FFI boundary: a built-in scalar, a `*unsafe` /
+  `*unsafe mutable` pointer, a `foreign type` declaration, or std's `Rune`. It is
+  a **closed set**; a Koral `type` is not in it, because the compiler chooses its
+  layout. This is what `List.borrow_ptr` / `borrow_mut_ptr` require.
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
+let read_bytes[T foreign](buf List[T]) *unsafe T = buf.borrow_ptr();
 ```
+
+A generic parameter carries its own bounds into a call: inside `f[T Any]`, a call
+that needs `T mutable` is rejected, because a bare `T` is not declared
+`mutable`. Inside `g[T mutable]` the same call is accepted.
 
 A bound-constrained extension block only contributes members where the bound
 actually holds. Given
@@ -1467,7 +1494,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 #### Memory Model
 
-- **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed.
+- **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. **A type that implements `Drop` is the exception**: its destructor runs once per object, so the sharing is observable and such a type is treated like `type mutable` here.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
 - **Raw pointers**: the pointer types are `*unsafe T` / `*unsafe mutable T`; `&unsafe` / `&unsafe mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
 - **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
@@ -1483,6 +1510,31 @@ trait Drop {
 ```
 
 `Drop.drop` is a compiler-only destructor entry point running in a finalization context. It is not called as an ordinary user method. A type that implements `Drop` is always reference-counted, and its `drop` runs when the last owning handle dies.
+
+Because the destructor runs exactly once per object, a `Drop` type's sharing is **observable** — see [Memory Model](#memory-model). It is treated like `type mutable` on that axis.
+
+**`self` does not escape a `drop` body.** The object is being destroyed; letting it out would resurrect a dying value or move fields out from under the destructor. Inside `drop`, `self` may appear **only as the receiver** of a field read/write (`self.x`, `self.x = v`) or a method call (`self.close()`). It may not be returned, bound to a new name, stored into a field, collection or global, passed as an ordinary argument, or captured by a lambda.
+
+```koral
+trait Drop {
+    drop(self) Void;
+};
+
+type mutable File(mutable fd Int);
+
+given File as Drop {
+    drop(self) Void = {
+        let n = self.fd;   // ok: field read
+        self.fd = n;       // ok: field write (the field is `mutable`)
+        // stash(self);    // error: `self` escapes the destructor
+    };
+};
+```
+
+> **Known gap.** A method call on `self` inside `drop` (`self.close()`) is legal by
+> this rule but currently fails in code generation — the destructor's `self` is
+> passed by pointer and the call site does not dereference it. Use a field access
+> or a free function taking the field until that is fixed.
 
 #### `clone()`
 
@@ -1530,7 +1582,7 @@ Supported patterns include:
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
-- Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
+- Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
@@ -1682,7 +1734,7 @@ The `is` operator checks whether a value matches a pattern, and the result is al
 
 `is not` is the negated form and returns the inverse match result.
 
-When used in the condition of an `if` or `while` statement, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings. The `when ... in` construct uses its own pattern matching on the matched value and does not use `is` for binding.
+When used in the condition of an `if` or `while` expression, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings. The `when ... in` construct uses its own pattern matching on the matched value and does not use `is` for binding.
 
 `is` accepts a single pattern directly. If you need logical pattern combinators under `is`, group them explicitly with parentheses so the parser can distinguish them from expression-level `and` / `or` / `not`.
 

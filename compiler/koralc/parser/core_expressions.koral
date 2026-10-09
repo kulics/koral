@@ -529,46 +529,11 @@ given Parser {
         };
         when self.current().kind in {
             .Comma() then {
-                self.advance();
-                let second = self.parse_expression_checked(
-                    "pair literal second element",
-                ) or else {
-                    return .Error(it);
-                };
-                let has_rparen = when self.current().kind in {
-                    .RParen() then true,
-                    _ then false,
-                };
-                if not has_rparen then {
-                    return .Error(self.parser_error("Expected ')'"));
-                };
-                self.advance();
-                let mutable args = List[Expr].new();
-                args.push(first);
-                args.push(second);
-                let span = self.span_from_start(start);
-                return .Ok(Expr.Call(Expr.Identifier("Pair", span), args, span));
-            },
-            .KwAs() then {
-                self.advance();
-                let mutable trait_type = self.parse_type() or else {
-                    return .Error(it);
-                };
-                let has_rparen = when self.current().kind in {
-                    .RParen() then true,
-                    _ then false,
-                };
-                if not has_rparen then {
-                    return .Error(
-                        self.parser_error("Expected ')' after trait qualification"),
-                    );
-                };
-                self.advance();
-                return .Ok(
-                    Expr.TraitQualificationExpr(
-                        first,
-                        trait_type,
-                        self.span_from_start(start),
+                // There is no tuple/pair literal. A `Pair` is built with its
+                // own constructor, like any other type.
+                return .Error(
+                    self.parser_error_at_current(
+                        "A pair literal is not an expression: construct a Pair with 'Pair(first, second)'",
                     ),
                 );
             },
@@ -577,7 +542,13 @@ given Parser {
                 return .Ok(first);
             },
             _ then {
-                return .Error(self.parser_error("Expected ')'"));
+                return .Error(
+                    self.unexpected_token_error_at(
+                        token_text(self.current()),
+                        "')'",
+                        self.current(),
+                    ),
+                );
             },
         };
     };
@@ -1315,26 +1286,31 @@ given Parser {
             .LParen() then {
                 self.advance();
                 let first = self.parse_pattern_or(stop_on_in) or return;
-                // Pair pattern: (pattern1, pattern2)
+                // `(p)` is a parenthesized pattern. `(p, q, ...)` is a TUPLE
+                // pattern: positional destructuring of a struct with exactly
+                // that many fields, in declaration order. There must be at
+                // least two slots. `Pair` is destructured this way too -- it is
+                // simply a two-field struct.
                 let mutable parsed_pattern = first;
                 if self.current().kind is .Comma() then {
-                    self.advance();
-                    let second = self.parse_pattern_or(stop_on_in) or return;
+                    let mutable elements = List[PatternElement].new();
+                    elements.push(PatternElement(Option[String].None(), first));
+                    while self.current().kind is .Comma() then {
+                        self.advance();
+                        let next = self.parse_pattern_or(stop_on_in) or return;
+                        elements.push(PatternElement(Option[String].None(), next));
+                    };
                     when self.current().kind in {
                         .RParen() then {
                             self.advance();
                         },
                         _ then {
                             return .Error(
-                                self.parser_error("Expected ')' in pair pattern"),
+                                self.parser_error("Expected ')' in tuple pattern"),
                             );
                         },
                     };
-                    let mutable elements = List[PatternElement].new();
-                    elements.push(PatternElement(Option[String].None(), first));
-                    elements.push(PatternElement(Option[String].None(), second));
-                    parsed_pattern = PatternNode.StructPattern(
-                        "Pair",
+                    parsed_pattern = PatternNode.TuplePattern(
                         elements,
                         self.span_from_start(start),
                     );
@@ -1635,21 +1611,24 @@ given Parser {
     module_private parse_for_binding_pattern(self) Result[ForBindingPattern] = {
         let start = self.current();
 
+        // `(a, b, c)` destructures a struct by position -- the same rule as a
+        // tuple pattern. At least two slots.
         if self.current().kind is .LParen() then {
             self.advance();
-            let first = self.parse_pair_binding_element() or return;
+            let mutable bindings = List[PairBindingElement].new();
+            bindings.push(self.parse_pair_binding_element() or return);
             if self.current().kind is not .Comma() then {
-                return .Error(self.parser_error("Expected ',' in for binding pattern"));
+                return .Error(self.parser_error("Expected ',' in tuple binding"));
             };
-            self.advance();
-            let second = self.parse_pair_binding_element() or return;
+            while self.current().kind is .Comma() then {
+                self.advance();
+                bindings.push(self.parse_pair_binding_element() or return);
+            };
             if self.current().kind is not .RParen() then {
-                return .Error(self.parser_error("Expected ')' in for binding pattern"));
+                return .Error(self.parser_error("Expected ')' in tuple binding"));
             };
             self.advance();
-            return .Ok(
-                ForBindingPattern.Pair(first, second, self.span_from_start(start)),
-            );
+            return .Ok(ForBindingPattern.Tuple(bindings, self.span_from_start(start)));
         };
 
         let binding = self.parse_for_binding_element() or return;

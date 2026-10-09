@@ -57,12 +57,9 @@ public type CstExpr {
     PrefixKw(kw Token, operand CstExpr),
     TypeCast(lparen Token, cast_type CstType, rparen Token, operand CstExpr),
     Paren(lparen Token, inner CstExpr, rparen Token),
-    PairExpr(lparen Token, first CstExpr, comma Token, second CstExpr, rparen Token),
-    TraitQualification(lparen Token, base CstExpr, as_kw Token, trait_type CstType, rparen Token),
 
     // Access and calls
     FieldAccess(base CstExpr, dot Token, field Token),
-    QualifiedCall(base CstExpr, dot Token, trait_lparen Token, trait_name Token, trait_rparen Token, method_name Token, lparen Token, args List[CstCallArg], rparen Token),
     Call(callee CstExpr, lparen Token, args List[CstCallArg], rparen Token),
     SubscriptExpr(base CstExpr, lbracket Token, args List[CstCallArg], rbracket Token),
     GenericInst(base CstExpr, lbracket Token, type_args List[CstTypeArg], rbracket Token),
@@ -94,7 +91,7 @@ public type CstExpr {
     Lambda(lparen Token, params List[CstLambdaParam], rparen Token, ret_type Option[CstType], arrow Token, body CstExpr),
 
     // Enum variant declaration in type enum body
-    EnumVariant(name Token, lparen Option[Token], fields List[CstEnumField], rparen Option[Token]),
+    EnumVariant(name Token, lparen Token, fields List[CstEnumField], rparen Token),
 };
 
 // Call argument with optional trailing comma
@@ -149,8 +146,9 @@ public type CstPattern {
     OrPattern(left CstPattern, or_kw Token, right CstPattern),
     NotPattern(not_kw Token, inner CstPattern),
     ParenPattern(lparen Token, inner CstPattern, rparen Token),
-    // (a, b) -- pair destructuring, also the `for (a, b) in ...` binding form
-    PairPattern(lparen Token, left CstPattern, comma Token, right CstPattern, rparen Token),
+    // (a, b, c) -- positional destructuring of a struct, also the
+    // `for (a, b, c) in ...` binding form
+    TuplePattern(lparen Token, items List[CstTuplePatternItem], rparen Token),
     // [mutable] name Type -- bind the matched trait-object implementation
     TypeBinding(mut_kw Option[Token], name Token, bound_type CstType),
 };
@@ -161,6 +159,11 @@ public type CstPatternArg(
     pattern CstPattern,
     comma Option[Token],
 );
+
+// One slot of a `(a, b, c)` tuple pattern: a pattern and the comma that
+// follows it, if any. The commas are kept as tokens so the checked formatter
+// can see every token the author wrote.
+public type CstTuplePatternItem(pattern CstPattern, comma Option[Token]);
 
 // ============================================================================
 // CST When Arm
@@ -198,7 +201,7 @@ public type CstGenericParams(
 
 public type CstStmt {
     VarDecl(let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType], eq Token, value CstExpr),
-    PairVarDecl(let_kw Token, lparen Token, first CstPairBinding, comma Token, second CstPairBinding, rparen Token, eq Token, value CstExpr),
+    TupleVarDecl(let_kw Token, lparen Token, items List[CstTupleBindingItem], rparen Token, eq Token, value CstExpr),
     Assignment(target CstExpr, op Token, value CstExpr),
     ExprStmt(expr CstExpr, semi Option[Token]),
     Defer(kw Token, value CstExpr),
@@ -213,6 +216,10 @@ public type CstPairBinding(
     binding_type Option[CstType],
     is_discard Bool,
 );
+
+// One slot of a `let (a, _, c) = ...` tuple binding: a binding and the comma
+// that follows it, if any.
+public type CstTupleBindingItem(binding CstPairBinding, comma Option[Token]);
 
 // ============================================================================
 // CST Type Body (for type declarations)
@@ -254,7 +261,6 @@ public type CstDecl {
     Type(vis Option[Token], modifiers List[Token], kw Token, mut_kw Option[Token], generic_params Option[CstGenericParams], name Token, body CstTypeBody),
     Trait(vis Option[Token], kw Token, generic_params Option[CstGenericParams], name Token, super_traits List[CstType], lbrace Token, members List[CstItem], rbrace Token),
     Given(vis Option[Token], modifiers List[Token], kw Token, generic_params Option[CstGenericParams], target CstType, as_kw Option[Token], trait_type Option[CstType], lbrace Token, members List[CstItem], rbrace Token),
-    GivenNot(vis Option[Token], modifiers List[Token], kw Token, generic_params Option[CstGenericParams], target CstType, not_kw Token, trait_name Token),
     Var(vis Option[Token], let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType]),
     TraitMethod(vis Option[Token], generic_params Option[CstGenericParams], name Token, lparen Token, params List[CstTraitMethodParam], rparen Token, return_type Option[CstType]),
 };

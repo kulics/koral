@@ -183,15 +183,15 @@ public class Parser {
     return (name, type, value, mutable)
   }
 
-  // Parse variable declaration or pair destructuring
+  // Parse variable declaration or tuple destructuring
   private func variableDeclaration() throws -> StatementNode {
     // Record the span at the start of the declaration (at 'let' keyword)
     let startSpan = currentSpan
     try match(.letKeyword)
 
-    // After 'let', if we see '(' it's pair destructuring: let (a, b) = expr
+    // After 'let', if we see '(' it's tuple destructuring: let (a, b, c) = expr
     if currentToken === .leftParen {
-      return try parsePairVariableDeclaration(startSpan: startSpan)
+      return try parseTupleVariableDeclaration(startSpan: startSpan)
     }
 
     // Normal variable declaration: let [mutable] name [Type] = expr
@@ -222,23 +222,28 @@ public class Parser {
       name: name, type: type, value: value, mutable: mutable, span: startSpan)
   }
 
-  /// Parse pair destructuring: `let (binding1, binding2) = expr`
-  /// Each binding is: `_` | `[mutable] name [Type]`
-  private func parsePairVariableDeclaration(startSpan: SourceSpan) throws -> StatementNode {
+  /// Parse tuple destructuring: `let (binding1, binding2, ...) = expr`
+  /// Each binding is: `_` | `[mutable] name [Type]`. At least two slots.
+  private func parseTupleVariableDeclaration(startSpan: SourceSpan) throws -> StatementNode {
     try match(.leftParen)
 
-    let first = try parsePairBindingElement()
-
+    var bindings: [PairBindingElement] = [try parsePairBindingElement()]
     try match(.comma)
-
-    let second = try parsePairBindingElement()
+    while true {
+      bindings.append(try parsePairBindingElement())
+      if currentToken === .comma {
+        try match(.comma)
+      } else {
+        break
+      }
+    }
 
     try match(.rightParen)
     try match(.equal)
 
     let value = try expression()
 
-    return .pairVariableDeclaration(first: first, second: second, value: value, span: startSpan)
+    return .tupleVariableDeclaration(bindings: bindings, value: value, span: startSpan)
   }
 
   /// Parse a single binding element inside pair destructuring: `_` | `[mutable] name [Type]`
@@ -281,13 +286,22 @@ public class Parser {
   func parseForBindingPattern() throws -> BindingPatternNode {
     let startSpan = currentSpan
 
+    // `(a, b, c)` destructures a struct by position -- the same rule as a
+    // tuple pattern. At least two slots.
     if currentToken === .leftParen {
       try match(.leftParen)
-      let first = try parsePairBindingElement()
+      var bindings: [PairBindingElement] = [try parsePairBindingElement()]
       try match(.comma)
-      let second = try parsePairBindingElement()
+      while true {
+        bindings.append(try parsePairBindingElement())
+        if currentToken === .comma {
+          try match(.comma)
+        } else {
+          break
+        }
+      }
       try match(.rightParen)
-      return .pair(first: first, second: second, span: startSpan)
+      return .tuple(bindings: bindings, span: startSpan)
     }
 
     let binding = try parseForBindingElement()

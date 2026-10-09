@@ -267,7 +267,10 @@ given Command {
 
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
-    public run(self) Result[ExitStatus] = self.spawn() and then it.wait();
+    public run(self) Result[ExitStatus] = when self.spawn() in {
+        .Ok(child) then child.wait(),
+        .Error(e) then Result[ExitStatus].Error(e),
+    };
 
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.
@@ -276,6 +279,9 @@ given Command {
         self.storage.stdout_cfg = IoRedirect.Piped();
         self.storage.stderr_cfg = IoRedirect.Piped();
 
-        return self.spawn() and then it.wait_output();
+        return when self.spawn() in {
+            .Ok(child) then child.wait_output(),
+            .Error(e) then Result[CommandOutput].Error(e),
+        };
     };
 };

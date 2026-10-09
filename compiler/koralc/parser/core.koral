@@ -477,48 +477,6 @@ given Parser {
     module_private invalid_module_name_error(self, name String) String =
         "Module name '\(name)' must start with a lowercase letter";
 
-    // 通过 lookahead 检查 [...] 后面是否跟着标识符
-    module_private is_generic_type_expr(self) Bool = {
-        when self.current().kind in {
-            .LBracket() then {},
-            _ then {
-                return false;
-            },
-        };
-
-        // Lookahead: 跳过 [...] 找到 ] 后的 token
-        let mutable depth UInt = 0;
-        let mutable i = self.index;
-        while i < self.tokens.count() then {
-            let tok = self.tokens[i];
-            when tok.kind in {
-                .LBracket() then {
-                    depth += 1;
-                },
-                .RBracket() then {
-                    if depth == 1 then {
-                        // 找到匹配的 ]，检查下一个 token
-                        if i + 1 < self.tokens.count() then {
-                            let next_tok = self.tokens[i + 1];
-                            return when next_tok.kind in {
-                                .Identifier(_) then not next_tok.has_newline_before,
-                                _ then false,
-                            };
-                        };
-                        return false;
-                    };
-                    depth -= 1;
-                },
-                .Eof() then {
-                    return false;
-                },
-                _ then {},
-            };
-            i += 1;
-        };
-        return false;
-    };
-
     module_private advance(self) Token = {
         let t = self.current();
         if not self.is_eof() then {
@@ -887,6 +845,10 @@ given Parser {
             self.advance();
             return .Ok(Option[Bound].Some(Bound.Mutable()));
         };
+        if self.current().kind is .KwForeign() then {
+            self.advance();
+            return .Ok(Option[Bound].Some(Bound.Foreign()));
+        };
         if self.is_type_start() then {
             let node = self.parse_type() or return;
             return .Ok(bound_from_type_node(node));
@@ -1051,7 +1013,8 @@ given Parser {
                     self.parser_error_at_current("Lifetime syntax has been removed."),
                 );
             };
-            if self.current().kind is not .KwMut() and not self.is_type_start() then {
+            if self.current().kind is not .KwMut() and not self.current().kind is .KwForeign() and not self.is_type_start(
+            ) then {
                 let t = self.current();
                 let mutable message = StringBuilder.new();
                 message.push_string("Type parameter '");
@@ -1106,6 +1069,10 @@ given Parser {
         reject_named_params Bool,
     ) Result[List[Param]] = {
         let mutable params = List[Param].new();
+        // Positional params must come before named params (grammar.bnf
+        // <func-param-list>): a declaration fixes one call shape, so the two
+        // kinds may not be interleaved.
+        let mutable seen_named = false;
 
         while true then {
             if self.current().kind is .RParen() then {
@@ -1170,6 +1137,13 @@ given Parser {
                             ),
                         );
                     };
+                    seen_named = true;
+                } else if seen_named then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Positional parameter '\(name)' cannot appear after named parameters",
+                        ),
+                    );
                 };
 
                 if not self.is_type_start() then {
@@ -1758,170 +1732,187 @@ given Parser {
                             };
                             let mutable case_fields = List[EnumCaseField].new();
 
-                            if self.current().kind is .LParen() then {
-                                self.advance();
-                                while true then {
-                                    when self.current().kind in {
-                                        .RParen() then {
-                                            self.advance();
-                                            break;
-                                        },
-                                        .Eof() then {
+                            // A variant declaration always writes its parens --
+                            // `Red()`, never bare `Red` -- so the declaration
+                            // matches the expression (`.Red()`) and pattern
+                            // (`.Red()`) spellings.
+                            if self.current().kind is not .LParen() then {
+                                return .Error(
+                                    self.unexpected_token_error_at(
+                                        token_text(self.current()),
+                                        "'('",
+                                        self.current(),
+                                    ),
+                                );
+                            };
+                            self.advance();
+                            // Positional payload fields must come before named
+                            // ones, same rule as <func-param-list>.
+                            let mutable seen_named_payload = false;
+                            while true then {
+                                when self.current().kind in {
+                                    .RParen() then {
+                                        self.advance();
+                                        break;
+                                    },
+                                    .Eof() then {
+                                        return .Error(
+                                            self.parser_error(
+                                                "Unexpected EOF in enum payload",
+                                            ),
+                                        );
+                                    },
+                                    _ then {
+                                        let payload_name_token = self.current();
+                                        let payload_name = self.expect_identifier(
+                                            "enum payload name",
+                                        ) or return;
+                                        if not self.is_valid_value_name(payload_name) then {
                                             return .Error(
-                                                self.parser_error(
-                                                    "Unexpected EOF in enum payload",
+                                                self.parser_error_at(
+                                                    self.invalid_parameter_name_error(
+                                                        payload_name,
+                                                    ),
+                                                    payload_name_token,
                                                 ),
                                             );
-                                        },
-                                        _ then {
-                                            let payload_name_token = self.current();
-                                            let payload_name = self.expect_identifier(
-                                                "enum payload name",
-                                            ) or return;
-                                            if not self.is_valid_value_name(
-                                                payload_name,
-                                            ) then {
+                                        };
+                                        // Check for colon - indicates named field
+                                        let mutable payload_named = false;
+                                        if self.current().kind is .Colon() then {
+                                            payload_named = true;
+                                            self.advance();
+                                            seen_named_payload = true;
+                                        } else if seen_named_payload then {
+                                            return .Error(
+                                                self.parser_error_at_current(
+                                                    "Positional field '\(payload_name)' cannot appear after named fields",
+                                                ),
+                                            );
+                                        };
+                                        let mutable payload_type = self.parse_type() or return;
+                                        // Parse optional default value for named fields
+                                        if self.current().kind is .Assign() then {
+                                            if not payload_named then {
                                                 return .Error(
-                                                    self.parser_error_at(
-                                                        self.invalid_parameter_name_error(
-                                                            payload_name,
-                                                        ),
-                                                        payload_name_token,
+                                                    self.parser_error_at_current(
+                                                        "Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
                                                     ),
                                                 );
                                             };
-                                            // Check for colon - indicates named field
-                                            let mutable payload_named = false;
-                                            if self.current().kind is .Colon() then {
-                                                payload_named = true;
-                                                self.advance();
-                                            };
-                                            let mutable payload_type = self.parse_type() or return;
-                                            // Parse optional default value for named fields
-                                            if self.current().kind is .Assign() then {
-                                                if not payload_named then {
-                                                    return .Error(
-                                                        self.parser_error_at_current(
-                                                            "Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
-                                                        ),
-                                                    );
-                                                };
-                                                self.advance();
-                                                let mutable field_default_val = StringBuilder.new(
-                                                );
-                                                field_default_val.push_string("");
-                                                when self.current().kind in {
-                                                    .IntegerLiteral(v) then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            v.to_string(),
-                                                        );
-                                                    },
-                                                    .FloatLiteral(v) then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            v.to_string(),
-                                                        );
-                                                    },
-                                                    .StringLiteral(v) then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            "\"\(v)\"",
-                                                        );
-                                                    },
-                                                    .RuneLiteral(v) then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            "'\(v)'",
-                                                        );
-                                                    },
-                                                    .KwTrue() then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            "true",
-                                                        );
-                                                    },
-                                                    .KwFalse() then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            "false",
-                                                        );
-                                                    },
-                                                    .LBracket() then {
-                                                        self.advance();
-                                                        when self.current().kind in {
-                                                            .RBracket() then {
-                                                                self.advance();
-                                                                field_default_val = StringBuilder.new(
-                                                                );
-                                                                field_default_val.push_string(
-                                                                    "[]",
-                                                                );
-                                                            },
-                                                            _ then {
-                                                                return .Error(
-                                                                    self.parser_error_at_current(
-                                                                        "Expected ']' for empty collection default value",
-                                                                    ),
-                                                                );
-                                                            },
-                                                        };
-                                                    },
-                                                    .Range() then {
-                                                        self.advance();
-                                                        field_default_val = StringBuilder.new(
-                                                        );
-                                                        field_default_val.push_string(
-                                                            "..",
-                                                        );
-                                                    },
-                                                    _ then {
-                                                        return .Error(
-                                                            self.parser_error_at_current(
-                                                                "Expected literal default value after '='",
-                                                            ),
-                                                        );
-                                                    },
-                                                };
-                                                self.parsed_defaults.insert(
-                                                    "\(case_name).\(payload_name)",
-                                                    field_default_val.to_string(),
-                                                );
-                                            };
-                                            case_fields.push(
-                                                EnumCaseField(
-                                                    payload_name,
-                                                    payload_type,
-                                                    payload_named,
-                                                ),
+                                            self.advance();
+                                            let mutable field_default_val = StringBuilder.new(
                                             );
+                                            field_default_val.push_string("");
                                             when self.current().kind in {
-                                                .Comma() then {
+                                                .IntegerLiteral(v) then {
                                                     self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        v.to_string(),
+                                                    );
                                                 },
-                                                .RParen() then {},
+                                                .FloatLiteral(v) then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        v.to_string(),
+                                                    );
+                                                },
+                                                .StringLiteral(v) then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        "\"\(v)\"",
+                                                    );
+                                                },
+                                                .RuneLiteral(v) then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        "'\(v)'",
+                                                    );
+                                                },
+                                                .KwTrue() then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        "true",
+                                                    );
+                                                },
+                                                .KwFalse() then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string(
+                                                        "false",
+                                                    );
+                                                },
+                                                .LBracket() then {
+                                                    self.advance();
+                                                    when self.current().kind in {
+                                                        .RBracket() then {
+                                                            self.advance();
+                                                            field_default_val = StringBuilder.new(
+                                                            );
+                                                            field_default_val.push_string(
+                                                                "[]",
+                                                            );
+                                                        },
+                                                        _ then {
+                                                            return .Error(
+                                                                self.parser_error_at_current(
+                                                                    "Expected ']' for empty collection default value",
+                                                                ),
+                                                            );
+                                                        },
+                                                    };
+                                                },
+                                                .Range() then {
+                                                    self.advance();
+                                                    field_default_val = StringBuilder.new(
+                                                    );
+                                                    field_default_val.push_string("..");
+                                                },
                                                 _ then {
                                                     return .Error(
-                                                        self.parser_error(
-                                                            "Expected ',' or ')' in enum payload",
+                                                        self.parser_error_at_current(
+                                                            "Expected literal default value after '='",
                                                         ),
                                                     );
                                                 },
                                             };
-                                        },
-                                    };
+                                            self.parsed_defaults.insert(
+                                                "\(case_name).\(payload_name)",
+                                                field_default_val.to_string(),
+                                            );
+                                        };
+                                        case_fields.push(
+                                            EnumCaseField(
+                                                payload_name,
+                                                payload_type,
+                                                payload_named,
+                                            ),
+                                        );
+                                        when self.current().kind in {
+                                            .Comma() then {
+                                                self.advance();
+                                            },
+                                            .RParen() then {},
+                                            _ then {
+                                                return .Error(
+                                                    self.parser_error(
+                                                        "Expected ',' or ')' in enum payload",
+                                                    ),
+                                                );
+                                            },
+                                        };
+                                    },
                                 };
                             };
 
@@ -1998,7 +1989,7 @@ given Parser {
         self.advance();
 
         if self.current().kind is .LParen() then {
-            return self.parse_pair_let_statement(start);
+            return self.parse_tuple_let_statement(start);
         };
 
         let mutable is_mut = false;
@@ -2038,36 +2029,38 @@ given Parser {
         );
     };
 
-    module_private parse_pair_let_statement(self, start Token) Result[Statement] = {
+    /// `let (a, b, c) = expr;` -- positional destructuring of a struct with
+    /// exactly that many fields, in declaration order. At least two slots.
+    module_private parse_tuple_let_statement(self, start Token) Result[Statement] = {
         self.advance();
 
-        let first = self.parse_pair_binding_element() or return;
+        let mutable bindings = List[PairBindingElement].new();
+        bindings.push(self.parse_pair_binding_element() or return);
 
         if self.current().kind is not .Comma() then {
-            return .Error(self.parser_error("Expected ',' in pair let statement"));
+            return .Error(self.parser_error("Expected ',' in tuple let statement"));
         };
-        self.advance();
-
-        let second = self.parse_pair_binding_element() or return;
+        while self.current().kind is .Comma() then {
+            self.advance();
+            bindings.push(self.parse_pair_binding_element() or return);
+        };
 
         if self.current().kind is not .RParen() then {
-            return .Error(self.parser_error("Expected ')' in pair let statement"));
+            return .Error(self.parser_error("Expected ')' in tuple let statement"));
         };
         self.advance();
 
         if self.current().kind is .Eof() then {
-            return .Error(self.parser_error("Expected '=' in pair let statement"));
+            return .Error(self.parser_error("Expected '=' in tuple let statement"));
         };
         if self.current().kind is not .Assign() then {
-            return .Error(self.parser_error("Expected '=' in pair let statement"));
+            return .Error(self.parser_error("Expected '=' in tuple let statement"));
         };
         self.advance();
 
-        let value = self.parse_expression_checked("pair let statement value") or return;
+        let value = self.parse_expression_checked("tuple let statement value") or return;
         let _ = self.require_semicolon() or return;
-        return .Ok(
-            Statement.PairLetStmt(first, second, value, self.span_from_start(start)),
-        );
+        return .Ok(Statement.TupleLetStmt(bindings, value, self.span_from_start(start)));
     };
 
     module_private parse_pair_binding_element(self) Result[PairBindingElement] = {

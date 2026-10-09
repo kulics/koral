@@ -271,8 +271,8 @@ final class MIRLowerer {
         return nil
       }
       return CanonicalTraitRef(traitName: name, traitDefId: defId, traitTypeArgs: resolvedArgs)
-    case .mutable:
-      // `mutable` is a shape requirement, not a trait; it has no vtable ref.
+    case .mutable, .foreign:
+      // A shape requirement is not a trait; it has no vtable ref.
       return nil
     }
   }
@@ -1008,25 +1008,11 @@ private final class MIRFunctionBuilder {
       } else {
         append(.evaluate(initialValue))
       }
-    case .pairVariableDeclaration(
-      let pairSymbol,
-      let pairValue,
-      let firstSymbol,
-      let firstMember,
-      let firstMutable,
-      let secondSymbol,
-      let secondMember,
-      let secondMutable
-    ):
-      lowerPairVariableDeclaration(
-        pairSymbol: pairSymbol,
-        pairValue: pairValue,
-        firstSymbol: firstSymbol,
-        firstMember: firstMember,
-        firstMutable: firstMutable,
-        secondSymbol: secondSymbol,
-        secondMember: secondMember,
-        secondMutable: secondMutable
+    case .tupleVariableDeclaration(let tupleSymbol, let tupleValue, let bindings):
+      lowerTupleVariableDeclaration(
+        tupleSymbol: tupleSymbol,
+        tupleValue: tupleValue,
+        bindings: bindings
       )
     case .assignment(let target, let operatorKind, let value):
       lowerAssignment(target: target, operatorKind: operatorKind, value: value)
@@ -1210,52 +1196,56 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func lowerPairVariableDeclaration(
-    pairSymbol: Symbol,
-    pairValue: TypedExpressionNode,
-    firstSymbol: Symbol?,
-    firstMember: Symbol,
-    firstMutable: Bool,
-    secondSymbol: Symbol?,
-    secondMember: Symbol,
-    secondMutable: Bool
+  /// `let (a, b, c) = expr;` -- bind each slot to the struct field at the same
+  /// position. The number of slots equals the number of fields.
+  private func lowerTupleVariableDeclaration(
+    tupleSymbol: Symbol,
+    tupleValue: TypedExpressionNode,
+    bindings: [Symbol?]
   ) {
-    let pairInitialValue = lowerValue(pairValue)
+    let tupleInitialValue = lowerValue(tupleValue)
     guard !currentBlockIsTerminated else { return }
 
-    let pairLocal = makeLocal(
-      name: context.getName(pairSymbol.defId) ?? "pair_\(pairSymbol.defId.id)",
-      type: pairSymbol.type,
+    let tupleLocal = makeLocal(
+      name: context.getName(tupleSymbol.defId) ?? "tuple_\(tupleSymbol.defId.id)",
+      type: tupleSymbol.type,
       mutability: .mutable,
       storage: .temporary,
-      symbol: pairSymbol
+      symbol: tupleSymbol
     )
-    localByDefId[pairSymbol.defId.id] = pairLocal.id
-    append(.declare(pairLocal.id))
-    append(.assign(.local(pairLocal.id), pairInitialValue))
+    localByDefId[tupleSymbol.defId.id] = tupleLocal.id
+    append(.declare(tupleLocal.id))
+    append(.assign(.local(tupleLocal.id), tupleInitialValue))
 
-    let pairPlace = MIRPlace.local(pairLocal.id)
-    lowerPairBinding(
-      symbol: firstSymbol,
-      member: firstMember,
-      mutable: firstMutable,
-      pairPlace: pairPlace
-    )
-    lowerPairBinding(
-      symbol: secondSymbol,
-      member: secondMember,
-      mutable: secondMutable,
-      pairPlace: pairPlace
-    )
+    let tuplePlace = MIRPlace.local(tupleLocal.id)
+    for (index, binding) in bindings.enumerated() {
+      lowerTupleBinding(
+        symbol: binding,
+        index: index,
+        tuplePlace: tuplePlace,
+        tupleType: tupleSymbol.type
+      )
+    }
   }
 
-  private func lowerPairBinding(
+  /// A slot binds the struct field at the same position. The field list comes
+  /// from the type's DECLARATION order -- identity only, never a name lookup.
+  /// A discarded slot drops its field at the destructuring site.
+  private func lowerTupleBinding(
     symbol: Symbol?,
-    member: Symbol,
-    mutable: Bool,
-    pairPlace: MIRPlace
+    index: Int,
+    tuplePlace: MIRPlace,
+    tupleType: Type
   ) {
-    let fieldPlace = MIRPlace.field(base: pairPlace, field: member)
+    guard let members = resolvedPatternStructMembers(for: tupleType),
+          members.indices.contains(index) else {
+      return
+    }
+    let member = members[index]
+    let fieldPlace = MIRPlace.field(
+      base: tuplePlace,
+      field: makeSyntheticPatternFieldSymbol(name: member.name, type: member.type)
+    )
     guard let symbol else {
       if needsDrop(member.type) {
         append(.drop(fieldPlace))
@@ -1266,7 +1256,7 @@ private final class MIRFunctionBuilder {
     let local = makeLocal(
       name: context.getName(symbol.defId) ?? "local_\(symbol.defId.id)",
       type: symbol.type,
-      mutability: mutable ? .mutable : .immutable,
+      mutability: symbol.isMutable() ? .mutable : .immutable,
       storage: .local,
       symbol: symbol
     )

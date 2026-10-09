@@ -147,8 +147,6 @@ public trait Default {
 public trait Clone {
     clone(self) Self;
 };
-
-public trait Pod {};
 ```
 
 ## Types
@@ -1207,7 +1205,7 @@ given[T Any] List[T] {
     public binary_search_by[K Ord](self, key Func(T) K, target K) Pair[UInt, Bool];
 };
 
-given[T Pod] List[T] {
+given[T foreign] List[T] {
     public borrow_ptr(self) *unsafe T;
     public borrow_mut_ptr(self) *unsafe mutable T;
 };
@@ -1578,8 +1576,6 @@ given Rune as ToString {
     public to_string(self) String;
 };
 
-given Rune as Pod {};
-
 given[T Hash] Set[T] as Drop {};
 
 given[T Hash] Set[T] {
@@ -1921,36 +1917,6 @@ given[T Any] *unsafe mutable T as Eq {
 given[T Any] *unsafe mutable T as Hash {
     public hash(self) UInt;
 };
-
-given Bool as Pod {};
-
-given Int as Pod {};
-
-given Int8 as Pod {};
-
-given Int16 as Pod {};
-
-given Int32 as Pod {};
-
-given Int64 as Pod {};
-
-given UInt as Pod {};
-
-given UInt8 as Pod {};
-
-given UInt16 as Pod {};
-
-given UInt32 as Pod {};
-
-given UInt64 as Pod {};
-
-given Float32 as Pod {};
-
-given Float64 as Pod {};
-
-given[T Any] *unsafe T as Pod {};
-
-given[T Any] *unsafe mutable T as Pod {};
 
 given[T Eq, U Eq] Pair[T, U] as Eq {
     public equals(self, other Pair[T, U]) Bool;

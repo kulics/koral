@@ -105,9 +105,9 @@ extension TypeChecker {
 
       for constraint in param.constraints {
         switch constraint {
-        case .mutable:
-          // `mutable` is a shape requirement and is always satisfied for a
-          // generic parameter (checked at its own declaration).
+        case .mutable, .foreign:
+          // A shape requirement is checked at the generic parameter's own
+          // declaration.
           continue
 
         case .trait(_, let traitName, _):
@@ -1200,7 +1200,8 @@ extension TypeChecker {
       return false
     case .enumCase(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
-    case .structPattern(_, let elements, _):
+    case .structPattern(_, let elements, _),
+         .tuplePattern(let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
     case .andPattern(let left, let right, _):
       return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
@@ -1216,7 +1217,8 @@ extension TypeChecker {
     case .traitObjectType, .traitObjectTypeBinding:
       return true
     case .enumCase(_, let elements, _),
-         .structPattern(_, let elements, _):
+         .structPattern(_, let elements, _),
+         .tuplePattern(let elements, _):
       return elements.contains { untypedPatternRequiresRawSubject($0.pattern) }
     case .andPattern(let left, let right, _),
          .orPattern(let left, let right, _):
@@ -3121,7 +3123,7 @@ extension TypeChecker {
 
     let traitTypeArgs: [Type]
     switch traitConstraint {
-    case .mutable:
+    case .mutable, .foreign:
       traitTypeArgs = []
     case .trait(_, _, let args):
       traitTypeArgs = try args.map { try resolveTypeNode($0) }
@@ -4912,6 +4914,32 @@ extension TypeChecker {
           }
         }
 
+        // Enforce the method's OWN type-parameter bounds against what the call
+        // site bound them to. Same gate a free function's call site runs
+        // (`enforceGenericConstraints`) and the same one the explicit
+        // `obj.[T]method(args)` path runs at `resolveGenericMethodWithExplicitTypeArgs`;
+        // inferred type arguments must not skip it. The parameters are paired
+        // with their arguments by name within the method's own binder, in
+        // declaration order -- the argument list `inferMethodCall` later
+        // extracts is in first-appearance order and must not be zipped against
+        // the declarations.
+        let ownTypeParams = methodTypeParamsByDefId[method.defId] ?? []
+        if !ownTypeParams.isEmpty {
+          var orderedArgs: [Type] = []
+          var allBound = true
+          for param in ownTypeParams {
+            if let bound = methodTypeParamBindings[param.name] {
+              orderedArgs.append(bound)
+            } else {
+              allBound = false
+              break
+            }
+          }
+          if allBound {
+            try enforceGenericConstraints(typeParameters: ownTypeParams, args: orderedArgs)
+          }
+        }
+
         // Extract method type args in order from the function type
         // The order is determined by the order of first appearance in the function type
         let paramNames = extractGenericParameterNames(from: method.type)
@@ -6187,7 +6215,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable:
+          case .mutable, .foreign:
             continue
           }
         }
@@ -8173,20 +8201,29 @@ extension TypeChecker {
     switch pattern {
     case .binding(let binding):
       return try typeCheckForBindingElement(binding, expectedType: elementType)
-    case .pair(let first, let second, let span):
-      guard case .genericStruct(let templateDefId, let typeArgs) = elementType,
-            context.isStdNominal(templateDefId, context.stdPairTemplateDefId),
-            typeArgs.count == 2 else {
-        throw SemanticError(.typeMismatch(expected: "Pair", got: elementType.description), span: span)
+    case .tuple(let bindings, let span):
+      // `(a, b, c)` -- positional destructuring of a struct with exactly that
+      // many fields, in declaration order. Field types come from the subject's
+      // DECLARATION, never from a name.
+      let innerType = unwrapTupleSubjectType(elementType)
+      guard let members = try tupleDestructuringMembers(of: innerType),
+            members.count == bindings.count else {
+        throw SemanticError(
+          .typeMismatch(
+            expected: "a struct with \(bindings.count) fields",
+            got: innerType.description
+          ),
+          span: span
+        )
       }
 
-      return .structPattern(
-        typeName: "Pair",
-        elements: [
-          try typeCheckForBindingElement(first, expectedType: typeArgs[0]),
-          try typeCheckForBindingElement(second, expectedType: typeArgs[1]),
-        ]
-      )
+      var elements: [TypedPattern] = []
+      for (index, binding) in bindings.enumerated() {
+        elements.append(try typeCheckForBindingElement(binding, expectedType: members[index].type))
+      }
+      // Display-only name for exhaustiveness messages; the match itself is
+      // against the subject's declaration identity.
+      return .structPattern(typeName: innerType.description, elements: elements)
     }
   }
 
@@ -8459,6 +8496,12 @@ extension TypeChecker {
         try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
       }
       return .structPattern(typeName: typeName, elements: typedElements)
+    case .tuplePattern(let elements, _):
+      let typedElements = try elements.map { elem -> TypedPattern in
+        try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
+      }
+      // The SUBJECT decides which struct this is; the name here is display-only.
+      return .structPattern(typeName: expectedType.description, elements: typedElements)
     }
   }
 
@@ -8486,7 +8529,8 @@ extension TypeChecker {
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
-    case .structPattern(_, let elements, _):
+    case .structPattern(_, let elements, _),
+         .tuplePattern(let elements, _):
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
@@ -8682,34 +8726,30 @@ extension TypeChecker {
 
   // MARK: - and then Lowering
 
-  /// Computes the result type of `and then`, with smart flattening.
-  /// Returns (finalType, isFlattened).
+  /// Result type of `operand and then transform`.
+  ///
+  /// The transform's value is always wrapped in the operand's own flow enum:
+  /// `Option[U]` for an `Option` operand, `Result[U]` for a `Result` one, where
+  /// `U` is whatever the transform returns. There is NO flattening -- a
+  /// transform that itself returns `Option[V]` yields `Option[Option[V]]` --
+  /// because flattening makes the result type depend on the SHAPE of the
+  /// transform's type, which a generic transform does not have yet.
   private func computeAndThenResultType(
     operandKind: OptionResultKind,
     transformResultType: Type
-  ) -> (Type, Bool) {
+  ) -> Type {
     switch operandKind {
     case .option:
-      // If transform already returns Option, flatten
-      if stdOptionInner(transformResultType) != nil {
-        return (transformResultType, true)
-      }
-      // Otherwise wrap in Option
       guard let optionDefId = stdOptionEnumDefId else {
-        return (transformResultType, false)
+        return transformResultType
       }
-      return (genericEnumType(template: "Option", templateDefId: optionDefId, args: [transformResultType]), false)
+      return genericEnumType(template: "Option", templateDefId: optionDefId, args: [transformResultType])
 
     case .result:
-      // If transform already returns Result (1 type param), flatten
-      if stdResultInner(transformResultType) != nil {
-        return (transformResultType, true)
-      }
-      // Otherwise wrap in Result
       guard let resultDefId = stdResultEnumDefId else {
-        return (transformResultType, false)
+        return transformResultType
       }
-      return (genericEnumType(template: "Result", templateDefId: resultDefId, args: [transformResultType]), false)
+      return genericEnumType(template: "Result", templateDefId: resultDefId, args: [transformResultType])
     }
   }
 
@@ -8739,7 +8779,7 @@ extension TypeChecker {
     }
     let transformType = typedTransform.type
 
-    let (finalType, flattened) = computeAndThenResultType(
+    let finalType = computeAndThenResultType(
       operandKind: kind, transformResultType: transformType)
 
     // Build the lowered whenExpression.
@@ -8750,13 +8790,8 @@ extension TypeChecker {
                                                 elements: [.variable(symbol: underscoreSymbol)])
       let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
 
-      let someBody: TypedExpressionNode
-      if flattened || typedTransform.type == .never {
-        someBody = typedTransform
-      } else {
-        someBody = .enumConstruction(type: finalType, caseName: "Some",
-                                      arguments: [typedTransform])
-      }
+      let someBody = TypedExpressionNode.enumConstruction(
+        type: finalType, caseName: "Some", arguments: [typedTransform])
       let noneBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "None", arguments: [])
 
@@ -8777,13 +8812,8 @@ extension TypeChecker {
       let errPattern = TypedPattern.enumCase(caseName: "Error", tagIndex: 1,
                                               elements: [.variable(symbol: errSym)])
 
-      let okBody: TypedExpressionNode
-      if flattened || typedTransform.type == .never {
-        okBody = typedTransform
-      } else {
-        okBody = .enumConstruction(type: finalType, caseName: "Ok",
-                                    arguments: [typedTransform])
-      }
+      let okBody = TypedExpressionNode.enumConstruction(
+        type: finalType, caseName: "Ok", arguments: [typedTransform])
       let errBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Error",
         arguments: [.variable(identifier: errSym)])

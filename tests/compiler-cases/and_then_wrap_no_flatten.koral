@@ -1,0 +1,92 @@
+// `and then` wraps the transform's value and NEVER flattens: the result type is
+// always Option[U] / Result[U], where U is the transform's return type. A
+// transform that itself returns Option[V] therefore yields Option[Option[V]].
+// Flattening would make the result type depend on the SHAPE of the transform's
+// type, which a generic transform does not have yet.
+// EXPECT: Option wrap bare Some: Some(20)
+// EXPECT: Option wrap bare None: None
+// EXPECT: Option nested Some: Some(Some(10))
+// EXPECT: Option nested inner None: Some(None)
+// EXPECT: Option nested outer None: None
+// EXPECT: Result wrap bare Ok: Ok(99)
+// EXPECT: Result nested Ok: Ok(Ok(50))
+// EXPECT: Result nested inner Error: Ok(Error: div by zero)
+
+let safe_div(x Int, y Int) Option[Int] = {
+    return if y == 0 then {
+        Option[Int].None()
+    } else {
+        Option[Int].Some(x / y)
+    };
+};
+
+let safe_result_div(x Int, y Int) Result[Int] = {
+    return if y == 0 then {
+        Result[Int].Error("div by zero")
+    } else {
+        Result[Int].Ok(x / y)
+    };
+};
+
+let print_option(label String, opt Option[Int]) Void = {
+    print(label);
+    when opt in {
+        .Some(v) then println("Some(" + v.to_string() + ")"),
+        .None() then println("None"),
+    };
+};
+
+let print_result(label String, res Result[Int]) Void = {
+    print(label);
+    when res in {
+        .Ok(v) then println("Ok(" + v.to_string() + ")"),
+        .Error(e) then println("Error: " + e.message()),
+    };
+};
+
+let print_nested_option(label String, opt Option[Option[Int]]) Void = {
+    print(label);
+    when opt in {
+        .Some(inner) then when inner in {
+            .Some(v) then println("Some(Some(" + v.to_string() + "))"),
+            .None() then println("Some(None)"),
+        },
+        .None() then println("None"),
+    };
+};
+
+let print_nested_result(label String, res Result[Result[Int]]) Void = {
+    print(label);
+    when res in {
+        .Ok(inner) then when inner in {
+            .Ok(v) then println("Ok(Ok(" + v.to_string() + "))"),
+            .Error(e) then println("Ok(Error: " + e.message() + ")"),
+        },
+        .Error(e) then println("Error: " + e.message()),
+    };
+};
+
+let main() Int = {
+    let opt_some = Option[Int].Some(100);
+    let opt_none = Option[Int].None();
+
+    // Transform returns a bare U -> wrapped once.
+    print_option("Option wrap bare Some: ", opt_some and then it / 5);
+    print_option("Option wrap bare None: ", opt_none and then it / 5);
+
+    // Transform returns Option[V] -> NOT flattened.
+    print_nested_option("Option nested Some: ", opt_some and then safe_div(it, 10));
+    print_nested_option("Option nested inner None: ", opt_some and then safe_div(it, 0));
+    print_nested_option("Option nested outer None: ", opt_none and then safe_div(it, 10));
+
+    let res_ok = Result[Int].Ok(100);
+
+    print_result("Result wrap bare Ok: ", res_ok and then it - 1);
+    print_nested_result("Result nested Ok: ", res_ok and then safe_result_div(it, 2));
+    print_nested_result(
+        "Result nested inner Error: ",
+        res_ok and then safe_result_div(it, 0),
+    );
+
+    return 0;
+};

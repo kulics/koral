@@ -514,14 +514,16 @@ extension TypeChecker {
       for constraint in param.constraints {
         switch constraint {
         case .mutable:
-          // `mutable` is a shape requirement, not a trait. Generic-parameter
-          // arguments are checked at their own declaration; concrete types must
-          // have been declared `type mutable`.
-          if case .genericParameter = args[i] {
-            continue
-          }
+          // `mutable` is a shape requirement, not a trait. A generic-parameter
+          // argument satisfies it only if ITS OWN declaration says `T mutable`.
           let ctx = "checking constraint \(param.name): mutable"
           try enforceMutableConstraint(args[i], context: ctx)
+
+        case .foreign:
+          // `foreign` is a shape requirement too. Same rule for a
+          // generic-parameter argument: it must itself be declared `T foreign`.
+          let ctx = "checking constraint \(param.name): foreign"
+          try enforceForeignConstraint(args[i], context: ctx)
 
         case .trait(_, let traitName, let traitArgs):
           // A real trait bound (e.g. `T Equatable`, `R [T]Iterator`).
@@ -623,6 +625,13 @@ extension TypeChecker {
     return traitInfo
   }
 
+  /// Whether the type parameter `name` was itself declared `T mutable`.
+  /// A bare `T` gets no free pass -- otherwise `f[T Any]` could satisfy a
+  /// `g[T mutable]` requirement by forwarding its own unconstrained `T`.
+  private func genericParamHasShapeBound(_ name: String, _ match: (Bound) -> Bool) -> Bool {
+    return (genericTraitBounds[name] ?? []).contains(where: match)
+  }
+
   /// Checks that a type satisfies the 'mutable' constraint — i.e., it is declared as 'type mutable'.
   private func enforceMutableConstraint(_ type: Type, context: String? = nil) throws {
     let satisfied: Bool
@@ -635,9 +644,8 @@ extension TypeChecker {
     case .genericStruct(let templateDefId, _):
       // The type carries the template's DECLARATION; the spelling is not read.
       satisfied = templateDefId.isValid ? context_isTypeMutable(templateDefId) : false
-    case .genericParameter:
-      // Generic parameters with 'mutable' bound are checked at call sites
-      return
+    case .genericParameter(let name):
+      satisfied = genericParamHasShapeBound(name) { if case .mutable = $0 { return true }; return false }
     default:
       satisfied = false
     }
@@ -647,6 +655,41 @@ extension TypeChecker {
         "Type '\(type)' does not satisfy the 'mutable' constraint\(ctx). Only types declared with 'type mutable' can be used as weak references."
       ), span: currentSpan)
     }
+  }
+
+  /// Whether `type`'s representation is fixed outside Koral's layout freedom and
+  /// may therefore cross the FFI boundary. A CLOSED set, decided by the compiler
+  /// and not claimable by any user declaration: the built-in scalars (including
+  /// std's `Rune`), raw pointers, and `foreign type` declarations.
+  private func satisfiesForeignConstraint(_ type: Type) -> Bool {
+    switch type {
+    case .bool, .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64,
+         .float32, .float64:
+      return true
+    case .pointer, .mutablePointer:
+      return true
+    case .structure(let defId):
+      return context.isForeignStruct(defId) || context.isStdNominal(defId, context.stdRuneDefId)
+    case .genericParameter(let name):
+      return genericParamHasShapeBound(name) { if case .foreign = $0 { return true }; return false }
+    default:
+      return false
+    }
+  }
+
+  /// Checks that a type satisfies the 'foreign' constraint.
+  private func enforceForeignConstraint(_ type: Type, context ctx: String? = nil) throws {
+    if case .error = type {
+      return
+    }
+    if satisfiesForeignConstraint(type) {
+      return
+    }
+    let ctxText = ctx.map { " (\($0))" } ?? ""
+    throw SemanticError(.generic(
+      "Type '\(type)' does not satisfy the 'foreign' constraint\(ctxText). Only built-in scalars, raw pointers and 'foreign type' declarations cross the FFI boundary."
+    ), span: currentSpan)
   }
 
   private func context_isTypeMutable(_ defId: DefId) -> Bool {

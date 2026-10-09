@@ -147,6 +147,13 @@ public class TypeChecker {
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
+  // A method's OWN type parameters (`get[T mutable]` inside a `given`) keyed by
+  // the method symbol's declaration identity. The call site holds a `Symbol`;
+  // this is the only way back to the bound list it must enforce -- the symbol's
+  // type carries the parameter NAMES (as `.genericParameter`) but not their
+  // constraints. Registered wherever a method declaration is assigned its
+  // DefId; empty lists are never stored.
+  var methodTypeParamsByDefId: [DefId: [TypeParameterDecl]] = [:]
 
   var traits: [String: TraitDeclInfo] = [:]
   var qualifiedTraits: [String: TraitDeclInfo] = [:]
@@ -866,6 +873,8 @@ public class TypeChecker {
       return .trait(defId: visibleTraitInfo(name)?.defId ?? .invalid, name: name, args: args)
     case .mutable:
       return .mutable
+    case .foreign:
+      return .foreign
     }
   }
 
@@ -880,6 +889,8 @@ public class TypeChecker {
       return "t\(defId.id)<\(argsStr)>"
     case .mutable:
       return "m"
+    case .foreign:
+      return "f"
     }
   }
 
@@ -1337,6 +1348,9 @@ public class TypeChecker {
           packageID: currentPackageID,
           span: currentSpan
         )
+    if !method.typeParameters.isEmpty {
+      methodTypeParamsByDefId[defId] = method.typeParameters
+    }
     return MethodDeclaration(
       name: method.name,
       typeParameters: method.typeParameters,

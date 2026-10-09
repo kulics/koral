@@ -84,9 +84,11 @@
 <func-param> ::= "mutable"? <identifier> <type-annotation>                  // positional param
                | "mutable"? <identifier> ":" <type-annotation>               // named param
                | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named param with default
-// Positional params must come before named params.
-//   — 目前在**调用点**（实参）与**结构体字段列表**两处强制；
-//     **参数声明层尚未强制**（`f(a: Int, b Int)` 会被接受），这是已知缺口。
+// Positional params must come before named params. Enforced at function /
+// method / foreign declarations, struct and enum payload field lists, and call
+// arguments. `f(a: Int, b Int)` is rejected at the declaration.
+// NOT yet enforced inside a pattern's argument list (`Point(y: 2, x)`) -- the
+// subject is matched positionally there and no name is available to report.
 // Named params must be called with labels: name: value.
 // Only named params (with colon) can have default values.
 
@@ -127,7 +129,7 @@
           | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named field with default
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
-<variant> ::= <type-identifier> ("(" <variant-field-list>? ")")?   // 括号可省（`Red` 与 `Red()` 都合法）
+<variant> ::= <type-identifier> "(" <variant-field-list>? ")"       // 括号必写：声明位也写 `Red()`，与构造位 `.Red()`、模式位 `.Red()` 一致
 <variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
 <variant-field> ::= <identifier> <type-annotation>                    // positional
                   | <identifier> ":" <type-annotation>                 // named
@@ -168,12 +170,18 @@
 <generic-param> ::= <type-identifier> <trait-constraints>
 <trait-constraints> ::= <trait-constraint> ("and" <trait-constraint>)*
 <trait-constraint> ::= "mutable"
+                     | "foreign"
                      | <type-identifier>
                      | <generic-type>
-// 说明：当前 parser 约束里支持三类：
-// 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）
-// 2) 简单 trait 名（如 Eq）
-// 3) 泛型 trait（如 Iterator[T]）
+// 说明：当前 parser 约束里支持四类：
+// 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）——
+//    主体必须声明为 `type mutable`
+// 2) 类型种类约束关键字 `foreign`（同样不是 trait 名）——主体的表示由
+//    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` 指针、
+//    `foreign type` 声明，以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
+//    用户声明不能认领（`type` 的布局由编译器选，不在其中）
+// 3) 简单 trait 名（如 Eq）
+// 4) 泛型 trait（如 Iterator[T]）
 // 约束是必填的：`[T]` 报 `Type parameter 'T' requires a constraint`；
 // 不加约束就写 `[T Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
 
@@ -225,10 +233,14 @@
 // Single-branch `if`/`when`/`while`/`for` semantically produce Void.
 
 <let-statement> ::= "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"
-                | "let" "(" <pair-binding> "," <pair-binding> ")" "=" <expression> ";"
+                | "let" <tuple-binding> "=" <expression> ";"
 
-<pair-binding> ::= "_"
-                | "mutable"? <identifier> <type-annotation>?
+// A tuple binding destructures a STRUCT by position: `(a, b, c)` against a
+// struct with exactly three fields, in declaration order. N >= 2 -- `(x)` is a
+// parenthesized binding, not a tuple. A field may be discarded with `_`.
+<tuple-binding> ::= "(" <binding-element> ("," <binding-element>)+ ")"
+<binding-element> ::= "_"
+                    | "mutable"? <identifier> <type-annotation>?
 
 <assignment-statement> ::= <expression> <assign-op> <expression> ";"
 <assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
@@ -261,25 +273,29 @@
 <when-expression> ::= "when" <expression> "in" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
 <match-arm> ::= <match-pattern> "then" <expression>
-<for-binding-pattern> ::= <pair-binding>
-                        | "(" <pair-binding> "," <pair-binding> ")"
+<for-binding-pattern> ::= <binding-element>
+                        | <tuple-binding>
 
 // ============================================================================
 // Binary Expressions (by precedence, lowest to highest)
 // ============================================================================
 
-<or-expression> ::= <option-flow-expression> ("or" <option-flow-expression>)*
+<or-expression> ::= <and-expression> ("or" <and-expression>)*
 
-<option-flow-expression> ::= <and-expression>
-                           (("or" "else" <and-expression>)
+<and-expression> ::= <option-flow-expression> ("and" <option-flow-expression>)*
+
+<option-flow-expression> ::= <and-then-expression>
+                           (("or" "else" <and-then-expression>)
                            | ("or" "return"))*
 // "or else" is value coalescing for Option/Result types
 // "or return" is early-return propagation for Option/Result types
+// They sit between `and then` and `and`: `f() and then g(it) or else h()`
+// groups as `(f() and then g(it)) or else h()`, and `a and b or else c`
+// groups as `a and (b or else c)`.
 
 <and-then-expression> ::= <not-expression> ("and" "then" <not-expression>)*
 // "and then" is optional chaining / value transformation for Option/Result types
 
-<and-expression> ::= <and-then-expression> ("and" <and-then-expression>)*
 <not-expression> ::= "not" <is-expression> | <is-expression>
 
 <is-expression> ::= <range-expression>
@@ -379,7 +395,8 @@
 //   passed by label, a positional parameter (`name Type`) MUST NOT be. There is no
 //   optional-label form. This applies uniformly to functions, methods and constructors,
 //   and the same rule governs pattern destructuring.
-// - Positional arguments must not appear after named arguments.
+// - Positional arguments must not appear after named arguments (call sites;
+//   see the note on <func-param-list> for pattern argument lists).
 // - Named arguments match by parameter/field name and may reorder named fields in constructors.
 // - Default values are provided by named parameter / named field declarations, not by call-site fill syntax.
 
@@ -396,10 +413,9 @@
                        | <collection-literal>
                        | <block-expression>
                        | <lambda-expression>
-                       | <pair-literal>
                        | "(" <expression> ")"
-
-<pair-literal> ::= "(" <expression> "," <expression> ")"
+// There is NO tuple/pair literal. A `Pair` is constructed with its own
+// constructor (`Pair[Int, String](1, "a")`) like any other type.
 
 // Generic instantiation is handled by postfix composition:
 //   TypeName[T]  → <identifier> <subscript-suffix>  (GenericInstantiation)
@@ -461,7 +477,7 @@
                     | <trait-object-type-pattern>             // exact trait-object implementation type test
                     | "mutable"? <identifier>                     // variable binding
                     | <struct-pattern>                        // struct destructuring pattern
-                    | <pair-pattern>                          // pair destructuring pattern
+                    | <tuple-pattern>                         // positional destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
                     | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
@@ -484,7 +500,11 @@
                           | <type-identifier> "[" <type-list> "]"
 // Generic concrete nominal type pattern, e.g. ParseError[Int].
 
-<pair-pattern> ::= "(" <match-pattern> "," <match-pattern> ")"
+<tuple-pattern> ::= "(" <match-pattern> ("," <match-pattern>)+ ")"
+// Positional destructuring against a STRUCT with exactly as many fields:
+// `(a, b, c)` matches a three-field struct in declaration order. N >= 2 -- `(p)`
+// is a parenthesized pattern. This is how `Pair` is destructured too, since
+// `Pair` is simply a two-field struct.
 
 <struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.
@@ -516,7 +536,6 @@
             | <duration-literal>
             | <string-literal>
             | <rune-literal>
-            | <interpolated-string-literal>
             | <bool-literal>
 
 <duration-literal> ::= <decimal-literal> <duration-suffix>
@@ -538,28 +557,46 @@
 
 <decimal-digits> ::= [0-9]+ ("_" [0-9]+)*
 
-<string-literal> ::= '"' <string-char>* '"'
-                   | '"""' "\n" <multiline-content> '"""'
+// One string literal with two layouts. Interpolation is optional -- a literal
+// with no `\(` is an ordinary string, one with at least one is an interpolated
+// string -- so there is no separate spelling and no ambiguity between two
+// productions. Only `"` delimits a string; there is no raw-string form.
+<string-literal> ::= '"' <single-line-string-part>* '"'
+                   | '"""' "\n" <multiline-string-part>* <multiline-closing>
 
-<rune-literal> ::= "'" <rune-char>* "'"
+<single-line-string-part> ::= <escape-sequence>
+                            | <interpolation>
+                            | <single-line-string-char>
+// Any Unicode scalar except `"`, `\` and newline.
+<single-line-string-char> ::= ~["\\\n]
 
-<multiline-string-literal> ::= '"""' "\n" <multiline-content> <multiline-closing>
-<multiline-content> ::= (<multiline-line> "\n")*
-<multiline-line> ::= <any character except newline>*
+// Inside a multi-line string a newline is ordinary content, and so is every
+// other scalar except `\`. The string ends at the first unescaped `"""`.
+<multiline-string-part> ::= <escape-sequence>
+                          | <interpolation>
+                          | <multiline-string-char>
+<multiline-string-char> ::= ~[\\]
+
 <multiline-closing> ::= <indent-whitespace> '"""'
-// The leading whitespace of the closing """ defines the indentation prefix
-// that is stripped from every content line.
-// Every non-empty content line must start with at least that prefix.
+// The leading whitespace of the closing `"""` defines the indentation prefix
+// that is stripped from every content line. Every non-empty content line must
+// start with at least that prefix, otherwise the literal is rejected.
+<indent-whitespace> ::= (" " | "\t")*
 
-<interpolated-string-literal> ::= '"' (<string-char> | <interpolation>)* '"'
-                                | '"""' "\n" (<multiline-char> | <interpolation>)* <multiline-closing>
 <interpolation> ::= "\(" <expression> ")"
 
-<string-char> ::= <escape-sequence> | ~["\\\n]
+// Exactly one Unicode scalar value -- `''` and `'ab'` are both errors. The
+// literal's default type is `Rune`; in a context that expects `UInt8` the same
+// spelling is inferred as a byte. One form, two types.
+<rune-literal> ::= "'" <rune-char> "'"
+// Any Unicode scalar except `'` and newline.
 <rune-char> ::= <escape-sequence> | ~['\\\n]
+
 <escape-sequence> ::= "\\" ("n" | "t" | "r" | "v" | "f" | "0" | "\\" | '"' | "'")
                     | "\\x" [0-9a-fA-F] [0-9a-fA-F]
                     | "\\u{" [0-9a-fA-F]+ "}"
+// \xHH  — exactly 2 hex digits, produces a single byte (0x00–0xFF)
+// \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid Unicode scalar)
 // \xHH  — exactly 2 hex digits, produces a single byte (0x00–0xFF)
 // \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid Unicode scalar)
 

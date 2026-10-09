@@ -94,6 +94,18 @@ extension TypeChecker {
     }
   }
 
+  /// `self` in a `drop` body may only be the receiver of a field access or a
+  /// method call. Everything else would let a dying object outlive its own
+  /// destructor. See `docs/guide/document.md` "Drop".
+  private func validateDropBodyEscape(body: ExpressionNode) throws {
+    if let span = dropSelfEscapeSpan(body) {
+      throw SemanticError(
+        .generic(
+          "'self' cannot escape a drop body: it may only be the receiver of a field access or a method call"
+        ), span: span)
+    }
+  }
+
   private func markExplicitDropConformanceTarget(_ type: Type) {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
@@ -1299,7 +1311,7 @@ extension TypeChecker {
 
         let traitArgNodes: [TypeNode]
         switch traitConstraint {
-        case .mutable:
+        case .mutable, .foreign:
           traitArgNodes = []
         case .trait(_, _, let args):
           traitArgNodes = args
@@ -1469,6 +1481,7 @@ extension TypeChecker {
             // Validate drop signature
             if method.name == "drop" {
               try validateCompilerDropSignature(params: params, returnType: returnType, selfType: genericSelfType)
+              try validateDropBodyEscape(body: method.body)
             }
 
             return (params, returnType)
@@ -1681,7 +1694,7 @@ extension TypeChecker {
         try recordGenericTraitBounds(typeParams)
         try currentScope.defineType("Self", type: selfType)
         switch traitConstraint {
-        case .mutable:
+        case .mutable, .foreign:
           return []
         case .trait(_, _, let argNodes):
           return try argNodes.map { try resolveTypeNode($0) }
@@ -2850,6 +2863,7 @@ extension TypeChecker {
 
           if method.name == "drop" {
             try validateCompilerDropSignature(params: params, returnType: returnType, selfType: type)
+            try validateDropBodyEscape(body: method.body)
           }
 
           let functionType = Type.function(
@@ -2959,7 +2973,7 @@ extension TypeChecker {
 
       let traitArgNodes: [TypeNode] = {
         switch traitConstraint {
-        case .mutable:
+        case .mutable, .foreign:
           return []
         case .trait(_, _, let args):
           return args
@@ -3086,7 +3100,7 @@ extension TypeChecker {
         let parentTraitName = parentConstraint.baseName
         let parentTraitArgTypes: [Type]
         switch parentConstraint {
-        case .mutable:
+        case .mutable, .foreign:
           parentTraitArgTypes = []
         case .trait(_, _, let parentArgNodes):
           parentTraitArgTypes = try parentArgNodes.map {
@@ -3184,6 +3198,7 @@ extension TypeChecker {
 
           if isStdDropTrait(traitDefId) && method.name == "drop" {
             try validateCompilerDropSignature(params: resolvedParams, returnType: resolvedReturn, selfType: selfType)
+            try validateDropBodyEscape(body: method.body)
           }
 
           let resolvedFunctionType = Type.function(

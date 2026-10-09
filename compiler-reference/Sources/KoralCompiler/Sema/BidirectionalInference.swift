@@ -486,12 +486,25 @@ public class BidirectionalInference {
             }
             extendEnvironment(name: name, type: valueType)
 
-        case .pairVariableDeclaration(let first, let second, let value, _):
+        case .tupleVariableDeclaration(let bindings, let value, _):
             let valueType = synthesize(value, span: span)
-            // Extract Pair type args for binding types
-            if case .genericStruct(_, let typeArgs) = valueType, typeArgs.count == 2 {
-                if !first.isDiscard { extendEnvironment(name: first.name, type: typeArgs[0]) }
-                if !second.isDiscard { extendEnvironment(name: second.name, type: typeArgs[1]) }
+            // Best effort: each slot takes the type at the same position when
+            // the subject's fields are visible from here. For a generic struct
+            // the type arguments are the field types only for shapes like
+            // `Pair[T, U]`; anything else is left to the real checker.
+            let fieldTypes: [Type]
+            switch valueType {
+            case .genericStruct(_, let typeArgs) where typeArgs.count == bindings.count:
+                fieldTypes = typeArgs
+            case .structure(let defId):
+                fieldTypes = (context.getStructMembers(defId) ?? []).map { $0.type }
+            default:
+                fieldTypes = []
+            }
+            if fieldTypes.count == bindings.count {
+                for (index, binding) in bindings.enumerated() where !binding.isDiscard {
+                    extendEnvironment(name: binding.name, type: fieldTypes[index])
+                }
             }
             
         case .expression(let expr, _):

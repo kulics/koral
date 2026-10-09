@@ -31,13 +31,14 @@
 public enum Bound: CustomStringConvertible {
     case trait(defId: DefId, name: String, args: [TypeNode])
     case mutable
+    case foreign
 
     /// The declaration identity of the required trait, or nil for shape bounds
     /// (which have no declaration).
     public var defId: DefId? {
         switch self {
         case .trait(let defId, _, _): return defId
-        case .mutable: return nil
+        case .mutable, .foreign: return nil
         }
     }
 
@@ -49,6 +50,7 @@ public enum Bound: CustomStringConvertible {
         switch self {
         case .trait(_, let name, _): return name
         case .mutable: return "mutable"
+        case .foreign: return "foreign"
         }
     }
 
@@ -57,7 +59,7 @@ public enum Bound: CustomStringConvertible {
     public var traitName: String? {
         switch self {
         case .trait(_, let name, _): return name
-        case .mutable: return nil
+        case .mutable, .foreign: return nil
         }
     }
 
@@ -66,7 +68,7 @@ public enum Bound: CustomStringConvertible {
     public var traitArgs: [TypeNode] {
         switch self {
         case .trait(_, _, let args): return args
-        case .mutable: return []
+        case .mutable, .foreign: return []
         }
     }
 
@@ -77,6 +79,7 @@ public enum Bound: CustomStringConvertible {
         switch self {
         case .trait(_, let name, let args): return .trait(defId: defId, name: name, args: args)
         case .mutable: return .mutable
+        case .foreign: return .foreign
         }
     }
 
@@ -94,6 +97,8 @@ public enum Bound: CustomStringConvertible {
             return "[\(argsStr)]\(name)"
         case .mutable:
             return "mutable"
+        case .foreign:
+            return "foreign"
         }
     }
 }
@@ -117,6 +122,8 @@ public func boundFromTypeNode(_ node: TypeNode) throws -> Bound? {
             return nil
         } else if name == "mutable" {
             return .mutable
+        } else if name == "foreign" {
+            return .foreign
         } else {
             return .trait(defId: .invalid, name: name, args: [])
         }

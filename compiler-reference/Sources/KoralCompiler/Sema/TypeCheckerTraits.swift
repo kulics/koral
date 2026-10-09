@@ -154,6 +154,13 @@ extension TypeChecker {
         type1: "mutable",
         type2: ""
       )
+    case .foreign:
+      // `foreign` is a shape requirement too, with no trait declaration.
+      throw SemanticError.invalidOperation(
+        op: "invalid trait bound",
+        type1: "foreign",
+        type2: ""
+      )
     }
   }
 

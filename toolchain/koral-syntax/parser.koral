@@ -513,6 +513,10 @@ given CstParser {
                     constraints.push(CstType.ConstraintKeyword(self.eat()));
                     continue;
                 };
+                if self.check(.KwForeign()) then {
+                    constraints.push(CstType.ConstraintKeyword(self.eat()));
+                    continue;
+                };
                 let ct = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then {
@@ -540,6 +544,10 @@ given CstParser {
     file_private parse_params(self) Result[List[CstParam]] = {
         let mutable params = List[CstParam].new();
         let mutable first UInt = 1;
+        // Positional params must come before named params (grammar.bnf
+        // <func-param-list>): a declaration fixes one call shape, so the two
+        // kinds may not be interleaved.
+        let mutable seen_named = false;
         while not self.check(.RParen()) and not self.is_eof() then {
             // `self` is the only receiver form. `*self` / `*self mutable` are
             // gone with managed refs -- the receiver's mutability follows the
@@ -572,6 +580,11 @@ given CstParser {
             let mutable colon = Option[Token].None();
             if self.check(.Colon()) then {
                 colon = .Some(self.eat());
+                seen_named = true;
+            } else if seen_named then {
+                return .Error(
+                    "Parse error: Positional parameter '\(name.to_string())' cannot appear after named parameters",
+                );
             };
 
             // Parameters must have explicit type annotation.
@@ -609,22 +622,21 @@ given CstParser {
     // Expression parsing — recursive descent with precedence
     // ========================================================================
     // Precedence (low to high):
-    //   or return
-    //   or else
     //   or
-    //   and then
     //   and
+    //   or else / or return
+    //   and then
     //   not
-    //   is / is not (newline before `is` is allowed as a grammar join token)
+    //   is / is not
+    //   range (.., ..<, <.., <..<)
+    //   == <> < > <= >=
     //   | (bitwise or)
     //   ^ (bitwise xor)
     //   & (bitwise and)
-    //   range (.., ..<, etc.)
-    //   == <> > < >= <=
     //   << >>
     //   + -
     //   * / %
-    //   prefix (-, ~, deptr, cast)
+    //   prefix (-, ~, cast)
     //   postfix (., call, subscript)
     //   primary
     // ========================================================================
@@ -638,7 +650,7 @@ given CstParser {
     };
 
     file_private parse_or(self) Result[CstExpr] = {
-        let mutable left = when self.parse_option_flow() in {
+        let mutable left = when self.parse_and() in {
             .Ok(e) then e,
             .Error(e) then {
                 return .Error(e);
@@ -653,7 +665,7 @@ given CstParser {
                 break;
             };
             let op = self.eat();
-            let right = when self.parse_option_flow() in {
+            let right = when self.parse_and() in {
                 .Ok(e) then e,
                 .Error(e) then {
                     return .Error(e);
@@ -664,8 +676,11 @@ given CstParser {
         return .Ok(left);
     };
 
+    // `or else` / `or return` sit between `and then` and logical `and`:
+    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
+    // and `a and b or else c` groups as `a and (b or else c)`.
     file_private parse_option_flow(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and() in {
+        let mutable left = when self.parse_and_then() in {
             .Ok(e) then e,
             .Error(e) then {
                 return .Error(e);
@@ -677,7 +692,7 @@ given CstParser {
                 .KwElse() then {
                     let or_kw = self.eat();
                     let else_kw = self.eat();
-                    let right = when self.parse_and() in {
+                    let right = when self.parse_and_then() in {
                         .Ok(e) then e,
                         .Error(e) then {
                             return .Error(e);
@@ -728,7 +743,7 @@ given CstParser {
     };
 
     file_private parse_and(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and_then() in {
+        let mutable left = when self.parse_option_flow() in {
             .Ok(e) then e,
             .Error(e) then {
                 return .Error(e);
@@ -740,7 +755,7 @@ given CstParser {
                 break;
             };
             let op = self.eat();
-            let right = when self.parse_and_then() in {
+            let right = when self.parse_option_flow() in {
                 .Ok(e) then e,
                 .Error(e) then {
                     return .Error(e);
@@ -1328,6 +1343,9 @@ given CstParser {
 
     file_private parse_call_args(self) Result[List[CstCallArg]] = {
         let mutable args = List[CstCallArg].new();
+        // Positional arguments must not appear after named arguments
+        // (grammar.bnf <argument-list>).
+        let mutable seen_named = false;
         while not self.check(.RParen()) and not self.is_eof() then {
             if self.check(.Semi()) then {
                 self.eat();
@@ -1348,6 +1366,11 @@ given CstParser {
             if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
                 label = .Some(self.eat());
                 colon = .Some(self.eat());
+                seen_named = true;
+            } else if seen_named then {
+                return .Error(
+                    "Parse error: Positional arguments are not allowed after named arguments",
+                );
             };
             let mutable value = when self.parse_expr_node() in {
                 .Ok(e) then e,
@@ -1726,36 +1749,11 @@ given CstParser {
             },
         };
         if self.check(.Comma()) then {
-            let comma = self.eat();
-            let second = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            return .Ok(.PairExpr(lp, inner, comma, second, rp));
-        };
-        if self.check(.KwAs()) then {
-            let as_kw = self.eat();
-            let trait_type = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            return .Ok(.TraitQualification(lp, inner, as_kw, trait_type, rp));
+            // There is no tuple/pair literal. A `Pair` is built with its own
+            // constructor, like any other type.
+            return .Error(
+                "Parse error: A pair literal is not an expression: construct a Pair with 'Pair(first, second)'",
+            );
         };
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
@@ -2276,30 +2274,38 @@ given CstParser {
         };
 
         // `( p )` -- parenthesized pattern
-        // `( a, b )` -- pair pattern, which is also the `for (a, b) in ...` binding
+        // `( a, b, c )` -- tuple pattern: positional destructuring of a struct,
+        // also the `for (a, b, c) in ...` binding form
         if self.check(.LParen()) then {
             let lp = self.eat();
-            let left = when self.parse_pattern_node() in {
+            let first = when self.parse_pattern_node() in {
                 .Ok(parsed_pattern) then parsed_pattern,
                 .Error(e) then {
                     return .Error(e);
                 },
             };
             if self.check(.Comma()) then {
-                let comma = self.eat();
-                let right = when self.parse_pattern_node() in {
-                    .Ok(parsed_pattern) then parsed_pattern,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
+                let mutable items = List[CstTuplePatternItem].new();
+                let mutable current = first;
+                while self.check(.Comma()) then {
+                    let comma = self.eat();
+                    let next = when self.parse_pattern_node() in {
+                        .Ok(parsed_pattern) then parsed_pattern,
+                        .Error(e) then {
+                            return .Error(e);
+                        },
+                    };
+                    items.push(CstTuplePatternItem(current, .Some(comma)));
+                    current = next;
                 };
+                items.push(CstTuplePatternItem(current, .None()));
                 let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then {
                         return .Error(e);
                     },
                 };
-                return .Ok(.PairPattern(lp, left, comma, right, rp));
+                return .Ok(.TuplePattern(lp, items, rp));
             };
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -2307,7 +2313,7 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            return .Ok(.ParenPattern(lp, left, rp));
+            return .Ok(.ParenPattern(lp, first, rp));
         };
 
         // Variable or struct pattern: name or Name(args)
@@ -2467,18 +2473,24 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            let comma = when self.expect(.Comma(), "','") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
+            let mutable items = List[CstTupleBindingItem].new();
+            let mutable current = first;
+            // At least two slots: `let (x) = ...` is not a tuple binding.
+            if not self.check(.Comma()) then {
+                return .Error("Parse error: expected ',' in tuple let statement");
             };
-            let second = when self.parse_pair_binding() in {
-                .Ok(binding) then binding,
-                .Error(e) then {
-                    return .Error(e);
-                },
+            while self.check(.Comma()) then {
+                let comma = self.eat();
+                let next = when self.parse_pair_binding() in {
+                    .Ok(binding) then binding,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                items.push(CstTupleBindingItem(current, .Some(comma)));
+                current = next;
             };
+            items.push(CstTupleBindingItem(current, .None()));
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then {
@@ -2501,7 +2513,7 @@ given CstParser {
                 return .Error("Parse error: expected ';' after let declaration");
             };
             self.eat();
-            return .Ok(.PairVarDecl(let_kw, lp, first, comma, second, rp, eq, value));
+            return .Ok(.TupleVarDecl(let_kw, lp, items, rp, eq, value));
         };
 
         let mutable mut_kw = Option[Token].None();
@@ -3154,6 +3166,9 @@ given CstParser {
         if self.check(.LParen()) then {
             let lp = self.eat();
             let mutable items = List[CstStructBodyItem].new();
+            // Positional fields must come before named fields (grammar.bnf
+            // <field-list>), same rule as <func-param-list>.
+            let mutable seen_named_field = false;
             while not self.check(.RParen()) and not self.is_eof() then {
                 let nl_count = self.count_newlines();
                 if nl_count >= 2 then {
@@ -3197,6 +3212,11 @@ given CstParser {
                 let mutable field_colon = Option[Token].None();
                 if self.check(.Colon()) then {
                     field_colon = .Some(self.eat());
+                    seen_named_field = true;
+                } else if seen_named_field then {
+                    return .Error(
+                        "Parse error: Positional field '\(field_name.to_string())' cannot appear after named fields",
+                    );
                 };
                 let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
@@ -3327,69 +3347,79 @@ given CstParser {
             },
         };
 
-        let mutable lp = Option[Token].None();
         let mutable fields = List[CstEnumField].new();
-        let mutable rp = Option[Token].None();
+        // Positional payload fields must come before named ones -- see
+        // parse_params.
+        let mutable seen_named_field = false;
 
-        if self.check(.LParen()) then {
-            lp = .Some(self.eat());
-            while not self.check(.RParen()) and not self.is_eof() then {
-                // A comment between payload fields is documentation on the
-                // field that follows it, not a field name. Keep it.
-                let mutable comments = List[Token].new();
-                while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
-                    comments.push(self.eat());
-                };
-                let field_name = when self.expect_ident("enum field name") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                // `name Type` (positional) and `name: Type` (named) are both
-                // <variant-field> spellings (grammar.bnf).
-                let mutable field_colon = Option[Token].None();
-                if self.check(.Colon()) then {
-                    field_colon = .Some(self.eat());
-                };
-                let field_type = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                // Only named fields (with a colon) may carry a default.
-                if field_colon is .None() and self.check(.Eq()) then {
-                    return .Error(
-                        "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
-                    );
-                };
-                let default_value = when self.parse_default_value() in {
-                    .Ok(d) then d,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let comma = self.eat_comma();
-                fields.push(
-                    CstEnumField(
-                        comments,
-                        field_name,
-                        field_colon,
-                        field_type,
-                        default_value,
-                        comma,
-                    ),
+        // A variant declaration always writes its parens -- `Red()`, never bare
+        // `Red` -- so the declaration matches the expression (`.Red()`) and
+        // pattern (`.Red()`) spellings.
+        let lp = when self.expect(.LParen(), "'('") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        while not self.check(.RParen()) and not self.is_eof() then {
+            // A comment between payload fields is documentation on the
+            // field that follows it, not a field name. Keep it.
+            let mutable comments = List[Token].new();
+            while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+                comments.push(self.eat());
+            };
+            let field_name = when self.expect_ident("enum field name") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            // `name Type` (positional) and `name: Type` (named) are both
+            // <variant-field> spellings (grammar.bnf).
+            let mutable field_colon = Option[Token].None();
+            if self.check(.Colon()) then {
+                field_colon = .Some(self.eat());
+                seen_named_field = true;
+            } else if seen_named_field then {
+                return .Error(
+                    "Parse error: Positional field '\(field_name.to_string())' cannot appear after named fields",
                 );
             };
-            rp = .Some(
-                when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
+            let field_type = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
                 },
+            };
+            // Only named fields (with a colon) may carry a default.
+            if field_colon is .None() and self.check(.Eq()) then {
+                return .Error(
+                    "Parse error: Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                );
+            };
+            let default_value = when self.parse_default_value() in {
+                .Ok(d) then d,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let comma = self.eat_comma();
+            fields.push(
+                CstEnumField(
+                    comments,
+                    field_name,
+                    field_colon,
+                    field_type,
+                    default_value,
+                    comma,
+                ),
             );
+        };
+        let rp = when self.expect(.RParen(), "')'") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
         };
 
         return .Ok(.EnumVariant(name, lp, fields, rp));
@@ -3535,6 +3565,8 @@ given CstParser {
         };
         let mutable params = List[CstTraitMethodParam].new();
         let mutable first UInt = 1;
+        // Positional params must come before named params -- see parse_params.
+        let mutable seen_named = false;
         while not self.check(.RParen()) and not self.is_eof() then {
             // `self` is the only receiver form -- see the note in parse_params.
             if first == 1 and self.check(.Star()) then {
@@ -3566,6 +3598,11 @@ given CstParser {
             let mutable colon = Option[Token].None();
             if self.check(.Colon()) then {
                 colon = .Some(self.eat());
+                seen_named = true;
+            } else if seen_named then {
+                return .Error(
+                    "Parse error: Positional parameter '\(pname.to_string())' cannot appear after named parameters",
+                );
             };
             let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
@@ -3640,16 +3677,6 @@ given CstParser {
 
         let mutable as_kw = Option[Token].None();
         let mutable trait_type = Option[CstType].None();
-        if self.check(.KwNot()) then {
-            let not_kw = self.eat();
-            let trait_name = when self.expect_ident("trait name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            return .Ok(.GivenNot(vis, mods, kw, gp, target, not_kw, trait_name));
-        };
         if self.check(.KwAs()) then {
             as_kw = when self.expect(.KwAs(), "'as'") in {
                 .Ok(t) then .Some(t),

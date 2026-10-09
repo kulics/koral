@@ -274,15 +274,21 @@ extension Parser {
       try match(.rightParen)
       return .enumCase(caseName: name, elements: args, span: startSpan)
     }
-    // Parenthesized pattern for grouping
+    // `(p)` is a parenthesized pattern. `(p, q, ...)` is a TUPLE pattern:
+    // positional destructuring of a struct with exactly that many fields, in
+    // declaration order. There must be at least two slots. `Pair` is
+    // destructured this way too -- it is simply a two-field struct.
     if currentToken === .leftParen {
       try match(.leftParen)
       let first = try parsePattern()
       if currentToken === .comma {
-        try match(.comma)
-        let second = try parsePattern()
+        var elements: [PatternArg] = [PatternArg(label: nil, pattern: first)]
+        while currentToken === .comma {
+          try match(.comma)
+          elements.append(PatternArg(label: nil, pattern: try parsePattern()))
+        }
         try match(.rightParen)
-        return .structPattern(typeName: "Pair", elements: [PatternArg(label: nil, pattern: first), PatternArg(label: nil, pattern: second)], span: startSpan)
+        return .tuplePattern(elements: elements, span: startSpan)
       }
       try match(.rightParen)
       return first

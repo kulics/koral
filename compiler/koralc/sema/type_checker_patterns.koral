@@ -430,6 +430,80 @@ given TypeChecker {
                 };
                 TypedPattern.StructPattern(type_name, typed_elements)
             },
+            // `(a, b, c)` -- positional destructuring of a struct with exactly
+            // that many fields. The SUBJECT decides which struct this is, so no
+            // name is written and none is looked up: identity comes from the
+            // type being matched, never from a spelling.
+            .TuplePattern(elements, span) then {
+                let inner_type = when subject_type in {
+                    .ReferenceType(inner) then inner,
+                    .MutableReferenceType(inner) then inner,
+                    .BorrowedReferenceType(inner) then inner,
+                    .MutableBorrowedReferenceType(inner) then inner,
+                    .WeakReferenceType(inner) then inner,
+                    .MutableWeakReferenceType(inner) then inner,
+                    _ then subject_type,
+                };
+                let pattern_def_id = when inner_type in {
+                    .StructureType(def_id) then self.struct_pattern_decl_def_id(def_id),
+                    .GenericStruct(template_def_id, _) then self.struct_pattern_decl_def_id(
+                        template_def_id,
+                    ),
+                    _ then def_id_invalid(),
+                };
+                if pattern_def_id == def_id_invalid() then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected a struct, got \(type_to_string(inner_type))",
+                        span,
+                    );
+                    return TypedPattern.Wildcard();
+                };
+                let param_specs = self.get_struct_pattern_param_specs(
+                    subject_type,
+                    pattern_def_id,
+                );
+                if elements.count() <> param_specs.count() then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected \(param_specs.count()) pattern elements, got \(elements.count())",
+                        span,
+                    );
+                    return TypedPattern.Wildcard();
+                };
+                for elem in elements then {
+                    if elem.label is .Some(label) then {
+                        self.push_diagnostic_at_span(
+                            "Type mismatch: tuple destructuring is positional, got a named element '\(label)'",
+                            span,
+                        );
+                        return TypedPattern.Wildcard();
+                    };
+                };
+                let field_types = self.get_struct_pattern_field_types(
+                    subject_type,
+                    pattern_def_id,
+                );
+                let mutable typed_elements = List[TypedPatternElement].new();
+                let mutable i UInt = 0;
+                for elem in elements then {
+                    let field_type = when field_types.get(i) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    };
+                    typed_elements.push(
+                        TypedPatternElement(
+                            Option[String].None(),
+                            self.lower_typed_pattern(elem.pattern, field_type, scope),
+                        ),
+                    );
+                    i += 1;
+                };
+                // The name here is display-only (exhaustiveness messages); the
+                // match itself is against the subject's declaration identity.
+                TypedPattern.StructPattern(
+                    self.context().type_display_name(inner_type),
+                    typed_elements,
+                )
+            },
         };
     };
 
@@ -504,6 +578,39 @@ given TypeChecker {
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
                     let mutable field_type = when field_types.get(i) in {
+                        .Some(t) then t,
+                        .None() then Type.Unknown(),
+                    };
+                    self.bind_pattern_vars(elem.pattern, field_type, scope);
+                    i += 1;
+                };
+            },
+            // `(a, b, c)` -- positional destructuring. The subject decides
+            // which struct this is; identity comes from the type being matched.
+            .TuplePattern(elements, _) then {
+                let inner_type = when subject_type in {
+                    .ReferenceType(inner) then inner,
+                    .MutableReferenceType(inner) then inner,
+                    .BorrowedReferenceType(inner) then inner,
+                    .MutableBorrowedReferenceType(inner) then inner,
+                    .WeakReferenceType(inner) then inner,
+                    .MutableWeakReferenceType(inner) then inner,
+                    _ then subject_type,
+                };
+                let pattern_def_id = when inner_type in {
+                    .StructureType(def_id) then self.struct_pattern_decl_def_id(def_id),
+                    .GenericStruct(template_def_id, _) then self.struct_pattern_decl_def_id(
+                        template_def_id,
+                    ),
+                    _ then def_id_invalid(),
+                };
+                let field_types = self.get_struct_pattern_field_types(
+                    subject_type,
+                    pattern_def_id,
+                );
+                let mutable i UInt = 0;
+                for elem in elements then {
+                    let field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
