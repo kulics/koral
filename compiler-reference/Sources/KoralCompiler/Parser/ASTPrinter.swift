@@ -104,11 +104,8 @@ public func printAST(_ node: ASTNode) {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .foreignTypeDeclaration(let name, let cname, let fields, let access, _, _):
+    case .foreignTypeDeclaration(let name, let fields, let access, _, _):
         print("\(indent)ForeignTypeDeclaration \(name)")
-        if let cname {
-          print("\(indent)  CName: \(cname)")
-        }
         print("\(indent)  Access: \(access)")
         if let fields {
           for field in fields {

@@ -1285,7 +1285,7 @@ given TypeChecker {
             .Tuple(bindings, span) then {
                 let field_types = self.for_tuple_binding_types(
                     element_type,
-                    bindings.count(),
+                    bindings,
                     span,
                 );
                 let mutable i UInt = 0;
@@ -1303,12 +1303,18 @@ given TypeChecker {
 
     /// The element type's field types, in declaration order, for positional
     /// destructuring. The count must match the number of binding slots.
+    ///
+    /// This is also where the two destructuring rules are enforced, because
+    /// `let (a, b) = x` and `for (a, b) in xs` have no other common entry: a
+    /// NAMED field cannot be bound positionally, and an unreadable field may
+    /// only be discarded with `_`.
     module_private for_tuple_binding_types(
         self,
         element_type Type,
-        count UInt,
+        bindings List[PairBindingElement],
         span SourceSpan,
     ) List[Type] = {
+        let count = bindings.count();
         let inner_type = when element_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1344,6 +1350,23 @@ given TypeChecker {
             };
             return out;
         };
+        let mutable binds = List[Bool].new();
+        let mutable slot_spans = List[SourceSpan].new();
+        for binding in bindings then {
+            binds.push(not binding.is_discard);
+            slot_spans.push(binding.span);
+        };
+        // Report, then keep the real field types: poisoning the slots with
+        // `Unknown` would make the rest of the statement type-check against
+        // nothing and pile a second diagnostic on top of the real one.
+        let _ = self.check_positional_destructuring(
+            self.get_struct_pattern_fields(element_type, pattern_def_id),
+            self.get_struct_pattern_owner_def_id(element_type, pattern_def_id),
+            type_to_string(inner_type),
+            binds,
+            slot_spans,
+            span,
+        );
         for t in field_types then {
             out.push(t);
         };

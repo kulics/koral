@@ -1093,6 +1093,7 @@ extension TypeChecker {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
+    try rejectWeakPatternSubject(subjectType, span: pattern.span)
     if !untypedPatternRequiresRawSubject(pattern),
        let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
@@ -1160,6 +1161,7 @@ extension TypeChecker {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
+    try rejectWeakPatternSubject(subjectType, span: pattern.span)
     if let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
     }
@@ -1535,13 +1537,13 @@ extension TypeChecker {
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
       if !cases.contains(where: { untypedPatternRequiresRawSubject($0.pattern) }) {
+        // A weak reference is NOT peeled here: it is opaque until `upgrade`d,
+        // and `checkPattern` rejects it as a shape-testing subject.
         switch subjectType {
         case .reference(let inner),
              .mutableReference(let inner),
              .borrowedReference(let inner),
-             .mutableBorrowedReference(let inner),
-             .weakReference(let inner),
-             .mutableWeakReference(let inner):
+             .mutableBorrowedReference(let inner):
           subjectType = inner
         default:
           break
@@ -2106,6 +2108,8 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
+      try rejectWeakPatternSubject(subjectType, span: pattern.span)
+    try rejectWeakPatternSubject(subjectType, span: pattern.span)
       if !untypedPatternRequiresRawSubject(pattern),
          let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
@@ -2130,6 +2134,8 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
+      try rejectWeakPatternSubject(subjectType, span: pattern.span)
+    try rejectWeakPatternSubject(subjectType, span: pattern.span)
       if !untypedPatternRequiresRawSubject(pattern),
          let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
@@ -5837,11 +5843,11 @@ extension TypeChecker {
           traitTypeArgs: traitTypeArgs
         )
 
-        let methodSym = makeGlobalSymbol(
+        let methodSym = makeMethodSymbol(
           name: memberName,
           type: expectedType,
-          kind: .function,
-          access: .module_private
+          access: .module_private,
+          ownerKey: methodLabelKey(traitObjType)
         )
 
         // Register named parameter info from the trait method signature
@@ -8216,6 +8222,14 @@ extension TypeChecker {
           span: span
         )
       }
+      try checkPositionalDestructuring(
+        members: members,
+        owner: tupleDestructuringOwner(of: innerType),
+        typeName: innerType.description,
+        binds: bindings.map { !$0.isDiscard },
+        slotSpans: bindings.map { $0.span },
+        span: span
+      )
 
       var elements: [TypedPattern] = []
       for (index, binding) in bindings.enumerated() {

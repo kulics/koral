@@ -218,6 +218,7 @@ extension TypeChecker {
     case .whenExpression(let subject, let cases, let whenSpan):
       let typedSubject = try inferTypedExpression(subject)
       var subjectType = typedSubject.type
+      try rejectWeakPatternSubject(subjectType, span: whenSpan)
       if let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
@@ -410,6 +411,14 @@ extension TypeChecker {
           span: span
         )
       }
+      try checkPositionalDestructuring(
+        members: members,
+        owner: tupleDestructuringOwner(of: innerType),
+        typeName: innerType.description,
+        binds: bindings.map { !$0.isDiscard },
+        slotSpans: bindings.map { $0.span },
+        span: span
+      )
 
       // Synthetic symbol for the temporary holding the destructured value.
       let tupleSymbol = nextSynthSymbol(prefix: "tuple_tmp", type: typedValue.type)

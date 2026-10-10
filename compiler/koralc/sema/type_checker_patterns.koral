@@ -1,3 +1,46 @@
+/// Names in a binding list, de-duplicated and sorted. This is the shape the
+/// pattern-binding diagnostics spell them in, and two sorted lists are equal
+/// exactly when the name sets behind them are.
+file_private let sorted_binding_names(bindings List[Pair[String, Type]]) List[String] = {
+    let mutable names = List[String].new();
+    let mutable seen = Set[String].new();
+    for binding in bindings then {
+        if not seen.contains(binding.first) then {
+            seen.insert(binding.first);
+            names.push(binding.first);
+        };
+    };
+    names.sort();
+    return names;
+};
+
+file_private let binding_names_equal(left List[String], right List[String]) Bool = {
+    if not (left.count() == right.count()) then {
+        return false;
+    };
+    let mutable i UInt = 0;
+    while i < left.count() then {
+        if not (left[i] == right[i]) then {
+            return false;
+        };
+        i += 1;
+    };
+    return true;
+};
+
+file_private let join_binding_names(names List[String]) String = {
+    let mutable out = StringBuilder.new();
+    let mutable i UInt = 0;
+    while i < names.count() then {
+        if i > 0(UInt) then {
+            out.push_string(", ");
+        };
+        out.push_string(names[i]);
+        i += 1;
+    };
+    return out.to_string();
+};
+
 given TypeChecker {
     module_private pattern_binding_symbol(
         self,
@@ -256,12 +299,43 @@ given TypeChecker {
         return TypedPattern.IntegerLiteral("0");
     };
 
+    /// Whether a pattern TESTS the shape of its subject, as opposed to simply
+    /// binding whatever is there. A weak reference is opaque until `upgrade`d --
+    /// it carries no fields, no cases and no payload -- so testing one's shape
+    /// is not meaningful. Binding the handle whole is fine.
+    file_private pattern_tests_subject_shape(self, pattern PatternNode) Bool = {
+        let _ = self;
+        return when pattern in {
+            .Variable(_, _, _) then false,
+            .Wildcard(_) then false,
+            _ then true,
+        };
+    };
+
+    file_private is_weak_reference_type(self, t Type) Bool = {
+        let _ = self;
+        return when t in {
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        };
+    };
+
     module_private lower_typed_pattern(
         self,
         pattern PatternNode,
         subject_type Type,
         scope Scope,
     ) TypedPattern = {
+        if self.pattern_tests_subject_shape(pattern) and self.is_weak_reference_type(subject_type) then {
+            self.push_diagnostic_at_span(
+                "Cannot match a pattern against a weak reference: upgrade it first",
+                pattern_span(pattern),
+            );
+            // Keep lowering the pattern the caller wrote: substituting a
+            // wildcard here would make a later arm look like a duplicate of it
+            // and pile diagnostics on top of the real one.
+        };
         return when pattern in {
             .Wildcard(_) then TypedPattern.Wildcard(),
             .Variable(name, is_mutable, span) then {
@@ -332,7 +406,7 @@ given TypeChecker {
                     self.lower_typed_pattern(inner, subject_type, scope),
                 )
             },
-            .EnumCase(case_name, elements, _) then {
+            .EnumCase(case_name, elements, span) then {
                 // When subject is a struct type, redirect .StructName(...) to StructPattern
                 let pattern_def_id = self.struct_pattern_def_id(case_name);
                 let struct_param_specs = self.get_struct_pattern_param_specs(
@@ -340,11 +414,20 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 if not struct_param_specs.is_empty() then {
-                    self.validate_named_pattern_arguments(elements, struct_param_specs);
-                    let ordered_elements = self.reorder_pattern_elements(
+                    let mutable ordered_elements = List[PatternElement].new();
+                    when self.order_pattern_arguments(
                         elements,
                         struct_param_specs,
-                    );
+                        case_name,
+                        span,
+                    ) in {
+                        .Some(ordered) then {
+                            for elem in ordered then {
+                                ordered_elements.push(elem);
+                            };
+                        },
+                        .None() then { return TypedPattern.Wildcard(); },
+                    };
                     let field_types = self.get_struct_pattern_field_types(
                         subject_type,
                         pattern_def_id,
@@ -370,11 +453,20 @@ given TypeChecker {
                         subject_type,
                         case_name,
                     );
-                    self.validate_named_pattern_arguments(elements, param_specs);
-                    let ordered_elements = self.reorder_pattern_elements(
+                    let mutable ordered_elements = List[PatternElement].new();
+                    when self.order_pattern_arguments(
                         elements,
                         param_specs,
-                    );
+                        ".\(case_name)",
+                        span,
+                    ) in {
+                        .Some(ordered) then {
+                            for elem in ordered then {
+                                ordered_elements.push(elem);
+                            };
+                        },
+                        .None() then { return TypedPattern.Wildcard(); },
+                    };
                     let case_field_types = self.get_enum_case_field_types(
                         subject_type,
                         case_name,
@@ -398,17 +490,26 @@ given TypeChecker {
                     TypedPattern.EnumCase(case_name, tag_index, typed_elements)
                 }
             },
-            .StructPattern(type_name, elements, _) then {
+            .StructPattern(type_name, elements, span) then {
                 let pattern_def_id = self.struct_pattern_def_id(type_name);
                 let param_specs = self.get_struct_pattern_param_specs(
                     subject_type,
                     pattern_def_id,
                 );
-                self.validate_named_pattern_arguments(elements, param_specs);
-                let ordered_elements = self.reorder_pattern_elements(
+                let mutable ordered_elements = List[PatternElement].new();
+                when self.order_pattern_arguments(
                     elements,
                     param_specs,
-                );
+                    type_name,
+                    span,
+                ) in {
+                    .Some(ordered) then {
+                        for elem in ordered then {
+                            ordered_elements.push(elem);
+                        };
+                    },
+                    .None() then { return TypedPattern.Wildcard(); },
+                };
                 let field_types = self.get_struct_pattern_field_types(
                     subject_type,
                     pattern_def_id,
@@ -478,6 +579,24 @@ given TypeChecker {
                         return TypedPattern.Wildcard();
                     };
                 };
+                let mutable binds = List[Bool].new();
+                let mutable slot_spans = List[SourceSpan].new();
+                for elem in elements then {
+                    binds.push(not (elem.pattern is .Wildcard(_)));
+                    slot_spans.push(pattern_span(elem.pattern));
+                };
+                // Keep lowering the pattern the caller wrote even when this
+                // rejects it: substituting a wildcard would make the arm look
+                // like a duplicate of some other `_` and pile a second
+                // diagnostic on top of the real one.
+                let _ = self.check_positional_destructuring(
+                    self.get_struct_pattern_fields(subject_type, pattern_def_id),
+                    self.get_struct_pattern_owner_def_id(subject_type, pattern_def_id),
+                    type_to_string(inner_type),
+                    binds,
+                    slot_spans,
+                    span,
+                );
                 let field_types = self.get_struct_pattern_field_types(
                     subject_type,
                     pattern_def_id,
@@ -507,12 +626,19 @@ given TypeChecker {
         };
     };
 
+    /// Define a pattern's bindings in `scope` and report, per name, the type it
+    /// was bound at.
+    ///
+    /// The type list is what makes the `or` / `and` / `not` rules checkable:
+    /// each branch still has its own payload types here, whereas by the time the
+    /// pattern is lowered an `or`'s branches already share one symbol per name.
     module_private bind_pattern_vars(
         self,
         pattern PatternNode,
         subject_type Type,
         scope Scope,
-    ) Void = {
+    ) List[Pair[String, Type]] = {
+        let mutable bound = List[Pair[String, Type]].new();
         when pattern in {
             .Variable(name, is_mutable, span) then {
                 if not (name == "_") then {
@@ -523,6 +649,7 @@ given TypeChecker {
                     let mutable context = self.context();
                     context.set_span(def_id, span);
                     scope.define(self.context(), Symbol(def_id, subject_type, kind));
+                    bound.push(Pair[String, Type](name, subject_type));
                 };
             },
             .TraitObjectTypeBinding(name, is_mutable, target_type, span) then {
@@ -539,49 +666,97 @@ given TypeChecker {
                         span,
                     );
                     scope.define(self.context(), Symbol(def_id, bound_type, kind));
+                    bound.push(Pair[String, Type](name, bound_type));
                 };
             },
-            .EnumCase(case_name, elements, _) then {
+            .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                let ordered_elements = self.reorder_pattern_elements(
+                when self.order_pattern_arguments(
                     elements,
                     param_specs,
-                );
-                let case_field_types = self.get_enum_case_field_types(
-                    subject_type,
-                    case_name,
-                );
-                let mutable i UInt = 0;
-                for elem in ordered_elements then {
-                    let mutable field_type = when case_field_types.get(i) in {
-                        .Some(t) then t,
-                        .None() then Type.Unknown(),
-                    };
-                    self.bind_pattern_vars(elem.pattern, field_type, scope);
-                    i += 1;
+                    ".\(case_name)",
+                    span,
+                ) in {
+                    .Some(ordered_elements) then {
+                        let case_field_types = self.get_enum_case_field_types(
+                            subject_type,
+                            case_name,
+                        );
+                        let mutable i UInt = 0;
+                        for elem in ordered_elements then {
+                            let mutable field_type = when case_field_types.get(i) in {
+                                .Some(t) then t,
+                                .None() then Type.Unknown(),
+                            };
+                            for b in self.bind_pattern_vars(elem.pattern, field_type, scope) then {
+                                bound.push(b);
+                            };
+                            i += 1;
+                        };
+                    },
+                    // The argument shape is already rejected. Bind what is
+                    // written anyway so the arm body still has its names --
+                    // otherwise every one of them reads as undefined and piles
+                    // on top of the real diagnostic.
+                    .None() then {
+                        for elem in elements then {
+                            for b in self.bind_pattern_vars(
+                                elem.pattern,
+                                Type.Unknown(),
+                                scope,
+                            ) then {
+                                bound.push(b);
+                            };
+                        };
+                    },
                 };
             },
-            .StructPattern(type_name, elements, _) then {
+            .StructPattern(type_name, elements, span) then {
                 let pattern_def_id = self.struct_pattern_def_id(type_name);
                 let param_specs = self.get_struct_pattern_param_specs(
                     subject_type,
                     pattern_def_id,
                 );
-                let ordered_elements = self.reorder_pattern_elements(
+                let mutable ordered_elements = List[PatternElement].new();
+                let mutable args_ok = true;
+                when self.order_pattern_arguments(
                     elements,
                     param_specs,
-                );
+                    type_name,
+                    span,
+                ) in {
+                    .Some(ordered) then {
+                        for elem in ordered then {
+                            ordered_elements.push(elem);
+                        };
+                    },
+                    // The argument shape is already rejected. Bind what is
+                    // written anyway so the arm body still has its names --
+                    // otherwise every one of them reads as undefined and piles
+                    // on top of the real diagnostic.
+                    .None() then {
+                        args_ok = false;
+                        for elem in elements then {
+                            ordered_elements.push(elem);
+                        };
+                    },
+                };
                 let field_types = self.get_struct_pattern_field_types(
                     subject_type,
                     pattern_def_id,
                 );
                 let mutable i UInt = 0;
                 for elem in ordered_elements then {
+                    // An unordered fallback has no field to point at, so the
+                    // name is bound at `Unknown` rather than at a neighbour's
+                    // field type.
                     let mutable field_type = when field_types.get(i) in {
-                        .Some(t) then t,
+                        .Some(t) then if args_ok then t else Type.Unknown(),
                         .None() then Type.Unknown(),
                     };
-                    self.bind_pattern_vars(elem.pattern, field_type, scope);
+                    for b in self.bind_pattern_vars(elem.pattern, field_type, scope) then {
+                        bound.push(b);
+                    };
                     i += 1;
                 };
             },
@@ -614,22 +789,116 @@ given TypeChecker {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
                     };
-                    self.bind_pattern_vars(elem.pattern, field_type, scope);
+                    for b in self.bind_pattern_vars(elem.pattern, field_type, scope) then {
+                        bound.push(b);
+                    };
                     i += 1;
                 };
             },
-            .AndPattern(left, right, _) then {
-                self.bind_pattern_vars(left, subject_type, scope);
-                self.bind_pattern_vars(right, subject_type, scope);
+            // `and` runs both sides, so a name cannot be bound by both: there
+            // would be two values for one binding.
+            .AndPattern(left, right, span) then {
+                let left_bound = self.bind_pattern_vars(left, subject_type, scope);
+                let right_bound = self.bind_pattern_vars(right, subject_type, scope);
+                let left_names = sorted_binding_names(left_bound);
+                let right_names = sorted_binding_names(right_bound);
+                let mutable shared = List[String].new();
+                for name in left_names then {
+                    for other in right_names then {
+                        if name == other then {
+                            shared.push(name);
+                        };
+                    };
+                };
+                if not shared.is_empty() then {
+                    self.push_diagnostic_at_span(
+                        "And pattern cannot bind the same variable in both branches: \(join_binding_names(shared))",
+                        span,
+                    );
+                };
+                for b in left_bound then {
+                    bound.push(b);
+                };
+                for b in right_bound then {
+                    bound.push(b);
+                };
             },
-            .OrPattern(left, right, _) then {
-                self.bind_pattern_vars(left, subject_type, scope);
+            // `or` matches one side or the other, so both sides must offer the
+            // same names, and each name must mean the same type on both sides.
+            // The right side is bound into a throw-away scope: it must NOT
+            // contribute symbols, or it would shadow the left side's and the two
+            // branches would stop sharing one binding per name.
+            .OrPattern(left, right, span) then {
+                let left_bound = self.bind_pattern_vars(left, subject_type, scope);
+                let right_bound = self.bind_pattern_vars(
+                    right,
+                    subject_type,
+                    Scope.new_child(scope),
+                );
+                let left_names = sorted_binding_names(left_bound);
+                let right_names = sorted_binding_names(right_bound);
+                if binding_names_equal(left_names, right_names) then {
+                    let mutable right_type_by_name = Dict[String, Type].new();
+                    for b in right_bound then {
+                        right_type_by_name.insert(b.first, b.second);
+                    };
+                    let mutable mismatch = Option[Pair[String, String]].None();
+                    for b in left_bound then {
+                        if mismatch is .None() then {
+                            when right_type_by_name.get(b.first) in {
+                                .Some(right_type) then {
+                                    if not (
+                                        stable_type_key(b.second) == stable_type_key(
+                                            right_type,
+                                        )
+                                    ) then {
+                                        mismatch = Option[Pair[String, String]].Some(
+                                            Pair[String, String](
+                                                self.display_type_name(b.second),
+                                                self.display_type_name(right_type),
+                                            ),
+                                        );
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        };
+                    };
+                    when mismatch in {
+                        .Some(found) then self.push_diagnostic_at_span(
+                            "Type mismatch: expected \(found.first), got \(found.second)",
+                            span,
+                        ),
+                        .None() then {},
+                    };
+                } else {
+                    self.push_diagnostic_at_span(
+                        "Or pattern branches must bind the same variables. Left binds: {\(join_binding_names(left_names))}, Right binds: {\(join_binding_names(right_names))}",
+                        span,
+                    );
+                };
+                for b in left_bound then {
+                    bound.push(b);
+                };
             },
-            .NotPattern(inner, _) then {
-                self.bind_pattern_vars(inner, subject_type, scope);
+            // A `not` pattern matches by the ABSENCE of a shape, so nothing is
+            // extracted for it to bind.
+            .NotPattern(inner, span) then {
+                let inner_bound = self.bind_pattern_vars(
+                    inner,
+                    subject_type,
+                    Scope.new_child(scope),
+                );
+                if not inner_bound.is_empty() then {
+                    self.push_diagnostic_at_span(
+                        "Not pattern cannot contain variable bindings",
+                        span,
+                    );
+                };
             },
             _ then {},
         };
+        return bound;
     };
 
     module_private ensure_pattern_bindings_present(
@@ -678,44 +947,58 @@ given TypeChecker {
             },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                self.validate_named_pattern_arguments(elements, param_specs);
-                let ordered_elements = self.reorder_pattern_elements(
+                when self.order_pattern_arguments(
                     elements,
                     param_specs,
-                );
-                let case_field_types = self.get_enum_case_field_types(
-                    subject_type,
-                    case_name,
-                );
-                let mutable i UInt = 0;
-                for elem in ordered_elements then {
-                    let mutable field_type = when case_field_types.get(i) in {
-                        .Some(t) then t,
-                        .None() then Type.Unknown(),
-                    };
-                    self.ensure_pattern_bindings_present(elem.pattern, field_type, scope);
-                    i += 1;
+                    ".\(case_name)",
+                    span,
+                ) in {
+                    .Some(ordered_elements) then {
+                        let case_field_types = self.get_enum_case_field_types(
+                            subject_type,
+                            case_name,
+                        );
+                        let mutable i UInt = 0;
+                        for elem in ordered_elements then {
+                            let mutable field_type = when case_field_types.get(i) in {
+                                .Some(t) then t,
+                                .None() then Type.Unknown(),
+                            };
+                            self.ensure_pattern_bindings_present(elem.pattern, field_type, scope);
+                            i += 1;
+                        };
+                    },
+                    .None() then {},
                 };
             },
             .StructPattern(type_name, elements, span) then {
                 let pattern_def_id = self.struct_pattern_def_id(type_name);
-                if not self.check_struct_pattern_field_visibility(
-                    subject_type,
-                    pattern_def_id,
-                    type_name,
-                    elements,
-                ) then {
-                    return;
-                };
                 let param_specs = self.get_struct_pattern_param_specs(
                     subject_type,
                     pattern_def_id,
                 );
-                self.validate_named_pattern_arguments(elements, param_specs);
-                let ordered_elements = self.reorder_pattern_elements(
+                let mutable ordered_elements = List[PatternElement].new();
+                when self.order_pattern_arguments(
                     elements,
                     param_specs,
-                );
+                    type_name,
+                    span,
+                ) in {
+                    .Some(ordered) then {
+                        for elem in ordered then {
+                            ordered_elements.push(elem);
+                        };
+                    },
+                    .None() then { return; },
+                };
+                if not self.check_struct_pattern_field_visibility(
+                    subject_type,
+                    pattern_def_id,
+                    type_name,
+                    ordered_elements,
+                ) then {
+                    return;
+                };
                 let field_types = self.get_struct_pattern_field_types(
                     subject_type,
                     pattern_def_id,
@@ -744,107 +1027,133 @@ given TypeChecker {
         };
     };
 
-    module_private validate_named_pattern_arguments(
+    /// Pattern arguments follow the call rules exactly -- same shape, same
+    /// reason: the DECLARATION decides whether a name is written at the use
+    /// site, and the use site does not get to disagree.
+    ///
+    ///   - a labeled argument names a field, which must be declared NAMED, and
+    ///     may do so at most once;
+    ///   - an unlabeled argument fills the next field NOT declared named, in
+    ///     declaration order, and may not appear after a labeled one;
+    ///   - every field is matched exactly once -- a pattern has no defaults.
+    ///
+    /// The result is one argument per field, in DECLARATION ORDER. `.None()`
+    /// means the pattern is not a legal match and a diagnostic has been pushed.
+    module_private order_pattern_arguments(
         self,
         elements List[PatternElement],
         param_specs List[FunctionParamSpec],
-    ) Void = {
-        let mutable has_label = false;
-        let mutable has_positional = false;
+        pattern_description String,
+        span SourceSpan,
+    ) Option[List[PatternElement]] = {
+        // No registered fields means the subject is not the constructor this
+        // pattern names. That is a type error, reported by the type check --
+        // saying anything about the arguments here would name the wrong fault.
+        if param_specs.is_empty() then {
+            return Option[List[PatternElement]].Some(elements);
+        };
+        let mutable ordered = List[Option[PatternElement]].new();
+        for _ in param_specs then {
+            ordered.push(Option[PatternElement].None());
+        };
+        let mutable positional_index UInt = 0;
+        let mutable seen_named = false;
         for element in elements then {
-            when element.label in {
-                .Some(_) then {
-                    has_label = true;
-                },
-                .None() then {
-                    has_positional = true;
-                },
-            };
-        };
-
-        if has_label and has_positional then {
-            self.push_diagnostic(
-                "Pattern cannot mix positional and labeled arguments",
-                unknown_span(),
-            );
-            return;
-        };
-
-        if not has_label then {
-            return;
-        };
-
-        let mutable valid_names = Set[String].new();
-        for spec in param_specs then {
-            valid_names.insert(spec.name);
-        };
-
-        let mutable seen_named_labels = Set[String].new();
-        for element in elements then {
+            let arg_span = pattern_span(element.pattern);
             when element.label in {
                 .Some(label) then {
-                    if not valid_names.contains(label) then {
-                        self.push_diagnostic(
-                            "Unknown constructor label '\(label)' for pattern",
-                            unknown_span(),
-                        );
-                        return;
+                    seen_named = true;
+                    let mutable field_index UInt = 0;
+                    let mutable found = false;
+                    while field_index < param_specs.count() then {
+                        if param_specs[field_index].name == label then {
+                            found = true;
+                            break;
+                        };
+                        field_index += 1;
                     };
-                    if seen_named_labels.contains(label) then {
-                        self.push_diagnostic(
-                            "Duplicate constructor label '\(label)'",
-                            unknown_span(),
+                    if not found then {
+                        self.push_diagnostic_at_span(
+                            "Unknown pattern label '\(label)' for '\(pattern_description)'",
+                            arg_span,
                         );
-                        return;
+                        return Option[List[PatternElement]].None();
                     };
-                    seen_named_labels.insert(label);
+                    if not param_specs[field_index].named then {
+                        self.push_diagnostic_at_span(
+                            "Field '\(label)' is positional and cannot be matched by label",
+                            arg_span,
+                        );
+                        return Option[List[PatternElement]].None();
+                    };
+                    if ordered[field_index] is .Some(_) then {
+                        self.push_diagnostic_at_span(
+                            "Duplicate pattern label '\(label)'",
+                            arg_span,
+                        );
+                        return Option[List[PatternElement]].None();
+                    };
+                    ordered[field_index] = Option[PatternElement].Some(element);
                 },
-                .None() then {},
+                .None() then {
+                    if seen_named then {
+                        self.push_diagnostic_at_span(
+                            "Positional pattern cannot appear after named pattern in '\(pattern_description)'",
+                            arg_span,
+                        );
+                        return Option[List[PatternElement]].None();
+                    };
+                    while positional_index < param_specs.count() and param_specs[
+                        positional_index
+                    ].named then {
+                        positional_index += 1;
+                    };
+                    if positional_index >= param_specs.count() then {
+                        let mutable required_index UInt = 0;
+                        let mutable reported = false;
+                        while required_index < param_specs.count() then {
+                            if param_specs[required_index].named and ordered[
+                                required_index
+                            ] is .None() then {
+                                self.push_diagnostic_at_span(
+                                    "Named pattern field '\(param_specs[required_index].name)' must be matched by label",
+                                    span,
+                                );
+                                reported = true;
+                                break;
+                            };
+                            required_index += 1;
+                        };
+                        if not reported then {
+                            self.push_diagnostic_at_span(
+                                "Too many positional pattern arguments for '\(pattern_description)'",
+                                arg_span,
+                            );
+                        };
+                        return Option[List[PatternElement]].None();
+                    };
+                    ordered[positional_index] = Option[PatternElement].Some(element);
+                    positional_index += 1;
+                },
             };
         };
 
-        for spec in param_specs then {
-            if not seen_named_labels.contains(spec.name) then {
-                self.push_diagnostic(
-                    "Missing constructor field '\(spec.name)' in pattern",
-                    unknown_span(),
-                );
-                return;
+        let mutable elements_out = List[PatternElement].new();
+        let mutable index UInt = 0;
+        while index < param_specs.count() then {
+            when ordered[index] in {
+                .Some(element) then elements_out.push(element),
+                .None() then {
+                    self.push_diagnostic_at_span(
+                        "Missing pattern field '\(param_specs[index].name)' in '\(pattern_description)'",
+                        span,
+                    );
+                    return Option[List[PatternElement]].None();
+                },
             };
+            index += 1;
         };
-    };
-
-    module_private reorder_pattern_elements(
-        self,
-        elements List[PatternElement],
-        param_specs List[FunctionParamSpec],
-    ) List[PatternElement] = {
-        let mutable has_label = false;
-        for element in elements then {
-            if element.label is .Some(_) then {
-                has_label = true;
-                break;
-            };
-        };
-
-        if not has_label then {
-            return elements;
-        };
-
-        let mutable ordered = List[PatternElement].new();
-
-        for spec in param_specs then {
-            for element in elements then {
-                when element.label in {
-                    .Some(label) then if label == spec.name then {
-                        ordered.push(element);
-                        break;
-                    },
-                    .None() then {},
-                };
-            };
-        };
-        return ordered;
+        return Option[List[PatternElement]].Some(elements_out);
     };
 
     module_private enum_case_name_matches(
@@ -1159,49 +1468,153 @@ given TypeChecker {
         };
     };
 
+    /// The registered fields behind a destructuring, in declaration order.
+    /// Identity comes from the SUBJECT's own DECLARATION, never from a name.
+    module_private get_struct_pattern_fields(
+        self,
+        subject_type Type,
+        pattern_def_id DefId,
+    ) List[StructField] = {
+        let inner_type = when subject_type in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            _ then subject_type,
+        };
+
+        return when inner_type in {
+            .StructureType(def_id) then {
+                let mutable out = List[StructField].new();
+                if self.struct_pattern_decl_def_id(def_id) == pattern_def_id then {
+                    when self.context().get_struct_fields(def_id) in {
+                        .Some(fields) then {
+                            for field in fields then {
+                                out.push(field);
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
+                out
+            },
+            // Identity: the template's DECLARATION.
+            .GenericStruct(template_def_id, _) then {
+                let mutable out = List[StructField].new();
+                if template_def_id == pattern_def_id then {
+                    when self.storage.generic_templates.struct_by_def_id(
+                        template_def_id,
+                    ) in {
+                        .Some(struct_template) then when self.context().get_struct_fields(
+                            struct_template.def_id,
+                        ) in {
+                            .Some(fields) then {
+                                for field in fields then {
+                                    out.push(field);
+                                };
+                            },
+                            .None() then {},
+                        },
+                        .None() then {},
+                    };
+                };
+                out
+            },
+            _ then List[StructField].new(),
+        };
+    };
+
+    /// `ordered_elements` is the DECLARATION-ORDER argument list that
+    /// `order_pattern_arguments` produced; slot i corresponds to field i.
     module_private check_struct_pattern_field_visibility(
         self,
         subject_type Type,
         pattern_def_id DefId,
         type_name String,
-        elements List[PatternElement],
+        ordered_elements List[PatternElement],
     ) Bool = {
-        let ordered_elements = self.reorder_pattern_elements(
-            elements,
-            self.get_struct_pattern_param_specs(subject_type, pattern_def_id),
-        );
+        let fields = self.get_struct_pattern_fields(subject_type, pattern_def_id);
         return when self.get_struct_pattern_owner_def_id(subject_type, pattern_def_id) in {
-            .Some(def_id) then when self.context().get_struct_fields(def_id) in {
-                .Some(fields) then {
-                    let mutable idx UInt = 0;
-                    while idx < ordered_elements.count() and idx < fields.count() then {
-                        let field = fields[idx];
-                        if not self.is_field_accessible_from_current_context(
-                            field.access,
-                            def_id,
-                        ) then {
-                            when ordered_elements[idx].pattern in {
-                                .Wildcard(_) then {},
-                                _ then {
-                                    let access_label = when field.access in {
-                                        .FilePrivate() then "file_private",
-                                        _ then "module_private",
-                                    };
-                                    self.push_diagnostic(
-                                        "Cannot access \(access_label) field '\(field.name)' of type '\(type_name)' in destructuring pattern",
-                                        pattern_span(ordered_elements[idx].pattern),
-                                    );
-                                    return false;
-                                },
-                            };
+            .Some(def_id) then {
+                let mutable idx UInt = 0;
+                while idx < ordered_elements.count() and idx < fields.count() then {
+                    let field = fields[idx];
+                    if not self.is_field_accessible_from_current_context(
+                        field.access,
+                        def_id,
+                    ) then {
+                        when ordered_elements[idx].pattern in {
+                            .Wildcard(_) then {},
+                            _ then {
+                                let access_label = access_modifier_label(field.access);
+                                self.push_diagnostic(
+                                    "Cannot access \(access_label) field '\(field.name)' of type '\(type_name)' in destructuring pattern",
+                                    pattern_span(ordered_elements[idx].pattern),
+                                );
+                                return false;
+                            },
                         };
-                        idx += 1;
                     };
-                    true
-                },
-                .None() then true,
+                    idx += 1;
+                };
+                true
             },
             .None() then true,
+        };
+    };
+
+    /// `(a, b, c)` binds fields in DECLARATION ORDER, so it can only reach a
+    /// field declared POSITIONAL. Two rules, both already owed to the named
+    /// struct pattern:
+    ///
+    ///   - a NAMED field has to be matched by label, which a positional slot
+    ///     cannot do;
+    ///   - a field this file may not read may only be ignored, never bound.
+    ///
+    /// `binds[i]` says whether slot i reads field i -- `_` does not -- and
+    /// `slot_spans[i]` is where that slot is written.
+    module_private check_positional_destructuring(
+        self,
+        fields List[StructField],
+        owner_def_id Option[DefId],
+        type_name String,
+        binds List[Bool],
+        slot_spans List[SourceSpan],
+        span SourceSpan,
+    ) Bool = {
+        let mutable idx UInt = 0;
+        while idx < fields.count() then {
+            if fields[idx].named then {
+                self.push_diagnostic_at_span(
+                    "Named pattern field '\(fields[idx].name)' must be matched by label",
+                    span,
+                );
+                return false;
+            };
+            idx += 1;
+        };
+        return when owner_def_id in {
+            .None() then true,
+            .Some(owner) then {
+                let mutable slot UInt = 0;
+                while slot < fields.count() and slot < binds.count() and slot < slot_spans.count() then {
+                    let field = fields[slot];
+                    if binds[slot] and not self.is_field_accessible_from_current_context(
+                        field.access,
+                        owner,
+                    ) then {
+                        self.push_diagnostic_at_span(
+                            "Cannot access \(access_modifier_label(field.access)) field '\(field.name)' of type '\(type_name)' in destructuring pattern",
+                            slot_spans[slot],
+                        );
+                        return false;
+                    };
+                    slot += 1;
+                };
+                true
+            },
         };
     };
 

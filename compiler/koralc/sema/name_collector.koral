@@ -123,6 +123,20 @@ given NameCollector {
         return self.package_id == "std:std";
     };
 
+    /// `intrinsic` names something the compiler provides. Letting user code
+    /// declare one would let anyone claim a builtin, so it is std-only.
+    /// Returns true when the declaration has been rejected.
+    file_private reject_intrinsic_outside_std(self, span SourceSpan) Bool = {
+        if self.is_std_package() then {
+            return false;
+        };
+        self.push_name_diagnostic(
+            "'intrinsic' declarations are only allowed in the standard library",
+            span,
+        );
+        return true;
+    };
+
     /// Whether declaring this name would take one of std's generic templates.
     file_private shadows_std_generic_template(self, name String, is_generic Bool) Bool = {
         if not is_generic then {
@@ -280,6 +294,9 @@ given NameCollector {
                 );
             },
             .IntrinsicTypeDecl(access, name, type_params, span, name_span) then {
+                if self.reject_intrinsic_outside_std(span) then {
+                    return;
+                };
                 if self.has_conflicting_top_level_type_name(name, access) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -325,7 +342,7 @@ given NameCollector {
                     intrinsic_type,
                 );
             },
-            .ForeignTypeDecl(access, name, cname, fields, span, name_span) then {
+            .ForeignTypeDecl(access, name, fields, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -409,6 +426,9 @@ given NameCollector {
                 self.global_scope.define(self.context, sym);
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
+                if self.reject_intrinsic_outside_std(span) then {
+                    return;
+                };
                 if self.has_conflicting_top_level_name(name, access) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -476,7 +496,9 @@ given NameCollector {
             .UsingDecl(_, _, _) then {},
             .GivenDecl(_, _, _, _) then {},
             .GivenTraitDecl(_, _, _, _, _) then {},
-            .IntrinsicGivenDecl(_, _, _, _) then {},
+            .IntrinsicGivenDecl(_, _, _, span) then {
+                let _ = self.reject_intrinsic_outside_std(span);
+            },
         };
     };
 };

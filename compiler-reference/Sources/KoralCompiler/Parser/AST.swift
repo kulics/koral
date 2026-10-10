@@ -199,7 +199,6 @@ public indirect enum GlobalNode {
   )
   case foreignTypeDeclaration(
     name: String,
-    cname: String?,
     fields: [(name: String, type: TypeNode)]?,
     access: AccessModifier,
     span: SourceSpan,
@@ -266,7 +265,7 @@ extension GlobalNode {
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span, _):
       return span
-    case .foreignTypeDeclaration(_, _, _, _, let span, _):
+    case .foreignTypeDeclaration(_, _, _, let span, _):
       return span
     case .foreignLetDeclaration(_, _, _, _, let span, _):
       return span
@@ -304,7 +303,7 @@ extension GlobalNode {
       return nameSpan
     case .intrinsicTypeDeclaration(_, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignTypeDeclaration(_, _, _, _, _, let nameSpan):
+    case .foreignTypeDeclaration(_, _, _, _, let nameSpan):
       return nameSpan
     case .foreignLetDeclaration(_, _, _, _, _, let nameSpan):
       return nameSpan

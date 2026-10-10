@@ -44,7 +44,16 @@ uint8_t** __koral_argv(void) {
 // dtor 由释放调用点单态化后传进来，头里不再存析构函数。
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     if (dtor) {
+        // 析构期间对象处于「不可复活」状态：`drop(self)` 里的 `self` 是同一个
+        // payload 的句柄，方法调用按值传接收者就会 retain 一次、在方法结束时
+        // release 一次。若不置 immortal，retain 会把 0 抬回 1，随后的 release
+        // 又会以 prev == 1 重新进入本函数——析构递归。
+        // `strong_count = -1` 正是运行时既有的 immortal 哨兵：retain/release
+        // 读到负数直接返回，weak 的 upgrade 也要求 > 0，所以析构期间既不能
+        // 复活也不能重入。析构结束后恢复 0，让 weak 释放仍能走下面的 free。
+        atomic_store(&control->strong_count, -1);
         dtor(__koral_payload_of(control));
+        atomic_store(&control->strong_count, 0);
     }
     // Merged layout: control block and payload are in the same allocation.
     // The payload is freed together with the control block when the last weak

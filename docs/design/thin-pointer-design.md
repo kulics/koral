@@ -330,6 +330,10 @@ static const struct __koral_payload_Std_String __koral_lit_42 = { data, len };
 - 成本：每个静态字面量多 16 B 常量数据。
 - 收益：`control == NULL` 这个「静态 / 非拥有」双重哨兵消失，表示统一。
 
+同一个哨兵也用在**析构期间**：`__koral_release_slow` 在跑析构函数体前后把
+`strong_count` 置 -1 / 恢复 0，让 `drop` 里的 `self.m()`（按值接收者会 retain）不复活
+对象、不重入析构。理由见 [`type-semantics.md`](type-semantics.md)「析构期间对象不可复活」。
+
 ---
 
 

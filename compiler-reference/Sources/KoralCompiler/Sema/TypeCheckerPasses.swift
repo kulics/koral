@@ -778,7 +778,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, _, _, let access, _, _):
+    case .foreignTypeDeclaration(let name, _, let access, _, _):
       let type = access == .file_private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -1103,7 +1103,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
@@ -1355,7 +1355,7 @@ extension TypeChecker {
           }
         }
 
-        let storedMethods = methods.map { registeredMethodDeclaration($0) }
+        let storedMethods = methods.map { registeredMethodDeclaration($0, ownerKey: traitName) }
         var existingBlocks = traitToolBlocks[traitName] ?? []
         for block in existingBlocks {
           for existingMethod in block.methods {
@@ -1498,7 +1498,7 @@ extension TypeChecker {
           // The declaration must carry its own DefId: two modules' `stamp` on
           // same-named templates are two methods, and a template whose
           // `method.defId` is invalid cannot tell them apart at instantiation.
-          let registeredMethod = registeredMethodDeclaration(method)
+          let registeredMethod = registeredMethodDeclaration(method, ownerKey: genericOwnerKey.display)
           genericExtensionMethods[genericOwnerKey]!.append(GenericExtensionMethodTemplate(
             typeParams: typeParams,
             method: registeredMethod,
@@ -1546,7 +1546,7 @@ extension TypeChecker {
 
         // Pre-register method signatures (without checking bodies)
         for method in methods {
-          let registeredMethod = registeredMethodDeclaration(method)
+          let registeredMethod = registeredMethodDeclaration(method, ownerKey: methodOwnerKey.display)
           let methodType = try withNewScope {
             for typeParam in registeredMethod.typeParameters {
               currentScope.defineGenericParameter(
@@ -1580,12 +1580,13 @@ extension TypeChecker {
             return Type.function(parameters: params, returns: returnType)
           }
 
-          let methodSymbol = makeGlobalSymbol(
+          let methodSymbol = makeMethodSymbol(
             name: registeredMethod.name,
             type: methodType,
-            kind: .function,
             access: registeredMethod.access,
-            preferredDefId: registeredMethod.defId
+            ownerKey: methodLabelKey(type),
+            preferredDefId: registeredMethod.defId,
+            typeParameters: registeredMethod.typeParameters
           )
           registerReceiverStyleMethod(
             methodSymbol,
@@ -1747,10 +1748,10 @@ extension TypeChecker {
           let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
           preRegisteredMethods = methods.map { method in
             let requirementAccess = requirementByName[method.name]?.access ?? method.access
-            return registeredMethodDeclaration(method, access: requirementAccess)
+            return registeredMethodDeclaration(method, access: requirementAccess, ownerKey: traitName)
           }
         } else {
-          preRegisteredMethods = methods.map { registeredMethodDeclaration($0) }
+          preRegisteredMethods = methods.map { registeredMethodDeclaration($0, ownerKey: traitName) }
         }
 
         var hasExistingMethodSignature = false
@@ -1900,11 +1901,12 @@ extension TypeChecker {
             return Type.function(parameters: params, returns: returnType)
           }
           
-          let methodSymbol = makeGlobalSymbol(
+          let methodSymbol = makeMethodSymbol(
             name: method.name,
             type: methodType,
-            kind: .function,
-            access: method.access
+            access: method.access,
+            ownerKey: methodLabelKey(type),
+            typeParameters: method.typeParameters
           )
           registerReceiverStyleMethod(
             methodSymbol,
@@ -1966,7 +1968,7 @@ extension TypeChecker {
       }
       // Generic structs are handled in pass 3
 
-    case .foreignTypeDeclaration(let name, let cname, let fields, let access, let span, _):
+    case .foreignTypeDeclaration(let name, let fields, let access, let span, _):
       self.currentSpan = span
       guard let fields else {
         break
@@ -1992,10 +1994,6 @@ extension TypeChecker {
       }
 
       if case .structure(let defId) = placeholder {
-        // Store cname if provided
-        if let cname = cname {
-          context.setCname(defId, cname)
-        }
         let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public, named: false) }
         context.updateStructInfo(
           defId: defId,
@@ -2358,7 +2356,7 @@ extension TypeChecker {
         kind: isMut ? .MutableValue : .Value
       )
 
-    case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .file_private)
       let type: Type
@@ -2880,11 +2878,12 @@ extension TypeChecker {
           return (functionType, params, returnType)
         }
 
-        let methodSymbol = makeGlobalSymbol(
+        let methodSymbol = makeMethodSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
-          kind: .function,
-          access: method.access
+          access: method.access,
+          ownerKey: methodLabelKey(type),
+          typeParameters: method.typeParameters
         )
         registerReceiverStyleMethod(
           methodSymbol,
@@ -3433,11 +3432,12 @@ extension TypeChecker {
           }
         }
 
-        let methodSymbol = makeGlobalSymbol(
+        let methodSymbol = makeMethodSymbol(
           name: method.name,
           type: functionType,
-          kind: .function,
-          access: requirement.access
+          access: requirement.access,
+          ownerKey: methodOwnerKey(nil, traitName: traitName),
+          typeParameters: method.typeParameters
         )
         registerReceiverStyleMethod(
           methodSymbol,
@@ -3480,12 +3480,13 @@ extension TypeChecker {
           toolTypeParams: toolTypeParams
         )
 
-        let toolSymbol = makeGlobalSymbol(
+        let toolSymbol = makeMethodSymbol(
           name: toolMethod.name,
           type: functionType,
-          kind: .function,
           access: toolMethod.access,
-          preferredDefId: toolMethod.defId
+          ownerKey: methodOwnerKey(nil, traitName: traitName),
+          preferredDefId: toolMethod.defId,
+          typeParameters: toolMethod.typeParameters
         )
         registerReceiverStyleMethod(
           toolSymbol,
@@ -3848,11 +3849,12 @@ extension TypeChecker {
           return (functionType, typedBody, params, returnType)
         }
 
-        let methodSymbol = makeGlobalSymbol(
+        let methodSymbol = makeMethodSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
-          kind: .function,
-          access: method.access
+          access: method.access,
+          ownerKey: methodLabelKey(type),
+          typeParameters: method.typeParameters
         )
         registerReceiverStyleMethod(
           methodSymbol,

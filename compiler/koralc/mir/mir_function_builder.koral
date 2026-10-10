@@ -4,6 +4,20 @@ type MIRLoopBuilderContext(
     scope_depth UInt,
 );
 
+/// What a pattern-binding walk is doing to each binding it reaches.
+///
+/// A plain pattern binds by ALIASING the payload place it reads from, which is
+/// correct only while one layout covers the whole pattern. An `or` pattern
+/// breaks that: its branches bind the same names from different payload
+/// positions, so each name needs one slot that every branch fills from its own
+/// layout. Claim/Fill split that across the branch, and the walk is
+/// parameterised rather than written out twice.
+type PatternBindMode {
+    Alias(),
+    Claim(),
+    Fill(),
+};
+
 type mutable MIRFunctionBuilder(
     program MonomorphizedProgram,
     identifier Symbol,
@@ -569,6 +583,20 @@ given MIRFunctionBuilder {
                                 inner_ref,
                             ) else place,
                             .MutableWeakReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
+                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                                inner_ref,
+                            ) else place,
+                            // A raw-pointer local whose expression type is the
+                            // POINTEE is the re-typed `self` of a drop body: the
+                            // drop ABI hands it in as a pointer while the type
+                            // system still calls it `Self`. A pointer the user
+                            // declared has the pointer type on both sides and is
+                            // left alone.
+                            .PointerType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
+                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                                inner_ref,
+                            ) else place,
+                            .MutablePointerType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
                                 MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                                 inner_ref,
                             ) else place,
@@ -2548,11 +2576,31 @@ given MIRFunctionBuilder {
         };
     };
 
+    /// Establish the bindings of an already-matched pattern by aliasing the
+    /// payload places they read from.
     file_private bind_pattern_variables(
         self,
         pattern TypedPattern,
         subject_place MIRPlace,
         subject_type Type,
+    ) Void = {
+        self.apply_pattern_bindings(
+            pattern,
+            subject_place,
+            subject_type,
+            PatternBindMode.Alias(),
+        );
+    };
+
+    /// One structural walk over a pattern's bindings. The recursion that finds
+    /// the payload place of each leaf is shared by all three modes; only what
+    /// happens to a binding once its place is known differs.
+    file_private apply_pattern_bindings(
+        self,
+        pattern TypedPattern,
+        subject_place MIRPlace,
+        subject_type Type,
+        mode PatternBindMode,
     ) Void = {
         let matched = self.pattern_match_place(subject_place, subject_type);
         let matched_place = matched.first;
@@ -2567,37 +2615,104 @@ given MIRFunctionBuilder {
                     let source_place = if binding_type == subject_type then subject_place
                     else matched_place;
                     let binding_name = self.context.symbol_name(symbol);
-                    self.pattern_place_by_def_id.insert(symbol.def_id.id, source_place);
-                    self.pattern_place_by_name.insert(binding_name, source_place);
+                    when mode in {
+                        .Alias() then {
+                            self.pattern_place_by_def_id.insert(
+                                symbol.def_id.id,
+                                source_place,
+                            );
+                            self.pattern_place_by_name.insert(binding_name, source_place);
+                        },
+                        .Claim() then {
+                            if self.pattern_place_by_def_id.get(symbol.def_id.id) is .None() then {
+                                let local = self.make_temporary(
+                                    binding_type,
+                                    if binding_name.is_empty() then "pattern_binding"
+                                    else binding_name,
+                                );
+                                self.append_statement(MIRStatement.Declare(local.id));
+                                let slot = MIRPlace.Local(local.id);
+                                self.pattern_place_by_def_id.insert(symbol.def_id.id, slot);
+                                self.pattern_place_by_name.insert(binding_name, slot);
+                            };
+                        },
+                        .Fill() then {
+                            when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
+                                .Some(destination) then self.append_statement(
+                                    MIRStatement.Assign(
+                                        destination,
+                                        MIRValue.PlaceRead(
+                                            source_place,
+                                            MIROwnershipUse.Copy(),
+                                        ),
+                                    ),
+                                ),
+                                .None() then {},
+                            };
+                        },
+                    };
                 };
             },
             .TraitObjectTypeBinding(symbol, target_type) then {
                 let binding_name = self.context.symbol_name(symbol);
-                let local = self.make_temporary(
-                    target_type,
-                    if binding_name.is_empty() then "trait_object_binding"
-                    else binding_name,
-                );
-                self.append_statement(MIRStatement.Declare(local.id));
-                self.append_statement(
-                    MIRStatement.Assign(
-                        MIRPlace.Local(local.id),
-                        MIRValue.Intrinsic(
-                            MIRIntrinsic.TraitObjectDowncast(
-                                MIRValue.PlaceRead(
-                                    subject_place,
-                                    MIROwnershipUse.Borrow(),
+                let name_hint = if binding_name.is_empty() then "trait_object_binding"
+                else binding_name;
+                when mode in {
+                    .Alias() then {
+                        let local = self.make_temporary(target_type, name_hint);
+                        self.append_statement(MIRStatement.Declare(local.id));
+                        self.append_statement(
+                            MIRStatement.Assign(
+                                MIRPlace.Local(local.id),
+                                MIRValue.Intrinsic(
+                                    MIRIntrinsic.TraitObjectDowncast(
+                                        MIRValue.PlaceRead(
+                                            subject_place,
+                                            MIROwnershipUse.Borrow(),
+                                        ),
+                                        target_type,
+                                    ),
                                 ),
-                                target_type,
                             ),
-                        ),
-                    ),
-                );
-                self.pattern_place_by_def_id.insert(
-                    symbol.def_id.id,
-                    MIRPlace.Local(local.id),
-                );
-                self.pattern_place_by_name.insert(binding_name, MIRPlace.Local(local.id));
+                        );
+                        self.pattern_place_by_def_id.insert(
+                            symbol.def_id.id,
+                            MIRPlace.Local(local.id),
+                        );
+                        self.pattern_place_by_name.insert(
+                            binding_name,
+                            MIRPlace.Local(local.id),
+                        );
+                    },
+                    .Claim() then {
+                        if self.pattern_place_by_def_id.get(symbol.def_id.id) is .None() then {
+                            let local = self.make_temporary(target_type, name_hint);
+                            self.append_statement(MIRStatement.Declare(local.id));
+                            let slot = MIRPlace.Local(local.id);
+                            self.pattern_place_by_def_id.insert(symbol.def_id.id, slot);
+                            self.pattern_place_by_name.insert(binding_name, slot);
+                        };
+                    },
+                    .Fill() then {
+                        when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
+                            .Some(destination) then self.append_statement(
+                                MIRStatement.Assign(
+                                    destination,
+                                    MIRValue.Intrinsic(
+                                        MIRIntrinsic.TraitObjectDowncast(
+                                            MIRValue.PlaceRead(
+                                                subject_place,
+                                                MIROwnershipUse.Borrow(),
+                                            ),
+                                            target_type,
+                                        ),
+                                    ),
+                                ),
+                            ),
+                            .None() then {},
+                        };
+                    },
+                };
             },
             .EnumCase(case_name, tag_index, elements) then {
                 let mutable case_info_opt = Option[EnumCaseInfo].None();
@@ -2654,10 +2769,11 @@ given MIRFunctionBuilder {
                             } else {
                                 payload_place
                             };
-                            self.bind_pattern_variables(
+                            self.apply_pattern_bindings(
                                 elements[idx].pattern,
                                 resolved_place,
                                 param.param_type,
+                                mode,
                             );
                             idx += 1;
                         };
@@ -2716,10 +2832,11 @@ given MIRFunctionBuilder {
                                 } else {
                                     payload_place
                                 };
-                                self.bind_pattern_variables(
+                                self.apply_pattern_bindings(
                                     elem.pattern,
                                     resolved_place,
                                     elem_type,
+                                    mode,
                                 );
                             };
                             idx += 1;
@@ -2748,10 +2865,11 @@ given MIRFunctionBuilder {
                                 field.field_type,
                             );
                             let field_place = MIRPlace.Field(matched_place, field_symbol);
-                            self.bind_pattern_variables(
+                            self.apply_pattern_bindings(
                                 elements[idx].pattern,
                                 field_place,
                                 field.field_type,
+                                mode,
                             );
                             idx += 1;
                         };
@@ -2760,17 +2878,93 @@ given MIRFunctionBuilder {
                 };
             },
             .AndPattern(left, right) then {
-                self.bind_pattern_variables(left, matched_place, matched_type);
-                self.bind_pattern_variables(right, matched_place, matched_type);
+                self.apply_pattern_bindings(left, matched_place, matched_type, mode);
+                self.apply_pattern_bindings(right, matched_place, matched_type, mode);
             },
-            .OrPattern(left, _) then self.bind_pattern_variables(
-                left,
-                matched_place,
-                matched_type,
-            ),
+            // An `or` pattern's branches bind the same names from different
+            // payload positions, so they cannot alias. Claim one slot per name,
+            // then let each branch fill the slots from its own layout.
+            .OrPattern(left, right) then {
+                when mode in {
+                    .Claim() then {
+                        self.apply_pattern_bindings(
+                            left,
+                            subject_place,
+                            subject_type,
+                            mode,
+                        );
+                        self.apply_pattern_bindings(
+                            right,
+                            subject_place,
+                            subject_type,
+                            mode,
+                        );
+                    },
+                    .Alias() or .Fill() then self.bind_or_pattern_variables(
+                        left,
+                        right,
+                        subject_place,
+                        subject_type,
+                    ),
+                };
+            },
             .NotPattern(_) then {},
             _ then {},
         };
+    };
+
+    /// Bind an `or` pattern by giving every name one slot and letting each
+    /// branch write its own payload layout into it. The join block is where the
+    /// arm body goes, so both branches reach it with every slot filled.
+    file_private bind_or_pattern_variables(
+        self,
+        left TypedPattern,
+        right TypedPattern,
+        subject_place MIRPlace,
+        subject_type Type,
+    ) Void = {
+        self.apply_pattern_bindings(
+            left,
+            subject_place,
+            subject_type,
+            PatternBindMode.Claim(),
+        );
+        let left_condition = self.lower_pattern_condition(
+            subject_place,
+            subject_type,
+            left,
+            false,
+        );
+        let branch_block = self.current_block_id();
+        let left_block = self.make_block();
+        let right_block = self.make_block();
+        let join_block = self.make_block();
+        self.set_current_block(branch_block);
+        self.terminate(MIRTerminator.Branch(left_condition, left_block, right_block));
+
+        self.set_current_block(left_block);
+        self.apply_pattern_bindings(
+            left,
+            subject_place,
+            subject_type,
+            PatternBindMode.Fill(),
+        );
+        if not self.current_block_is_terminated() then {
+            self.terminate(MIRTerminator.Goto(join_block));
+        };
+
+        self.set_current_block(right_block);
+        self.apply_pattern_bindings(
+            right,
+            subject_place,
+            subject_type,
+            PatternBindMode.Fill(),
+        );
+        if not self.current_block_is_terminated() then {
+            self.terminate(MIRTerminator.Goto(join_block));
+        };
+
+        self.set_current_block(join_block);
     };
 
     file_private pattern_binding_type(self, symbol Symbol, subject_type Type) Type = {
@@ -5685,6 +5879,16 @@ given MIRFunctionBuilder {
                 inner_ref,
             ) else place,
             .MutableWeakReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
+                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                inner_ref,
+            ) else place,
+            // See the matching cases in `lower_expression`: a raw-pointer local
+            // typed as its own pointee is the drop body's `self`.
+            .PointerType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
+                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                inner_ref,
+            ) else place,
+            .MutablePointerType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
                 MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                 inner_ref,
             ) else place,

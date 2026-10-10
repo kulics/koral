@@ -115,9 +115,11 @@ public class NameCollector: CompilerPass {
             currentModulePath = sourceInfo?.modulePath ?? []
             currentPackageID = sourceInfo?.packageID ?? ""
             defIdMap.currentModulePath = currentModulePath
-            
-            try collectDefinition(node, isStdLib: isStdLib)
 
+            // A diagnostic names its file from the AMBIENT name, so that has to
+            // be this node's before the node is looked at. Setting it after
+            // attributes everything `collectDefinition` reports to whatever
+            // node came before -- for a user `intrinsic` that was a std file.
             if let checker {
                 checker.isCurrentDeclStdLib = isStdLib
                 checker.currentFileName = currentSourceFile
@@ -125,6 +127,11 @@ public class NameCollector: CompilerPass {
                 checker.currentModulePath = currentModulePath
                 checker.currentPackageID = currentPackageID
                 checker.currentSpan = node.span
+            }
+
+            try collectDefinition(node, isStdLib: isStdLib)
+
+            if let checker {
                 try checker.collectTypeDefinition(node, isStdLib: isStdLib)
             }
         }
@@ -239,7 +246,7 @@ public class NameCollector: CompilerPass {
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, _, let fields, let access, let span, let nameSpan):
+        case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
             try collectForeignTypeDefinition(
                 name: name,
                 fields: fields,

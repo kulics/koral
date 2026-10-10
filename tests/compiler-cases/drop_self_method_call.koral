@@ -1,0 +1,41 @@
+// EXPECT-EXACT: before: 7
+// EXPECT-EXACT: drop self method call: PASS
+// EXPECT-EXACT: closed: 7
+// EXPECT-EXACT: described: file-drop
+
+// `self.m()` inside a `drop` body is a receiver use, not an escape. Two things
+// have to hold for it to work: the drop ABI hands `self` in as a pointer while
+// the type system still calls it `Self`, so the call site dereferences; and an
+// ordinary method takes its receiver by value, which retains -- so the object
+// has to be un-resurrectable for the duration of its own destructor.
+//
+// EXPECT-EXACT pins the whole output: a missing drop, a double drop, or a
+// destructor that ran at the wrong moment all change these lines.
+
+type mutable File(mutable fd Int);
+
+given File {
+    close(self) Int = {
+        return self.fd;
+    };
+
+    describe(self, suffix String) String = {
+        return "file-\(suffix)";
+    };
+};
+
+given File as Drop {
+    drop(self) Void = {
+        let n = self.close();
+        let label = self.describe("drop");
+        println("closed: \(n)");
+        println("described: \(label)");
+    };
+};
+
+let main() Int = {
+    let f = File(7);
+    println("before: \(f.fd)");
+    println("drop self method call: PASS");
+    return 0;
+};

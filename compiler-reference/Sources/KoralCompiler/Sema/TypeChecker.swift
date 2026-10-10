@@ -496,6 +496,16 @@ public class TypeChecker {
     return context.methodOwner(of: t).display
     }
 
+  /// The registry key for a method: the same identity `registerReceiverStyleMethod`
+  /// uses for its per-method label tables.
+  func methodOwnerKey(_ owner: ReceiverMethodOwner?, traitName: String? = nil) -> String {
+    switch owner {
+    case .concreteType(let ownerType): return methodLabelKey(ownerType)
+    case .extensionTemplate(let ownerDefId): return MethodOwner.decl(ownerDefId).display
+    case nil: return traitName ?? ""
+    }
+  }
+
   func isReceiverStyleMethod(_ symbol: Symbol) -> Bool {
     receiverStyleMethodDefIds.contains(symbol.defId.id)
   }
@@ -1308,7 +1318,8 @@ public class TypeChecker {
     type: Type,
     kind: SymbolKind,
     access: AccessModifier,
-    preferredDefId: DefId? = nil
+    preferredDefId: DefId? = nil,
+    isMethod: Bool = false
   ) -> Symbol {
     let isMutable: Bool
     switch kind {
@@ -1328,26 +1339,86 @@ public class TypeChecker {
       span: currentSpan,
       packageID: currentPackageID,
       isMutable: isMutable,
-      preferredDefId: preferredDefId
+      preferredDefId: preferredDefId,
+      isMethod: isMethod
+    )
+  }
+
+  /// Method identity is (owner, name) -- NOT (module, name). Two same-named
+  /// methods on different owners are two methods and must not share a DefId:
+  /// `functionNamedParams` and `methodTypeParamsByDefId` are keyed on it, so a
+  /// shared one hands one method the other's parameter labels and type-parameter
+  /// bounds. This table is the single allocator, so every pass that touches the
+  /// same method lands on the same DefId.
+  var methodDefIdsByOwner: [String: [String: DefId]] = [:]
+
+  func methodSymbolDefId(ownerKey: String, name: String, access: AccessModifier) -> DefId {
+    if let existing = methodDefIdsByOwner[ownerKey]?[name] {
+      return existing
+    }
+    let defId = context.allocateDefId(
+      modulePath: currentModulePath,
+      name: name,
+      kind: .function,
+      sourceFile: currentSourceFile,
+      access: access,
+      packageID: currentPackageID,
+      span: currentSpan,
+      isMethod: true
+    )
+    methodDefIdsByOwner[ownerKey, default: [:]][name] = defId
+    return defId
+  }
+
+  /// Build a method's symbol. `ownerKey` is `methodLabelKey` of the receiver
+  /// type, or a trait identity for trait-side methods -- whatever the caller
+  /// already uses to key `extensionMethods`.
+  func makeMethodSymbol(
+    name: String,
+    type: Type,
+    access: AccessModifier,
+    ownerKey: String,
+    preferredDefId: DefId? = nil,
+    typeParameters: [TypeParameterDecl] = []
+  ) -> Symbol {
+    // A declaration that already carries a DefId wins: that is the method's
+    // identity from the pass that registered it, and re-deriving one here is
+    // how the two drifted apart in the first place.
+    let defId: DefId
+    if let preferredDefId, preferredDefId.isValid {
+      defId = preferredDefId
+      methodDefIdsByOwner[ownerKey, default: [:]][name] = defId
+    } else {
+      defId = methodSymbolDefId(ownerKey: ownerKey, name: name, access: access)
+    }
+    if !typeParameters.isEmpty {
+      methodTypeParamsByDefId[defId] = typeParameters
+    }
+    return context.createSymbol(
+      name: name,
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      type: type,
+      kind: .function,
+      access: access,
+      span: currentSpan,
+      packageID: currentPackageID,
+      isMutable: false,
+      preferredDefId: defId,
+      isMethod: true
     )
   }
 
   func registeredMethodDeclaration(
     _ method: MethodDeclaration,
-    access: AccessModifier? = nil
+    access: AccessModifier? = nil,
+    ownerKey: String = ""
   ) -> MethodDeclaration {
     let resolvedAccess = access ?? method.access
     let defId = method.defId.isValid
       ? method.defId
-      : context.allocateDefId(
-          modulePath: currentModulePath,
-          name: method.name,
-          kind: .function,
-          sourceFile: currentSourceFile,
-          access: resolvedAccess,
-          packageID: currentPackageID,
-          span: currentSpan
-        )
+      : methodSymbolDefId(ownerKey: ownerKey, name: method.name, access: resolvedAccess)
+    methodDefIdsByOwner[ownerKey, default: [:]][method.name] = defId
     if !method.typeParameters.isEmpty {
       methodTypeParamsByDefId[defId] = method.typeParameters
     }

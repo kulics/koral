@@ -472,13 +472,20 @@ public class DefIdMap {
         sourceFile: String,
         access: AccessModifier = .module_private,
         packageID: String = "",
-        span: SourceSpan = .unknown
+        span: SourceSpan = .unknown,
+        isMethod: Bool = false
     ) -> DefId {
         let isLocalSymbol = modulePath.isEmpty && sourceFile.isEmpty && kind == .variable
 
+        func key(_ file: String?) -> String {
+            isMethod
+                ? makeMethodKey(modulePath: modulePath, name: name, sourceFile: file)
+                : makeKey(modulePath: modulePath, name: name, sourceFile: file)
+        }
+
         // Reuse existing DefId for non-local symbols when possible
         if access == .file_private {
-            let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+            let keyWithFile = key(sourceFile)
             if let existing = nameToDefId[keyWithFile],
                let metadata = idToMetadata[existing.id],
                metadata.kind == kind {
@@ -498,21 +505,20 @@ public class DefIdMap {
             packageID: packageID,
             span: span
         )
-        
+
         if !isLocalSymbol {
             // Private symbols must stay file-scoped and should not shadow siblings in
             // the module-wide lookup table.
-            let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+            let keyWithFile = key(sourceFile)
             nameToDefId[keyWithFile] = defId
 
             if access != .file_private {
-                let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
-                nameToDefId[keyWithoutFile] = defId
+                nameToDefId[key(nil)] = defId
             }
         }
-        
+
         idToMetadata[id] = metadata
-        
+
         return defId
     }
 
@@ -570,27 +576,35 @@ public class DefIdMap {
     public func lookup(
         modulePath: [String],
         name: String,
-        sourceFile: String? = nil
+        sourceFile: String? = nil,
+        isMethod: Bool = false
     ) -> DefId? {
+        func key(_ file: String?) -> String {
+            isMethod
+                ? makeMethodKey(modulePath: modulePath, name: name, sourceFile: file)
+                : makeKey(modulePath: modulePath, name: name, sourceFile: file)
+        }
         // 如果提供了 sourceFile，首先尝试带文件路径的键
         if let file = sourceFile {
-            let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: file)
+            let keyWithFile = key(file)
             if let defId = nameToDefId[keyWithFile] {
                 return defId
             }
         }
-        
+
         // 尝试不带文件路径的键（用于公共符号）
-        let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
-        return nameToDefId[keyWithoutFile]
+        return nameToDefId[key(nil)]
     }
 
     public func lookupExact(
         modulePath: [String],
         name: String,
-        sourceFile: String
+        sourceFile: String,
+        isMethod: Bool = false
     ) -> DefId? {
-        let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+        let keyWithFile = isMethod
+            ? makeMethodKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+            : makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
         return nameToDefId[keyWithFile]
     }
     
@@ -1175,6 +1189,20 @@ public class DefIdMap {
 
     private func makeKey(modulePath: [String], name: String, sourceFile: String?) -> String {
         var parts = modulePath
+        parts.append(name)
+        if let file = sourceFile {
+            parts.append("@\(file)")
+        }
+        return parts.joined(separator: ".")
+    }
+
+    /// Methods live in their own key space. A method is identified by
+    /// (owner, name), not by (module, name): the method tables expect
+    /// same-named methods on different owners to share one DefId, but a free
+    /// function of that name is a different entity and must not share it.
+    private func makeMethodKey(modulePath: [String], name: String, sourceFile: String?) -> String {
+        var parts = ["\u{1}method"]
+        parts.append(contentsOf: modulePath)
         parts.append(name)
         if let file = sourceFile {
             parts.append("@\(file)")

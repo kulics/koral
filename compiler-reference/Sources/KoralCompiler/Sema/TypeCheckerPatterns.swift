@@ -91,10 +91,53 @@ extension TypeChecker {
     }
   }
 
+  /// Whether a pattern TESTS the shape of its subject, as opposed to simply
+  /// binding whatever is there.
+  private func patternTestsSubjectShape(_ pattern: PatternNode) -> Bool {
+    switch pattern {
+    case .variable, .wildcard:
+      return false
+    default:
+      return true
+    }
+  }
+
+  private func isWeakReferenceType(_ type: Type) -> Bool {
+    switch type {
+    case .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
+
+  /// A weak reference is opaque until `upgrade`d. Reject it as a pattern
+  /// subject before anything peels it, so the diagnostic names the weak
+  /// reference the user wrote and not the type hiding behind it.
+  func rejectWeakPatternSubject(_ type: Type, span: SourceSpan) throws {
+    if isWeakReferenceType(type) {
+      throw SemanticError(
+        .generic("Cannot match a pattern against a weak reference: upgrade it first"),
+        span: span
+      )
+    }
+  }
+
   func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (
     TypedPattern, [(String, Bool, Type)]
   ) {
     var bindings: [(String, Bool, Type)] = []
+
+    // A weak reference is opaque until `upgrade`d -- it carries no fields, no
+    // cases and no payload -- so testing one's shape is not meaningful. Binding
+    // the handle whole is fine.
+    if patternTestsSubjectShape(pattern), isWeakReferenceType(subjectType) {
+      throw SemanticError(
+        .generic("Cannot match a pattern against a weak reference: upgrade it first"),
+        span: pattern.span
+      )
+    }
 
     switch pattern {
     case .traitObjectType(let targetType, let span):
@@ -236,7 +279,8 @@ extension TypeChecker {
         subPatternArgs,
         fieldNames: caseDef.parameters.map { $0.name },
         fieldIsNamed: caseDef.parameters.map { $0.named },
-        patternDescription: ".\(caseName)"
+        patternDescription: ".\(caseName)",
+        patternSpan: span
       )
       let subPatterns = orderedPatternArgs.map { $0.pattern }
 
@@ -409,7 +453,8 @@ extension TypeChecker {
         subPatternArgs,
         fieldNames: members.map { $0.name },
         fieldIsNamed: members.map { $0.named },
-        patternDescription: typeName
+        patternDescription: typeName,
+        patternSpan: span
       )
       let subPatterns = orderedPatternArgs.map { $0.pattern }
       
@@ -470,6 +515,24 @@ extension TypeChecker {
           )
         }
       }
+      var binds: [Bool] = []
+      var slotSpans: [SourceSpan] = []
+      for arg in elements {
+        if case .wildcard = arg.pattern {
+          binds.append(false)
+        } else {
+          binds.append(true)
+        }
+        slotSpans.append(arg.pattern.span)
+      }
+      try checkPositionalDestructuring(
+        members: members,
+        owner: tupleDestructuringOwner(of: innerType),
+        typeName: innerType.description,
+        binds: binds,
+        slotSpans: slotSpans,
+        span: span
+      )
       var typedSubPatterns: [TypedPattern] = []
       for (idx, arg) in elements.enumerated() {
         let fieldType = members[idx].type
@@ -505,13 +568,15 @@ extension TypeChecker {
   /// the type arguments substituted. `nil` when the subject is not a struct at
   /// all; `[]` when it is a struct whose fields are not registered.
   func tupleDestructuringMembers(of subjectType: Type) throws ->
-    [(name: String, type: Type)]? {
+    [(name: String, type: Type, access: AccessModifier, named: Bool)]? {
     switch subjectType {
     case .structure(let defId):
       guard let members = context.getStructMembers(defId) else {
         return []
       }
-      return members.map { (name: $0.name, type: $0.type) }
+      return members.map {
+        (name: $0.name, type: $0.type, access: $0.access, named: $0.named)
+      }
 
     case .genericStruct(let tplDefId, let typeArgs):
       // Identity: the template's DECLARATION, carried on the type.
@@ -522,7 +587,7 @@ extension TypeChecker {
       for (index, param) in template.typeParameters.enumerated() where index < typeArgs.count {
         substitution[param.name] = typeArgs[index]
       }
-      var resolved: [(name: String, type: Type)] = []
+      var resolved: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
       resolved.reserveCapacity(template.parameters.count)
       for param in template.parameters {
         let resolvedType = try withNewScope {
@@ -531,12 +596,60 @@ extension TypeChecker {
           }
           return try resolveTypeNode(param.type)
         }
-        resolved.append((name: param.name, type: resolvedType))
+        resolved.append((name: param.name, type: resolvedType, access: param.access, named: param.named))
       }
       return resolved
 
     default:
       return nil
+    }
+  }
+
+  /// The declaration that owns the fields a positional destructuring reads,
+  /// for the visibility rule. `nil` when the subject is not a nominal struct.
+  func tupleDestructuringOwner(of subjectType: Type) -> DefId? {
+    switch subjectType {
+    case .structure(let defId):
+      return defId
+    case .genericStruct(let tplDefId, _):
+      return currentScope.genericStructTemplate(defId: tplDefId)?.defId
+    default:
+      return nil
+    }
+  }
+
+  /// `(a, b, c)` binds fields in DECLARATION ORDER, so it can only reach a
+  /// field declared POSITIONAL. Two rules, both already owed to the named
+  /// struct pattern:
+  ///
+  ///   - a NAMED field has to be matched by label, which a positional slot
+  ///     cannot do;
+  ///   - a field this file may not read may only be ignored, never bound.
+  ///
+  /// `binds[i]` says whether slot i reads field i -- `_` does not -- and
+  /// `slotSpans[i]` is where that slot is written.
+  func checkPositionalDestructuring(
+    members: [(name: String, type: Type, access: AccessModifier, named: Bool)],
+    owner: DefId?,
+    typeName: String,
+    binds: [Bool],
+    slotSpans: [SourceSpan],
+    span: SourceSpan
+  ) throws {
+    if let namedField = members.first(where: { $0.named }) {
+      throw SemanticError(.generic(
+        "Named pattern field '\(namedField.name)' must be matched by label"
+      ), span: span)
+    }
+    guard let owner else { return }
+    for (index, member) in members.enumerated() {
+      guard index < binds.count, index < slotSpans.count, binds[index] else { continue }
+      if !isFieldAccessible(fieldAccess: member.access, defId: owner) {
+        let accessLabel = member.access.description
+        throw SemanticError(.generic(
+          "Cannot access \(accessLabel) field '\(member.name)' of type '\(typeName)' in destructuring pattern"
+        ), span: slotSpans[index])
+      }
     }
   }
 

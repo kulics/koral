@@ -1154,7 +1154,7 @@ Koral provides a powerful type system that allows you to define your own data st
 
 ### `type`: Shallowly Immutable Nominals
 
-A `type` declaration introduces a nominal type whose fields are all immutable. Values of a `type` have **no identity**, and the compiler decides the layout — inline, hidden indirection, or shared backing. Value semantics is not promised: copies may share storage, which is unobservable precisely because the type is shallowly immutable.
+A `type` declaration introduces a nominal type whose fields are all immutable. Values of a `type` have **no identity**, and the compiler decides the layout — inline, hidden indirection, or shared backing. Value semantics is not promised: copies may share storage, which is unobservable precisely because the type is shallowly immutable. **A type that implements `Drop` is the exception** — its destructor runs once per object, so the sharing is observable and must not be optimized away; see [Memory Model](#memory-model).
 
 Struct fields can be positional or named. Named fields use colon syntax and can have default values.
 
@@ -1375,11 +1375,14 @@ let a1 = Pair(1, 2);           // Inferred as Pair[Int, Int]
 let a2 = Pair(true, "hello");  // Inferred as Pair[Bool, String]
 ```
 
-Pair also supports a literal form:
+There is **no tuple/pair literal**. `(1, 2)` is not an expression — it is the
+*destructuring* form, and only appears where something is being taken apart
+(`let (a, b) = p;`, a `when`/`is` pattern). Build a `Pair` with its constructor:
 
 ```koral
-let p1 = (1, 2);               // Equivalent to Pair(1, 2)
-let p2 = (true, "hello");     // Equivalent to Pair(true, "hello")
+let p1 = Pair(1, 2);
+let p2 = Pair(true, "hello");
+let (a, b) = p1;              // destructuring, not a literal
 ```
 
 #### Generic Functions
@@ -1531,10 +1534,26 @@ given File as Drop {
 };
 ```
 
-> **Known gap.** A method call on `self` inside `drop` (`self.close()`) is legal by
-> this rule but currently fails in code generation — the destructor's `self` is
-> passed by pointer and the call site does not dereference it. Use a field access
-> or a free function taking the field until that is fixed.
+A method call on `self` inside `drop` works like a field access. The destructor
+hands `self` in as a pointer while the type system still calls it `Self`, so the
+call site dereferences it. An ordinary method also takes its receiver by value,
+which retains: the object is un-resurrectable for the duration of its own
+destructor, so the retain and the method's matching release do nothing and the
+destructor is not re-entered.
+
+```koral
+given File {
+    close(self) Int = {
+        return self.fd;
+    };
+};
+
+given File as Drop {
+    drop(self) Void = {
+        println("closed: \(self.close())");
+    };
+};
+```
 
 #### `clone()`
 
@@ -1597,6 +1616,28 @@ when s in {
 };
 
 if b is Button(w, height: _, label: l) then println(l);
+```
+
+Logical combinators carry rules about what a pattern may bind:
+
+- `a and b` runs both sides, so the two sides must not bind the same name -- one
+  name would end up with two different values.
+- `a or b` matches one side or the other, so both sides must bind the same names,
+  and a name must mean the same type on both sides.
+- `not p` matches by the absence of a shape, so `p` must not bind anything.
+
+The two sides of an `or` may still place a name differently. Each branch reads
+its own layout, so `a` and `b` below come from whichever branch matched.
+
+```koral
+type E {
+    A(a Int, b Int),
+    B(a Int, mid Int, b Int),
+};
+
+when e in {
+    .A(a, b) or .B(a, _, b) then a + b,
+};
 ```
 
 ### `when` Expressions
@@ -2487,7 +2528,7 @@ Rules:
 
 - `&unsafe` produces `*unsafe T`; `&unsafe mutable` produces `*unsafe mutable T`.
 - `*expr` reads and `*expr = value` writes are the raw dereference forms.
-- Raw pointers are not a general "any type to `*unsafe T`` bridge: the std helpers that hand out raw pointers are restricted to plain-old-data element types.
+- Raw pointers are not a general "any type to `*unsafe T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
 
 ### Foreign Function Interface
 

@@ -251,43 +251,65 @@ extension TypeChecker {
     return (meta.map { $0.name }, meta.map { $0.named })
   }
 
+  /// Pattern arguments follow the call rules exactly -- same shape, same
+  /// reason: the DECLARATION decides whether a name is written at the use
+  /// site, and the use site does not get to disagree.
+  ///
+  ///   - a labeled argument names a field, which must be declared NAMED, and
+  ///     may do so at most once;
+  ///   - an unlabeled argument fills the next field NOT declared named, in
+  ///     declaration order, and may not appear after a labeled one;
+  ///   - every field is matched exactly once -- a pattern has no defaults.
+  ///
+  /// The result is one argument per field, in DECLARATION ORDER. An error
+  /// points at the offending argument, or at the pattern as a whole when the
+  /// pattern itself is the fault (a field left unmatched).
   func reorderPatternArguments(
     _ patternArgs: [PatternArg],
     fieldNames: [String],
     fieldIsNamed: [Bool],
-    patternDescription: String
+    patternDescription: String,
+    patternSpan: SourceSpan
   ) throws -> [PatternArg] {
+    // No registered fields means the subject is not the constructor this
+    // pattern names. That is a type error, reported by the type check --
+    // saying anything about the arguments here would name the wrong fault.
+    if fieldNames.isEmpty {
+      return patternArgs
+    }
+
     var orderedArgs: [PatternArg?] = Array(repeating: nil, count: fieldNames.count)
     var positionalIndex = 0
     var seenNamed = false
 
     for arg in patternArgs {
+      let argSpan = arg.pattern.span
       if let label = arg.label {
         // Named pattern
         seenNamed = true
         guard let fieldIndex = fieldNames.firstIndex(of: label) else {
-          throw SemanticError(.generic("Unknown pattern label '\(label)' for '\(patternDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Unknown pattern label '\(label)' for '\(patternDescription)'"), span: argSpan)
         }
         guard fieldIsNamed[fieldIndex] else {
-          throw SemanticError(.generic("Field '\(label)' is positional and cannot be matched by label"), span: currentSpan)
+          throw SemanticError(.generic("Field '\(label)' is positional and cannot be matched by label"), span: argSpan)
         }
         if orderedArgs[fieldIndex] != nil {
-          throw SemanticError(.generic("Duplicate pattern label '\(label)'"), span: currentSpan)
+          throw SemanticError(.generic("Duplicate pattern label '\(label)'"), span: argSpan)
         }
         orderedArgs[fieldIndex] = arg
       } else {
         // Positional pattern
         if seenNamed {
-          throw SemanticError(.generic("Positional pattern cannot appear after named pattern in '\(patternDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Positional pattern cannot appear after named pattern in '\(patternDescription)'"), span: argSpan)
         }
         while positionalIndex < fieldNames.count && fieldIsNamed[positionalIndex] {
           positionalIndex += 1
         }
         guard positionalIndex < fieldNames.count else {
           if let required = fieldNames.indices.firstIndex(where: { fieldIsNamed[$0] && orderedArgs[$0] == nil }) {
-            throw SemanticError(.generic("Named pattern field '\(fieldNames[required])' must be matched by label"), span: currentSpan)
+            throw SemanticError(.generic("Named pattern field '\(fieldNames[required])' must be matched by label"), span: patternSpan)
           }
-          throw SemanticError(.generic("Too many positional pattern arguments for '\(patternDescription)'"), span: currentSpan)
+          throw SemanticError(.generic("Too many positional pattern arguments for '\(patternDescription)'"), span: argSpan)
         }
         orderedArgs[positionalIndex] = arg
         positionalIndex += 1
@@ -297,7 +319,7 @@ extension TypeChecker {
     // Patterns don't support defaults - all fields must be provided
     for (index, name) in fieldNames.enumerated() {
       if orderedArgs[index] == nil {
-        throw SemanticError(.generic("Missing pattern field '\(name)' in '\(patternDescription)'"), span: currentSpan)
+        throw SemanticError(.generic("Missing pattern field '\(name)' in '\(patternDescription)'"), span: patternSpan)
       }
     }
 

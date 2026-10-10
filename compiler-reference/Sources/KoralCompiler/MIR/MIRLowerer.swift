@@ -3427,10 +3427,31 @@ private final class MIRFunctionBuilder {
     return .local(local.id)
   }
 
+  /// The drop ABI hands `self` in as a pointer while the type system still
+  /// calls it `Self`, so a local that is a pointer OF its own symbol type is
+  /// that re-typed `self`. Reading it as the symbol's type means reading the
+  /// pointee. A pointer the user declared has the pointer type on both sides
+  /// and is left alone.
+  private func derefDropSelfPlace(_ place: MIRPlace, for symbol: Symbol) -> MIRPlace {
+    guard case .local(let localID) = place,
+          let localType = locals.first(where: { $0.id == localID })?.type else {
+      return place
+    }
+    let pointee: Type
+    switch localType {
+    case .pointer(let inner), .mutablePointer(let inner):
+      pointee = inner
+    default:
+      return place
+    }
+    guard symbol.type == pointee else { return place }
+    return .deref(base: .placeRead(place, ownership: .borrow), pointee: pointee)
+  }
+
   private func lowerPlace(_ expression: TypedExpressionNode) -> MIRPlace? {
     switch expression {
     case .variable(let symbol):
-      return capturePlace(for: symbol)
+      return derefDropSelfPlace(capturePlace(for: symbol), for: symbol)
     case .memberPath(let source, let path):
       let basePlace: MIRPlace?
       switch source.type {

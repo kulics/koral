@@ -935,7 +935,7 @@ let sum = add(20)(22);   // sum == 42
 let main() Void = if 1 == 1 then println("yes") else println("no");
 ```
 
-带 `else` 的 `if` 也是表达式。`then` 和 `else` 分支后必须是表达式。
+`if` 始终是表达式。`then` 与 `else` 都写时它产生一个值；不写 `else` 时，单分支 `if` 产生 `Void`。两个分支后都必须是表达式。
 
 ```koral
 let main() Void = println(if 1 == 1 then "yes" else "no");
@@ -948,7 +948,7 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-不需要处理 `else` 分支时可以省略它。此时该结构是语句，不产生值；它的块分支仍默认为 `Void`。
+不需要处理 `else` 分支时可以省略它。单分支形式仍是表达式，但产生 `Void`：它的块分支默认为 `Void`。
 
 ```koral
 let main() Void = if 1 == 1 then println("yes");
@@ -1364,11 +1364,13 @@ let a1 = Pair(1, 2);           // 推断为 Pair[Int, Int]
 let a2 = Pair(true, "hello");  // 推断为 Pair[Bool, String]
 ```
 
-Pair 还支持字面量形式：
+**没有元组 / pair 字面量**。`(1, 2)` 不是表达式——它是**解构**形式，只出现在把东西拆开的地方
+（`let (a, b) = p;`，以及 `when` / `is` 里的模式）。构造 `Pair` 用它自己的构造器：
 
 ```koral
-let p1 = (1, 2);               // 等价于 Pair(1, 2)
-let p2 = (true, "hello");     // 等价于 Pair(true, "hello")
+let p1 = Pair(1, 2);
+let p2 = Pair(true, "hello");
+let (a, b) = p1;              // 解构，不是字面量
 ```
 
 #### 泛型函数
@@ -1503,9 +1505,23 @@ given File as Drop {
 };
 ```
 
-> **已知缺口。** 按本规则，`drop` 里对 `self` 的方法调用（`self.close()`）是合法的，
-> 但目前会在代码生成阶段失败——析构的 `self` 以指针传入，调用点没有解引用。
-> 在修好之前，请改用字段读写，或把字段传给自由函数。
+`drop` 里对 `self` 的方法调用与字段读写一样可用。析构把 `self` 以指针传入，而类型系统
+仍称它为 `Self`，所以调用点会解引用。普通方法按值接收，也就是会 retain 一次：对象在自身
+析构期间是不可复活的，这次 retain 与方法结束时的 release 都是空操作，析构不会被重新进入。
+
+```koral
+given File {
+    close(self) Int = {
+        return self.fd;
+    };
+};
+
+given File as Drop {
+    drop(self) Void = {
+        println("closed: \(self.close())");
+    };
+};
+```
 
 
 #### `clone()`
@@ -1568,6 +1584,26 @@ when s in {
 };
 
 if b is Button(w, height: _, label: l) then println(l);
+```
+
+逻辑组合子对模式能绑定什么有约束：
+
+- `a and b` 两侧都会执行，所以两侧不能绑定同一个名字——否则一个名字会有两个不同的值。
+- `a or b` 只匹配其中一侧，所以两侧必须绑定同一批名字，且同一个名字在两侧必须是同一个类型。
+- `not p` 靠「形状不存在」来匹配，所以 `p` 不能绑定任何东西。
+
+`or` 的两侧仍然可以把同一个名字放在不同位置。每个分支读自己的布局，因此下面的 `a` 与 `b`
+来自真正匹配到的那个分支。
+
+```koral
+type E {
+    A(a Int, b Int),
+    B(a Int, mid Int, b Int),
+};
+
+when e in {
+    .A(a, b) or .B(a, _, b) then a + b,
+};
 ```
 
 ### `when` 表达式
@@ -1702,7 +1738,7 @@ when b in {
 
 `is not` 是取反形式，返回相反的匹配结果。
 
-用在 `if` 或 `while` 语句的条件中时，成功的 `is` 匹配还可以把模式中的变量绑定到当前作用域。在这些条件上下文之外，`is` 只能做布尔测试，不能引入绑定。`when ... in` 结构使用自己对匹配值的模式匹配，不通过 `is` 绑定。
+用在 `if` 或 `while` 表达式的条件中时，成功的 `is` 匹配还可以把模式中的变量绑定到当前作用域。在这些条件上下文之外，`is` 只能做布尔测试，不能引入绑定。`when ... in` 结构使用自己对匹配值的模式匹配，不通过 `is` 绑定。
 
 `is` 直接接受单个模式。如果需要在 `is` 下使用逻辑模式组合子，请显式加圆括号，以便解析器将其与表达式级的 `and` / `or` / `not` 区分开。
 
@@ -2435,7 +2471,7 @@ let x = *p;       // raw 解引用读取
 
 - `&unsafe` 产生 `*unsafe T`；`&unsafe mutable` 产生 `*unsafe mutable T`。
 - `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
-- raw pointer 不是「任意类型到 `*unsafe T`」的通用桥：标准库中交出 raw pointer 的辅助接口只对 plain-old-data（POD）元素类型开放。
+- raw pointer 不是「任意类型到 `*unsafe T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
 
 ### 外部函数接口
 

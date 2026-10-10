@@ -84,7 +84,8 @@ public final class CompilerContext: @unchecked Sendable {
         sourceFile: String,
         access: AccessModifier = .module_private,
         packageID: String = "",
-        span: SourceSpan = .unknown
+        span: SourceSpan = .unknown,
+        isMethod: Bool = false
     ) -> DefId {
         defIdMap.allocate(
             modulePath: modulePath,
@@ -93,7 +94,8 @@ public final class CompilerContext: @unchecked Sendable {
             sourceFile: sourceFile,
             access: access,
             packageID: packageID,
-            span: span
+            span: span,
+            isMethod: isMethod
         )
     }
 
@@ -107,7 +109,8 @@ public final class CompilerContext: @unchecked Sendable {
         span: SourceSpan = .unknown,
         packageID: String = "",
         isMutable: Bool = false,
-        preferredDefId: DefId? = nil
+        preferredDefId: DefId? = nil,
+        isMethod: Bool = false
     ) -> Symbol {
         let defKind: DefKind
         switch kind {
@@ -132,7 +135,8 @@ public final class CompilerContext: @unchecked Sendable {
             defId = defIdMap.lookupExact(
                 modulePath: modulePath,
                 name: name,
-                sourceFile: sourceFile
+                sourceFile: sourceFile,
+                isMethod: isMethod
             ) ?? defIdMap.allocate(
                 modulePath: modulePath,
                 name: name,
@@ -140,13 +144,15 @@ public final class CompilerContext: @unchecked Sendable {
                 sourceFile: sourceFile,
                 access: access,
                 packageID: packageID,
-                span: span
+                span: span,
+                isMethod: isMethod
             )
         } else {
             defId = defIdMap.lookup(
                 modulePath: modulePath,
                 name: name,
-                sourceFile: nil
+                sourceFile: nil,
+                isMethod: isMethod
             ) ?? defIdMap.allocate(
                 modulePath: modulePath,
                 name: name,
@@ -154,7 +160,8 @@ public final class CompilerContext: @unchecked Sendable {
                 sourceFile: sourceFile,
                 access: access,
                 packageID: packageID,
-                span: span
+                span: span,
+                isMethod: isMethod
             )
         }
 

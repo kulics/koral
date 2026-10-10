@@ -859,53 +859,6 @@ given TypeChecker {
         return out;
     };
 
-    module_private check_given_members(
-        self,
-        members List[GivenMember],
-    ) List[TypedGivenMember] = {
-        let mutable out = List[TypedGivenMember].with_capacity(members.count());
-        for m in members then {
-            let typed_params = self.check_params(m.params);
-            let ret = self.resolve_type(m.return_type);
-            let typed_body = when m.body in {
-                .Some(b) then Option[TypedExpr].Some(
-                    self.check_expr_global_ref(b, .Some(ret)),
-                ),
-                .None() then Option[TypedExpr].None(),
-            };
-            let mutable context = self.context();
-            let method_def_id = context.allocate(m.name, DefKind.Function());
-            // Register method signature so mono can look it up by DefId
-            let mutable param_types = List[Type].new();
-            for p in typed_params then {
-                param_types.push(p.param_type);
-            };
-            let stable_ret = ret;
-            let mutable method_type = make_function_type(
-                self.to_type_ref_list(param_types),
-                stable_ret,
-            );
-            context.set_symbol_info(
-                method_def_id,
-                SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false),
-            );
-            context.set_param_specs(
-                method_def_id,
-                self.function_param_specs_from_typed_params(typed_params),
-            );
-            out.push(
-                TypedGivenMember(
-                    method_def_id,
-                    m.name,
-                    typed_params,
-                    stable_ret,
-                    typed_body,
-                ),
-            );
-        };
-        return out;
-    };
-
     module_private check_given_members_for_type(
         self,
         members List[GivenMember],
@@ -1233,9 +1186,16 @@ given TypeChecker {
                     let type_key = self.extension_template_key(target_type);
                     when self.lookup_method_signature(type_key, method_name) in {
                         .Some(existing_symbol) then existing_symbol.def_id,
-                        .None() then context.allocate(method_name, DefKind.Function()),
+                        // A method is identified by its owner, not by its name in
+                        // the module. Indexing it under the bare name would make
+                        // it collide with a free function of the same name, and
+                        // one of the two would silently take the other's body.
+                        .None() then self.allocate_unindexed_def_id(
+                            method_name,
+                            DefKind.Function(),
+                        ),
                     }
-                } else context.allocate(method_name, DefKind.Function()),
+                } else self.allocate_unindexed_def_id(method_name, DefKind.Function()),
             };
             // Register method signature so mono can look it up by DefId
             when reused_signature in {

@@ -87,7 +87,7 @@ let v = Vec(1, 2);
 
 - `Drop` uses `drop(self) Void`.
 - `Drop` is a normal trait requirement with a compiler-reserved finalization context; it is not a user-invoked method.
-- A type that implements `Drop` must behave as an ARC-backed object at runtime, even when the compiler's layout analysis may optimize away some extra layers for a local value.
+- A type that implements `Drop` must behave as an ARC-backed object at runtime. The compiler must NOT optimize the sharing away: the destructor runs exactly once, when the last owning handle dies, so the handle count is observable. During a destructor the object is held immortal (`strong_count = -1`), so a `retain`/`release` pair resurrecting it cannot re-enter the destructor; see `std/koral_runtime.c`.
 - `Drop` is separate from weak capability; trait objects are gated by object safety rather than an `Object` marker trait.
 - The compiler may perform finalization in an internal managed-lifetime context and still hide the raw address details from user code.
 - Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
@@ -128,6 +128,25 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 
 这是一条**契约**层的裁定：它约束的是「用户能依赖什么」和「编译器不许优化掉什么」，
 不改变声明语法——带 `Drop` 的类型仍然是 `type`，仍然不能声明 `mutable` 字段。
+
+### 析构期间对象不可复活
+
+语言规则允许 `drop` 里对 `self` 调方法（`self.m()` 是接收者使用，不是逃逸）。普通方法按值
+接收者，也就是会 retain 一次、在方法结束时 release 一次——而此刻强引用计数已经是 0。
+
+**裁定**：析构函数体执行期间，对象进入**不可复活**状态（运行时的 immortal 哨兵
+`strong_count = -1`）：
+
+- 这段时间里的 `retain` / `release` 都是空操作，所以接收者的那一对正好抵消，析构不会被
+  重新进入，也不会下溢。
+- weak 的 `upgrade` 要求 `strong_count > 0`，所以析构期间的弱引用拿不回对象——这正是
+  「`self` 不得逃逸」在运行时那一侧的对应物。
+
+析构函数体结束后计数恢复 0，让 weak 的最后一次释放仍能释放内存。
+
+出处：`std/koral_runtime.c` 的 `__koral_release_slow`。这与静态字面量的 immortal 头
+（`strong_count = -1`，见 [`thin-pointer-design.md`](thin-pointer-design.md)）是同一个哨兵，
+语义一致：**这个对象不再由引用计数决定生死**。
 
 ## 替代方案
 

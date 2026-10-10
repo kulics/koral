@@ -1,0 +1,102 @@
+// Or-pattern branches bind the same NAMES, but not necessarily at the same
+// POSITIONS. Each branch must lay its bindings out against its own payload.
+// EXPECT: test_right_branch_positions: PASS
+// EXPECT: test_left_branch_positions: PASS
+// EXPECT: test_three_branch_positions: PASS
+// EXPECT: test_nested_payload_positions: PASS
+// EXPECT: All or-pattern binding position tests passed!
+
+type E {
+    A(a Int, b Int),
+    B(a Int, mid Int, b Int),
+    C(only Int),
+};
+
+type Box {
+    Wrap(e E),
+    Bare(value Int),
+};
+
+// The right branch's `a` and `b` sit at payload positions 0 and 2, not 0 and 1.
+let test_right_branch_positions() Int = {
+    let e = E.B(1, 7, 2);
+    return when e in {
+        .A(a, b) or .B(a, _, b) then a + b,
+        .C(v) then v,
+    };
+};
+
+let test_left_branch_positions() Int = {
+    let e = E.A(1, 2);
+    return when e in {
+        .A(a, b) or .B(a, _, b) then a + b,
+        .C(v) then v,
+    };
+};
+
+// Three branches, each with its own layout.
+let test_three_branch_positions() Int = {
+    let mutable total = 0;
+    let one = E.A(10, 20);
+    total = total + (when one in {
+        .A(a, b) or .B(a, _, b) then a + b,
+        .C(v) then v,
+    });
+    let two = E.B(1, 2, 3);
+    total = total + (when two in {
+        .A(a, b) or .B(a, _, b) then a + b,
+        .C(v) then v,
+    });
+    let three = E.C(5);
+    total = total + (when three in {
+        .A(a, b) or .B(a, _, b) then a + b,
+        .C(v) then v,
+    });
+    // 30 + 4 + 5
+    return total;
+};
+
+// The or sits inside a nested payload rather than at the top level.
+let test_nested_payload_positions() Int = {
+    let b = Box.Wrap(E.B(3, 9, 4));
+    return when b in {
+        .Wrap(e) then when e in {
+            .A(a, x) or .B(a, _, x) then a + x,
+            .C(v) then v,
+        },
+        .Bare(v) then v,
+    };
+};
+
+let main() Int = {
+    if test_right_branch_positions() == 3 then {
+        println("test_right_branch_positions: PASS");
+    } else {
+        println("test_right_branch_positions: FAIL");
+        return 1;
+    };
+
+    if test_left_branch_positions() == 3 then {
+        println("test_left_branch_positions: PASS");
+    } else {
+        println("test_left_branch_positions: FAIL");
+        return 1;
+    };
+
+    if test_three_branch_positions() == 39 then {
+        println("test_three_branch_positions: PASS");
+    } else {
+        println("test_three_branch_positions: FAIL");
+        return 1;
+    };
+
+    if test_nested_payload_positions() == 7 then {
+        println("test_nested_payload_positions: PASS");
+    } else {
+        println("test_nested_payload_positions: FAIL");
+        return 1;
+    };
+
+    println("All or-pattern binding position tests passed!");
+    return 0;
+};

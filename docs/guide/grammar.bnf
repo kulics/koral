@@ -104,12 +104,12 @@
 // ============================================================================
 
 <type-decl> ::= "type" "mutable"? <type-identifier> <generic-params>? <type-body> ";"
-              | "type" "foreign" <string-literal>? <type-identifier> <foreign-type-body> ";"
+              | "type" "foreign" <type-identifier> <foreign-type-body> ";"
               | "type" "intrinsic" <type-identifier> ";"                // body-less (built into the compiler)
               | "type" <type-identifier> "=" <type> ";"                 // type alias
 // 说明：`mutable` 仅对 struct 有效，枚举和别名不支持。
 // `type foreign` 与 `type mutable` 互斥——外部类型的可变性不属于 Koral 自己的
-// nominal 声明。可选 string-literal 是 C 侧类型名（cname）。
+// nominal 声明。
 // 类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 List[Int]）
 // 类型别名在语义检查阶段被完全消除，后续阶段无需感知其存在
 <type-body> ::= "(" <field-list>? ")"                 // struct
@@ -371,10 +371,34 @@
                    | <cast-suffix>
                    | <qualified-path-suffix>
 
+// `(` 是三个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
+// 但解析时是**有序试验**，不是任选其一；下表就是消歧结果，与实现一一对应
+// （koralc parser/core_expressions.koral:parse_postfix_suffixes）。
+//
+//   `(` 的试验次序（一旦成功就定案，不再回退）：
+//     1. <qualified-path-suffix>  -- 仅当 base 是类型名（首字母大写的标识符）
+//                                    且括号内能解析成 <trait-ref>
+//     2. <cast-suffix>            -- 仅当括号内是单个 <type> 且后面紧跟 `)`
+//     3. <call-suffix>            -- 其余一律是调用；调用失败即报错，不回退
+//   例：Num(Tag) 是限定路径；x(Int) 是把 x 转型到 Int；f(1, 2) 是调用。
+//
+//   `[` 的试验次序：
+//     base 是首字母大写的标识符 -> 强制按 <generic-application> 解析（类型实参）
+//     base 是首字母小写的标识符 -> 先试 <generic-application>，失败则回退 <subscript-suffix>
+//     其它 base                -> <subscript-suffix>
+//   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义。
+//
+//   `[` 实参的判据是**能否解析成类型**：能则是泛型实参，否则是下标表达式。
+
 <call-suffix> ::= "(" <argument-list>? ")"
-<subscript-suffix> ::= "[" <expression-list> "]"
+<subscript-suffix> ::= "[" <expression> "]"
+// Exactly ONE index. `[]` and `[a, b]` are errors, not empty or multi-index
+// subscripts: there is no collection in the language that indexes by a tuple.
 <member-suffix> ::= "." <identifier>
 <cast-suffix> ::= "(" <type> ")"
+// A postfix cast is `expr(Type)` -- NEVER `expr as T`. `as` has exactly two
+// uses: import aliases (`using "..." { X as Y }`) and `given Type as Trait`.
+<generic-application> ::= "[" <type-list> "]"
 
 // 完全限定调用（Rust 式限定路径，等价于 <Type as Trait>::method）：消歧义，指定 trait。
 // 写法只有一种：左侧固定是类型名，实例方法的 receiver 作为第一个实参传入，

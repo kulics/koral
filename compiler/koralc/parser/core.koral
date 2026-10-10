@@ -9,8 +9,6 @@ public type DeclQualifiers(
 file_private type ParseDeclFlags(
     access AccessModifier,
     has_explicit_access Bool,
-    is_foreign Bool,
-    is_intrinsic Bool,
     invalid_access_message Option[String],
 );
 
@@ -597,8 +595,6 @@ given Parser {
     module_private parse_decl_flags(self) ParseDeclFlags = {
         let mutable access = AccessModifier.ModulePrivate();
         let mutable has_explicit_access = false;
-        let mutable is_foreign = false;
-        let mutable is_intrinsic = false;
         let mutable invalid_access_message = Option[String].None();
 
         while true then {
@@ -694,8 +690,6 @@ given Parser {
         return ParseDeclFlags(
             access,
             has_explicit_access,
-            false,
-            false,
             invalid_access_message,
         );
     };
@@ -707,14 +701,6 @@ given Parser {
         is_intrinsic Bool,
         base Decl,
     ) Result[Decl] = {
-        if is_foreign and is_intrinsic then {
-            return .Error(
-                self.parser_error_at_current(
-                    "foreign and intrinsic cannot be used together",
-                ),
-            );
-        };
-
         if is_foreign then {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span, name_span) then .Ok(
@@ -741,7 +727,6 @@ given Parser {
                     Decl.ForeignTypeDecl(
                         access,
                         name,
-                        Option[String].None(),
                         Option[List[Field]].Some(fields),
                         span,
                         name_span,
@@ -1296,8 +1281,6 @@ given Parser {
     module_private parse_let_decl(
         self,
         access AccessModifier,
-        is_foreign Bool,
-        is_intrinsic Bool,
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
@@ -1305,8 +1288,8 @@ given Parser {
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let decl_qualifiers = self.parse_decl_qualifiers();
-        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
-        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
+        let decl_is_foreign = decl_qualifiers.is_foreign;
+        let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
 
         let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
@@ -1501,8 +1484,6 @@ given Parser {
     module_private parse_type_decl(
         self,
         access AccessModifier,
-        is_foreign Bool,
-        is_intrinsic Bool,
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
@@ -1510,21 +1491,13 @@ given Parser {
         // `foreign` / `intrinsic` sit immediately after `type`, alongside
         // `mutable`: `type foreign ...`, `type intrinsic T;`.
         let decl_qualifiers = self.parse_decl_qualifiers();
-        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
-        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
+        let decl_is_foreign = decl_qualifiers.is_foreign;
+        let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
 
         let mutable is_nominal_mutable = false;
         if self.current().kind is .KwMut() then {
             is_nominal_mutable = true;
             self.advance();
-        };
-
-        let mutable foreign_cname = Option[String].None();
-        if decl_is_foreign then {
-            if self.current().kind is .StringLiteral(v) then {
-                foreign_cname = .Some(v);
-                self.advance();
-            };
         };
 
         let name_token = self.current();
@@ -1727,7 +1700,6 @@ given Parser {
                         Decl.ForeignTypeDecl(
                             access,
                             name,
-                            foreign_cname,
                             Option[List[Field]].Some(fields),
                             self.span_from_start(start),
                             self.token_span(name_token),
@@ -1762,7 +1734,6 @@ given Parser {
                             Decl.ForeignTypeDecl(
                                 access,
                                 name,
-                                foreign_cname,
                                 Option[List[Field]].None(),
                                 self.span_from_start(start),
                                 self.token_span(name_token),

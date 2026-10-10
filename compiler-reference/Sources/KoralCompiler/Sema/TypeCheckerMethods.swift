@@ -721,11 +721,12 @@ extension TypeChecker {
     }
     let functionType = Type.function(parameters: params, returns: returnType)
     
-    let methodSymbol = makeGlobalSymbol(
+    let methodSymbol = makeMethodSymbol(
       name: method.name,
       type: functionType,
-      kind: .function,
-      access: method.access
+      access: method.access,
+      ownerKey: methodLabelKey(baseType),
+      typeParameters: method.typeParameters
     )
     registerReceiverStyleMethod(
       methodSymbol,
@@ -1021,11 +1022,11 @@ extension TypeChecker {
         
         // Create a placeholder symbol without __trait_ prefix
         // The traitName field in the result indicates this is a trait method placeholder
-        let methodSymbol = makeGlobalSymbol(
+        let methodSymbol = makeMethodSymbol(
           name: methodName,
           type: functionType,
-          kind: .function,
-          access: sig.access
+          access: sig.access,
+          ownerKey: methodName
         )
         recordTraitPlaceholderInstantiation(
           baseType: baseType,

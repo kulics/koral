@@ -903,8 +903,6 @@ given Parser {
         self,
         access AccessModifier,
         has_explicit_access Bool,
-        is_foreign Bool,
-        is_intrinsic Bool,
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
@@ -914,17 +912,6 @@ given Parser {
                 self.parser_error(
                     "access modifier on using declaration is not supported",
                 ),
-            );
-        };
-        if is_foreign then {
-            // The token the message names is `using`, and `self.advance()` above
-            // has already moved past it -- reporting at `current()` points at
-            // whatever follows. `start` is the `using` itself.
-            return .Error(self.parser_error_at("Unexpected token: using", start));
-        };
-        if is_intrinsic then {
-            return .Error(
-                self.parser_error("intrinsic using declaration is not supported"),
             );
         };
 
@@ -998,8 +985,6 @@ given Parser {
     module_private parse_trait_decl(
         self,
         access AccessModifier,
-        is_foreign Bool,
-        is_intrinsic Bool,
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
@@ -1059,21 +1044,21 @@ given Parser {
             self.span_from_start(start),
             self.token_span(name_token),
         );
-        return self.wrap_decl(access, is_foreign, is_intrinsic, base);
+        // A trait declaration carries no `foreign` / `intrinsic` qualifier, so
+        // there is nothing for `wrap_decl` to rewrite.
+        return .Ok(base);
     };
 
     module_private parse_given_decl(
         self,
         access AccessModifier,
-        is_foreign Bool,
-        is_intrinsic Bool,
     ) Result[Decl] = {
         let start = self.current();
         self.advance();
         // `given intrinsic T { ... };` -- the qualifier sits right after `given`.
         let decl_qualifiers = self.parse_decl_qualifiers();
-        let mutable decl_is_foreign = is_foreign or decl_qualifiers.is_foreign;
-        let mutable decl_is_intrinsic = is_intrinsic or decl_qualifiers.is_intrinsic;
+        let decl_is_foreign = decl_qualifiers.is_foreign;
+        let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
         let type_params = self.parse_type_parameters() or return;
         let mutable target_type = self.parse_type() or return;
 
@@ -1117,14 +1102,6 @@ given Parser {
             .None() then {},
         };
 
-        if flags.is_foreign and flags.is_intrinsic then {
-            return .Error(
-                self.parser_error_at_current(
-                    "foreign and intrinsic cannot be used together",
-                ),
-            );
-        };
-
         // `foreign` / `intrinsic` are written immediately after the keyword,
         // not before it. Peek past the keyword to read them without disturbing
         // the branch parser that consumes it.
@@ -1144,30 +1121,12 @@ given Parser {
             },
             .None() then {},
         };
-        let decl_is_foreign = flags.is_foreign or qualifiers.is_foreign;
-        let decl_is_intrinsic = flags.is_intrinsic or qualifiers.is_intrinsic;
-        if decl_is_foreign and decl_is_intrinsic then {
-            return .Error(
-                self.parser_error_at_current(
-                    "foreign and intrinsic cannot be used together",
-                ),
-            );
-        };
-
         when self.current().kind in {
             .KwLet() then {
-                return self.parse_let_decl(
-                    flags.access,
-                    decl_is_foreign,
-                    decl_is_intrinsic,
-                );
+                return self.parse_let_decl(flags.access);
             },
             .KwType() then {
-                return self.parse_type_decl(
-                    flags.access,
-                    decl_is_foreign,
-                    decl_is_intrinsic,
-                );
+                return self.parse_type_decl(flags.access);
             },
             .KwUsing() then {
                 let mutable using_access = AccessModifier.FilePrivate();
@@ -1177,16 +1136,10 @@ given Parser {
                 return self.parse_using_decl(
                     using_access,
                     flags.has_explicit_access,
-                    decl_is_foreign,
-                    decl_is_intrinsic,
                 );
             },
             .KwTrait() then {
-                return self.parse_trait_decl(
-                    flags.access,
-                    decl_is_foreign,
-                    decl_is_intrinsic,
-                );
+                return self.parse_trait_decl(flags.access);
             },
             .KwGiven() then {
                 if flags.has_explicit_access then {
@@ -1196,11 +1149,7 @@ given Parser {
                         ),
                     );
                 };
-                return self.parse_given_decl(
-                    flags.access,
-                    flags.is_foreign,
-                    flags.is_intrinsic,
-                );
+                return self.parse_given_decl(flags.access);
             },
             _ then {
                 let t = self.current();

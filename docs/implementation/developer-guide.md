@@ -819,8 +819,8 @@ Design ruling — see [`../design/name-resolution.md`](../design/name-resolution
 ### How do I add a new foreign binding?
 
 1. Declare external libraries in package or module `links` inside `koral.json`
-2. Declare external functions with `foreign let`
-3. Declare external types with `foreign type` (optional fields)
+2. Declare external functions with `let foreign`
+3. Declare external types with `type foreign` (optional fields)
 4. CodeGen emits C declarations; Driver appends linker flags from the resolved manifest graph
 
 ## Canonical sources and change workflow
