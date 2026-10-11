@@ -662,7 +662,7 @@ given TypeChecker {
     module_private bind_prelude_trait_names(self, importing_module List[String]) Void = {
         for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
             let info = entry.second;
-            if not self.is_std_root_module_path(info.module_path) then {
+            if not self.is_std_root_module_decl(info.def_id, info.module_path) then {
                 continue;
             };
             if not self.importable_trait_access(info.def_id) then {
@@ -672,11 +672,21 @@ given TypeChecker {
         };
     };
 
-    /// The module std's root declarations live in. The package is named once
-    /// here; everything that asks "is this std?" compares a declaration
-    /// identity or this path, never a user spelling.
-    module_private is_std_root_module_path(self, module_path List[String]) Bool = {
-        return module_path.count() == 1 and (module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std");
+    /// Whether `def_id` is declared in the root module of the std package.
+    ///
+    /// std-ness comes from the PACKAGE identity `package_id_for_kind` mints, not
+    /// from the module being spelled `Std` -- a package chooses its own names.
+    /// Root-ness is the module's shape: std's root is the single-segment module
+    /// in that package, the one its manifest names as the main module. Submodules
+    /// (`std::io` and friends) are imported explicitly and are not prelude.
+    module_private is_std_root_module_decl(self, def_id DefId, module_path List[String]) Bool = {
+        if not module_path.count() == 1 then {
+            return false;
+        };
+        return when self.storage.context.get_package_id(def_id) in {
+            .Some(package_id) then is_std_package_id(package_id),
+            .None() then false,
+        };
     };
 
     /// Whether a batch import may bring this trait in. `module_private` /

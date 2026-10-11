@@ -101,7 +101,7 @@ extension TypeChecker {
     if let t = currentScope.lookupType(name) {
       return context.methodOwner(of: t)
     }
-    if let traitInfo = traits[name] {
+    if let traitInfo = visibleTraitInfo(name) {
       return context.methodOwnerDecl(traitInfo.defId)
     }
     return nil

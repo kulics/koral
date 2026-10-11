@@ -163,8 +163,8 @@ and-then 链       := 操作数 ("and" "then" 操作数)*
 
 - **工具链三方必须收敛。** parser、BNF、手册按各自节奏更新就会漂移；按 `docs/README`
   约定三者一起改，不能只改文档。
-- **`and then` / `or else` 的求值顺序与副作用次序没有设计记录。** 本设计只定「怎么分组」，
-  不定「求值顺序」。见 [`control-flow.md`](control-flow.md)「风险与未决」第 1 条。
+- **求值顺序是另一件事**，已记在 [`control-flow.md`](control-flow.md)「流程算子的求值顺序：短路」。
+  本设计只定「怎么分组」。
 
 ## 实施
 

@@ -3207,7 +3207,7 @@ extension TypeChecker {
     // The trait's spelling resolves to its declaration once here; the bucket is
     // keyed by that declaration.
     let traitOwner: MethodOwner =
-      traits[traitName].map { MethodOwner.decl($0.defId) } ?? methodOwnerForName(traitName)
+      visibleTraitInfo(traitName).map { MethodOwner.decl($0.defId) } ?? methodOwnerForName(traitName)
         ?? .builtin(traitName)
     if let ext = genericExtensionMethods[traitOwner]?.first(where: { $0.method.name == methodName }) {
       let functionType = try substitute(
@@ -3374,7 +3374,7 @@ extension TypeChecker {
           let traitName = traitConstraint.baseName
           let methods = try flattenedTraitMethods(traitName)
           if let sig = methods[methodName], sig.parameters.first?.name != "self" {
-            let traitInfo = traits[traitName]
+            let traitInfo = visibleTraitInfo(traitName)
             var traitTypeArgs: [Type] = []
             if case .trait(_, _, let argNodes) = traitConstraint {
               for argNode in argNodes {
@@ -6258,7 +6258,7 @@ extension TypeChecker {
     selfType: Type,
     traitName: String
   ) throws -> [Type]? {
-    guard let traitInfo = traits[traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitName) else {
       return nil
     }
 

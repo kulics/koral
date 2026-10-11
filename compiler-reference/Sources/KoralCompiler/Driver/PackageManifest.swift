@@ -192,6 +192,14 @@ public final class PackageRegistry {
 
 // MARK: - Resolved module
 
+/// Whether `packageID` was minted for a `.std` package. The tag is the one
+/// `Driver.packageID(for:packageName:)` writes ("std:<name>") -- decided by the
+/// package identity, never by a module path or a user spelling, either of which
+/// a package chooses freely.
+public func isStdPackageID(_ packageID: String) -> Bool {
+  return packageID.hasPrefix("std:")
+}
+
 /// A module as the rest of the compiler sees it.
 public struct ResolvedModuleSpec {
   /// The full name as written from the ROOT package's point of view:

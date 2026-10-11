@@ -22,7 +22,8 @@
 
 - **各语句的语法与示例** → [`../guide/document.md`](../guide/document.md) §2、
   [`../guide/grammar.bnf`](../guide/grammar.bnf)。
-- **求值顺序、副作用次序** → 原文未记载，不在本文。
+- **一般表达式的求值顺序** → 不在本文。**流程算子的求值与短路**在本文
+  「流程算子的求值顺序：短路」。
 
 ## 方案
 
@@ -53,6 +54,24 @@ values; `while` and `for` always produce `Void`.
 > `if` 表达式体内的 `break`，却接受 `when` 分支体与 `if` 语句里一模一样的 `break`。
 > `break_across_branch_test.koral` 就是为看护它而加的。语言规则是**分支不拦截**。
 
+### 流程算子的求值顺序：短路
+
+`and then` / `or else` / `or return` 是**短路**的，左到右求值：
+
+| 写法 | 求值 |
+|---|---|
+| `a and then b` | 先 `a`。是 `Some`/`Ok` 才求 `b`（`it` 为解包值）；否则直接传播，`b` 不求值 |
+| `a or else b` | 先 `a`。是 `None`/`Error` 才求 `b`；否则用 `a` 的值，`b` 不求值 |
+| `a or return` | 先 `a`。是 `None`/`Error` 就从所在函数返回，后面的都不求值 |
+
+副作用因此只发生在被选中的那一侧。这与主流语言的值兜底算子一致
+（`??` / `?:` 一律短路），对照见
+[`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)「其它语言怎么做的」。
+
+实现上 `and then` 脱糖成对左操作数的 `when`：只有命中的分支体执行，变换体因此天然
+不在空值路径上求值。`or return` 是 `or else { return .Error(it) }` /
+`or else { return .None() }` 的语法糖。
+
 ### `defer` 的位置
 
 `defer` 在当前作用域结束时执行清理，顺序与登记相反。用法见
@@ -68,10 +87,8 @@ values; `while` and `for` always produce `Void`.
 
 ## 风险与未决
 
-- **求值顺序与副作用次序**：未记。`and then` / `or else` 的短路语义在手册里有写法，
-  但「为什么这样定」没有记录。（**分组**问题已另案结清——见
-  [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)：流程层与逻辑层
-  不隐式混用，跨层要括号。**求值顺序**仍无记录，那条是独立的问题。）
+- **求值顺序与副作用次序**：已记，见上「流程算子的求值顺序：短路」。
+  **分组**是另一件事，见 [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)。
 - **`Never` 与控制流**：`while` / `for` 在 `Never` 提前终止时的求值形态只在文法注记里提了一句，
   无设计说明。
 

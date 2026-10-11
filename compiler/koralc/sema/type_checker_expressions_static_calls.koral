@@ -1047,6 +1047,52 @@ given TypeChecker {
     /// name -- it is module-prefixed, it is not visible, it is not a type --
     /// and falling back to the ambient cursor blamed whatever statement the
     /// call happened to sit in.
+    /// Enum-case construction returns before the call-shape check in
+    /// `check_static_method_call_ref`, so its arguments are checked here.
+    /// Same predicate as that check: a real mismatch is reported, an unsolved
+    /// generic parameter or an unresolved type is not.
+    module_private reject_enum_constructor_arg_mismatches(
+        self,
+        constructor_name String,
+        call_args List[Expr],
+        typed_args List[TypedExpr],
+        expected_types List[Type],
+    ) Void = {
+        let mutable arg_i UInt = 0;
+        while arg_i < typed_args.count() then {
+            let typed_arg = typed_args[arg_i];
+            when expected_types.get(arg_i) in {
+                .Some(expected_t) then {
+                    if not self.same_expr_type(typed_arg.expr_type, expected_t)
+                        and not self.type_matches_expected_pattern(
+                            expected_t,
+                            typed_arg.expr_type,
+                        )
+                        and not self.contains_generic_parameter(expected_t)
+                        and not self.is_unresolved_expr_type(expected_t)
+                        and not self.is_unresolved_expr_type(typed_arg.expr_type)
+                    then {
+                        self.push_diagnostic(
+                            self.format_call_type_mismatch_message(
+                                Expr.ImplicitMemberExpr(
+                                    constructor_name,
+                                    call_args,
+                                    unknown_span(),
+                                ),
+                                call_args,
+                                expected_t,
+                                typed_arg.expr_type,
+                            ),
+                            self.typed_expr_span(typed_arg),
+                        );
+                    };
+                },
+                .None() then {},
+            };
+            arg_i += 1;
+        };
+    };
+
     module_private check_static_method_call_ref(
         self,
         type_name String,
@@ -1468,6 +1514,12 @@ given TypeChecker {
         };
         when enum_constructor_type_opt in {
             .Some(enum_type) then {
+                self.reject_enum_constructor_arg_mismatches(
+                    method_name,
+                    call_args,
+                    typed_args,
+                    static_param_types,
+                );
                 return self.lower_enum_constructor_expr(
                     enum_type,
                     method_name,
@@ -1989,6 +2041,12 @@ given TypeChecker {
                                             call_args,
                                             field_types,
                                             scope,
+                                        );
+                                        self.reject_enum_constructor_arg_mismatches(
+                                            member_name,
+                                            call_args,
+                                            typed_args,
+                                            field_types,
                                         );
                                         return self.lower_enum_constructor_expr(
                                             canonical,

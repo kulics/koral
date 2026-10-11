@@ -83,9 +83,42 @@ B 是 rustc 的做法：witness 按**实例**记，不是按 trait 记。
 
 ## 未决
 
-1. **pattern 里的 `*T`** 与表达式层的解析规则仍有残留不一致。
-2. **`layout_key` 有两套命名**，无用例可写，尚未统一。
-3. **两边转义规则不一致**（C 标识符转义在两个编译器里各写了一份）。
+1. **C 标识符转义仍未收敛成一份规则。** 已修：C89 关键字表补上 `enum`（原先 `union`
+   写了两遍、`enum` 没有）、无 `cname` 的 foreign global 落到 sanitizer、pattern 里
+   「Unexpected token」的措辞与参考编译器对齐。**没修**，因为不能只删豁免就完事：
+   - koralc 的 `escape_codegen_keyword` 有一条参考实现没有的豁免（`__koral_` / `__mir_`
+     前缀直通）。它是**载荷**：`file_private let foreign __koral_argc()` 这类运行时符号
+     在**调用点**会走 sanitizer，去掉豁免会转义成 `__k___koral_argc`，链接直接失败
+     （实测 600+ 用例全红）。正确做法是让 foreign 与生成名绕过 sanitizer。
+   - `normalize_codegen_lookup_name` 里的 `_k__k__` 削三字符，正是「先转义再撤销」的补丁。
+   - 字符类两边不同（ASCII vs Unicode 的 `isLetter`/`isNumber`）；`layout_key`、
+     mono 的 mangled name 等若干处**并不经过** sanitizer，所以同一源码两边 C 名不同
+     （实测 `let union()` → koralc `Kw2_union`、参考 `Kw2__k_union`）。
+   - oracle 有 `uniqueCIdentifier` 的碰撞加后缀规则，koralc 没有对应物。
+2. **`layout_key` 有两套命名，且函数类型会撞 C 符号。** `context.get_layout_key` 把
+   `FunctionType` 一律塌成 `"Fn"`，于是 `Box[Func(Int) Int]` 与 `Box[Func(Bool) Void]`
+   两个实例共用一个 C 名。`mono/mono_types.koral` 的 `layout_key` 保留签名，两者对
+   「借用是否等同拥有」也不一致（前者 `R_`/`MR_` 塌成一类，后者 `bref_`/`ref_` 分开）。
+   oracle 同样塌成 `"Fn"`，所以修它要两边同改并配用例。
+3. **裸名索引仍有一部分在做解析。** 已把 Swift 侧四处**书写处**的裸查（工具方法归属、
+   泛型 bound 的 trait、conformance 反查实参、名字→owner）改成 `visibleTraitInfo`——
+   裸索引跨模块 last-wins，回答不了「哪个 `Tag`」。**剩下**：`GivenLocality` 的显示路径、
+   `TypeCheckerTypeResolution` 的无 `DefId` 兜底（书写边界，合法），以及 koralc 侧
+   mono 里几处经 `generic_templates.traits.get(name)` 的裸查——那些要走
+   `resolve_trait_name` 的候选键序列，不是直接换键。
+4. **`mutable name Type` / `name Type` 绑 trait object 取到野指针。** 两个编译器都编译
+   通过、都打印垃圾值（`bound 4306866680`），两种绑定形式都一样。设计说这类模式
+   「operate on the erased trait-object subject; they do not auto-deref to the concrete
+   value type」，而实现把绑定标成了具体类型 `Box`，于是按 `Box` 去调方法、指针是擦除后的。
+   要先定：绑定应当是擦除后的 subject（那就该标成 trait object 类型），还是具体值
+   （那 lowering 就该给出具体 payload）。**这是设计裁定，不是纯代码缺陷。**
+5. **`List.sort_by` 在可变 newtype 包装类型上栈溢出**（见
+   [`module-design-implementation.md`](module-design-implementation.md) §11）。
+6. **`.as(Trait)` 路径上的几个签名仍以名字为入口**（书写处解析，合法，但签名是 name-first）。
+
+已清：prelude 边界从「模块路径 == `["Std"]`」改成**包身份**（`package_id_for_kind(.Std())`
+/ `Driver.packageID(for:packageName:)` 铸的那一个），`name_collector` 的同名判定改走同一个
+谓词。根模块仍是「该包里的单段模块」——这是结构属性，不是拼写。
 
 ## 参考
 

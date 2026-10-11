@@ -90,12 +90,6 @@ extension Parser {
   private func parsePrimaryPattern() throws -> PatternNode {
     let startSpan = currentSpan
 
-    if currentToken === .multiply {
-      let targetType = try parseType()
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      return .traitObjectType(targetType: targetType, span: span)
-    }
-    
     // Comparison patterns: > n, < n, >= n, <= n
     if currentToken === .greater || currentToken === .less ||
        currentToken === .greaterEqual || currentToken === .lessEqual {
@@ -181,12 +175,6 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      if currentToken === .multiply {
-        let targetType = try parseType()
-        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-        return .traitObjectTypeBinding(name: name, mutable: false, targetType: targetType, span: span)
-      }
-
       // Type pattern binding without *: name TypeName (new syntax)
       // Check if next token is a type identifier (starts with uppercase)
       if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
@@ -246,10 +234,14 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      if currentToken === .multiply {
-        let targetType = try parseType()
+      // Type pattern binding without `*`: `mutable name TypeName`.
+      // (`guide/grammar.bnf` <trait-object-type-binding-pattern>.)
+      if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
+        let typeNameSpan = currentSpan
+        try match(.identifier(typeName))
+        let targetNode = TypeNode.identifier(typeName, span: typeNameSpan)
         let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-        return .traitObjectTypeBinding(name: name, mutable: true, targetType: targetType, span: span)
+        return .traitObjectTypeBinding(name: name, mutable: true, targetType: targetNode, span: span)
       }
 
       return .variable(name: name, mutable: true, span: startSpan)

@@ -231,6 +231,17 @@ trait 时两个拼写落在同一个声明上，判定对任意一对都为真�
 
 ## 风险与未决
 
+- **trait object 精确类型模式的绑定到底是什么**：**未裁定，且现状会出野指针。**
+  上文「trait object 不设 marker」写着这类模式 *operate on the erased trait-object
+  subject; they do not auto-deref to the concrete value type*，而两个编译器都把
+  `inner Box` 的绑定**标成具体类型 `Box`**，于是按 `Box` 去调方法、指针却是擦除后的
+  subject——编译通过、打印垃圾（`bound 4306866680`）；`mutable inner Box` 一样。
+  两条路都通，但语义不同，得先定：
+  - **绑定是擦除后的 subject** —— 那绑定就该标成 trait object 类型，方法走 trait 派发；
+  - **绑定是具体值** —— 那 lowering 就该把具体 payload 取出来，而不是复用擦除指针。
+  现状是两者都不是。修法见
+  [`../implementation/bootstrap-productization-plan.md`](../implementation/bootstrap-productization-plan.md)
+  未决第 4 条。
 - **object safety 的完整判据**：`../guide/document.md` 的「Object Safety」是**规则清单**，
   不是取舍记录——哪些规则是硬性的、哪些是实现权衡，未记。
 - **`given` 与 trait 分开的完整论证**：只从语法形状反推，无正面论证。

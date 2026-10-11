@@ -954,13 +954,6 @@ given Parser {
 
         let mutable node = PatternNode.Wildcard(self.span_from_start(start));
         when self.current().kind in {
-            .Star() then {
-                let target_type = self.parse_type() or return;
-                node = PatternNode.TraitObjectType(
-                    target_type,
-                    self.span_from_start(start),
-                );
-            },
             .KwMut() then {
                 self.advance();
                 let name = self.expect_identifier("mutable pattern variable") or return;
@@ -973,17 +966,6 @@ given Parser {
                             name,
                             true,
                             TypeNode.Identifier(type_name, unknown_span()),
-                            self.span_from_start(start),
-                        ),
-                    );
-                };
-                if self.current().kind is .Star() then {
-                    let mutable target_type = self.parse_type() or return;
-                    return .Ok(
-                        PatternNode.TraitObjectTypeBinding(
-                            name,
-                            true,
-                            target_type,
                             self.span_from_start(start),
                         ),
                     );
@@ -1140,17 +1122,6 @@ given Parser {
                             name,
                             false,
                             TypeNode.Identifier(type_name, unknown_span()),
-                            self.span_from_start(start),
-                        ),
-                    );
-                };
-                if self.current().kind is .Star() then {
-                    let target_type = self.parse_type() or return;
-                    return .Ok(
-                        PatternNode.TraitObjectTypeBinding(
-                            name,
-                            false,
-                            target_type,
                             self.span_from_start(start),
                         ),
                     );
@@ -1317,9 +1288,12 @@ given Parser {
                 node = parsed_pattern;
             },
             _ then {
+                // Same shape as every other "unexpected token" in the parser,
+                // and the same one the frozen reference produces here. The span
+                // already says the token is inside a pattern.
                 return .Error(
                     self.parser_error(
-                        "Unexpected token in pattern: \(token_text(self.current()))",
+                        "Unexpected token: \(token_text(self.current()))",
                     ),
                 );
             },

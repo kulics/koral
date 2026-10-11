@@ -168,6 +168,22 @@ given CodeGen {
         return self.escape_codegen_keyword(result.to_string());
     };
 
+    /// Escape a C reserved word or a name that could collide with one.
+    ///
+    /// The rules are the frozen reference's (`CIdentifierUtils.swift`
+    /// `escapeCKeyword`): a keyword gets the `_k_` prefix, a name already
+    /// starting with `_k_` is re-escaped (so a user's `_k_int` cannot land on
+    /// the same symbol as an escaped `int`), and `_` followed by an uppercase
+    /// letter or another `_` is a reserved identifier pattern.
+    ///
+    /// The `__koral_` / `__mir_` exemption is NOT in the reference, and is not
+    /// a licence for a user symbol to squat the runtime namespace: those
+    /// prefixes reach this function only for compiler-EMITTED names, which are
+    /// passed in already owning their spelling. A user symbol goes through
+    /// `sanitize_codegen_identifier` from a declaration name and is escaped
+    /// normally. Removing the exemption without first routing generated names
+    /// around this function escapes the runtime's own symbols and breaks the
+    /// link -- see `docs/implementation/bootstrap-productization-plan.md`.
     escape_codegen_keyword(self, name String) String = {
         if name.is_empty() then {
             return name;
@@ -175,9 +191,6 @@ given CodeGen {
 
         let prefix = c_escape_prefix();
         if name.starts_with("__koral_") or name.starts_with("__mir_") then {
-            return name;
-        };
-        if name.starts_with("_k__") then {
             return name;
         };
         if self.c_keywords.contains(name) then {
@@ -2426,7 +2439,13 @@ given CodeGen {
         if self.is_foreign_global_var_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
-                .None() then self.context.symbol_name(symbol),
+                // No `cname` was given, so the C name is derived from the
+                // Koral name -- and a derived name has to be a legal C
+                // identifier. A declared `cname` is used verbatim: it exists
+                // to spell the real symbol.
+                .None() then self.sanitize_codegen_identifier(
+                    self.context.symbol_name(symbol),
+                ),
             };
         };
 

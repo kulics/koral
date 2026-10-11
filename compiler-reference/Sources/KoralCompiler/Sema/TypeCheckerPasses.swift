@@ -672,7 +672,7 @@ extension TypeChecker {
       }
     }
     for decl in traitDeclsByDefId.values {
-      guard isStdRootModulePath(decl.modulePath) else { continue }
+      guard isStdRootModuleDecl(decl) else { continue }
       for modulePath in modulePaths {
         registerImportedTraitName(localName: decl.name, defId: decl.defId, modulePath: modulePath)
       }
@@ -689,11 +689,17 @@ extension TypeChecker {
     return nil
   }
 
-  /// The module std's root declarations live in. Named once here; everything
-  /// else asks "is this std?" of a declaration identity.
-  private func isStdRootModulePath(_ modulePath: [String]) -> Bool {
-    guard modulePath.count == 1 else { return false }
-    return modulePath[0] == "Std" || modulePath[0] == "std"
+  /// Whether `decl` is declared in the root module of the std package.
+  ///
+  /// std-ness comes from the PACKAGE identity `Driver.packageID(for:packageName:)`
+  /// mints, not from the module being spelled `Std` -- a package chooses its own
+  /// names. Root-ness is the module's shape: std's root is the single-segment
+  /// module in that package. Submodules (`std::io` and friends) are imported
+  /// explicitly and are not prelude.
+  private func isStdRootModuleDecl(_ decl: TraitDeclInfo) -> Bool {
+    guard decl.modulePath.count == 1 else { return false }
+    guard let packageID = decl.defId.packageID(in: defIdMap) else { return false }
+    return isStdPackageID(packageID)
   }
 
   /// Registers `localName` as a spelling of the trait `defId` declares, in the
