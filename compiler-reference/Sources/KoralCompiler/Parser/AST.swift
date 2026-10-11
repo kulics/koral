@@ -51,6 +51,7 @@ public struct UsingDeclaration {
   /// A specifier that names a file to merge, rather than a module (§3.1).
   public var isFileMerge: Bool {
     specifier.hasPrefix("./") || specifier.hasPrefix("../")
+      || specifier.hasPrefix(".\\") || specifier.hasPrefix("..\\")
   }
 }
 

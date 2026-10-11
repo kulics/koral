@@ -1,9 +1,6 @@
 using "std";
 using "std/os";
 
-file_private let is_windows_host() Bool =
-    if env("OS") is .Some(os) then os.contains("Windows") else false;
-
 file_private let default_bootstrap_koralc_path() Path = {
     if is_windows_host() then {
         return "bin/compiler/koralc.exe".into_path();
@@ -40,12 +37,42 @@ file_private let make_absolute(base Path, path Path) Path = {
     return if path.is_absolute() then path else base.join(path.to_string()).normalize();
 };
 
+/// Resolve a compiler path that was written the POSIX way.
+///
+/// Every documented invocation spells these without an extension
+/// (`bin/compiler/koralc`, `compiler-reference/.build/release/koralc`), and CI
+/// copies that spelling. On Windows the artifact is `*.exe`, and SwiftPM may
+/// also put it under the target-triple directory with no `release` symlink. So
+/// try the literal path first -- if the caller gave an exact existing file, use
+/// it -- then the `.exe` spelling, then the triple-dir spelling.
+file_private let resolve_compiler_path(path Path) Path = {
+    if path_exist(path) then {
+        return path;
+    };
+    if is_windows_host() then {
+        let exe_path = path.with_ext_name(".exe");
+        if path_exist(exe_path) then {
+            return exe_path;
+        };
+        // SwiftPM: .build/release/koralc -> .build/x86_64-unknown-windows-msvc/release/koralc.exe
+        let parent = path.dir_name();
+        let triple_path = parent.dir_name().join("x86_64-unknown-windows-msvc").join(
+            parent.base_name(),
+        ).join(path.base_name()).with_ext_name(".exe");
+        if path_exist(triple_path) then {
+            return triple_path;
+        };
+    };
+    return path;
+};
+
 file_private let default_output_root(run_root Path) Path = {
     return run_root.join("tests/compiler-cases_output").normalize();
 };
 
 public let print_usage() Void =
-    eprintln("""
+    eprintln(
+        """
         compiler test runner
         usage: compiler-test-runner [options]
         options:
@@ -64,13 +91,16 @@ public let print_usage() Void =
           --report-file <path>         write stable summary log (default: tests/compiler-cases_output/_reports/latest-summary.log)
           --verbose                    print verbose case command logs
           -h, --help                   show this help
-        """);
+        """,
+    );
 
 public let parse_runner_config() Result[RunnerConfig] = {
     let argv = args();
 
     let run_root = current_dir() or else {
-        return Result[RunnerConfig].Error("failed to determine current working directory: " + it.message());
+        return Result[RunnerConfig].Error(
+            "failed to determine current working directory: " + it.message(),
+        );
     };
     let mutable cases_root = "tests/compiler-cases".into_path();
     let mutable filter = Option[String].None();
@@ -116,7 +146,9 @@ public let parse_runner_config() Result[RunnerConfig] = {
             };
             let value = argv[i];
             if value <> "bootstrap" and value <> "swift" and value <> "custom" and value <> "differential" then {
-                return Result[RunnerConfig].Error("invalid value for --compiler: " + value);
+                return Result[RunnerConfig].Error(
+                    "invalid value for --compiler: " + value,
+                );
             };
             compiler_kind = value;
             i += 1;
@@ -176,7 +208,9 @@ public let parse_runner_config() Result[RunnerConfig] = {
         if arg == "--bootstrap-koralc" then {
             i += 1;
             if i >= argv.count() then {
-                return Result[RunnerConfig].Error("missing value for --bootstrap-koralc");
+                return Result[RunnerConfig].Error(
+                    "missing value for --bootstrap-koralc",
+                );
             };
             bootstrap_koralc = argv[i].into_path();
             i += 1;
@@ -243,10 +277,13 @@ public let parse_runner_config() Result[RunnerConfig] = {
     };
 
     let abs_cases_root = make_absolute(run_root, cases_root);
-    let abs_bootstrap_koralc = make_absolute(run_root, bootstrap_koralc);
-    let abs_swift_koralc = make_absolute(run_root, swift_koralc);
+    let abs_bootstrap_koralc = resolve_compiler_path(
+        make_absolute(run_root, bootstrap_koralc),
+    );
+    let abs_swift_koralc = resolve_compiler_path(make_absolute(run_root, swift_koralc));
     let output_root = default_output_root(run_root);
-    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize();
+    let default_report_file = output_root.join("_reports").join("latest-summary.log").normalize(
+    );
     let mutable report_file = default_report_file;
     if report_file_opt.is_some() then {
         report_file = make_absolute(run_root, report_file_opt.unwrap()).normalize();
@@ -260,9 +297,11 @@ public let parse_runner_config() Result[RunnerConfig] = {
         // up-front existence check, which this mode overrides to check both.
         "differential" then abs_swift_koralc,
         "custom" then when compiler_bin_opt in {
-            .Some(path) then make_absolute(run_root, path).normalize(),
+            .Some(path) then resolve_compiler_path(make_absolute(run_root, path)),
             .None() then {
-                return Result[RunnerConfig].Error("--compiler-bin is required when --compiler custom");
+                return Result[RunnerConfig].Error(
+                    "--compiler-bin is required when --compiler custom",
+                );
             },
         },
         _ then {
@@ -270,20 +309,22 @@ public let parse_runner_config() Result[RunnerConfig] = {
         },
     };
 
-    return Result[RunnerConfig].Ok(RunnerConfig(
-        run_root,
-        abs_cases_root,
-        output_root,
-        report_file,
-        filter,
-        jobs,
-        timeout_secs,
-        memory_limit_mb,
-        compiler_kind,
-        compiler_bin,
-        abs_bootstrap_koralc,
-        abs_swift_koralc,
-        compare_diagnostics,
-        verbose
-    ));
+    return Result[RunnerConfig].Ok(
+        RunnerConfig(
+            run_root,
+            abs_cases_root,
+            output_root,
+            report_file,
+            filter,
+            jobs,
+            timeout_secs,
+            memory_limit_mb,
+            compiler_kind,
+            compiler_bin,
+            abs_bootstrap_koralc,
+            abs_swift_koralc,
+            compare_diagnostics,
+            verbose,
+        ),
+    );
 };

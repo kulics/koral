@@ -122,13 +122,28 @@ public let make_c_keywords_set() Set[String] = build_c_keywords_set();
 /// 转义前缀，用于避免与 C 关键字冲突
 let c_escape_prefix() String = "_k_";
 
+/// 源路径的规范拼写，用于哈希：统一 `/` 分隔符，并把 Windows 盘符折叠为小写。
+///
+/// 同一个文件会以不同拼写到达这里（`\` 与 `/`、`C:` 与 `c:`，取决于调用方或
+/// 操作系统）。直接哈希原始字节会把拼写烙进每个 file_private 符号名，生成的 C
+/// 就无法跨机器、甚至跨同机多次调用复现。
+file_private let canonical_path_for_hash(path String) String = {
+    let normalized = path.replace_all("\\", with: "/");
+    if normalized.count() >= 2 and normalized[1] == ':' then {
+        let head = normalized.substring(0..<1).to_ascii_lowercase();
+        return head + normalized.substring(1..);
+    };
+    return normalized;
+};
+
 /// 生成文件标识符（用于 file_private 符号的文件隔离）
 /// 使用文件路径的哈希值生成短标识符
 /// - Parameter source_file: 源文件路径
 /// - Returns: 文件标识符字符串（如 "f1234"）
 public let generate_file_identifier(source_file String) String = {
+    let canonical = canonical_path_for_hash(source_file);
     let mutable hash UInt32 = 0;
-    for byte in source_file.bytes() then {
+    for byte in canonical.bytes() then {
         hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32));
     };
     let h = (hash % 10000)(UInt);

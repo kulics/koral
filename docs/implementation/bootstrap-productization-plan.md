@@ -25,7 +25,7 @@
 ## 信任边界
 
 **测试 harness 永远由冻结的种子编出来，绝不由被测实现编。** 否则被测实现里的
-codegen 缺陷会污染本该抓住它的那个东西。这条写进 `.github/workflows/ci.yml` 第 0 步。
+codegen 缺陷会污染本该抓住它的那个东西。这条写进验证链第 0 步。
 
 ## 被否掉的方案
 
@@ -122,6 +122,6 @@ B 是 rustc 的做法：witness 按**实例**记，不是按 trait 记。
 
 ## 参考
 
-- 验证链的权威定义：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)。
+- 验证链的权威定义：[`../../scripts/verify.sh`](../../scripts/verify.sh)。
 - 差分预言机契约：[`../../tests/README.md`](../../tests/README.md)。
 - 身份匹配改造记录：[`identity-matching-tracking.md`](identity-matching-tracking.md)。

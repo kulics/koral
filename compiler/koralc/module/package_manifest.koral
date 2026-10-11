@@ -615,7 +615,8 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
                 entry_target = entry_target.join(segment);
             };
         };
-        let entry_abs = entry_target.to_string();
+        let entry_path = entry_target.normalize();
+        let entry_abs = entry_path.to_string();
         if seen_entries.contains(entry_abs) then {
             return Result[PackageManifest].Error(
                 manifest_error_text(.DuplicateModuleEntry(entry_rel)),
@@ -626,8 +627,13 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         // an attempt to compile someone else's source under this name. Checked
         // before "does it exist": a path outside the package is the problem,
         // whether or not something happens to sit there.
-        let root_norm = package_root.into_path().normalize().to_string();
-        if not (entry_abs == root_norm or entry_abs.starts_with(root_norm + "/")) then {
+        //
+        // Compared component-wise, not by string prefix: the two sides reach
+        // here through different joins, and a literal prefix test on "root + '/'"
+        // breaks the moment the spellings disagree (drive-letter case, an
+        // un-normalized segment). Path.starts_with splits on both separators.
+        let root_path = package_root.into_path().normalize();
+        if not (entry_path == root_path or entry_path.starts_with(root_path)) then {
             return Result[PackageManifest].Error(
                 manifest_error_text(
                     .InvalidField(
@@ -638,7 +644,7 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
             );
         };
         seen_entries.insert(entry_abs);
-        if not path_exist(entry_abs.into_path()) then {
+        if not path_exist(entry_path) then {
             return Result[PackageManifest].Error(
                 manifest_error_text(
                     .InvalidField(

@@ -89,6 +89,8 @@ public let create_temp_file[T IntoPath](dir T, prefix: String) Result[File];
 
 public let path_separator() String;
 
+public let is_windows_host() Bool;
+
 public let path_list_separator() String;
 ```
 

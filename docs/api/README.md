@@ -46,7 +46,7 @@ bin/toolchain-doc-gen/koral_doc --check       # 过期闸门
 ## 什么算「API 变了」
 
 改 `std/` 的公开声明（签名、默认参数、可见性、新增/删除成员）后，重新生成并把 14 页一并提交。
-`--check` 会在 CI 之外的 checklist 里被要求跑过。
+`--check` 会在变更 checklist 里被要求跑过。
 
 生成页顶部有机器可读标记：
 

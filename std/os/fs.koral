@@ -192,14 +192,18 @@ public let path_exist[T IntoPath](path T) Bool = {
 };
 
 /// Convert to absolute path (does not resolve symlinks)
+///
+/// Always returns the canonical `/`-separated form: an already-absolute path is
+/// normalized too, so callers can compare or print the result without first
+/// asking which spelling it came in.
 public let absolute_path[T IntoPath](path T) Result[Path] = {
-    let p = path.into_path();
+    let p = path.into_path().normalize();
     if p.is_absolute() then {
         return Result[Path].Ok(p);
     };
     when current_dir() in {
         .Ok(cwd) then {
-            return Result[Path].Ok(cwd.join(p.to_string()));
+            return Result[Path].Ok(cwd.join(p.to_string()).normalize());
         },
         .Error(e) then {
             return Result[Path].Error(e);
@@ -208,6 +212,9 @@ public let absolute_path[T IntoPath](path T) Result[Path] = {
 };
 
 /// Canonicalize path (resolves symlinks and relative components)
+///
+/// The result is normalized to the canonical `/` form even though the OS call
+/// underneath returns the platform spelling.
 public let canonicalize_path[T IntoPath](path T) Result[Path] = {
     let s = path.into_path().to_string();
     let buf = alloc_memory[UInt8](4096);
@@ -217,7 +224,7 @@ public let canonicalize_path[T IntoPath](path T) Result[Path] = {
         return Result[Path].Error(last_error_message());
     };
     return when String.from_cstring(buf) in {
-        .Ok(resolved) then Result[Path].Ok(resolved.into_path()),
+        .Ok(resolved) then Result[Path].Ok(resolved.into_path().normalize()),
         .Error(e) then Result[Path].Error(e),
     };
 };

@@ -96,6 +96,24 @@ public func sanitizeCIdentifier(_ name: String) -> String {
     return escapeCKeyword(result)
 }
 
+/// Canonical spelling of a source path for hashing: '/' separators and a
+/// lower-cased Windows drive letter.
+///
+/// The same file reaches here spelled different ways (`\` vs `/`, `C:` vs `c:`,
+/// whatever the harness or the OS handed over). Hashing the raw bytes would
+/// bake that spelling into every private symbol name, so the generated C would
+/// not be reproducible across machines or even across invocations on one.
+private func canonicalPathForHash(_ path: String) -> String {
+    var result = path.replacingOccurrences(of: "\\", with: "/")
+    // Fold only the drive letter; the rest of a Windows path is not reliably
+    // case-insensitive on every filesystem the compiler can be pointed at.
+    let chars = Array(result)
+    if chars.count >= 2, chars[1] == ":" {
+        result = String(chars[0]).lowercased() + result.dropFirst()
+    }
+    return result
+}
+
 /// 生成文件标识符（用于 private 符号的文件隔离）
 /// 使用文件路径的哈希值生成短标识符
 /// - Parameter sourceFile: 源文件路径
@@ -106,7 +124,7 @@ public func sanitizeCIdentifier(_ name: String) -> String {
 /// `docs/implementation/identity-matching-tracking.md`. Nothing decides identity from it.
 public func generateFileIdentifier(_ sourceFile: String) -> String {
     var hash: UInt32 = 0
-    for char in sourceFile.utf8 {
+    for char in canonicalPathForHash(sourceFile).utf8 {
         hash = hash &* 31 &+ UInt32(char)
     }
     return "f\(hash % 10000)"

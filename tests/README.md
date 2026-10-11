@@ -72,7 +72,7 @@ Each of the modes above checks one compiler against the `// EXPECT` comments in
 the case file — a hand-written oracle. This mode checks **the two compilers
 against each other**. The seed is **frozen, not on death row**: it is the
 standing reference oracle, and this is the cross-check that keeps the two honest.
-It stays mandatory in CI.
+It stays mandatory in the verification chain.
 
 ```bash
 ./bin/compiler-test-runner/compiler_runner \

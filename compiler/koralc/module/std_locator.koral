@@ -1,20 +1,50 @@
 using "std/os";
 
 // Shared std / external module lookup helpers.
-// Mirrors the Swift driver's KORAL_HOME-first, then relative fallback order.
+// Mirrors the Swift driver's search order: KORAL_HOME first, then relative to
+// the current directory, then relative to the running executable. The last one
+// is what makes `koralc` on PATH work from a project outside the repository --
+// cwd-relative lookup alone cannot see the tree the binary was built in.
+
+/// Look for `path_suffix` starting at `start` and walking up a few parents.
+file_private let search_upward(start Path, path_suffix String) Option[String] = {
+    let mutable cursor = start;
+    let mutable steps UInt = 0;
+    while steps < 5 then {
+        let candidate = cursor.join(path_suffix).normalize();
+        if path_exist(candidate) then {
+            return Option[String].Some(candidate.to_string());
+        };
+        let parent = cursor.dir_name();
+        if parent.to_string() == cursor.to_string() then {
+            break;
+        };
+        cursor = parent;
+        steps += 1;
+    };
+    return Option[String].None();
+};
 
 public let find_workspace_relative_path(path_suffix String) Option[String] = {
     if env("KORAL_HOME") is .Some(home) then {
-        let candidate = home + "/" + path_suffix;
+        let candidate = home.into_path().join(path_suffix).normalize();
+        if path_exist(candidate) then {
+            return Option[String].Some(candidate.to_string());
+        };
+    };
+
+    // Relative to the current directory.
+    let candidates = [path_suffix, "../" + path_suffix, "../../" + path_suffix];
+    for candidate in candidates then {
         if path_exist(candidate.into_path()) then {
             return Option[String].Some(candidate);
         };
     };
 
-    let candidates = [path_suffix, "../" + path_suffix, "../../" + path_suffix];
-    for candidate in candidates then {
-        if path_exist(candidate.into_path()) then {
-            return Option[String].Some(candidate);
+    // Relative to the executable: <repo>/bin/compiler/koralc -> <repo>/std.
+    if current_exe() is .Ok(exe) then {
+        if search_upward(exe.dir_name(), path_suffix) is .Some(found) then {
+            return Option[String].Some(found);
         };
     };
 

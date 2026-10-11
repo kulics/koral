@@ -766,12 +766,15 @@ file_private let find_clang() String = {
     else {
         return "clang";
     };
-    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false;
+    let is_windows = is_windows_host();
     let sep = if is_windows then ";" else ":";
-    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""];
+    // Only real executables: `CreateProcess` cannot run a `.cmd`/`.bat` shim,
+    // and one sitting in an earlier PATH directory would otherwise win over a
+    // real `clang.exe` further down and fail at spawn.
+    let exts = if is_windows then [".exe", ""] else [""];
     for dir in path_env.split(sep) then {
         for ext in exts then {
-            let candidate = dir + "/clang" + ext;
+            let candidate = dir.into_path().join("clang" + ext).to_string();
             if path_exist(candidate.into_path()) then {
                 return candidate;
             };
@@ -794,15 +797,22 @@ file_private let run_clang(
     let mutable clang_args = List[String].new();
     clang_args.push(c_file);
 
-    // Include koral_runtime.c and header if available
-    if find_std_lib_path() is .Some(std_path) then {
-        let runtime_c = std_path + "/koral_runtime.c";
-        if path_exist(runtime_c.into_path()) then {
-            clang_args.push(runtime_c);
-        };
-        clang_args.push("-I");
-        clang_args.push(std_path);
+    // The generated C includes koral_runtime.h and needs koral_runtime.c at
+    // link time, so a missing std is a hard error -- not a silently degraded
+    // command line that surfaces later as an unreadable clang failure.
+    let std_path = find_std_lib_path() or else {
+        eprintln("Error: Could not locate the standard library (std/).");
+        eprintln("Set KORAL_HOME to the koral repository root, or run from inside it.");
+        return false;
     };
+    let runtime_c = std_path.into_path().join("koral_runtime.c").to_string();
+    if not path_exist(runtime_c.into_path()) then {
+        eprintln("Error: standard library runtime not found: \(runtime_c)");
+        return false;
+    };
+    clang_args.push(runtime_c);
+    clang_args.push("-I");
+    clang_args.push(std_path);
 
     clang_args.push("-o");
     clang_args.push(exe_file);
@@ -821,7 +831,7 @@ file_private let run_clang(
     };
 
     // Windows: link bcrypt and ws2_32 (needed by koral_runtime)
-    if env("OS") is .Some(os) and os.contains("Windows") then {
+    if is_windows_host() then {
         if not seen_libs.contains("bcrypt") then {
             clang_args.push("-lbcrypt");
         };
@@ -1141,7 +1151,7 @@ file_private let run_build(options InvocationOptions) Int = {
     let output_path = output.first;
     let linked_libraries = output.second;
 
-    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false;
+    let is_windows = is_windows_host();
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
 
     if not run_clang(
@@ -1165,7 +1175,7 @@ file_private let run_run(options InvocationOptions) Int = {
     let output_path = output.first;
     let linked_libraries = output.second;
 
-    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false;
+    let is_windows = is_windows_host();
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
 
     if not run_clang(

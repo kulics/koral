@@ -100,6 +100,17 @@ koralc build app.koral -o out --optimize 3
 
 ### Run Tests
 
+The whole verification chain -- seed build, self-check, main gate, self-host
+fixed point, stage2 suite, differential oracle, samples, toolchain gates -- is
+one script:
+
+```bash
+bash scripts/verify.sh
+```
+
+It runs on macOS, Linux and Windows (Git Bash) and is the one entry point for
+"does this tree pass". Work files land in `.verify-work/`, not `/tmp`.
+
 The **primary gate** is the suite against `bin/compiler/koralc`. Build the seed and the compiler once, then run it:
 
 ```bash
@@ -193,8 +204,23 @@ Case names with these prefixes are tagged for conflict grouping metadata:
 
 Windows notes:
 
-- The default self-hosting compiler path is auto-selected as `bin/compiler/koralc.exe` when `OS` contains `Windows`.
+- **Path canonical form is `/`**, on every platform. `Path.normalize()` unifies
+  separators to `/` and resolves `.`/`..`; `Path.join` joins with `/`. The
+  platform separator is produced only at the syscall boundary, inside
+  `std/koral_runtime.c`. Both compilers render diagnostics in that form, so the
+  differential oracle can require byte-identical text.
+- `is_windows_host()` in `std/os` derives the answer from the separator the
+  runtime was compiled for, not from `OS` or any other environment variable --
+  an env sniff returns "no" in a stripped environment and then `.exe` naming and
+  PATH splitting both come out wrong.
+- The default self-hosting compiler path is auto-selected as `bin/compiler/koralc.exe`. A compiler path written the POSIX way (`bin/compiler/koralc`, `compiler-reference/.build/release/koralc`) still resolves: the test runner tries the literal path, then `.exe`, then the SwiftPM target-triple directory.
 - Output matching normalizes CRLF to LF before evaluating `EXPECT` comments.
+- File and process APIs go through the wide Win32/CRT entry points
+  (`_wsopen_s`, `_wstat64`, `CreateProcessW`, ...). Koral strings are UTF-8; the
+  ANSI "A" APIs interpret bytes in the system codepage and silently resolve the
+  wrong file for any non-ASCII path.
+- `CreateProcessW` gets a real UTF-16 environment block when the caller passes
+  one, and only then sets `CREATE_UNICODE_ENVIRONMENT`.
 
 ### Compile Koral Programs
 

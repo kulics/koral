@@ -60,6 +60,9 @@ given Path {
     };
 
     /// 拼接路径组件，返回新 Path
+    ///
+    /// 永远用 `/` 拼接——这是用户态的规范形，与平台无关。传给操作系统之前由
+    /// 运行时的各 syscall 边界负责翻译成平台分隔符。
     public join[T IntoPath](self, path T) Path = {
         let p = path.into_path();
         if self._path.is_empty() then {
@@ -73,9 +76,8 @@ given Path {
         };
         let mutable result = StringBuilder.new();
         result.push_string(self._path);
-        let sep = path_separator();
         if not self._path.ends_with("/") and not self._path.ends_with("\\") then {
-            result.push_string(sep);
+            result.push_byte('/');
         };
         result.push_string(p._path);
         return Path(result.to_string());
@@ -90,7 +92,9 @@ given Path {
         if is_all_separators(p) then {
             return Path("/");
         };
-        while p.ends_with("/") and p.count() > 1 then {
+        // Keep a drive root like "C:/" intact -- dropping its slash would leave
+        // "C:", which has no "/" in it and falls through to ".".
+        while p.ends_with("/") and p.count() > 1 and not is_drive_root(p) then {
             p = p.substring(0..<(p.count() - 1));
         };
         when p.find_last("/") in {
@@ -118,7 +122,7 @@ given Path {
         if is_all_separators(p) then {
             return "/";
         };
-        while p.ends_with("/") and p.count() > 1 then {
+        while p.ends_with("/") and p.count() > 1 and not is_drive_root(p) then {
             p = p.substring(0..<(p.count() - 1));
         };
         when p.find_last("/") in {
@@ -182,7 +186,10 @@ given Path {
         name,
     ) else self.dir_name().join(name);
 
-    /// 规范化路径（解析 . 和 .. 组件）
+    /// 规范化路径：统一为 `/` 分隔符，并解析 `.` 与 `..` 组件。
+    ///
+    /// 这是用户态的规范形，平台无关。传给操作系统之前由运行时各 syscall 边界
+    /// 负责翻译成平台分隔符，所以这里刻意不翻成 `\`。
     public normalize(self) Path = {
         let buf_size = self._path.count() + 1;
         let buf = alloc_memory[UInt8](buf_size);
@@ -287,6 +294,14 @@ public let path_separator() String = {
     return s.to_string();
 };
 
+/// Whether the host is Windows.
+///
+/// Derived from the separator the runtime was compiled for, not from `OS` or
+/// any other environment variable: an env sniff answers "unset" in a stripped
+/// environment (`env -i`, some CI shells) and then `.exe` naming and PATH
+/// splitting both come out wrong.
+public let is_windows_host() Bool = __koral_path_separator() == 92(UInt8);
+
 /// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator() String = {
     let sep = __koral_path_list_separator();
@@ -323,6 +338,14 @@ file_private let is_all_separators(path String) Bool = {
         };
     };
     return true;
+};
+
+/// Whether `path` is exactly a drive root like `C:/` (already `/`-normalized).
+///
+/// Its trailing separator is part of the root and must survive trimming --
+/// `C:` is a drive-relative path, not a directory root.
+file_private let is_drive_root(path String) Bool = {
+    return path.count() == 3 and path[1] == ':' and path[2] == '/';
 };
 
 given Path as Eq {

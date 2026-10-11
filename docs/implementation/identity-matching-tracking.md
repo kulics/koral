@@ -33,7 +33,7 @@
 
 ## 2. 验证链
 
-权威定义在 `.github/workflows/ci.yml`，不要在这里维护第二份计数。
+权威定义在 `scripts/verify.sh`，不要在这里维护第二份计数。
 
 ```
 0) swift build seed + 用 seed 编测试 harness（信任边界）
@@ -253,5 +253,5 @@ prelude 是一条**显式绑定**（std 根模块的 public trait 绑进每个�
 
 ## 28.5 验证口径
 
-权威计数在 `tests/README.md` 与 CI 运行输出，这里不维护第二份。
+权威计数在 `tests/README.md` 与 `scripts/verify.sh` 的运行输出，这里不维护第二份。
 当前形状：seed 自检 / 主闸 / stage2 / 差分四道全绿，自举 `FIXED POINT`、悬空 0。

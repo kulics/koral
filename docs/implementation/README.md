@@ -10,8 +10,8 @@
 编译器角色分工。
 
 - 随行为变化而**修订**。改了工作方式或验证步骤，同批更新它。
-- 被 `README.md`、`tests/README.md`、`compiler/README.md`、`compiler-reference/README.md`、
-  `.github/workflows/ci.yml` 引用，是全仓库最常被指的一份文档。
+- 被 `README.md`、`tests/README.md`、`compiler/README.md`、`compiler-reference/README.md`
+  引用，是全仓库最常被指的一份文档。
 - **`### Compiler roles` 这节的标题不能改** —— `README.md` 用 `#compiler-roles` 锚点链着它。
   只改内容不改标题；改了标题就得同步改所有锚点链接。
 - 判断一份东西该不该写进它的标准：**读者需要照做**。写「怎么做」，不写「当时做了什么」。

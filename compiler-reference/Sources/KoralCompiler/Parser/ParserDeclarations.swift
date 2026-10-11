@@ -1197,6 +1197,7 @@ extension Parser {
     }
 
     let isFileMerge = specifier.hasPrefix("./") || specifier.hasPrefix("../")
+      || specifier.hasPrefix(".\\") || specifier.hasPrefix("..\\")
 
     var items: [UsingModuleItem]? = nil
     if currentToken === .leftBrace {

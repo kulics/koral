@@ -448,13 +448,16 @@ public class Driver {
       } else {
         isStd = false
       }
-      let packageID = module.spec.map { packageID(for: $0.packageKind, packageName: $0.packageIdentity) }
-        ?? "single:unspecified"
+      // Not named `packageID`: a local of that name shadows the
+      // `packageID(for:packageName:)` method and the call below stops resolving.
+      let resolvedPackageID = module.spec.map {
+        self.packageID(for: $0.packageKind, packageName: $0.packageIdentity)
+      } ?? "single:unspecified"
       for (node, sourceFile) in module.globalNodes {
         let sourceInfo = GlobalNodeSourceInfo(
           sourceFile: sourceFile,
           modulePath: module.path,
-          packageID: packageID,
+          packageID: resolvedPackageID,
           node: node
         )
         if isStd {
@@ -759,13 +762,26 @@ public class Driver {
     #endif
 
     var clangArgs = [cFileURL.path]
-    if let stdPath = getStdLibPath() {
-      let runtimeURL = URL(fileURLWithPath: stdPath).appendingPathComponent("koral_runtime.c")
-      if FileManager.default.fileExists(atPath: runtimeURL.path) {
-        clangArgs.append(runtimeURL.path)
-      }
-      clangArgs.append(contentsOf: ["-I", stdPath])
+    // The generated C includes koral_runtime.h and needs koral_runtime.c at
+    // link time. A missing std is a hard error here -- proceeding without it
+    // produces an unreadable clang failure instead of a diagnosis.
+    guard let stdPath = getStdLibPath() else {
+      throw NSError(
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Could not locate the standard library (std/). Set KORAL_HOME to the koral repository root, or run from inside it."]
+      )
     }
+    let runtimeURL = URL(fileURLWithPath: stdPath).appendingPathComponent("koral_runtime.c")
+    guard FileManager.default.fileExists(atPath: runtimeURL.path) else {
+      throw NSError(
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Standard library runtime not found: \(runtimeURL.path)"]
+      )
+    }
+    clangArgs.append(runtimeURL.path)
+    clangArgs.append(contentsOf: ["-I", stdPath])
 
     clangArgs.append("-o")
     clangArgs.append(exeURL.path)
@@ -798,7 +814,20 @@ public class Driver {
 
     debugPhase("\(phasePrefix): clang")
     let clangStart = DispatchTime.now()
+    // PATH first. The last-resort spelling is only meaningful where a system
+    // clang lives at a fixed place; on Windows there is no such path and a
+    // hardcoded `/usr/bin/clang` would resolve to `<drive>:\usr\bin\clang`.
+    #if os(Windows)
+    guard let clangPath = findExecutable("clang") else {
+      throw NSError(
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Could not find clang on PATH. Install LLVM/clang and make sure it is on PATH."]
+      )
+    }
+    #else
     let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
+    #endif
     let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
     profilePhase("\(phasePrefix): clang", start: clangStart)
     if clangResult != 0 {
@@ -862,6 +891,27 @@ public class Driver {
     exit(1)
   }
 
+  /// Search for `suffix` starting at `start` and walking up a few parents.
+  ///
+  /// Used to find the standard library relative to the running executable:
+  /// `koralc` on PATH, invoked from a project outside the repository, cannot
+  /// see the tree it was built in through the cwd.
+  private func searchUpward(from start: URL, suffix: String) -> String? {
+    var cursor = start
+    for _ in 0..<5 {
+      let candidate = cursor.appendingPathComponent(suffix).standardized.path
+      if FileManager.default.fileExists(atPath: candidate) {
+        return candidate
+      }
+      let parent = cursor.deletingLastPathComponent()
+      if parent.path == cursor.path {
+        break
+      }
+      cursor = parent
+    }
+    return nil
+  }
+
   func getStdManifestPath() -> String? {
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
       let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std/koral.json").path
@@ -879,6 +929,13 @@ public class Driver {
     for path in candidatePaths {
       if FileManager.default.fileExists(atPath: path) {
         return path
+      }
+    }
+
+    // Relative to the executable: <repo>/bin/compiler/koralc -> <repo>/std.
+    if let exePath = Bundle.main.executableURL ?? CommandLine.arguments.first.map({ URL(fileURLWithPath: $0) }) {
+      if let found = searchUpward(from: exePath.deletingLastPathComponent(), suffix: "std/koral.json") {
+        return found
       }
     }
 
@@ -960,9 +1017,13 @@ public class Driver {
   func findExecutable(_ name: String) -> String? {
     #if os(Windows)
     let pathSeparator: Character = ";"
-    let extensions = [".exe", ".cmd", ".bat", ""]
+    // Only real executables. `CreateProcess` cannot run a `.cmd`/`.bat` shim
+    // (it needs `cmd.exe /c`), and a shim sitting in an earlier PATH directory
+    // would otherwise win over a real `clang.exe` further down and fail at
+    // spawn with an opaque error.
+    let extensions = [".exe", ""]
     // On Windows, environment variable names are case-insensitive but Swift may be case-sensitive
-    let pathEnv = ProcessInfo.processInfo.environment["PATH"] 
+    let pathEnv = ProcessInfo.processInfo.environment["PATH"]
                   ?? ProcessInfo.processInfo.environment["Path"]
                   ?? ProcessInfo.processInfo.environment["path"]
                   ?? ""
@@ -971,9 +1032,9 @@ public class Driver {
     let extensions = [""]
     let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
     #endif
-    
+
     let paths = pathEnv.split(separator: pathSeparator).map(String.init)
-    
+
     for path in paths {
         let dirURL = URL(fileURLWithPath: path)
         for ext in extensions {

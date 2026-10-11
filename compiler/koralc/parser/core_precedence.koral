@@ -547,8 +547,8 @@ given Parser {
     module_private parse_logical_tail(self, operand Expr) Result[Expr] = {
         let mutable expr = self.parse_logical_and_chain(operand) or return;
 
-        while self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return()
-        then {
+        while self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return(
+        ) then {
             self.advance();
             let rhs_operand = self.parse_logical_not() or return;
             let rhs = self.parse_logical_and_chain(rhs_operand) or return;
@@ -562,14 +562,19 @@ given Parser {
     /// itself, so the caret sits on the token to parenthesize around.
     module_private reject_logical_at_flow_layer(self, expr Expr) Result[Expr] = {
         if self.current().kind is .KwAnd() and not self.next_is_then() then {
-            return .Error(self.parser_error_at_current(
-                "'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
-            ));
+            return .Error(
+                self.parser_error_at_current(
+                    "'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+                ),
+            );
         };
-        if self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return() then {
-            return .Error(self.parser_error_at_current(
-                "'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
-            ));
+        if self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return(
+        ) then {
+            return .Error(
+                self.parser_error_at_current(
+                    "'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+                ),
+            );
         };
         return .Ok(expr);
     };
@@ -577,19 +582,25 @@ given Parser {
     /// A flow operator arriving after a logical chain.
     module_private reject_flow_at_logical_layer(self, expr Expr) Result[Expr] = {
         if self.current().kind is .KwAnd() and self.next_is_then() then {
-            return .Error(self.parser_error_at_current(
-                "'and then' cannot be mixed with logical 'and' / 'or' without parentheses",
-            ));
+            return .Error(
+                self.parser_error_at_current(
+                    "'and then' cannot be mixed with logical 'and' / 'or' without parentheses",
+                ),
+            );
         };
         if self.current().kind is .KwOr() and self.next_is_else() then {
-            return .Error(self.parser_error_at_current(
-                "'or else' cannot be mixed with logical 'and' / 'or' without parentheses",
-            ));
+            return .Error(
+                self.parser_error_at_current(
+                    "'or else' cannot be mixed with logical 'and' / 'or' without parentheses",
+                ),
+            );
         };
         if self.current().kind is .KwOr() and self.next_is_return() then {
-            return .Error(self.parser_error_at_current(
-                "'or return' cannot be mixed with logical 'and' / 'or' without parentheses",
-            ));
+            return .Error(
+                self.parser_error_at_current(
+                    "'or return' cannot be mixed with logical 'and' / 'or' without parentheses",
+                ),
+            );
         };
         return .Ok(expr);
     };
@@ -1017,7 +1028,9 @@ given Parser {
             );
         };
 
-        let is_file_merge = specifier.starts_with("./") or specifier.starts_with("../");
+        let is_file_merge = specifier.starts_with("./") or specifier.starts_with("../") or specifier.starts_with(
+            ".\\",
+        ) or specifier.starts_with("..\\");
 
         let mutable items = Option[List[UsingModuleItem]].None();
         if self.current().kind is .LBrace() then {
@@ -1054,10 +1067,7 @@ given Parser {
         return .Ok(Decl.UsingDecl(specifier, items, self.span_from_start(start)));
     };
 
-    module_private parse_trait_decl(
-        self,
-        access AccessModifier,
-    ) Result[Decl] = {
+    module_private parse_trait_decl(self, access AccessModifier) Result[Decl] = {
         let start = self.current();
         self.advance();
         let name_token = self.current();
@@ -1121,10 +1131,7 @@ given Parser {
         return .Ok(base);
     };
 
-    module_private parse_given_decl(
-        self,
-        access AccessModifier,
-    ) Result[Decl] = {
+    module_private parse_given_decl(self, access AccessModifier) Result[Decl] = {
         let start = self.current();
         self.advance();
         // `given intrinsic T { ... };` -- the qualifier sits right after `given`.
@@ -1202,10 +1209,7 @@ given Parser {
                 if flags.has_explicit_access then {
                     using_access = flags.access;
                 };
-                return self.parse_using_decl(
-                    using_access,
-                    flags.has_explicit_access,
-                );
+                return self.parse_using_decl(using_access, flags.has_explicit_access);
             },
             .KwTrait() then {
                 return self.parse_trait_decl(flags.access);

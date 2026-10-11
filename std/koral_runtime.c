@@ -247,6 +247,7 @@ struct KoralTimespec {
 #include <fcntl.h>
 #include <share.h>
 #include <sys/stat.h>
+#include <wchar.h>
 
 int __koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
     if (!req) return -1;
@@ -290,6 +291,8 @@ int __koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
 // Path helpers
 // ============================================================================
 
+// Translate to the separator the OS wants. Called at every syscall boundary;
+// userland keeps the canonical '/' form (see __koral_normalize_path).
 static void normalize_path_internal(const char* src, char* dst, size_t size) {
     size_t i = 0;
     while (src[i] && i < size - 1) {
@@ -303,9 +306,129 @@ static void normalize_path_internal(const char* src, char* dst, size_t size) {
     dst[i] = '\0';
 }
 
+#ifdef _WIN32
+// Koral strings are UTF-8; the ANSI Win32/CRT entry points interpret bytes in
+// the system codepage, so any non-ASCII path (CJK user profile, CJK project
+// name) silently resolves to the wrong file. Every path-bearing call below goes
+// through these and then uses the W-suffixed API. Callers free the result.
+static wchar_t* __koral_utf8_to_wide(const char* s) {
+    if (!s) return NULL;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    if (n <= 0) return NULL;
+    wchar_t* w = (wchar_t*)malloc((size_t)n * sizeof(wchar_t));
+    if (!w) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n) <= 0) {
+        free(w);
+        return NULL;
+    }
+    return w;
+}
+
+static char* __koral_wide_to_utf8(const wchar_t* w) {
+    if (!w) return NULL;
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    if (n <= 0) return NULL;
+    char* s = (char*)malloc((size_t)n);
+    if (!s) return NULL;
+    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) {
+        free(s);
+        return NULL;
+    }
+    return s;
+}
+#endif
+
+// Canonicalize a path in userland: unify separators to '/' and resolve "."
+// and ".." components. The result is what Path.normalize() hands back, and it
+// is the form every string comparison in the compilers may rely on -- which is
+// why this deliberately does NOT flip to the platform separator.
+//
+// The result never grows: '.' and '..' only ever remove bytes, and separator
+// unification is 1:1. Callers size the buffer to strlen(path) + 1.
 int __koral_normalize_path(const char* path, char* buf, size_t size) {
-    normalize_path_internal(path, buf, size);
-    return (int)strlen(buf);
+    if (!path || !buf || size == 0) return 0;
+
+    size_t len = strlen(path);
+    if (len + 1 > size) len = size - 1;
+
+    // Unify separators to '/'.
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = (path[i] == '\\') ? '/' : path[i];
+    }
+    buf[len] = '\0';
+
+    // Root prefix, kept verbatim: "C:", "C:/", "/" or "//" (UNC).
+    size_t root = 0;
+    if (len >= 2 && buf[1] == ':') {
+        root = 2;
+        if (len >= 3 && buf[2] == '/') root = 3;
+    } else if (len >= 1 && buf[0] == '/') {
+        root = (len >= 2 && buf[1] == '/') ? 2 : 1;
+    }
+
+    // Rewrite components after the root in place. `out` is the end of the last
+    // component kept so far (or of the root); it never runs ahead of the read
+    // cursor because the output is never longer than the input.
+    //
+    // `regular` counts real components written above the root. A ".." pops one
+    // of those; when there are none left, a relative path keeps the ".."
+    // (there is nothing above it to cancel) and an absolute one drops it.
+    size_t out = root;
+    size_t i = root;
+    size_t regular = 0;
+
+    while (i < len) {
+        while (i < len && buf[i] == '/') i++;
+        if (i >= len) break;
+
+        size_t cs = i;
+        while (i < len && buf[i] != '/') i++;
+        size_t cl = i - cs;
+
+        if (cl == 1 && buf[cs] == '.') {
+            continue;
+        }
+
+        if (cl == 2 && buf[cs] == '.' && buf[cs + 1] == '.') {
+            if (regular > 0) {
+                // Remove the last regular component. `out` ends up just past
+                // the component before it, with its trailing separator dropped.
+                size_t j = out - 1;
+                while (j > root && buf[j] != '/') j--;
+                out = (buf[j] == '/') ? j : root;
+                regular--;
+            } else if (root == 0) {
+                // Relative path with nothing above: keep the "..".
+                if (out > 0 && buf[out - 1] != '/') {
+                    if (out + 1 < size) buf[out++] = '/';
+                }
+                if (out + 2 < size) {
+                    buf[out++] = '.';
+                    buf[out++] = '.';
+                }
+            }
+            // Absolute path with nothing above: ".." cancels against the root,
+            // so it is dropped.
+            continue;
+        }
+
+        // Append a separator before the component unless we sit right after a
+        // root that already ends in '/' (or this is the first thing written).
+        if (out > 0 && buf[out - 1] != '/') {
+            if (out + 1 < size) buf[out++] = '/';
+        }
+        if (out + cl < size) {
+            memmove(buf + out, buf + cs, cl);
+            out += cl;
+        }
+        regular++;
+    }
+
+    // Trailing separator on a non-root path is dropped ("a/b/" -> "a/b").
+    while (out > root && out > 1 && buf[out - 1] == '/') out--;
+
+    buf[out] = '\0';
+    return (int)out;
 }
 
 char __koral_path_separator(void) {
@@ -328,8 +451,12 @@ int __koral_path_exists(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
+    wchar_t* wpath = __koral_utf8_to_wide(normalized);
+    if (!wpath) return 0;
     struct _stat st;
-    return _stat(normalized, &st) == 0 ? 1 : 0;
+    int rc = _wstat(wpath, &st);
+    free(wpath);
+    return rc == 0 ? 1 : 0;
 #else
     struct stat st;
     return stat(normalized, &st) == 0 ? 1 : 0;
@@ -343,12 +470,14 @@ int __koral_path_exists(const char* path) {
 #ifdef _WIN32
 struct CDirHandle {
     HANDLE handle;
-    WIN32_FIND_DATAA data;
+    WIN32_FIND_DATAW data;
     bool first;
 };
 
 struct CDirEntry {
-    char name[MAX_PATH];
+    // UTF-8, converted from the wide name the OS reports. MAX_PATH wide
+    // characters can expand to 3x that in UTF-8.
+    char name[MAX_PATH * 3];
     DWORD attributes;
 };
 #else
@@ -371,10 +500,17 @@ CDirHandle* __koral_opendir(const char* path) {
     CDirHandle* dir = (CDirHandle*)malloc(sizeof(CDirHandle));
     if (!dir) return NULL;
 
-    char pattern[MAX_PATH];
-    snprintf(pattern, MAX_PATH, "%s\\*", normalized);
+    wchar_t* wnormalized = __koral_utf8_to_wide(normalized);
+    if (!wnormalized) {
+        free(dir);
+        return NULL;
+    }
 
-    dir->handle = FindFirstFileA(pattern, &dir->data);
+    wchar_t pattern[4096 + 3];
+    _snwprintf_s(pattern, _countof(pattern), _TRUNCATE, L"%s\\*", wnormalized);
+    free(wnormalized);
+
+    dir->handle = FindFirstFileW(pattern, &dir->data);
     if (dir->handle == INVALID_HANDLE_VALUE) {
         free(dir);
         return NULL;
@@ -394,18 +530,31 @@ CDirHandle* __koral_opendir(const char* path) {
 #endif
 }
 
+// Fill a CDirEntry's UTF-8 name from the wide name the OS reported.
+#ifdef _WIN32
+static void __koral_fill_entry_name(CDirEntry* entry, const WIN32_FIND_DATAW* data) {
+    char* utf8 = __koral_wide_to_utf8(data->cFileName);
+    if (utf8) {
+        strncpy(entry->name, utf8, sizeof(entry->name) - 1);
+        entry->name[sizeof(entry->name) - 1] = '\0';
+        free(utf8);
+    } else {
+        entry->name[0] = '\0';
+    }
+    entry->attributes = data->dwFileAttributes;
+}
+#endif
+
 CDirEntry* __koral_readdir(CDirHandle* dir) {
 #ifdef _WIN32
     static CDirEntry entry;
     if (dir->first) {
         dir->first = false;
-        strcpy(entry.name, dir->data.cFileName);
-        entry.attributes = dir->data.dwFileAttributes;
+        __koral_fill_entry_name(&entry, &dir->data);
         return &entry;
     }
-    if (FindNextFileA(dir->handle, &dir->data)) {
-        strcpy(entry.name, dir->data.cFileName);
-        entry.attributes = dir->data.dwFileAttributes;
+    if (FindNextFileW(dir->handle, &dir->data)) {
+        __koral_fill_entry_name(&entry, &dir->data);
         return &entry;
     }
     return NULL;
@@ -443,7 +592,11 @@ int __koral_mkdir(const char* path, unsigned int mode) {
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
     (void)mode;
-    return _mkdir(normalized);
+    wchar_t* wpath = __koral_utf8_to_wide(normalized);
+    if (!wpath) return -1;
+    int rc = _wmkdir(wpath);
+    free(wpath);
+    return rc;
 #else
     return mkdir(normalized, mode);
 #endif
@@ -453,7 +606,11 @@ int __koral_rmdir(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
-    return _rmdir(normalized);
+    wchar_t* wpath = __koral_utf8_to_wide(normalized);
+    if (!wpath) return -1;
+    int rc = _wrmdir(wpath);
+    free(wpath);
+    return rc;
 #else
     return rmdir(normalized);
 #endif
@@ -461,7 +618,20 @@ int __koral_rmdir(const char* path) {
 
 char* __koral_getcwd(char* buf, size_t size) {
 #ifdef _WIN32
-    return _getcwd(buf, (int)size);
+    // _wgetcwd reports the platform spelling in UTF-16; hand back UTF-8 so the
+    // rest of the runtime sees the same encoding as every other path.
+    wchar_t wbuf[4096];
+    if (!_wgetcwd(wbuf, (int)(sizeof(wbuf) / sizeof(wbuf[0])))) return NULL;
+    char* utf8 = __koral_wide_to_utf8(wbuf);
+    if (!utf8) return NULL;
+    size_t n = strlen(utf8);
+    if (n + 1 > size) {
+        free(utf8);
+        return NULL;
+    }
+    memcpy(buf, utf8, n + 1);
+    free(utf8);
+    return buf;
 #else
     return getcwd(buf, size);
 #endif
@@ -1785,8 +1955,12 @@ static void __koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
 }
 
 int32_t __koral_stat(const uint8_t* path, KoralStatResult* out) {
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
     struct _stat64 st;
-    if (_stat64((const char*)path, &st) != 0) return -1;
+    int rc = _wstat64(wpath, &st);
+    free(wpath);
+    if (rc != 0) return -1;
     __koral_fill_stat_result(&st, out);
     return 0;
 }
@@ -1804,19 +1978,43 @@ int32_t __koral_fstat(int32_t fd, KoralStatResult* out) {
 }
 
 int32_t __koral_chmod(const uint8_t* path, uint32_t mode) {
-    return _chmod((const char*)path, (int)(mode & 0777)) == 0 ? 0 : -1;
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
+    int rc = _wchmod(wpath, (int)(mode & 0777));
+    free(wpath);
+    return rc == 0 ? 0 : -1;
 }
 
 int32_t __koral_link(const uint8_t* src, const uint8_t* dst) {
-    return CreateHardLinkA((const char*)dst, (const char*)src, NULL) ? 0 : -1;
+    wchar_t* wsrc = __koral_utf8_to_wide((const char*)src);
+    wchar_t* wdst = __koral_utf8_to_wide((const char*)dst);
+    if (!wsrc || !wdst) {
+        free(wsrc);
+        free(wdst);
+        return -1;
+    }
+    int rc = CreateHardLinkW(wdst, wsrc, NULL) ? 0 : -1;
+    free(wsrc);
+    free(wdst);
+    return rc;
 }
 
 int32_t __koral_symlink(const uint8_t* src, const uint8_t* dst) {
+    wchar_t* wsrc = __koral_utf8_to_wide((const char*)src);
+    wchar_t* wdst = __koral_utf8_to_wide((const char*)dst);
+    if (!wsrc || !wdst) {
+        free(wsrc);
+        free(wdst);
+        return -1;
+    }
     DWORD flags = 0;
-    DWORD attrs = GetFileAttributesA((const char*)src);
+    DWORD attrs = GetFileAttributesW(wsrc);
     if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
         flags = SYMBOLIC_LINK_FLAG_DIRECTORY;
-    return CreateSymbolicLinkA((const char*)dst, (const char*)src, flags) ? 0 : -1;
+    int rc = CreateSymbolicLinkW(wdst, wsrc, flags) ? 0 : -1;
+    free(wsrc);
+    free(wdst);
+    return rc;
 }
 
 int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
@@ -1826,8 +2024,11 @@ int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
 }
 
 int32_t __koral_truncate(const uint8_t* path, int64_t size) {
-    HANDLE h = CreateFileA((const char*)path, GENERIC_WRITE, 0, NULL,
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
+    HANDLE h = CreateFileW(wpath, GENERIC_WRITE, 0, NULL,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    free(wpath);
     if (h == INVALID_HANDLE_VALUE) return -1;
     LARGE_INTEGER li;
     li.QuadPart = size;
@@ -1863,8 +2064,22 @@ int32_t __koral_errno_is_wouldblock(void) {
 }
 
 int32_t __koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
-    DWORD len = GetFullPathNameA((const char*)path, (DWORD)size, (char*)buf, NULL);
-    if (len == 0 || len >= (DWORD)size) return -1;
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
+    wchar_t wbuf[4096];
+    DWORD cap = (DWORD)(sizeof(wbuf) / sizeof(wbuf[0]));
+    DWORD len = GetFullPathNameW(wpath, cap, wbuf, NULL);
+    free(wpath);
+    if (len == 0 || len >= cap) return -1;
+    char* utf8 = __koral_wide_to_utf8(wbuf);
+    if (!utf8) return -1;
+    size_t n = strlen(utf8);
+    if (n + 1 > size) {
+        free(utf8);
+        return -1;
+    }
+    memcpy(buf, utf8, n + 1);
+    free(utf8);
     return 0;
 }
 
@@ -1906,8 +2121,19 @@ int32_t __koral_hostname(uint8_t* buf, uint64_t size) {
 }
 
 int32_t __koral_current_exe(uint8_t* buf, uint64_t size) {
-    DWORD len = GetModuleFileNameA(NULL, (char*)buf, (DWORD)size);
-    if (len == 0 || len >= (DWORD)size) return -1;
+    wchar_t wbuf[4096];
+    DWORD cap = (DWORD)(sizeof(wbuf) / sizeof(wbuf[0]));
+    DWORD len = GetModuleFileNameW(NULL, wbuf, cap);
+    if (len == 0 || len >= cap) return -1;
+    char* utf8 = __koral_wide_to_utf8(wbuf);
+    if (!utf8) return -1;
+    size_t n = strlen(utf8);
+    if (n + 1 > size) {
+        free(utf8);
+        return -1;
+    }
+    memcpy(buf, utf8, n + 1);
+    free(utf8);
     return 0;
 }
 
@@ -1922,9 +2148,12 @@ int32_t __koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
         case 4: flags = _O_RDWR | _O_BINARY; break;                                                // ReadWrite
         default: return -1;
     }
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
     int fd;
-    if (_sopen_s(&fd, (const char*)path, flags, _SH_DENYNO, mode) != 0)
-        return -1;
+    int rc = _wsopen_s(&fd, wpath, flags, _SH_DENYNO, mode);
+    free(wpath);
+    if (rc != 0) return -1;
     return (int32_t)fd;
 }
 
@@ -1945,7 +2174,11 @@ int32_t __koral_close(int32_t fd) {
 }
 
 int32_t __koral_chdir(const uint8_t* path) {
-    return _chdir((const char*)path);
+    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    if (!wpath) return -1;
+    int rc = _wchdir(wpath);
+    free(wpath);
+    return rc;
 }
 
 uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
@@ -2779,7 +3012,8 @@ int32_t __koral_spawn(
                              0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
     }
 
-    // Build command line string
+    // Build command line string as UTF-8 first, then widen it for
+    // CreateProcessW. Args and paths can hold non-ASCII text.
     char cmdline[32768];
     int pos = 0;
     for (int i = 0; i < argc && pos < 32700; i++) {
@@ -2794,27 +3028,67 @@ int32_t __koral_spawn(
     }
     cmdline[pos] = '\0';
 
-    // Build environment block if needed
-    char* env_block = NULL;
-    if (envc > 0) {
-        size_t total = 0;
-        for (int i = 0; i < envc; i++) {
-            total += strlen((const char*)envp[i]) + 1;
+    wchar_t* wcmdline = __koral_utf8_to_wide(cmdline);
+    if (!wcmdline) goto fail;
+    wchar_t* wprogram = __koral_utf8_to_wide((const char*)program);
+    if (!wprogram) {
+        free(wcmdline);
+        goto fail;
+    }
+    wchar_t* wwork_dir = NULL;
+    if (cwd && cwd[0]) {
+        wwork_dir = __koral_utf8_to_wide((const char*)cwd);
+        if (!wwork_dir) {
+            free(wcmdline);
+            free(wprogram);
+            goto fail;
         }
-        total += 1;  // double null terminator
-        env_block = (char*)malloc(total);
-        if (!env_block) goto fail;
-        char* p = env_block;
-        for (int i = 0; i < envc; i++) {
-            size_t len = strlen((const char*)envp[i]);
-            memcpy(p, envp[i], len);
-            p[len] = '\0';
-            p += len + 1;
-        }
-        *p = '\0';
     }
 
-    STARTUPINFOA si;
+    // Build the environment block as UTF-16, the form
+    // CREATE_UNICODE_ENVIRONMENT declares. Each entry is `NAME=VALUE\0`, and
+    // the block ends with an extra `\0`.
+    wchar_t* env_block = NULL;
+    if (envc > 0) {
+        size_t total = 1;  // trailing extra null
+        for (int i = 0; i < envc; i++) {
+            wchar_t* wentry = __koral_utf8_to_wide((const char*)envp[i]);
+            if (!wentry) {
+                free(wcmdline);
+                free(wprogram);
+                free(wwork_dir);
+                goto fail;
+            }
+            total += wcslen(wentry) + 1;
+            free(wentry);
+        }
+        env_block = (wchar_t*)malloc(total * sizeof(wchar_t));
+        if (!env_block) {
+            free(wcmdline);
+            free(wprogram);
+            free(wwork_dir);
+            goto fail;
+        }
+        wchar_t* p = env_block;
+        for (int i = 0; i < envc; i++) {
+            wchar_t* wentry = __koral_utf8_to_wide((const char*)envp[i]);
+            if (!wentry) {
+                free(env_block);
+                free(wcmdline);
+                free(wprogram);
+                free(wwork_dir);
+                goto fail;
+            }
+            size_t len = wcslen(wentry);
+            memcpy(p, wentry, len * sizeof(wchar_t));
+            p[len] = L'\0';
+            p += len + 1;
+            free(wentry);
+        }
+        *p = L'\0';
+    }
+
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
@@ -2838,15 +3112,16 @@ int32_t __koral_spawn(
     else if (stderr_mode == 3) si.hStdError = stderr_file;
     else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
-    const char* work_dir = (cwd && cwd[0]) ? (const char*)cwd : NULL;
-
     memset(&pi, 0, sizeof(pi));
-    BOOL ok = CreateProcessA(
-        (LPCSTR)program, cmdline, NULL, NULL, TRUE,
+    BOOL ok = CreateProcessW(
+        wprogram, wcmdline, NULL, NULL, TRUE,
         env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
-        env_block, work_dir, &si, &pi
+        env_block, wwork_dir, &si, &pi
     );
 
+    free(wcmdline);
+    free(wprogram);
+    free(wwork_dir);
     if (env_block) free(env_block);
 
     if (!ok) goto fail;
