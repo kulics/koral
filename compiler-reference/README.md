@@ -42,5 +42,5 @@ thing meant to catch it.
 
 - [`../docs/implementation/developer-guide.md`](../docs/implementation/developer-guide.md) — *Compiler roles* and the trust boundary
 - [`../tests/README.md`](../tests/README.md) — the differential oracle contract
-- [`../docs/implementation/bootstrap-productization-plan.md`](../docs/implementation/bootstrap-productization-plan.md) — the
-  dated appendix recording this role decision
+- [`../docs/implementation/bootstrap-productization-plan.md`](../docs/implementation/bootstrap-productization-plan.md) — why this
+  split and why the reference is frozen rather than deleted

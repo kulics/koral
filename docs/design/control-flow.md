@@ -77,7 +77,6 @@ values; `while` and `for` always produce `Void`.
 
 ## 实施
 
-无实现记录。上述回归的修复过程记在
-[`thin-pointer-design.md`](thin-pointer-design.md) 的「后续修复：bootstrap 的 `break`
-分支边界误判（已修）」一节。流程层 / 逻辑层分层的实施记在
+无单独实现记录。`break` / `continue` 的绑定规则由回归用例看住——它一度把
+`or else` / `and then` 误判成分支边界。流程层 / 逻辑层分层的实施记在
 [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) 的「实施」一节。

@@ -469,70 +469,28 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 - **版本区间与升级策略**（含传递依赖版本冲突的裁决，见 §10.2）
 
 
-## 迁移 —— 原文「8. 迁移」
+## 兼容与旧写法 —— 原文「8. 迁移」
 
-不保留兼容层，但错误信息必须把旧写法指清楚。
+**不设兼容层。** 旧写法直接报错，错误信息把该写什么指清楚。
 
-```koral
-using "utils";            // 旧：裸名文件合并
-```
-
-被分类为模块导入（不以 `./` 开头），查不到包名 `utils`，报：
+`using` 的裸名是**包名**，不是文件路径：
 
 ```text
-error: 未知包名 "utils"
-  想做文件合并 → using "./utils.koral";
-  想导入模块   → 先在 koral.json 的 dependencies 里声明该包
+error: Unknown package name "utils"
+  A name in 'using' is a package name: this package's 'package', one of its
+  'dependencies' keys, or the reserved "std".
 ```
 
-```koral
-using "std/io" { .. };    // 旧：.. 表全部
-```
+想做文件合并写 `using "./utils.koral";`；想导入模块，先在 `koral.json` 的
+`dependencies` 里声明该包。`{ .. }` 这类「导入全部」的旧写法不存在：
+导入全部可见符号请省略列表，写 `using "std/io";`。
 
-```text
-error: 未知符号 ".."
-  导入全部可见符号请省略列表 → using "std/io";
-```
+**风险窗口**：裸名写法落到模块查询。若恰好存在同名包（如 `dependencies` 里把某包
+改名成 `utils`），会**静默解析到无关包**。这是「裸名是包名」这条规则的固有代价。
 
-**风险窗口**：裸名写法会落到模块查询。若恰好存在同名包（如 `dependencies` 里把某包改名成 `utils`），会**静默解析到无关包**。
-
-- 迁移期：迁移脚本必须一次改完 243 处裸名，不留尾巴；
-- 迁移后：源码里不应再有裸名文件合并，风险消失。
-
-> **修正（2026-10-10）**：迁移**已完成**，上面「迁移期…不留尾巴」是当时的施工要求，不是待办。
-> 今天的实况：源码里已无裸名文件合并，文件合并一律写 `using "./…"`。**现存量 233 处**
-> （`*.koral` 里以 `using "./` 开头的语句，已剔除注释行）。原文的「243 处」是迁移脚本当时
-> 要改的量，不是现在的存量。
-
-### 迁移面
-
-| 对象 | 内容 | 量级 |
-| --- | --- | --- |
-| 文件合并 | `using "x"` → `using "./x.koral"`；`using "./x"` → 补 `.koral` | 243 处（脚本化） |
-| 模块导入 | `using std::io { X }` → `using "std/io" { X }`；`{ .. }` → 省略 | 330 处 / 236 文件 |
-| manifest | 加 `package`；`modules` key `std` → `.`、`std::io` → `io`；`module_aliases` → `dependencies` 的 key | 中 |
-| Swift 编译器 | Parser / ModuleResolver / PackageManifest | 中 |
-| 主实现编译器 | `compiler/koralc` 的 lexer / parser / module / driver | 大 |
-| toolchain | `toolchain/koral/config.koral` | 中 |
-| 测试 | `tests/compiler-cases` | 559 用例 |
-| 文档 | `grammar.bnf` / `document.md` / `document-zh.md` | 中 |
-
-> bootstrap 目前 semantic 通过率 139/456。语法面变更应等它稳定后再动，或并行推进并单独验收。
-
-> **修正（2026-10-10）**：上表「量级」列与上面那句 bootstrap 通过率是**迁移前的计划基线**，均非现状。
-> 今天的实况（计数口径见括号）：
-> - **模块导入**：`using "…"`（非 `./`）语句 **376 处 / 255 文件**（不是 330 处 / 236 文件）。
-> - **测试**：`tests/compiler-cases` 现有 **644 个用例**（不是 559）。按
->   `tests/compiler-runner/discovery.koral` 的纳入规则数出：**583 个顶层 `*.koral` 单文件用例
->   \+ 61 个 `dir/dir.koral` 多文件用例根**。另有 3 个多程序/夹具目录
->   （`multi_program_test`、`module_error_tests`、`using_relative_merge_path_test`）不符合
->   `dir/dir.koral` 根约定，不被该规则纳入为用例。
-> - **bootstrap**：已**全绿并自举**，不再是 139/456。实现记录
->   [`../implementation/bootstrap-productization-plan.md`](../implementation/bootstrap-productization-plan.md)
->   记的是全链绿 + 自举不动点 + 悬空 0（例：「Swift 566/566 · stage1 566/566 ·
->   自举 FIXED POINT + 悬空 0 · stage2 566/566」）。当下的确切通过数**无法静态核实**
->   （要现跑一轮），故不填具体比值。
-
+**演进**：`using "x"` 一度兼做裸名文件合并与模块导入，靠有无 `./` 区分。
+两者语义不同、错误也不同，于是拆成两条：文件合并强制 `./` + `.koral`，
+裸名一律是包名。拆开之后不再需要兼容层。
 
 ## 示例 —— 原文「6. 示例」
 

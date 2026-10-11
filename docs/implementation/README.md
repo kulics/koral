@@ -16,31 +16,35 @@
   只改内容不改标题；改了标题就得同步改所有锚点链接。
 - 判断一份东西该不该写进它的标准：**读者需要照做**。写「怎么做」，不写「当时做了什么」。
 
-## 二、带日期的记录 —— 其余三份
+## 二、实现记录 —— 其余四份
+
+这些写**现在的实现是什么样、怎么演进成这样、否决了什么及原因**，不写「当时做了什么、
+接下来要改什么」。读者是想理解或评审这个实现的人。
 
 | 文件 | 记的是什么 |
 |---|---|
-| [`module-design-implementation.md`](module-design-implementation.md) | 模块设计的落地计划、验收判据、复核 |
-| [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）改造的执行记录 |
-| [`bootstrap-productization-plan.md`](bootstrap-productization-plan.md) | bootstrap 产品化的计划与各期取证 |
-| [`samples-capability-plan.md`](samples-capability-plan.md) | 用样本程序验证语言能力的计划与下沉裁决 |
+| [`module-design-implementation.md`](module-design-implementation.md) | 模块与导入的实现裁定、CLI 信封规则、未决缺陷 |
+| [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）模型、演进、硬性约束与被否方案 |
+| [`bootstrap-productization-plan.md`](bootstrap-productization-plan.md) | bootstrap 产品化的约束、信任边界、panic 判定方法 |
+| [`samples-capability-plan.md`](samples-capability-plan.md) | 样本验证的分界判据、语言缺口、被否掉的下沉 |
 
 写法：
 
-- **只追加，不重写。** 历史正文是当时的记录，改它就毁了证据。新结论以
-  `## 附：<标题>（<日期>）` 的形式追加到文末，或开新的一节。
-- **每份顶部给一行状态**：已完成什么 / 还剩什么。读者不该通读 1500 行才知道现状。
-- **路径指针是唯一例外**：文档搬家后，记录里指向别的文档的路径字符串要修到能解析。
-  只改路径，其余措辞一字不动 —— 坏掉的指针不是历史叙述，是坏掉的指针。
+- **写现状，不写流水账。** 只记三件事：现在怎么做、怎么演进到这样、否决了什么及为什么。
+  「当时改了哪几处、跑了几个用例、还剩几处没做」是过程，不进文档——git 历史有。
+- **每份顶部给一行状态**：当前范围与未决。读者不该通读才知道现状。
+- **带 `§N` 的节号是引用锚点**：设计文档与代码注释按 `§N` 指过来。改节号前先 grep。
 - **文件名一旦定名就别改**，理由同设计文档：grep 锚点与 `git log --follow`。
+- **路径指针要能解析**：文档搬家后，指过去路径字符串要修到能解析。只改路径，不改措辞。
 
 ## 为什么章程和记录不分成两个目录
 
-现在只有 1 份章程 + 3 份记录，多一层目录不值当。分界靠本 README 的上述规则和各自的写法。
+现在只有 1 份章程 + 4 份记录，多一层目录不值当。分界靠本 README 的上述规则和各自的写法。
 等记录多到章程被埋住，再收进 `records/` 子目录。
 
 ## 写新文档前
 
 1. 读者需要**照做**吗？→ 给 `developer-guide.md` 加一节，别开新文件。
-2. 是**一次改造的执行过程**吗？→ 开 `<topic>-tracking.md` 或 `<topic>-plan.md`，顶部写状态与日期。
+2. 是**某个改造的实现裁定**吗？→ 开 `<topic>-tracking.md` 或 `<topic>-plan.md`，
+   写现状 / 演进 / 被否方案，顶部写状态。
 3. 是**为什么这样设计**吗？→ 去 [`../design/`](../design/)。

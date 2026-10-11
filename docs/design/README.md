@@ -53,10 +53,10 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | 设计 | Status | 对应实现记录 | 最近状态变更 |
 |---|---|---|---|
 | [`module-design.md`](module-design.md) —— 模块与导入 | Implemented（模块与导入部分） | [`../implementation/module-design-implementation.md`](../implementation/module-design-implementation.md) | 2026-10-05 |
-| [`thin-pointer-design.md`](thin-pointer-design.md) —— 薄指针对象表示 | Implemented（步骤 1–4b） | 文内 `## 实施` 一节（未单独拆出） | 2026-10 |
+| [`thin-pointer-design.md`](thin-pointer-design.md) —— 薄指针对象表示 | Implemented | 文内 `## 实施` 一节（未单独拆出） | 2026-10 |
 | [`type-semantics.md`](type-semantics.md) —— type / type mutable / Clone / Drop | Implemented | 无单独记录（随 std 与两编译器同批） | 2026-10 |
-| [`control-flow.md`](control-flow.md) —— 控制流 | Implemented（**材料不足**） | 见 `thin-pointer-design.md` 的 break 回归一节 | 2026-10 |
-| [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) —— `and then` / `or else` 与布尔 `and` / `or` 的优先级与混用约束 | Implemented | 文内 `## 实施` 一节（未单独拆出） | 2026-10-11 |
+| [`control-flow.md`](control-flow.md) —— 控制流 | Implemented（**材料不足**） | 无单独记录（回归用例看住） | 2026-10 |
+| [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) —— 流程运算符与布尔运算符分层 | Implemented | 文内 `## 实施` 一节（未单独拆出） | 2026-10-11 |
 | [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §4–§5 | 2026-10 |
 | [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §4–§5、§16.3、§22.4 | 2026-10 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
@@ -87,19 +87,22 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 ## 实施
 ```
 
-其余各节（`## 迁移`、`## 示例`、`## 附录`、`## 现状` …）按内容取舍，有就写，没有不硬凑。
+其余各节（`## 演进`、`## 示例`、`## 附录` …）按内容取舍，有就写，没有不硬凑。
 
 要求：
 
+- **写现在的设计，不写「以前是 A，现在改成 B」。** 只记三件事：现在的设计是什么、
+  **怎么演进成这样**（`## 演进`）、**否决了什么及为什么**（`## 替代方案`）。
+  「以前的布局表 + 修正块」「迁移施工计划」「阶段状态表」都是过程，不进设计文档。
+  需要历史时去 `git log`。
 - **Status 头放在正文最前**，一行说清状态、日期、对应的实现记录。
 - **`## 摘要`** 是「一句话说清这个设计是什么」，`module-design.md` 的做法是范例。
 - **`## 非目标` 与 `## 替代方案` 必须存在**。当时没考虑过别的方案就写「原文未记载」，
   **不要事后编造**——补写的「替代方案」会伪装成当时的决策依据。
-- **改写已有设计成 RFC 体例时，只搬块、不改写句子**：原文每一段必须逐字出现在新结构的某处。
-  新增的只有脚手架标题和「原文未记载」占位。用 `/tmp/no_loss.py` 一类的机械比对证明零丢信息
-  （本次重组就是这么验的）。
-- **重命名章节时，把原标题留在标题里**，例如 `## 背景 —— 原文「1. 概念」`。
-  文档自身和实现记录里的 `§N` / `第 N 节` 引用靠它继续可 grep。
+- **重排章节时保住引用锚点**：`§N` / `第 N 节` 一类的引用靠节号继续可 grep，
+  改号前先 grep 设计文档、实现记录与代码注释。
+- **改写时不要丢裁定**：原文的每条裁定要在新结构的某处出现；材料不足就写「原文未记载」，
+  不要事后编造取舍。
 - 长篇设计若分期实施，把每期的状态放进 `## 实施`，不要新开一份文档。
 
 ## 命名
