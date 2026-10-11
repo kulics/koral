@@ -500,6 +500,34 @@ let main() Void = {
         "using \"std/io\" { Reader as reader };\n",
         "alias must start with an uppercase letter",
     );
+    // Flow operators (`and then`, `or else`, `or return`) and logical operators
+    // (`and`, `or`) are two layers and do not mix without parentheses
+    // (guide/grammar.bnf <expression>). Each message is the compiler's own.
+    t.test_error_contains(
+        "logical `and` after flow rejected",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then it == 1 and false;\n    let _ = v;\n    return 0;\n};\n",
+        "'and' cannot be mixed with the flow operators",
+    );
+    t.test_error_contains(
+        "logical `or` after flow rejected",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then it == 1 or false;\n    let _ = v;\n    return 0;\n};\n",
+        "'or' cannot be mixed with the flow operators",
+    );
+    t.test_error_contains(
+        "flow `and then` after logical rejected",
+        "let main() Int = {\n    let v = true or false and then it == 1;\n    let _ = v;\n    return 0;\n};\n",
+        "'and then' cannot be mixed with logical",
+    );
+    t.test_error_contains(
+        "flow `or else` after logical rejected",
+        "let main() Int = {\n    let v = true and false or else false;\n    let _ = v;\n    return 0;\n};\n",
+        "'or else' cannot be mixed with logical",
+    );
+    t.test_error_contains(
+        "flow `or return` after logical rejected",
+        "let main() Int = {\n    let v = true and false or return;\n    let _ = v;\n    return 0;\n};\n",
+        "'or return' cannot be mixed with logical",
+    );
     // `;` is required by the compiler and must not be supplied here. Grammar
     // has no ASI: a missing `;` is an error, and filling one in would rewrite
     // source the compiler refuses. Each shape below is rejected by `koralc`
@@ -557,6 +585,31 @@ let main() Void = {
         "leading underscore in type name accepted",
         "type _Foo(a Int);\n",
         "type _Foo(a Int);\n",
+    );
+    // Parentheses are the only way to cross the flow / logical boundary, so
+    // they are load-bearing: dropping one would turn accepted source into the
+    // rejected mix. Assert the parentheses survive a rewrite.
+    t.test_checked(
+        "parenthesised flow inside logical keeps its parens",
+        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then it > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then it > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "parenthesised logical inside flow keeps its parens",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then (it == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then (it == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+    );
+    // Chains inside one layer are still accepted, and still flatten onto one
+    // line when they fit.
+    t.test_checked(
+        "flow chain inside its own layer accepted",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then it * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then it * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "logical chain inside its own layer accepted",
+        "let main() Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
     );
     // Newlines carry no meaning: only `;` ends a statement (grammar.bnf
     // "Statement Termination"). An expression may therefore span lines after

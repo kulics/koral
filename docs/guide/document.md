@@ -658,37 +658,36 @@ Operator precedence from high to low:
 10. Range: `..`, `..<`, `<..`, `<..<`
 11. Pattern test: `is`, `is not`
 12. Logical NOT: `not`
-13. Optional chaining: `and then`
-14. Value coalescing / early-return propagation: `or else`, `or return`
-15. Logical AND: `and`
-16. Logical OR: `or`
+13. Flow layer, tightest to loosest: `and then`, then `or else` / `or return`
+14. Logical layer, tightest to loosest: `and`, then `or`
 
-The three flow keywords do not sit at one precedence level. From tightest to loosest they order `and then`, then `or else` / `or return`, then `and`, then `or`:
+Rows 13 and 14 are **two separate layers**, not four steps of one ladder. Everything
+above them is the ordinary ladder; these two sit at the same level as each other and
+are entered one at a time. Precedence *inside* a layer is as listed, but **the two
+layers do not mix implicitly**. Crossing from one to the other takes parentheses:
 
-- `and then` binds **tighter** than `or else` / `or return`: `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
-- `or else` / `or return` bind **tighter** than `and`: `a and b or else c` groups as `a and (b or else c)`.
-- `and` binds **tighter** than `or`: `a or b and c` groups as `a or (b and c)`.
+- `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()` — flow with flow, fine.
+- `a or b and c` groups as `a or (b and c)` — logical with logical, fine.
+- `a and (b or else c)` — fine, and means that.
+- `(a and b) or else c` — fine, and means something else.
+- `a and b or else c` — **refused**. It looks like `(a and b) or else c` and would have parsed as `a and (b or else c)`; neither is what the line reads as, so say which with parentheses.
+- `opt and then it == 1 and false` — **refused**, for the same reason.
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
+let ready Bool = true;
 
-// `and then` grabs the comparison first, so this parses as
-//   (opt and then it == 1) and false
-// and fails: `and` needs Bool on both sides, but the left is Option[Bool].
-let bad = opt and then it == 1 and false;
+// `and then` runs first inside the flow layer, then `or else`:
+let inLayer = opt and then it * 2 or else 0;   // 84
 
 // The transform is the intended scope of `and` — say so:
 let good = opt and then (it == 1 and false);   // Some(false)
 
-// The natural reading needs no parentheses: `and then` runs first, then the
-// coalescing `or else`, then the logical `and`.
-let ready Bool = true;
+// The logical `and` wants a flow result on its right — say so:
 let good2 = ready and (opt and then it > 0 or else false);   // true
 ```
 
-Note that `(ready and opt)` is not a fix: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
-
-`or else` in the other direction — it binds tighter than `or`, so `a or b or else c` groups as `a or (b or else c)`, not `(a or b) or else c`.
+This is the same rule `??` follows in languages that have it: a value-coalescing operator is a clear middle layer and does not chain onto boolean logic without a parenthesis. Note that `(ready and opt)` is not a fix for the mixed form: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
 
 ### Functions
 
@@ -1118,7 +1117,7 @@ Koral provides three special operators for working with `Option` and `Result` ty
 
 In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
 
-Precedence follows the parser: `and then` binds tightest, then `or else` / `or return`, then logical `and`, then logical `or`.
+Precedence follows the parser: inside the flow layer `and then` binds tighter than `or else` / `or return`. The flow layer as a whole does not mix with logical `and` / `or` without parentheses — see [Operator Precedence](#operator-precedence).
 
 ```koral
 let opt = Option[Int].Some(42);

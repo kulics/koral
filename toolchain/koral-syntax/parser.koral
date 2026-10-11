@@ -890,59 +890,89 @@ given CstParser {
         return self.parse_expr_node();
     };
 
+    // ── flow layer / logical layer ──────────────────────────────────────────
+    //
+    // `and then` / `or else` / `or return` are ONE layer -- value flow -- and
+    // `and` / `or` are another -- boolean logic. Precedence inside a layer is
+    // unchanged: `and then` binds tighter than `or else` / `or return`, and
+    // `and` binds tighter than `or`. The layers do not mix implicitly.
+    // Crossing from one to the other takes parentheses, the way `??` refuses
+    // to sit beside `||` in the languages that have it:
+    //
+    //   `a and (b or else c)`              -- fine, and means that
+    //   `(a and b) or else c`              -- fine, and means something else
+    //   `a and b or else c`                -- refused: it means neither
+    //   `opt and then it == 1 and false`   -- refused
+    //
+    // So the operand is parsed first, and the operator that follows it decides
+    // which chain continues. Both chains stop at the other layer's operators
+    // and refuse them there instead of guessing a grouping. The rule is the
+    // same one the compilers enforce, so a file the formatter accepts is a
+    // file the compilers accept.
+
     file_private parse_expr_node(self) Result[CstExpr] = {
-        return self.parse_or();
+        let operand = self.parse_not() or return;
+        return self.parse_layered_tail(operand);
     };
 
-    file_private parse_or(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
+    /// Continue `operand` in whichever layer its next operator belongs to.
+    file_private parse_layered_tail(self, operand CstExpr) Result[CstExpr] = {
+        if self.starts_flow_chain() then {
+            let flowed = self.parse_flow_tail(operand) or return;
+            return self.reject_logical_at_flow_layer(flowed);
         };
-        while self.check(.KwOr()) then {
-            let next = self.peek_at_skip_nl(1);
-            if next is .KwElse() then {
-                break;
-            };
-            if next is .KwReturn() then {
-                break;
-            };
-            let op = self.eat();
-            let right = when self.parse_and() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            left = .BinaryOp(left, op, right);
+        if self.starts_logical_chain() then {
+            let logical = self.parse_logical_tail(operand) or return;
+            return self.reject_flow_at_logical_layer(logical);
+        };
+        return .Ok(operand);
+    };
+
+    /// Whether the operator at the cursor is a flow operator.
+    file_private starts_flow_chain(self) Bool = {
+        return when self.peek() in {
+            .KwAnd() then self.peek_at_skip_nl(1) is .KwThen(),
+            .KwOr() then
+                self.peek_at_skip_nl(1) is .KwElse() or self.peek_at_skip_nl(1) is .KwReturn(),
+            _ then false,
+        };
+    };
+
+    /// Whether the operator at the cursor is a logical operator.
+    file_private starts_logical_chain(self) Bool = {
+        return when self.peek() in {
+            .KwAnd() then not self.peek_at_skip_nl(1) is .KwThen(),
+            .KwOr() then
+                not self.peek_at_skip_nl(1) is .KwElse()
+                and not self.peek_at_skip_nl(1) is .KwReturn(),
+            _ then false,
+        };
+    };
+
+    // `and then` binds tightest of the flow operators.
+    file_private parse_and_then_chain(self, operand CstExpr) Result[CstExpr] = {
+        let mutable left = operand;
+        while self.check(.KwAnd()) and self.peek_at_skip_nl(1) is .KwThen() then {
+            let and_kw = self.eat();
+            let then_kw = self.eat();
+            let right = self.parse_not() or return;
+            left = .AndThen(left, and_kw, then_kw, right);
         };
         return .Ok(left);
     };
 
-    // `or else` / `or return` sit between `and then` and logical `and`:
-    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
-    // and `a and b or else c` groups as `a and (b or else c)`.
-    file_private parse_option_flow(self) Result[CstExpr] = {
-        let mutable left = when self.parse_and_then() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+    // `or else` / `or return` sit between `and then` and the end of the layer:
+    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
+    file_private parse_flow_tail(self, operand CstExpr) Result[CstExpr] = {
+        let mutable left = self.parse_and_then_chain(operand) or return;
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1);
             when next in {
                 .KwElse() then {
                     let or_kw = self.eat();
                     let else_kw = self.eat();
-                    let right = when self.parse_and_then() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let rhs_operand = self.parse_not() or return;
+                    let right = self.parse_and_then_chain(rhs_operand) or return;
                     left = .OrElse(left, or_kw, else_kw, right);
                 },
                 .KwReturn() then {
@@ -958,57 +988,62 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_and_then(self) Result[CstExpr] = {
-        let mutable left = when self.parse_not() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        while self.check(.KwAnd()) then {
-            let next = self.peek_at_skip_nl(1);
-            when next in {
-                .KwThen() then {
-                    let and_kw = self.eat();
-                    let then_kw = self.eat();
-                    let right = when self.parse_not() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    left = .AndThen(left, and_kw, then_kw, right);
-                },
-                _ then {
-                    break;
-                },
-            };
+    file_private parse_logical_and_chain(self, operand CstExpr) Result[CstExpr] = {
+        let mutable left = operand;
+        while self.check(.KwAnd()) and not self.peek_at_skip_nl(1) is .KwThen() then {
+            let op = self.eat();
+            let right = self.parse_not() or return;
+            left = .BinaryOp(left, op, right);
         };
         return .Ok(left);
     };
 
-    file_private parse_and(self) Result[CstExpr] = {
-        let mutable left = when self.parse_option_flow() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        while self.check(.KwAnd()) then {
-            let next = self.peek_at_skip_nl(1);
-            if next is .KwThen() then {
-                break;
-            };
+    file_private parse_logical_tail(self, operand CstExpr) Result[CstExpr] = {
+        let mutable left = self.parse_logical_and_chain(operand) or return;
+        while self.check(.KwOr()) and not self.peek_at_skip_nl(1) is .KwElse()
+            and not self.peek_at_skip_nl(1) is .KwReturn() then {
             let op = self.eat();
-            let right = when self.parse_option_flow() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rhs_operand = self.parse_not() or return;
+            let right = self.parse_logical_and_chain(rhs_operand) or return;
             left = .BinaryOp(left, op, right);
         };
         return .Ok(left);
+    };
+
+    /// A logical operator arriving after a flow chain.
+    file_private reject_logical_at_flow_layer(self, expr CstExpr) Result[CstExpr] = {
+        if self.peek() is .KwAnd() and not self.peek_at_skip_nl(1) is .KwThen() then {
+            return .Error(
+                "Parse error: 'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+            );
+        };
+        if self.peek() is .KwOr() and not self.peek_at_skip_nl(1) is .KwElse()
+            and not self.peek_at_skip_nl(1) is .KwReturn() then {
+            return .Error(
+                "Parse error: 'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+            );
+        };
+        return .Ok(expr);
+    };
+
+    /// A flow operator arriving after a logical chain.
+    file_private reject_flow_at_logical_layer(self, expr CstExpr) Result[CstExpr] = {
+        if self.peek() is .KwAnd() and self.peek_at_skip_nl(1) is .KwThen() then {
+            return .Error(
+                "Parse error: 'and then' cannot be mixed with logical 'and' / 'or' without parentheses",
+            );
+        };
+        if self.peek() is .KwOr() and self.peek_at_skip_nl(1) is .KwElse() then {
+            return .Error(
+                "Parse error: 'or else' cannot be mixed with logical 'and' / 'or' without parentheses",
+            );
+        };
+        if self.peek() is .KwOr() and self.peek_at_skip_nl(1) is .KwReturn() then {
+            return .Error(
+                "Parse error: 'or return' cannot be mixed with logical 'and' / 'or' without parentheses",
+            );
+        };
+        return .Ok(expr);
     };
 
     file_private parse_single_pattern(self) Result[CstPattern] = {

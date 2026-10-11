@@ -1,6 +1,7 @@
 # Flow Operator Precedence and Mixing Safety
 
-> Status: Draft · 2026-10-11 · 对应实现记录：尚未落地；设计问题在 parser / docs / tests 里一起收敛
+> Status: Implemented · 2026-10-11 · 实施记录见文末「实施」
+> 设计问题在 parser / docs / tests 里一起收敛
 
 ## 摘要
 
@@ -270,3 +271,82 @@ Koral 的优先级层位并不需要大改；真正应该改的是把“跨层�
 ## 备注
 
 这份文档是“为什么这样设计”的计划说明，不是运行时/formal-proof 说明；它的目标是给 parser / docs / tests 提供一个一致的行动目标，并明确这不是对已有优先级的一次大改，而是对“混用友好性”的一次收紧。
+
+## 实施
+
+2026-10-11 落地。三个前端同批改：`compiler/koralc/parser/core_precedence.koral`、
+`compiler-reference/Sources/KoralCompiler/Parser/ParserExpressions.swift`、
+`toolchain/koral-syntax/parser.koral`。
+
+**与「实施计划」的一处差别，先记这个。** 阶段 1 说的是「修改 `parse_and` / `parse_or` /
+`parse_option_flow` / `parse_and_then`，加强检查」——即在原来的四级阶梯上事后判定。实际是把
+阶梯换成了**分层链**，理由有两条：
+
+1. **事后判定报不到该报的 token。** 原结构里 `a and b or else c` 的分组发生在
+   `parse_and` 的右操作数内部，错误发现时 `or else` 已经被吃进 `OrElse` 节点，
+   能指出的位置是那个节点的起点（`b`），不是要读者加括号的那个运算符。
+2. **`a or b or else c` 在原结构里根本走不到检查点。** `parse_or` 在 `or else` 处
+   `break`，剩下 `or else c` 成了游离记号，报的是「unexpected token」，读者看不出规则。
+
+现在的形状是：先解析操作数，由其后的**第一个运算符**决定进哪条链；两条链都只吃自己那一层的
+运算符，遇到另一层的就在**那个运算符上**拒绝。层内优先级原样保留。
+
+```
+parse_expression      := 操作数 层尾
+层尾                  := 流程链 | 逻辑链          // 由首运算符定层
+流程链                := and-then 链 (("or" "else" and-then 链) | ("or" "return"))*
+and-then 链           := 操作数 ("and" "then" 操作数)*
+逻辑链                := 逻辑-and 链 ("or" 逻辑-and 链)*
+逻辑-and 链           := 操作数 ("and" 操作数)*
+操作数                := <not-expression>（即原 `parse_logical_not`，未改）
+```
+
+**诊断**（两编译器逐字相同，差分闸门默认开）：
+
+| 情形 | 文本 |
+|---|---|
+| 逻辑运算符到流程层 | `'and' / 'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses` |
+| 流程运算符到逻辑层 | `'and then' / 'or else' / 'or return' cannot be mixed with logical 'and' / 'or' without parentheses` |
+
+span 落在闯入的那个运算符上（`and then` 的 `and`），读者一眼看到该给谁加括号。
+koralc 走 `parser_error_at_current`，Swift 走 `ParserError.rejectedConstruct`——
+后者本就是「记号都合法、构型被拒」这一类，比套 `unexpectedToken` 的
+`Unexpected token: <got>, expected: <want>` 框子更贴。
+
+**风险 1 的实际答案**：存量混用只有一处——`tests/compiler-cases/` 里 3 个断言旧分组的
+用例本身。`std/`、`compiler/`、`compiler-reference/`、`toolchain/`、`samples/`、
+`tests/compiler-runner/` 全部干净（它们要么纯流程、要么纯逻辑，跨层处本来就写了括号）。
+`codegen_mir.koral:97` 那种 `(a or else b) and (c or else d)` 是括号跨层，不是混用。
+
+**风险 3 的答案**：按 error，不是 warning。理由见「风险与未决」。
+
+**测试**（9 个，覆盖禁止与允许两端，以及层内优先级未被误伤）：
+
+| 用例 | 断言 |
+|---|---|
+| `flow_mix_and_after_flow_error` | `'and' cannot be mixed with the flow operators` |
+| `flow_mix_or_after_flow_error` | `'or' cannot be mixed with the flow operators` |
+| `flow_mix_and_then_after_logical_error` | `'and then' cannot be mixed with logical` |
+| `flow_mix_or_else_after_logical_error` | `'or else' cannot be mixed with logical` |
+| `flow_mix_or_return_after_logical_error` | `'or return' cannot be mixed with logical` |
+| `flow_mix_parens_allowed_test` | 两种括号跨层写法按括号的语义求值 |
+| `flow_parens_logical_in_flow_test` | `(a and b) or else c` **能过 parser**，随后被 sema 以 `'or else' can only be used with Option or Result types` 拒——证明拒绝的是类型，不是解析 |
+| `flow_layer_internal_precedence_test` | `opt and then it * 10 or else 0` == 20（`and then` 仍紧于 `or else`） |
+| `logical_layer_internal_precedence_test` | `a or b and c` == 1（`and` 仍紧于 `or`） |
+
+原 `and_then_and_precedence` / `or_else_and_precedence` / `or_option_flow_precedence`
+三个用例断言的正是被禁止的分组，按新规则改名改义（`git mv` 保留历史）。
+
+**formatter 侧的同批看护**（`toolchain/koral-syntax/README.md`「Parse parity」要求：
+编译器新拒一个形状，这里就要同批加拒绝 + 断言）：`koral-syntax/parser.koral` 加了同样的
+拒绝，`toolchain/koralfmt/test_fmt.koral` 的「parse parity with the compiler」段加了
+5 条拒绝断言 + 4 条接受断言。后者专门盯**括号不能被 printer 吃掉**——括号现在是载荷：
+丢一个就把合法源改成了被拒的混用。README 的拒绝表补了这一行。
+
+**验证**：seed 自检、主闸、stage2、差分四道各 **662/662**（656 + 新增 6 个用例），
+自举 `FIXED POINT`、`dangling=0`；formatter **132/132**（123 + 新增 9 条）· corpus 220/0；
+`koral_doc --check` 14 模块最新；samples 与 `toolchain/koral` 构建工具在
+**两个编译器下都能构建**，`cat` 样例测试 10/10、`sha256sum` 13/13 通过。
+
+**尚未做**：`and then` / `or else` 的短路语义与副作用次序**仍然没有设计记录**——
+`control-flow.md`「风险与未决」第 1 条原样开放。本次只收紧「怎么分组」，不动「求值顺序」。

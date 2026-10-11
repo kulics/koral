@@ -437,15 +437,65 @@ given Parser {
         return self.parse_is();
     };
 
-    // `and then` binds tightest of the three Option/Result flow operators.
-    module_private parse_and_then(self) Result[Expr] = {
-        let mutable expr = self.parse_logical_not() or return;
+    // ── flow layer / logical layer ──────────────────────────────────────────
+    //
+    // `and then` / `or else` / `or return` are ONE layer -- value flow -- and
+    // `and` / `or` are another -- boolean logic. Precedence inside a layer is
+    // unchanged: `and then` binds tighter than `or else` / `or return`, and
+    // `and` binds tighter than `or`. The layers do not mix implicitly.
+    // Crossing from one to the other takes parentheses, the way `??` refuses
+    // to sit beside `||` in the languages that have it:
+    //
+    //   `a and (b or else c)`              -- fine, and means that
+    //   `(a and b) or else c`              -- fine, and means something else
+    //   `a and b or else c`                -- refused: it means neither
+    //   `opt and then it == 1 and false`   -- refused
+    //
+    // So the operand is parsed first, and the operator that follows it decides
+    // which chain continues. Both chains stop at the other layer's operators
+    // and refuse them there instead of guessing a grouping.
 
-        while self.current().kind is .KwAnd() then {
-            let is_and_then = self.next_is_then();
-            if not is_and_then then {
-                break;
-            };
+    module_private parse_expression(self) Result[Expr] = {
+        let operand = self.parse_logical_not() or return;
+        return self.parse_layered_tail(operand);
+    };
+
+    /// Continue `operand` in whichever layer its next operator belongs to.
+    module_private parse_layered_tail(self, operand Expr) Result[Expr] = {
+        if self.starts_flow_chain() then {
+            let flowed = self.parse_flow_tail(operand) or return;
+            return self.reject_logical_at_flow_layer(flowed);
+        };
+        if self.starts_logical_chain() then {
+            let logical = self.parse_logical_tail(operand) or return;
+            return self.reject_flow_at_logical_layer(logical);
+        };
+        return .Ok(operand);
+    };
+
+    /// Whether the operator at the cursor is a flow operator.
+    module_private starts_flow_chain(self) Bool = {
+        return when self.current().kind in {
+            .KwAnd() then self.next_is_then(),
+            .KwOr() then self.next_is_else() or self.next_is_return(),
+            _ then false,
+        };
+    };
+
+    /// Whether the operator at the cursor is a logical operator.
+    module_private starts_logical_chain(self) Bool = {
+        return when self.current().kind in {
+            .KwAnd() then not self.next_is_then(),
+            .KwOr() then not self.next_is_else() and not self.next_is_return(),
+            _ then false,
+        };
+    };
+
+    // `and then` binds tightest of the flow operators.
+    module_private parse_and_then_chain(self, operand Expr) Result[Expr] = {
+        let mutable expr = operand;
+
+        while self.current().kind is .KwAnd() and self.next_is_then() then {
             self.advance();
             self.advance();
             let rhs = self.parse_logical_not() or return;
@@ -455,18 +505,18 @@ given Parser {
         return .Ok(expr);
     };
 
-    // `or else` / `or return` sit between `and then` and logical `and`:
-    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
-    // and `a and b or else c` groups as `a and (b or else c)`.
-    module_private parse_option_flow(self) Result[Expr] = {
-        let mutable expr = self.parse_and_then() or return;
+    // `or else` / `or return` sit between `and then` and the end of the layer:
+    // `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
+    module_private parse_flow_tail(self, operand Expr) Result[Expr] = {
+        let mutable expr = self.parse_and_then_chain(operand) or return;
 
         while self.current().kind is .KwOr() then {
             // Same as `is`: `x or return` begins at `x`, so the span does too.
             if self.next_is_else() then {
                 self.advance();
                 self.advance();
-                let rhs = self.parse_and_then() or return;
+                let rhs_operand = self.parse_logical_not() or return;
+                let rhs = self.parse_and_then_chain(rhs_operand) or return;
                 expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
                 continue;
             };
@@ -482,44 +532,66 @@ given Parser {
         return .Ok(expr);
     };
 
-    module_private parse_and(self) Result[Expr] = {
-        let mutable expr = self.parse_option_flow() or return;
+    module_private parse_logical_and_chain(self, operand Expr) Result[Expr] = {
+        let mutable expr = operand;
 
-        while self.current().kind is .KwAnd() then {
-            let next_is_then = self.next_is_then();
-            if next_is_then then {
-                break;
-            };
+        while self.current().kind is .KwAnd() and not self.next_is_then() then {
             self.advance();
-            let rhs = self.parse_option_flow() or return;
+            let rhs = self.parse_logical_not() or return;
             expr = Expr.AndExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_or(self) Result[Expr] = {
-        let mutable expr = self.parse_and() or return;
+    module_private parse_logical_tail(self, operand Expr) Result[Expr] = {
+        let mutable expr = self.parse_logical_and_chain(operand) or return;
 
-        while self.current().kind is .KwOr() then {
-            let next_is_else = self.next_is_else();
-            let next_is_return = self.next_is_return();
-            if next_is_else then {
-                break;
-            };
-            if next_is_return then {
-                break;
-            };
+        while self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return()
+        then {
             self.advance();
-            let rhs = self.parse_and() or return;
+            let rhs_operand = self.parse_logical_not() or return;
+            let rhs = self.parse_logical_and_chain(rhs_operand) or return;
             expr = Expr.OrExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
         return .Ok(expr);
     };
 
-    module_private parse_expression(self) Result[Expr] = {
-        return self.parse_or();
+    /// A logical operator arriving after a flow chain. The span is the operator
+    /// itself, so the caret sits on the token to parenthesize around.
+    module_private reject_logical_at_flow_layer(self, expr Expr) Result[Expr] = {
+        if self.current().kind is .KwAnd() and not self.next_is_then() then {
+            return .Error(self.parser_error_at_current(
+                "'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+            ));
+        };
+        if self.current().kind is .KwOr() and not self.next_is_else() and not self.next_is_return() then {
+            return .Error(self.parser_error_at_current(
+                "'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
+            ));
+        };
+        return .Ok(expr);
+    };
+
+    /// A flow operator arriving after a logical chain.
+    module_private reject_flow_at_logical_layer(self, expr Expr) Result[Expr] = {
+        if self.current().kind is .KwAnd() and self.next_is_then() then {
+            return .Error(self.parser_error_at_current(
+                "'and then' cannot be mixed with logical 'and' / 'or' without parentheses",
+            ));
+        };
+        if self.current().kind is .KwOr() and self.next_is_else() then {
+            return .Error(self.parser_error_at_current(
+                "'or else' cannot be mixed with logical 'and' / 'or' without parentheses",
+            ));
+        };
+        if self.current().kind is .KwOr() and self.next_is_return() then {
+            return .Error(self.parser_error_at_current(
+                "'or return' cannot be mixed with logical 'and' / 'or' without parentheses",
+            ));
+        };
+        return .Ok(expr);
     };
 
     module_private parse_access_modifier(self, default AccessModifier) AccessModifier = {

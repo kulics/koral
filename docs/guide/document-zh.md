@@ -653,36 +653,34 @@ y >>= 2;     // y = y >> 2
 10. 范围：`..`、`..<`、`<..`、`<..<`
 11. 模式测试：`is`、`is not`
 12. 逻辑非：`not`
-13. 可选链：`and then`
-14. 值合并 / 早返回传播：`or else`、`or return`
-15. 逻辑与：`and`
-16. 逻辑或：`or`
+13. 流程层，从紧到松：`and then`，然后 `or else` / `or return`
+14. 逻辑层，从紧到松：`and`，然后 `or`
 
-这三个流程关键词不在同一优先级。从紧到松依次是 `and then`，然后 `or else` / `or return`，然后 `and`，最后 `or`：
+第 13 与第 14 行是**两个独立的层**，不是一条阶梯上的四档。它们上面各行才是普通阶梯；
+这两层彼此同级，一次只进一层。层内优先级如上——但**两层之间不隐式混用**。跨层必须加括号：
 
-- `and then` 比 `or else` / `or return` 结合**更紧**：`f() and then g(it) or else h()` 按 `(f() and then g(it)) or else h()` 分组。
-- `or else` / `or return` 比 `and` 结合**更紧**：`a and b or else c` 按 `a and (b or else c)` 分组。
-- `and` 比 `or` 结合**更紧**：`a or b and c` 按 `a or (b and c)` 分组。
+- `f() and then g(it) or else h()` 按 `(f() and then g(it)) or else h()` 分组——流程接流程，合法。
+- `a or b and c` 按 `a or (b and c)` 分组——逻辑接逻辑，合法。
+- `a and (b or else c)` —— 合法，语义就是它。
+- `(a and b) or else c` —— 合法，语义是另一回事。
+- `a and b or else c` —— **拒绝**。它看起来像 `(a and b) or else c`，实际会按 `a and (b or else c)` 分组；两者都不是这行字面读起来的意思，所以用括号说清楚。
+- `opt and then it == 1 and false` —— **拒绝**，同理。
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
+let ready Bool = true;
 
-// `and then` 先抓住比较，所以下面按
-//   (opt and then it == 1) and false
-// 解析，编译失败：`and` 两侧都要求 Bool，而左侧是 Option[Bool]。
-let bad = opt and then it == 1 and false;
+// 流程层内先 `and then`，再 `or else`：
+let inLayer = opt and then it * 2 or else 0;   // 84
 
 // 变换体才是 `and` 的预期作用域——显式写出来：
 let good = opt and then (it == 1 and false);   // Some(false)
 
-// 自然写法无需括号：先 `and then`，再合并 `or else`，最后逻辑 `and`。
-let ready Bool = true;
+// 逻辑 `and` 的右侧要的是流程结果——显式写出来：
 let good2 = ready and (opt and then it > 0 or else false);   // true
 ```
 
-注意 `(ready and opt)` 并不是修法：`and` 两侧都要求 `Bool`，流程结果必须先归约成 `Bool`（如 `good2`）才能参与逻辑 `and`。
-
-`or else` 则比 `or` 更紧，所以 `a or b or else c` 按 `a or (b or else c)` 分组，而不是 `(a or b) or else c`。
+这与有 `??` 的语言里 `??` 的规矩一致：值兜底是一个清晰的中间层，不加括号就不与布尔逻辑拼接。注意 `(ready and opt)` 并不是混用写法的修法：`and` 两侧都要求 `Bool`，流程结果必须先归约成 `Bool`（如 `good2`）才能参与逻辑 `and`。
 
 ### 函数
 
@@ -1107,7 +1105,7 @@ Koral 为 `Option` 和 `Result` 类型提供三个特殊操作符：
 
 在 `and then` 与 `or else` 表达式中，关键字 `it` 指代被解包的值：对 `and then`，`it` 是内层的 `Some` 或 `Ok` 值；对作用于 `Result` 的 `or else`，`it` 是 `Error` 值。
 
-其优先级与解析器一致：`and then` 最紧，然后是 `or else` / `or return`，然后是逻辑 `and`，最后是逻辑 `or`。
+其优先级与解析器一致：流程层内 `and then` 比 `or else` / `or return` 更紧。流程层整体不与逻辑 `and` / `or` 隐式混用，跨层必须加括号——见[运算符优先级](#运算符优先级)。
 
 ```koral
 let opt = Option[Int].Some(42);

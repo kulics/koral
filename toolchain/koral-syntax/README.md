@@ -53,6 +53,13 @@ verbatim, so a toolchain error and a compiler error say the same thing:
 | default on a positional param/field | `Default values are only allowed for named parameters (use 'name: Type = value' syntax)` |
 | `type mutable` on an alias / enum | `Type alias cannot be marked mutable` / `Enum type cannot be marked mutable` |
 | import alias case mismatch | `Using alias '<a>' is invalid: alias must start with an upper\|lowercase letter because referenced identifier '<n>' starts with upper\|lowercase` |
+| flow operator mixed with logical `and` / `or`, or the reverse | `'<op>' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses` / `'<op>' cannot be mixed with logical 'and' / 'or' without parentheses` |
+
+That last one is a *layer* rule, not a token rule: `and then` / `or else` / `or return`
+are one layer and `and` / `or` another, and an expression is a chain in one layer or
+the other, never both (`guide/grammar.bnf`, `<expression>`). Parentheses are the only
+way to cross, so a printer that drops one turns accepted source into a rejected mix —
+`toolchain/koralfmt/test_fmt.koral` asserts the parentheses survive.
 
 Reserved words must match too: `it` is reserved (it cannot be a declaration
 name) but stays legal in **expression position** as the implicit lambda

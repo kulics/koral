@@ -56,7 +56,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`thin-pointer-design.md`](thin-pointer-design.md) —— 薄指针对象表示 | Implemented（步骤 1–4b） | 文内 `## 实施` 一节（未单独拆出） | 2026-10 |
 | [`type-semantics.md`](type-semantics.md) —— type / type mutable / Clone / Drop | Implemented | 无单独记录（随 std 与两编译器同批） | 2026-10 |
 | [`control-flow.md`](control-flow.md) —— 控制流 | Implemented（**材料不足**） | 见 `thin-pointer-design.md` 的 break 回归一节 | 2026-10 |
-| [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) —— `and then` / `or else` 与布尔 `and` / `or` 的优先级与混用约束 | Draft | 计划：对应 parser/doc/test 的收紧 | 2026-10-11 |
+| [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) —— `and then` / `or else` 与布尔 `and` / `or` 的优先级与混用约束 | Implemented | 文内 `## 实施` 一节（未单独拆出） | 2026-10-11 |
 | [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §4–§5 | 2026-10 |
 | [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §4–§5、§16.3、§22.4 | 2026-10 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |

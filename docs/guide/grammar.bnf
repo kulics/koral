@@ -257,7 +257,18 @@
 // Expressions
 // ============================================================================
 
-<expression> ::= <or-expression>
+<expression> ::= <flow-expression> | <logical-expression>
+// Flow operators and logical operators are TWO layers, and the layers do not
+// mix implicitly: an expression is a flow chain or a logical chain, never both
+// at the same level. Crossing from one layer to the other takes parentheses --
+// the way `??` refuses to sit beside `||` in the languages that have it.
+//
+//   `a and (b or else c)`              -- fine, and means that
+//   `(a and b) or else c`              -- fine, and means something else
+//   `a and b or else c`                -- refused: it means neither
+//   `opt and then it == 1 and false`   -- refused
+//
+// The two layers are defined under "Binary Expressions" below.
 
 // `if`, `while`, `for`, `when` are parsed as prefix expressions.
 // See <prefix-expression> below. `while` / `for` evaluate to `Void` unless they terminate early with `Never` control flow.
@@ -276,24 +287,33 @@
                         | <tuple-binding>
 
 // ============================================================================
-// Binary Expressions (by precedence, lowest to highest)
+// Flow layer / logical layer
 // ============================================================================
 
-<or-expression> ::= <and-expression> ("or" <and-expression>)*
+// Precedence INSIDE a layer is unchanged: `and then` binds tighter than
+// `or else` / `or return`, and `and` binds tighter than `or`. Both layers
+// start from the same operand nonterminal.
+//
+// With no operator at all the two alternatives of <expression> coincide -- a
+// bare <layer-operand> is both -- so the choice only becomes observable once
+// an operator follows. That is the same shape the parsers have: parse the
+// operand, then let the next operator pick the chain.
 
-<and-expression> ::= <option-flow-expression> ("and" <option-flow-expression>)*
+<layer-operand> ::= <not-expression>
 
-<option-flow-expression> ::= <and-then-expression>
-                           (("or" "else" <and-then-expression>)
-                           | ("or" "return"))*
+<flow-expression> ::= <and-then-expression>
+                    (("or" "else" <and-then-expression>)
+                    | ("or" "return"))*
 // "or else" is value coalescing for Option/Result types
 // "or return" is early-return propagation for Option/Result types
-// They sit between `and then` and `and`: `f() and then g(it) or else h()`
-// groups as `(f() and then g(it)) or else h()`, and `a and b or else c`
-// groups as `a and (b or else c)`.
+// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
 
-<and-then-expression> ::= <not-expression> ("and" "then" <not-expression>)*
+<and-then-expression> ::= <layer-operand> ("and" "then" <layer-operand>)*
 // "and then" is optional chaining / value transformation for Option/Result types
+
+<logical-expression> ::= <logical-and-expression> ("or" <logical-and-expression>)*
+
+<logical-and-expression> ::= <layer-operand> ("and" <layer-operand>)*
 
 <not-expression> ::= "not" <is-expression> | <is-expression>
 

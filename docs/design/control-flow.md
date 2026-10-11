@@ -69,7 +69,9 @@ values; `while` and `for` always produce `Void`.
 ## 风险与未决
 
 - **求值顺序与副作用次序**：未记。`and then` / `or else` 的短路语义在手册里有写法，
-  但「为什么这样定」没有记录。
+  但「为什么这样定」没有记录。（**分组**问题已另案结清——见
+  [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)：流程层与逻辑层
+  不隐式混用，跨层要括号。**求值顺序**仍无记录，那条是独立的问题。）
 - **`Never` 与控制流**：`while` / `for` 在 `Never` 提前终止时的求值形态只在文法注记里提了一句，
   无设计说明。
 
@@ -77,4 +79,5 @@ values; `while` and `for` always produce `Void`.
 
 无实现记录。上述回归的修复过程记在
 [`thin-pointer-design.md`](thin-pointer-design.md) 的「后续修复：bootstrap 的 `break`
-分支边界误判（已修）」一节。
+分支边界误判（已修）」一节。流程层 / 逻辑层分层的实施记在
+[`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) 的「实施」一节。

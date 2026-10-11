@@ -420,7 +420,11 @@ let nested(flag Bool) Int =
 let option_chaining() Void = {
     let opt = Option[Int].Some(42);
     let none = Option[Int].None();
-    // 优先级：`and then` > `or else` / `or return` > `and` > `or`
+    // 优先级：流程层内 `and then` > `or else` / `or return`；
+    //         逻辑层内 `and` > `or`。
+    // 两层不隐式混用，跨层必须加括号：`a and (b or else c)` 与
+    // `(a and b) or else c` 都合法，`a and b or else c` 与
+    // `opt and then it == 1 and false` 都被拒绝。
 
     // or else：值合并；左侧为 None / Error 时使用默认值
     let value  = opt  or else 0;// 42
@@ -435,6 +439,11 @@ let option_chaining() Void = {
     // and then：值变换（Some / Ok 时执行，None / Error 时透传）
     let doubled = opt and then it * 2;// Some(84)
     let chained = opt and then it + 1 and then it * 3;// Some(129)
+
+    // 跨层的两种合法写法——括号就是分层
+    let ready Bool = true;
+    let wrapped = opt and then (it == 1 and false);// Option[Bool]：Some(false)
+    let combined = ready and (opt and then it > 0 or else false);// Bool：true
 
     // and then 不拍平：变换体的返回值按原样包回同一种 Option / Result
     let safe_div Func(Int, Int) Option[Int] = (x Int, y Int) Option[Int] ->

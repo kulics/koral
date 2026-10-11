@@ -363,36 +363,89 @@ extension Parser {
   }
   
   // MARK: - Expression Entry Point
-  
+
   /// Parse expression rule - main entry point for expression parsing
   func expression() throws -> ExpressionNode {
-    return try parseOrExpression()
+    let operand = try parseLogicalNotExpression()
+    return try parseLayeredTail(operand)
   }
-  
-  // MARK: - Logical Expressions
 
-  private func parseOrExpression() throws -> ExpressionNode {
-    var left = try parseAndExpression()
+  // MARK: - Flow layer / logical layer
+  //
+  // `and then` / `or else` / `or return` are ONE layer -- value flow -- and
+  // `and` / `or` are another -- boolean logic. Precedence inside a layer is
+  // unchanged: `and then` binds tighter than `or else` / `or return`, and
+  // `and` binds tighter than `or`. The layers do not mix implicitly.
+  // Crossing from one to the other takes parentheses, the way `??` refuses to
+  // sit beside `||` in the languages that have it:
+  //
+  //   `a and (b or else c)`            -- fine, and means that
+  //   `(a and b) or else c`            -- fine, and means something else
+  //   `a and b or else c`              -- refused: it means neither
+  //   `opt and then it == 1 and false` -- refused
+  //
+  // So the operand is parsed first, and the operator that follows it decides
+  // which chain continues. Both chains stop at the other layer's operators and
+  // refuse them there instead of guessing a grouping.
 
-    while currentToken === .orKeyword {
-      try match(.orKeyword)
-      let right = try parseAndExpression()
-      left = .orExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
+  /// Continue `operand` in whichever layer its next operator belongs to.
+  private func parseLayeredTail(_ operand: ExpressionNode) throws -> ExpressionNode {
+    if startsFlowChain {
+      let flowed = try parseFlowTail(operand)
+      return try rejectLogicalAtFlowLayer(flowed)
+    }
+    if startsLogicalChain {
+      let logical = try parseLogicalTail(operand)
+      return try rejectFlowAtLogicalLayer(logical)
+    }
+    return operand
+  }
+
+  /// Whether the operator at the cursor is a flow operator.
+  private var startsFlowChain: Bool {
+    switch currentToken {
+    case .andKeyword: return lexer.peekNextToken() === .thenKeyword
+    case .orKeyword:
+      return lexer.peekNextToken() === .elseKeyword || lexer.peekNextToken() === .returnKeyword
+    default: return false
+    }
+  }
+
+  /// Whether the operator at the cursor is a logical operator.
+  private var startsLogicalChain: Bool {
+    switch currentToken {
+    case .andKeyword: return lexer.peekNextToken() !== .thenKeyword
+    case .orKeyword:
+      return lexer.peekNextToken() !== .elseKeyword && lexer.peekNextToken() !== .returnKeyword
+    default: return false
+    }
+  }
+
+  /// `and then` binds tightest of the flow operators.
+  private func parseAndThenChain(_ operand: ExpressionNode) throws -> ExpressionNode {
+    var left = operand
+
+    while currentToken === .andKeyword && lexer.peekNextToken() === .thenKeyword {
+      try match(.andKeyword)
+      try match(.thenKeyword)
+      let transformExpr = try parseLogicalNotExpression()
+      left = .andThenExpression(operand: left, transformExpr: transformExpr,
+                                span: SourceSpan(start: left.span.start, end: transformExpr.span.end))
     }
     return left
   }
 
-  /// `or else` / `or return` sit between `and then` and logical `and`:
-  /// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`,
-  /// and `a and b or else c` groups as `a and (b or else c)`.
-  private func parseOptionFlowExpression() throws -> ExpressionNode {
-    var left = try parseAndThenExpression()
+  /// `or else` / `or return` sit between `and then` and the end of the layer:
+  /// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
+  private func parseFlowTail(_ operand: ExpressionNode) throws -> ExpressionNode {
+    var left = try parseAndThenChain(operand)
 
     while currentToken === .orKeyword {
       if lexer.peekNextToken() === .elseKeyword {
         try match(.orKeyword)
         try match(.elseKeyword)
-        let defaultExpr = try parseAndThenExpression()
+        let rhsOperand = try parseLogicalNotExpression()
+        let defaultExpr = try parseAndThenChain(rhsOperand)
         left = .orElseExpression(operand: left, defaultExpr: defaultExpr,
                                 span: SourceSpan(start: left.span.start, end: defaultExpr.span.end))
         continue
@@ -412,33 +465,73 @@ extension Parser {
     return left
   }
 
-  private func parseAndExpression() throws -> ExpressionNode {
-    var left = try parseOptionFlowExpression()
+  private func parseLogicalAndChain(_ operand: ExpressionNode) throws -> ExpressionNode {
+    var left = operand
 
-    while currentToken === .andKeyword {
-      if lexer.peekNextToken() === .thenKeyword { break }
+    while currentToken === .andKeyword && lexer.peekNextToken() !== .thenKeyword {
       try match(.andKeyword)
-      let right = try parseOptionFlowExpression()
+      let right = try parseLogicalNotExpression()
       left = .andExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
   }
 
-  private func parseAndThenExpression() throws -> ExpressionNode {
-    var left = try parseLogicalNotExpression()
+  private func parseLogicalTail(_ operand: ExpressionNode) throws -> ExpressionNode {
+    var left = try parseLogicalAndChain(operand)
 
-    while currentToken === .andKeyword {
-      if lexer.peekNextToken() === .thenKeyword {
-        try match(.andKeyword)
-        try match(.thenKeyword)
-        let transformExpr = try parseLogicalNotExpression()
-        left = .andThenExpression(operand: left, transformExpr: transformExpr,
-                                  span: SourceSpan(start: left.span.start, end: transformExpr.span.end))
-      } else {
-        break
-      }
+    while currentToken === .orKeyword
+      && lexer.peekNextToken() !== .elseKeyword
+      && lexer.peekNextToken() !== .returnKeyword
+    {
+      try match(.orKeyword)
+      let right = try parseLogicalAndChain(try parseLogicalNotExpression())
+      left = .orExpression(left: left, right: right, span: SourceSpan(start: left.span.start, end: right.span.end))
     }
     return left
+  }
+
+  /// A logical operator arriving after a flow chain. The span is the operator
+  /// itself, so the caret sits on the token to parenthesize around.
+  private func rejectLogicalAtFlowLayer(_ expr: ExpressionNode) throws -> ExpressionNode {
+    if currentToken === .andKeyword && lexer.peekNextToken() !== .thenKeyword {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses"
+      )
+    }
+    if currentToken === .orKeyword
+      && lexer.peekNextToken() !== .elseKeyword
+      && lexer.peekNextToken() !== .returnKeyword
+    {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses"
+      )
+    }
+    return expr
+  }
+
+  /// A flow operator arriving after a logical chain.
+  private func rejectFlowAtLogicalLayer(_ expr: ExpressionNode) throws -> ExpressionNode {
+    if currentToken === .andKeyword && lexer.peekNextToken() === .thenKeyword {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'and then' cannot be mixed with logical 'and' / 'or' without parentheses"
+      )
+    }
+    if currentToken === .orKeyword && lexer.peekNextToken() === .elseKeyword {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'or else' cannot be mixed with logical 'and' / 'or' without parentheses"
+      )
+    }
+    if currentToken === .orKeyword && lexer.peekNextToken() === .returnKeyword {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'or return' cannot be mixed with logical 'and' / 'or' without parentheses"
+      )
+    }
+    return expr
   }
 
 
