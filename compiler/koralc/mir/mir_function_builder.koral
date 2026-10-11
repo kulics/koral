@@ -109,20 +109,22 @@ given MIRFunctionBuilder {
             let local = self.make_local(
                 param.name,
                 param.param_type,
-                if param.is_mutable then MIRMutability.Mutable()
-                else MIRMutability.Immutable(),
                 MIRStorage.Parameter(),
                 Option[Symbol].None(),
             );
             self.parameter_local_by_name.insert(param.name, local.id);
             self.append_statement(MIRStatement.Declare(local.id));
         };
+        // A capture local is a HANDLE into the closure environment, not a
+        // mutable slot: sema rejects a mutable capture outright
+        // (`Cannot capture mutable variable ... hold the state in a Cell and
+        // capture the cell instead`), so the mutability this used to compute
+        // from `capture.is_mutable()` was never observable. The local is keyed
+        // by the captured symbol's DefId and typed by its sema type.
         for capture in self.captured_symbols then {
             let local = self.make_local(
                 self.context.symbol_name(capture),
                 capture.symbol_type,
-                if capture.is_mutable() then MIRMutability.Mutable()
-                else MIRMutability.Immutable(),
                 MIRStorage.Capture(),
                 Option[Symbol].Some(capture),
             );
@@ -260,7 +262,6 @@ given MIRFunctionBuilder {
         self,
         name String,
         local_type Type,
-        mutability MIRMutability,
         storage MIRStorage,
         symbol Option[Symbol],
     ) MIRLocal = {
@@ -268,7 +269,6 @@ given MIRFunctionBuilder {
             MIRLocalID(self.next_local_id),
             name,
             local_type,
-            mutability,
             storage,
             symbol,
         );
@@ -281,7 +281,6 @@ given MIRFunctionBuilder {
         return self.make_local(
             "\(name_hint)_\(self.next_local_id)",
             local_type,
-            MIRMutability.Mutable(),
             MIRStorage.Temporary(),
             Option[Symbol].None(),
         );
@@ -1059,8 +1058,6 @@ given MIRFunctionBuilder {
         let local = self.make_local(
             self.context.symbol_name(symbol),
             declared_type,
-            if symbol.is_mutable() then MIRMutability.Mutable()
-            else MIRMutability.Immutable(),
             MIRStorage.Local(),
             Option[Symbol].Some(symbol),
         );
@@ -1163,8 +1160,6 @@ given MIRFunctionBuilder {
                 let local = self.make_local(
                     self.context.symbol_name(sym),
                     sym.symbol_type,
-                    if sym.is_mutable() then MIRMutability.Mutable()
-                    else MIRMutability.Immutable(),
                     MIRStorage.Local(),
                     Option[Symbol].Some(sym),
                 );
@@ -5395,7 +5390,14 @@ given MIRFunctionBuilder {
         let mutable lambda_captures = List[Symbol].new();
         for capture in captures then {
             capture_sources.push(self.capture_place(capture));
-            lambda_captures.push(self.lambda_capture_symbol(capture));
+            // The captured symbol goes in AS IT IS: its type and kind are
+            // sema's answer. This used to run through `lambda_capture_symbol`,
+            // which rewrote a `MutableValue` capture into a mutable reference;
+            // sema rejects a mutable capture outright
+            // (`Cannot capture mutable variable ... hold the state in a Cell and
+            // capture the cell instead`), so no accepted program ever took that
+            // branch. Swift passes `capture.type` straight through here.
+            lambda_captures.push(capture);
         };
         let mutable param_symbols = List[Symbol].new();
         for param in params then {
@@ -5454,32 +5456,6 @@ given MIRFunctionBuilder {
                 Option[MIRPlace].None(),
             ),
         );
-    };
-
-    file_private lambda_capture_symbol(self, symbol Symbol) Symbol = {
-        let capture_type = when symbol.kind in {
-            .Variable(variable_kind) then when variable_kind in {
-                .MutableValue() then when symbol.symbol_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then symbol.symbol_type,
-                    _ then Type.MutableReferenceType(symbol.symbol_type),
-                },
-                _ then symbol.symbol_type,
-            },
-            _ then symbol.symbol_type,
-        };
-        let capture_kind = when symbol.kind in {
-            .Variable(variable_kind) then when variable_kind in {
-                .MutableValue() then when capture_type in {
-                    .MutableReferenceType(_) or .MutableBorrowedReferenceType(_) then SymbolKind.Variable(
-                        VariableKind.MutableReference(),
-                    ),
-                    _ then symbol.kind,
-                },
-                _ then symbol.kind,
-            },
-            _ then symbol.kind,
-        };
-        return Symbol(symbol.def_id, capture_type, capture_kind);
     };
 
     file_private param_types_to_refs(self, params List[TypedParam]) List[Type] = {
@@ -5697,8 +5673,6 @@ given MIRFunctionBuilder {
                         let local = self.make_local(
                             name,
                             symbol.symbol_type,
-                            if symbol.is_mutable() then MIRMutability.Mutable()
-                            else MIRMutability.Immutable(),
                             MIRStorage.Local(),
                             Option[Symbol].Some(symbol),
                         );

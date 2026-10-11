@@ -41,23 +41,56 @@ given CodeGen {
         return "__koral_vtable_\(sanitized_trait)";
     };
 
-    /// Returns a mangled trait name that includes type arguments.
-    /// For non-generic traits this is identical to trait_name.
-    /// For generic traits like Comparable[Int] this produces "Comparable_Int_".
-    public mangled_trait_name(self, trait_name String, trait_type_args List[Type]) String = {
-        if trait_type_args.is_empty() then {
-            return trait_name;
-        };
+    /// The trait's identity as a C-safe string: its DECLARATION, never its
+    /// spelling, plus its type arguments.
+    ///
+    /// Two same-named traits declared in different modules are different
+    /// traits. Keying a vtable on the spelling gave them one name, one dedup
+    /// slot and one C symbol -- the dedup table kept one request, the inventory
+    /// reported a false "duplicate vtable key", and the emitted C declared
+    /// `__koral_vtable_Tag_for_Box` twice. The `d<id>` disambiguator is the same
+    /// one type names already carry (`List_I_d58`).
+    public mangled_trait_name(
+        self,
+        trait_name String,
+        trait_def_id DefId,
+        trait_type_args List[Type],
+    ) String = {
         let mutable mangled = StringBuilder.new();
         mangled.push_string(trait_name);
+        mangled.push_string("_d");
+        mangled.push_string(trait_def_id.id.to_string());
         for targ in trait_type_args then {
             mangled.push_string("_");
             mangled.push_string(
                 self.sanitize_codegen_identifier(self.c_type_name(targ)),
             );
         };
-        mangled.push_string("_");
+        if not trait_type_args.is_empty() then {
+            mangled.push_string("_");
+        };
         return mangled.to_string();
+    };
+
+    /// Pure identity of a vtable: (trait DECLARATION, trait arguments,
+    /// concrete type). Every dedup/inventory table must key on this and on
+    /// nothing that contains a spelling.
+    public trait_vtable_identity_key(
+        self,
+        concrete_type Type,
+        trait_def_id DefId,
+        trait_type_args List[Type],
+    ) String = {
+        let mutable key = StringBuilder.new();
+        key.push_string("d");
+        key.push_string(trait_def_id.id.to_string());
+        for arg in trait_type_args then {
+            key.push_string("|");
+            key.push_string(stable_type_key(arg));
+        };
+        key.push_string(" for ");
+        key.push_string(stable_type_key(concrete_type));
+        return key.to_string();
     };
 
     public specialized_vtable_struct_name(
@@ -71,20 +104,22 @@ given CodeGen {
     public specialized_vtable_struct_name_with_args(
         self,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         concrete_type_c_name String,
     ) String = {
-        return "\(self.vtable_struct_name(self.mangled_trait_name(trait_name, trait_type_args)))_for_\(self.sanitize_codegen_identifier(concrete_type_c_name))";
+        return "\(self.vtable_struct_name(self.mangled_trait_name(trait_name, trait_def_id, trait_type_args)))_for_\(self.sanitize_codegen_identifier(concrete_type_c_name))";
     };
 
     public vtable_instance_name_with_args(
         self,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         concrete_type_c_name String,
     ) String = {
         let sanitized_trait = self.sanitize_codegen_identifier(
-            self.mangled_trait_name(trait_name, trait_type_args),
+            self.mangled_trait_name(trait_name, trait_def_id, trait_type_args),
         );
         let mutable sanitized_type = self.sanitize_codegen_identifier(
             concrete_type_c_name,
@@ -93,15 +128,18 @@ given CodeGen {
     };
 
     /// 返回 vtable 实例的 C 变量名
-    /// 格式：`__koral_vtable_{TraitName}_for_{ConcreteTypeCName}`
+    /// 格式：`__koral_vtable_{TraitName}_d{DefId}_for_{ConcreteTypeCName}`
     ///
     /// Requirements: 10.5
     public vtable_instance_name(
         self,
         trait_name String,
+        trait_def_id DefId,
         concrete_type_c_name String,
     ) String = {
-        let sanitized_trait = self.sanitize_codegen_identifier(trait_name);
+        let sanitized_trait = self.sanitize_codegen_identifier(
+            self.mangled_trait_name(trait_name, trait_def_id, List[Type].new()),
+        );
         let mutable sanitized_type = self.sanitize_codegen_identifier(
             concrete_type_c_name,
         );
@@ -635,12 +673,11 @@ given CodeGen {
         trait_name String,
         preferred_module_path List[String],
     ) Option[TraitDeclInfo] = {
-        return when self.program.traits.get(
+        // The unqualified index is NOT consulted: it is last-wins across
+        // modules and cannot say which `Tag`.
+        return self.program.traits.get(
             qualified_symbol_key(preferred_module_path, trait_name),
-        ) in {
-            .Some(info) then Option[TraitDeclInfo].Some(info),
-            .None() then self.program.traits.get(trait_name),
-        };
+        );
     };
 
     /// Resolves a trait spelling to the declaration identity it names, preferring
@@ -1052,17 +1089,21 @@ given CodeGen {
         concrete_type Type,
         concrete_type_c_name String,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         members List[MIRTraitVTableMethod],
         actual_method_def_ids Dict[String, DefId],
     ) Void = {
         let instance_name = self.vtable_instance_name_with_args(
             trait_name,
+            trait_def_id,
             trait_type_args,
             concrete_type_c_name,
         );
 
-        // 去重：如果已生成，跳过
+        // 去重：如果已生成，跳过。`instance_name` mangles the trait's
+        // DECLARATION, so the name is a faithful key and two same-named traits
+        // cannot share a slot.
         if self.generated_vtable_instances.contains(instance_name) then {
             return;
         };
@@ -1070,6 +1111,7 @@ given CodeGen {
 
         let struct_name = self.specialized_vtable_struct_name_with_args(
             trait_name,
+            trait_def_id,
             trait_type_args,
             concrete_type_c_name,
         );
@@ -2187,53 +2229,44 @@ given CodeGen {
     public process_vtable_requests(self) Void = {
         let mutable requests = self.collect_mir_vtable_codegen_requests();
 
-        // 去重：按 (traitName, concreteType) 排序，确保确定性输出
+        // 去重：按 vtable 身份排序，确保确定性输出。身份是
+        // (trait DECLARATION, trait arguments, concrete type) -- 不含拼写，
+        // 两个同名 trait 才不会塌成一条请求。
         // 先收集唯一的请求
         let mutable unique_keys = Set[String].new();
         let mutable sorted_requests = List[VtableCodegenRequest].new();
 
         for req in requests then {
-            let type_key = stable_type_key(req.concrete_type);
-            let mutable arg_key = StringBuilder.new();
-            for arg in req.trait_type_args then {
-                if not arg_key.is_empty() then {
-                    arg_key.push_string(",");
-                };
-                arg_key.push_string(stable_type_key(arg));
-            };
-            let key = "\(req.trait_name)<\(arg_key.to_string())>|\(type_key)";
+            let key = self.trait_vtable_identity_key(
+                req.concrete_type,
+                req.trait_def_id,
+                req.trait_type_args,
+            );
             if not unique_keys.contains(key) then {
                 unique_keys.insert(key);
                 sorted_requests.push(req);
             };
         };
 
-        // 按 (traitName, concreteType) 排序（插入排序）
+        // 按 vtable 身份排序（插入排序）。身份含 trait 的 DECLARATION，两个
+        // 同名 trait 才不会在第一步就比成相等。
         let n = sorted_requests.count();
         let mutable i UInt = 1;
         while i < n then {
             let key_req = sorted_requests[i];
-            let mutable key_type = stable_type_key(key_req.concrete_type);
-            let mutable key_arg_str = StringBuilder.new();
-            for arg in key_req.trait_type_args then {
-                if not key_arg_str.is_empty() then {
-                    key_arg_str.push_string(",");
-                };
-                key_arg_str.push_string(stable_type_key(arg));
-            };
-            let key_str = "\(key_req.trait_name)<\(key_arg_str.to_string())>|\(key_type.to_string())";
+            let key_str = self.trait_vtable_identity_key(
+                key_req.concrete_type,
+                key_req.trait_def_id,
+                key_req.trait_type_args,
+            );
             let mutable j = i;
             while j > 0 then {
                 let prev = sorted_requests[j - 1];
-                let mutable prev_type = stable_type_key(prev.concrete_type);
-                let mutable prev_arg_str = StringBuilder.new();
-                for arg in prev.trait_type_args then {
-                    if not prev_arg_str.is_empty() then {
-                        prev_arg_str.push_string(",");
-                    };
-                    prev_arg_str.push_string(stable_type_key(arg));
-                };
-                let prev_str = "\(prev.trait_name)<\(prev_arg_str.to_string())>|\(prev_type.to_string())";
+                let prev_str = self.trait_vtable_identity_key(
+                    prev.concrete_type,
+                    prev.trait_def_id,
+                    prev.trait_type_args,
+                );
                 if prev_str > key_str then {
                     sorted_requests[j] = prev;
                     j -= 1;
@@ -2278,12 +2311,17 @@ given CodeGen {
             // 步骤1：生成 vtable 结构体定义（按具体接收者专门化）
             let struct_key = self.specialized_vtable_struct_name_with_args(
                 trait_name,
+                req.trait_def_id,
                 req.trait_type_args,
                 concrete_c_name,
             );
             if not generated_vtable_structs.contains(struct_key) then {
                 generated_vtable_structs.insert(struct_key);
-                let mangled = self.mangled_trait_name(trait_name, req.trait_type_args);
+                let mangled = self.mangled_trait_name(
+                    trait_name,
+                    req.trait_def_id,
+                    req.trait_type_args,
+                );
                 self.generate_vtable_struct_definition(
                     mangled,
                     concrete_c_name,
@@ -2343,6 +2381,7 @@ given CodeGen {
                 concrete_type,
                 concrete_c_name,
                 trait_name,
+                req.trait_def_id,
                 req.trait_type_args,
                 ordered_members,
                 actual_method_def_ids,
@@ -2363,6 +2402,7 @@ given CodeGen {
         self,
         ref_value String,
         trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
         concrete_type Type,
         retain_source Bool,
@@ -2382,6 +2422,7 @@ given CodeGen {
         };
         let vtable_name = self.vtable_instance_name_with_args(
             trait_name,
+            trait_def_id,
             trait_type_args,
             concrete_c_name,
         );

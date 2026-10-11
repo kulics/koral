@@ -400,6 +400,10 @@ extension TypeChecker {
       // Positional destructuring: the number of slots equals the number of
       // fields, and slot i binds field i. Field types come from the subject's
       // DECLARATION, never from a name.
+      //
+      // A weak handle has no fields to destructure: it is opaque until
+      // `upgrade`d. Binding the handle whole is fine.
+      try rejectWeakPatternSubject(typedValue.type, span: span)
       let innerType = unwrapTupleSubjectType(typedValue.type)
       guard let members = try tupleDestructuringMembers(of: innerType),
             members.count == bindings.count else {

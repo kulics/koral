@@ -24,6 +24,14 @@ trait object  { void* ptr; const void* vtable } 16 B
 借用          void*                             不 retain / 不 release
 ```
 
+> **修正（2026-10-10）**：上表是迁移自原文的历史结论，其中两处与今天的代码不符。
+> **(1) 头是 8 B、两个字段**，不是 16 B：`struct __koral_Control { _Atomic int strong_count;
+> _Atomic int weak_count; };`（`std/koral_runtime.h:66-69`）。
+> **(2) 弱引用不与句柄同形**：`__koral_WeakRef { void* control; }` 存 **control 地址**，
+> 而强句柄存 **payload 地址**（`std/koral_runtime.h:14-22`）。弱引用故意不存 payload ——
+> payload 可能已销毁，而 weak 仍要能查 `strong_count` 判断能否 upgrade
+> （`std/koral_runtime.h:105-106`）。
+
 ---
 
 
@@ -114,6 +122,12 @@ case .mutableBorrowedReference: return .byMutRef
 | `Option[String]` | **24 B** | **16 B**（niche 后 8 B） |
 | `Option[Int]` | 16 B | 16 B |
 | `DictBucket[String, Type]` | 40 B | 24 B |
+
+> **修正（2026-10-10）**：上表是迁移自原文的**测量基线**，「今天」指**测这套数时**（薄指针改造前）
+> 的状态，不是当下的状态；「薄指针」一列是**当时**的目标值，也不是最终值。今天：
+> `__koral_Control` 是 **8 B**（`{strong, weak}`，`dtor` 已在第 4a 步移出，见下），
+> 不是表里的 16 B；`Option[String]` 已按 niche 收到 **8 B**。要查最终落地值看下面
+> 「第 4a 步 / 第 4b 步」的实测表，不要把这张基线表当现状。
 
 #### 2.2 分配画像
 
@@ -219,6 +233,14 @@ struct __koral_Control {
 - `dtor` 仍按函数指针存：每个托管类型不同，放侧表或做 vtable 索引是后续优化，不在本期。
 - 强弱计数语义不变。
 
+> **修正（2026-10-10）**：上面这段是迁移自原文的历史文本。今天的 `struct __koral_Control`
+> **没有 `dtor` 字段**，只有两个引用计数（`_Atomic int strong_count; _Atomic int weak_count;`），
+> 头是 **8 B** 不是 16 B（`std/koral_runtime.h:66-69`）。`dtor` 也**不再按函数指针存在头里**：
+> drop glue 在**释放调用点单态化**，由调用方作为 `__koral_Dtor` 传进
+> `__koral_release_value(payload, dtor)`；类型擦除的场景（trait object）改走 vtable 的
+> `base.destroy`（`__koral_VTableHeader`，`std/koral_runtime.h:49-51`、`:62-65`、`:124-135`）。
+> 这正是下文「第 4a 步」记的那一步；此处是它改前的原文。
+
 #### 3.2 值 / 句柄
 
 托管值、owning 引用、借用，**统一是 `void*`（payload 地址）**。
@@ -234,6 +256,15 @@ struct Std_String  { void* ptr; };        // 8 B
 | 析构 | `release(x.control);` | `__koral_release(__koral_control_of(x.ptr));` |
 | 字段访问 | `((Payload*)x.ptr)->f` | 不变 |
 | 建对象 | `x.control = malloc(24+sz); x.ptr = x.control + 24;` | `x.ptr = malloc(16+sz);`（payload 在 `ptr`） |
+
+> **修正（2026-10-10）**：上面「现在」一列是迁移自原文的历史写法，与今天的发射 API 不一致。
+> 生成代码走 **`_value` 形式**（入参是 payload 地址，`std/koral_runtime.h:124-135`）：
+> 拷贝发 `__koral_retain_value((src).ptr)`，析构发 `__koral_release_value((x).ptr, dtor)`
+> —— **两个参数**，`dtor` 在释放调用点传入，不由头读取（`codegen_memory.koral:94-97`）。
+> 分配是 `x.ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct Payload)))`
+> —— 即 `malloc(sizeof(Control)+sz)`，**不是** `malloc(16+sz)`；`x.ptr` 是 payload 地址
+> （control 块在 `ptr - sizeof(Control)`），不是整块的起点
+> （`compiler/koralc/codegen/codegen_mir.koral:2270` 等）。
 
 #### 3.3 trait object
 
@@ -270,6 +301,21 @@ struct __koral_WeakRef { void* ptr; };   // 1 字，与强句柄同形
 - `weak_count` 保证 `[Control | payload]` 整块活到弱引用归零，所以 `ptr` 不悬垂。
 - `downgrade(p)` → `weak_retain(control_of(p)); return (WeakRef){p};`
 - `upgrade(w)` → CAS `strong_count` 从 `>0` 到 `+1`，成功则返回 `{w.ptr}`。
+
+> **修正（2026-10-10）**：上面这段是迁移自原文的历史文本，**与今天的代码正好相反**。
+> `__koral_WeakRef` 存的是 **control 地址**，不是 payload 地址：
+> `struct __koral_WeakRef { void* control; };`（`std/koral_runtime.h:20-22`）。
+> 它**不与强句柄同形** —— 强句柄存 payload 地址，弱引用存 control 地址。
+> 于是：
+> - `downgrade(p)` → `w.control = __koral_control_of(r.ptr); __koral_weak_retain(w.control);`
+>   （`std/koral_runtime.c:105-112`）
+> - `upgrade(w)` → `control = w.control`；CAS `strong_count`（要求 `>0`）到 `+1`，成功则
+>   `r.ptr = __koral_payload_of(control)`（从 control **反推** payload，不是读 `w.ptr`）
+>   （`std/koral_runtime.c:114-132`）。
+>
+> 为什么 weak 存 control 而不是 payload：**payload 可能已经销毁**，而 weak 仍要能查
+> `strong_count` 判断能否 upgrade（`std/koral_runtime.h:105-106`）。这与本文后面的 niche 表
+> （`__koral_WeakRef | control == NULL`）一致，是原文自相矛盾处的正确一侧。
 
 #### 3.5 借用（本设计的关键裁定）
 
@@ -329,6 +375,19 @@ static const struct __koral_payload_Std_String __koral_lit_42 = { data, len };
 - `retain`/`release` 读到 `strong_count == -1` 直接返回（或依赖原子加对 -1 恒不为 1 的性质）。
 - 成本：每个静态字面量多 16 B 常量数据。
 - 收益：`control == NULL` 这个「静态 / 非拥有」双重哨兵消失，表示统一。
+
+> **修正（2026-10-10）**：上面这段是迁移自原文的历史文本，三处与今天的代码不符。
+> **(1) 发的是一个合并块，不是两个 static**。`codegen_expressions_literals.koral:50-53` 发：
+> `static const struct { struct __koral_Control ctrl; struct <Payload> payload; } <name>_block
+> = { { -1, -1 }, { ... } };` —— control 与 payload 合在一个常量结构体里。
+> **(2) `Control` 初始化器是 2 字段** `{ -1, -1 }`，**没有 `.dtor = NULL`**（头里根本没有 `dtor`，
+> 见 §3.1 修正）。**(3) 头是 8 B 不是 16 B**：`retain(p)` 读的是
+> `p - sizeof(struct __koral_Control)` = `p - 8`，不是 `p - 16`（`std/koral_runtime.h:74-75`）；
+> 每个静态字面量多的是 **8 B** 头，不是 16 B。
+>
+> 另注：本文后面「第 3 步」记过一处实测修正 —— 当前实现里**还没有静态托管值**
+> （字符串字面量每次都 `malloc`），immortal 头已写进运行时为将来预留。故上面「成本」一行
+> 描述的常量数据增量，现在尚未实际发生。
 
 同一个哨兵也用在**析构期间**：`__koral_release_slow` 在跑析构函数体前后把
 `strong_count` 置 -1 / 恢复 0，让 `drop` 里的 `self.m()`（按值接收者会 retain）不复活
@@ -395,6 +454,13 @@ static const struct __koral_payload_Std_String __koral_lit_42 = { data, len };
 2. 静态字面量是否按内容去重 —— 需要先量字面量数量。
 3. `?*Trait`（`TraitWeakRef`，今天 16 B）是否也收到 1 字 —— 需要 vtable 另存，
    与「不用扁平布局」的取向一致但要多一张侧表。留到第 4 步评估。
+
+> **修正（2026-10-10）**：上面是迁移自原文的历史文本。
+> **未决 1 已不成立** —— `dtor` **已经移出头**（第 4a 步），头现在是 `{strong, weak}` = 8 B，
+> 「头再省 4 B」没有对象了；类型擦除的析构改走 vtable 的 `base.destroy`。这条不再是未决项。
+> **上表「静态字面量体积」一行的「16 B」是错的**：头是 8 B，每个静态字面量多的是 **8 B**
+> 常量数据；而且当前实现里还没有静态托管值（见 §3.6 修正），这一增量尚未实际发生。
+> 未决 2、3 仍然有效。
 
 
 ---
@@ -820,6 +886,10 @@ bootstrap 编译器自己的包（约 10 万行）里 **243 个 `Option` 实例�
   `Option[Field]`、`Option[FunctionParamSpec]`、`Option[CompilationUnit]` …
 - **TAG 185 个** —— `Option[Int]` / `Option[Bool]` / `Option[Float]` / 各种无 niche 的枚举
 
+> **无法静态核实**：上面 243 / 58 / 185 三个数是**单态化之后**的实例化分布，只能靠跑一次
+> bootstrap 编译数出来，静态读源码无法复核。此处按当时实测原样保留，不猜改；要复现请重跑
+> 编译并按 NICHE / TAG 分类统计。
+
 每个 niche 实例化从 16 B 降到 8 B（payload 是 8 B 句柄，tag 是 8 B）。
 
 ##### 后续修复：bootstrap 的 `break` 分支边界误判（已修）
@@ -977,12 +1047,27 @@ decl / member / lambda / 全局表达式四处函数边界统一归零。
 | vtable wrapper 的 `struct __koral_Ref self_ref` | `CodeGen/CodeGenVtable.swift:331` | 改 `void* self` |
 | `generateTraitObjectConversionABI` 的 `control` 赋值 | `CodeGen/CodeGenVtable.swift:~525` | `TraitRef` 无 control 字 |
 
+> **修正（2026-10-10）**：上面「可一并删除」的清单里，有一组**至今仍在、且仍在用**，
+> 判断**不成立**，不要照着删：`MIRReferenceAllocation`（`stackBorrow` / `heapOwned` /
+> `heapOwnedMove`）在 `compiler-reference/Sources/KoralCompiler/MIR/MIR.swift:257-260` 定义、
+> `MIRLowerer.swift` 10+ 处仍在构造；`borrowedForwardingLocalIDs` / `computeBorrowedForwardingLocals` /
+> `isNonOwningLocalValue` 在 `CodeGen/CodeGenMIR.swift:30-395 :686 :809` 仍在计算与读取。
+> 这些簿记**没有**在薄指针后失效 —— 「是否拥有」仍由 `MIRReferenceAllocation` 区分
+> （`stackBorrow` = 非拥有借用 / `heapOwned`·`heapOwnedMove` = 拥有），见
+> `MIRTypeResolver.swift:133-134`。上文「类型系统」一张表里把
+> `isNonOwningLocalValue` / `borrowedForwardingLocalIDs` 列为「可删」同样是这一条误判。
+
 #### 保留、不删
 
 - `Control.strong_count` / `weak_count` / `dtor` —— ARC 语义需要。
 - vtable 静态实例与 `__koral_TraitRef.vtable` —— 动态派发需要。
 - `__koral_WeakRef` —— 保持 1 字。
 - `type` 值类型的内联布局判定（`nominalLayoutKind`）—— 不受本项影响。
+
+> **修正（2026-10-10）**：第一条里 **`dtor` 不在 `Control` 里**。今天的
+> `struct __koral_Control` 只有 `strong_count` / `weak_count` 两个字段（`std/koral_runtime.h:66-69`）；
+> 析构在释放调用点由调用方作为 `__koral_Dtor` 传入 `__koral_release_value(payload, dtor)`，
+> trait object 走 vtable 的 `base.destroy`。所以「保留」的是两个引用计数，不是三个字段。
 
 ---
 

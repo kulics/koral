@@ -4,18 +4,21 @@
 //
 using "std/os";
 
-file_private let method_trait_conformance_name(
+/// The trait DECLARATION a method belongs to. Nothing may decide membership
+/// from the spelling (`ReceiverMethodDispatchInfo.conformance_trait_name`,
+/// `ConcreteCallableInfo.trait_conformance`) -- those are display-only.
+file_private let method_trait_conformance_def_id(
     mono Monomorphizer,
     method Symbol,
-) Option[String] = {
+) Option[DefId] = {
     if method.def_id.id == 0 then {
-        return Option[String].None();
+        return Option[DefId].None();
     };
     return when mono.receiver_method_dispatch_info(method.def_id) in {
-        .Some(info) then info.conformance_trait_name,
+        .Some(info) then info.conformance_trait_def_id,
         .None() then when mono.storage.concrete_callables_by_def_id.get(method.def_id) in {
-            .Some(info) then info.trait_conformance,
-            .None() then Option[String].None(),
+            .Some(info) then info.trait_conformance_def_id,
+            .None() then Option[DefId].None(),
         },
     };
 };
@@ -5019,8 +5022,14 @@ file_private let resolve_concrete_method_call(
             .None() then {},
         };
 
-        let trait_name = method_trait_conformance_name(mono, preferred_value_method) or else "";
-        if not trait_name.is_empty() then {
+        let conformance_trait_def_id = when method_trait_conformance_def_id(
+            mono,
+            preferred_value_method,
+        ) in {
+            .Some(id) then id,
+            .None() then def_id_invalid(),
+        };
+        if conformance_trait_def_id.is_valid() then {
             let mutable method_type_arg_refs = List[Type].new();
             for method_type_arg in resolved_method_type_args then {
                 method_type_arg_refs.push(method_type_arg);
@@ -5028,7 +5037,7 @@ file_private let resolve_concrete_method_call(
             instantiate_conformance_trait_method_for_type(
                 mono,
                 effective_receiver_type,
-                trait_name,
+                conformance_trait_def_id,
                 effective_method_name,
                 method_type_arg_refs,
             );
@@ -5242,18 +5251,18 @@ file_private let resolve_trait_placeholder_call_callee(
                     method_name,
                     resolved_method_type_args_ref,
                 );
-                let dispatch_trait_name_opt = when trait_type in {
-                    // Display/resolution handle: the spelling comes from the declaration.
-                    .TraitObject(trait_def_id, _) then Option[String].Some(
-                        def_id_spelling(trait_def_id),
-                    ),
-                    _ then Option[String].None(),
+                let dispatch_trait_def_id_opt = when trait_type in {
+                    // The DECLARATION the trait-object type names -- handed
+                    // straight through. Spelling it out and resolving it again
+                    // downstream is a DefId -> name -> DefId round-trip.
+                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    _ then Option[DefId].None(),
                 };
                 when instantiate_trait_target_static_method(
                     mono,
                     base_type,
                     method_name,
-                    dispatch_trait_name_opt,
+                    dispatch_trait_def_id_opt,
                     resolved_method_type_args_ref,
                     new_args,
                     resolved_call_type,
@@ -5586,17 +5595,17 @@ file_private let resolve_method_reference_call_callee(
         if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(
             bound_method,
         ) == mono.storage.context.symbol_name(method) then {
-            let dispatch_trait_name_opt = if method.def_id.id > 0 then when mono.receiver_method_dispatch_info(
+            let dispatch_trait_def_id_opt = if method.def_id.id > 0 then when mono.receiver_method_dispatch_info(
                 method.def_id,
             ) in {
-                .Some(info) then info.conformance_trait_name,
-                .None() then Option[String].None(),
-            } else Option[String].None();
+                .Some(info) then info.conformance_trait_def_id,
+                .None() then Option[DefId].None(),
+            } else Option[DefId].None();
             when instantiate_trait_target_static_method(
                 mono,
                 method_resolution_receiver_type,
                 method_name_for_lookup,
-                dispatch_trait_name_opt,
+                dispatch_trait_def_id_opt,
                 resolved_method_type_args,
                 new_args,
                 resolved_call_type,
@@ -5830,8 +5839,14 @@ file_private let resolve_method_reference_call_callee(
             let rebound_method_name = normalize_receiver_call_method_name(
                 get_semantic_method_name(mono, bound_method),
             );
-            let trait_name = method_trait_conformance_name(mono, bound_method) or else "";
-            if not trait_name.is_empty() then {
+            let conformance_trait_def_id = when method_trait_conformance_def_id(
+                mono,
+                bound_method,
+            ) in {
+                .Some(id) then id,
+                .None() then def_id_invalid(),
+            };
+            if conformance_trait_def_id.is_valid() then {
                 let mutable method_type_arg_refs = List[Type].new();
                 for method_type_arg in resolved_method_type_args then {
                     method_type_arg_refs.push(method_type_arg);
@@ -5839,7 +5854,7 @@ file_private let resolve_method_reference_call_callee(
                 instantiate_conformance_trait_method_for_type(
                     mono,
                     method_resolution_receiver_type,
-                    trait_name,
+                    conformance_trait_def_id,
                     rebound_method_name,
                     method_type_arg_refs,
                 );
@@ -10052,11 +10067,9 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
                     method_name,
                     empty_method_type_args,
                 );
-                let dispatch_trait_name_opt = when new_trait_type in {
-                    .TraitObject(trait_def_id, _) then Option[String].Some(
-                        def_id_spelling(trait_def_id),
-                    ),
-                    _ then Option[String].None(),
+                let dispatch_trait_def_id_opt = when new_trait_type in {
+                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    _ then Option[DefId].None(),
                 };
                 let mutable witness_method_opt = Option[Symbol].None();
                 when new_trait_type in {
@@ -10094,7 +10107,7 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
                     mono,
                     lookup_base_type,
                     method_name,
-                    dispatch_trait_name_opt,
+                    dispatch_trait_def_id_opt,
                     empty_method_type_args,
                     new_args,
                     expected_return_type,
@@ -12083,17 +12096,17 @@ file_private let resolve_static_method_call_to_call(
         ),
     };
     if concrete_sym is .None() then {
-        let dispatch_trait_name_opt = if new_method.def_id.id > 0 then when mono.receiver_method_dispatch_info(
+        let dispatch_trait_def_id_opt = if new_method.def_id.id > 0 then when mono.receiver_method_dispatch_info(
             new_method.def_id,
         ) in {
-            .Some(info) then info.conformance_trait_name,
-            .None() then Option[String].None(),
-        } else Option[String].None();
+            .Some(info) then info.conformance_trait_def_id,
+            .None() then Option[DefId].None(),
+        } else Option[DefId].None();
         concrete_sym = instantiate_trait_target_static_method(
             mono,
             new_receiver_type,
             method_name,
-            dispatch_trait_name_opt,
+            dispatch_trait_def_id_opt,
             new_method_type_args,
             new_args,
             resolved_return_type,
@@ -12592,7 +12605,7 @@ file_private let instantiate_trait_target_static_method(
     mono Monomorphizer,
     base_type Type,
     method_name String,
-    dispatch_trait_name_opt Option[String],
+    dispatch_trait_def_id_opt Option[DefId],
     provided_method_type_args List[Type],
     args List[TypedExpr],
     expected_return_type Type,
@@ -12601,7 +12614,7 @@ file_private let instantiate_trait_target_static_method(
         mono,
         base_type,
         method_name,
-        dispatch_trait_name_opt,
+        dispatch_trait_def_id_opt,
         provided_method_type_args,
         args,
         expected_return_type,
@@ -12626,12 +12639,11 @@ file_private let instantiate_trait_target_static_method(
     when mono.storage.conformance_index.get(conformance_key) in {
         .Some(conformances) then {
             for conformance in conformances then {
-                when dispatch_trait_name_opt in {
-                    .Some(dispatch_trait_name) then {
-                        if not trait_target_static_trait_name_matches(
-                            mono,
-                            conformance.trait_name,
-                            dispatch_trait_name,
+                when dispatch_trait_def_id_opt in {
+                    .Some(dispatch_trait_def_id) then {
+                        if not trait_identity_matches(
+                            conformance.trait_def_id,
+                            dispatch_trait_def_id,
                         ) then {
                             continue;
                         };
@@ -12708,10 +12720,10 @@ file_private let instantiate_trait_target_static_method(
 
     for node_ref in trait_target_static_candidate_given_decls(
         mono,
-        dispatch_trait_name_opt,
+        dispatch_trait_def_id_opt,
     ) then {
         when node_ref in {
-            .GivenTraitDecl(target_type, trait_name, trait_args, _, _, _) then {
+            .GivenTraitDecl(target_type, _, trait_args, _, _, given_trait_def_id) then {
                 let mutable normalized_base_type = normalize_vtable_conformance_actual_type(
                     mono,
                     resolved_base_type,
@@ -12737,9 +12749,7 @@ file_private let instantiate_trait_target_static_method(
 
                 // The trait's DECLARATION is the owner; a structure name was
                 // the last-resort spelling this used to fall back to.
-                let trait_owner = trait_owner_by_name(mono, trait_name) or else MethodOwner.Builtin(
-                    trait_name,
-                );
+                let trait_owner = MethodOwner.Decl(given_trait_def_id);
                 let trait_templates_opt = mono.storage.generic_templates.lookup_extension_methods(
                     trait_owner,
                 );
@@ -12812,27 +12822,24 @@ file_private let instantiate_trait_target_static_method(
 
 file_private let trait_target_static_candidate_given_decls(
     mono Monomorphizer,
-    dispatch_trait_name_opt Option[String],
+    dispatch_trait_def_id_opt Option[DefId],
 ) List[TypedDecl] = {
-    return when dispatch_trait_name_opt in {
-        .Some(dispatch_trait_name) then {
-            if mono.storage.fuzzy_given_trait_decls_missing.contains(
-                dispatch_trait_name,
-            ) then {
+    return when dispatch_trait_def_id_opt in {
+        .Some(trait_def_id) then {
+            // Cache keyed on the DECLARATION. A bare spelling would put two
+            // same-named traits from different modules in one slot.
+            let key = "d\(trait_def_id.id)";
+            if mono.storage.fuzzy_given_trait_decls_missing.contains(key) then {
                 return List[TypedDecl].new();
             };
-            when mono.storage.fuzzy_given_trait_decls_cache.get(dispatch_trait_name) in {
+            when mono.storage.fuzzy_given_trait_decls_cache.get(key) in {
                 .Some(cached) then cached,
                 .None() then {
                     let mutable matches = List[TypedDecl].new();
                     for node_ref in mono.storage.source_given_decls then {
                         when node_ref in {
-                            .GivenTraitDecl(_, node_trait_name, _, _, _, _) then {
-                                if trait_target_static_trait_name_matches(
-                                    mono,
-                                    node_trait_name,
-                                    dispatch_trait_name,
-                                ) then {
+                            .GivenTraitDecl(_, _, _, _, _, given_trait_def_id) then {
+                                if trait_identity_matches(given_trait_def_id, trait_def_id) then {
                                     matches.push(node_ref);
                                 };
                             },
@@ -12840,14 +12847,9 @@ file_private let trait_target_static_candidate_given_decls(
                         };
                     };
                     if matches.is_empty() then {
-                        mono.storage.fuzzy_given_trait_decls_missing.insert(
-                            dispatch_trait_name,
-                        );
+                        mono.storage.fuzzy_given_trait_decls_missing.insert(key);
                     } else {
-                        mono.storage.fuzzy_given_trait_decls_cache.insert(
-                            dispatch_trait_name,
-                            matches,
-                        );
+                        mono.storage.fuzzy_given_trait_decls_cache.insert(key, matches);
                     };
                     matches
                 },
@@ -12857,21 +12859,11 @@ file_private let trait_target_static_candidate_given_decls(
     };
 };
 
-file_private let trait_target_static_trait_name_matches(
-    mono Monomorphizer,
-    left String,
-    right String,
-) Bool = {
-    let left_def_id = trait_def_id_from_registry(mono, left);
-    let right_def_id = trait_def_id_from_registry(mono, right);
-    return left_def_id.is_valid() and right_def_id.is_valid() and left_def_id == right_def_id;
-};
-
 file_private let trait_target_static_lookup_cache_key(
     mono Monomorphizer,
     base_type Type,
     method_name String,
-    dispatch_trait_name_opt Option[String],
+    dispatch_trait_def_id_opt Option[DefId],
     provided_method_type_args List[Type],
     args List[TypedExpr],
     expected_return_type Type,
@@ -12881,8 +12873,10 @@ file_private let trait_target_static_lookup_cache_key(
     key.push_string("|m:");
     key.push_string(method_name);
     key.push_string("|t:");
-    when dispatch_trait_name_opt in {
-        .Some(trait_name) then key.push_string(trait_name),
+    // The trait's DECLARATION, never its spelling: a cache key is an identity
+    // slot and two same-named traits would share one.
+    when dispatch_trait_def_id_opt in {
+        .Some(trait_def_id) then key.push_string("d\(trait_def_id.id)"),
         .None() then key.push_string("_"),
     };
     key.push_string("|mt:");
@@ -13755,14 +13749,14 @@ file_private let enqueue_extension_method_for_static_call(
                                 if mono.storage.extension_body_resolution_depth == 0 then {
                                     let mutable lookup_method_type_args = List[Type].new(
                                     );
-                                    let trait_name = when ext.conformance_trait_name in {
-                                        .Some(name) then name,
-                                        .None() then "",
+                                    let conformance_trait_def_id = when ext.conformance_trait_def_id in {
+                                        .Some(id) then id,
+                                        .None() then def_id_invalid(),
                                     };
                                     for method_type_arg in method_type_args then {
                                         lookup_method_type_args.push(method_type_arg);
                                     };
-                                    if not trait_name.is_empty() then {
+                                    if conformance_trait_def_id.is_valid() then {
                                         let mutable method_type_arg_refs = List[Type].new(
                                         );
                                         for method_type_arg in method_type_args then {
@@ -13771,7 +13765,7 @@ file_private let enqueue_extension_method_for_static_call(
                                         instantiate_conformance_trait_method_for_type(
                                             mono,
                                             base_type,
-                                            trait_name,
+                                            conformance_trait_def_id,
                                             method_name,
                                             method_type_arg_refs,
                                         );

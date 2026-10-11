@@ -120,18 +120,21 @@ struct MIRFunction {
   var blocks: [MIRBasicBlock]
 }
 
+/// A local slot.
+///
+/// There is no mutability on it: mutability is a SEMA property, enforced when
+/// the binding is declared. MIR only needs to know which storage a local lives
+/// in and which `Symbol` it came from. `mutability` used to be carried here and
+/// was never read -- including the capture case, which decided it from
+/// `capture.isMutable()` and then never looked at the answer (and could not
+/// have: sema rejects a mutable capture outright, `Cannot capture mutable
+/// variable ... hold the state in a Cell and capture the cell instead`).
 struct MIRLocal {
   let id: MIRLocalID
   let name: String
   let type: Type
-  let mutability: MIRMutability
   let storage: MIRStorage
   let symbol: Symbol?
-}
-
-enum MIRMutability {
-  case immutable
-  case mutable
 }
 
 enum MIRStorage {

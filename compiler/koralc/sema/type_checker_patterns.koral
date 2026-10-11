@@ -312,7 +312,10 @@ given TypeChecker {
         };
     };
 
-    file_private is_weak_reference_type(self, t Type) Bool = {
+    /// Whether `t` is a weak handle. The single place that answers it: every
+    /// "may this operation see the referent's shape?" question must ask this
+    /// rather than matching on the two weak cases and peeling them by hand.
+    module_private is_weak_reference_type(self, t Type) Bool = {
         let _ = self;
         return when t in {
             .WeakReferenceType(_) then true,
@@ -1689,13 +1692,15 @@ given TypeChecker {
     };
 
     module_private infer_for_pattern_item_type(self, iter_type Type) Type = {
+        // A weak handle is NOT peeled: it is opaque until `upgrade`d, so it
+        // carries no `next`/`iterator` of the referent and is not iterable.
+        // Peeling here is what let `for x in <a ?List[Int]>` type `x` as `Int`
+        // and lower to a payload access through a `__koral_WeakRef`.
         let inner_iter_type = when iter_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then iter_type,
         };
 

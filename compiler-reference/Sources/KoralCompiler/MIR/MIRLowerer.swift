@@ -570,7 +570,6 @@ private final class MIRFunctionBuilder {
       let local = makeLocal(
         name: context.getName(parameter.defId) ?? "param_\(parameter.defId.id)",
         type: parameter.type,
-        mutability: parameter.isMutable() ? .mutable : .immutable,
         storage: .parameter,
         symbol: parameter
       )
@@ -582,7 +581,6 @@ private final class MIRFunctionBuilder {
       let local = makeLocal(
         name: context.getName(capture.defId) ?? "capture_\(capture.defId.id)",
         type: capture.type,
-        mutability: capture.isMutable() ? .mutable : .immutable,
         storage: .capture,
         symbol: capture
       )
@@ -679,7 +677,6 @@ private final class MIRFunctionBuilder {
   private func makeLocal(
     name: String,
     type: Type,
-    mutability: MIRMutability,
     storage: MIRStorage,
     symbol: Symbol?
   ) -> MIRLocal {
@@ -689,7 +686,6 @@ private final class MIRFunctionBuilder {
       id: id,
       name: name,
       type: type,
-      mutability: mutability,
       storage: storage,
       symbol: symbol
     )
@@ -701,7 +697,6 @@ private final class MIRFunctionBuilder {
     makeLocal(
       name: "\(nameHint)_\(nextLocalID)",
       type: type,
-      mutability: .mutable,
       storage: .temporary,
       symbol: nil
     )
@@ -997,7 +992,6 @@ private final class MIRFunctionBuilder {
       let local = makeLocal(
         name: context.getName(symbol.defId) ?? "local_\(symbol.defId.id)",
         type: symbol.type,
-        mutability: mutable ? .mutable : .immutable,
         storage: .local,
         symbol: symbol
       )
@@ -1209,7 +1203,6 @@ private final class MIRFunctionBuilder {
     let tupleLocal = makeLocal(
       name: context.getName(tupleSymbol.defId) ?? "tuple_\(tupleSymbol.defId.id)",
       type: tupleSymbol.type,
-      mutability: .mutable,
       storage: .temporary,
       symbol: tupleSymbol
     )
@@ -1256,7 +1249,6 @@ private final class MIRFunctionBuilder {
     let local = makeLocal(
       name: context.getName(symbol.defId) ?? "local_\(symbol.defId.id)",
       type: symbol.type,
-      mutability: symbol.isMutable() ? .mutable : .immutable,
       storage: .local,
       symbol: symbol
     )

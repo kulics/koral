@@ -87,8 +87,9 @@ module_private type mutable FunctionReturnContext(
 /// For example, `[R Iterator[T]]` produces GenericConstraintBound("Iterator", [GenericParameter("T")]).
 ///
 /// `trait_def_id` is the declaration identity used for matching; `trait_name` is
-/// display-only. Shape bounds (`mutable`) carry `DefId(0)` and are matched by
-/// name through `bound_base_name`, because they have no declaration.
+/// display-only. A shape bound (`mutable` / `foreign`) has no declaration: it is
+/// matched by its KIND and keeps `DefId(0)`, and nothing may read its spelling
+/// to decide anything.
 public type GenericConstraintBound(
     trait_def_id DefId,
     trait_name String,
@@ -594,6 +595,130 @@ given TypeChecker {
 
     module_private record_instantiation_request(self, request InstantiationRequest) Void = {
         self.storage.instantiation_requests.insert(request);
+    };
+
+    /// Bind every trait name a module can see without writing it, plus the ones
+    /// its `using` brings in. Runs after every trait is registered and before
+    /// any body is checked.
+    ///
+    /// Two sources, both binding under **(importing module, local spelling)**:
+    ///
+    /// - the **prelude**. std's root traits (`Eq`, `Ord`, `Default`, ...) are
+    ///   nameable from any module without an import. That used to happen by
+    ///   accident -- the unqualified index answered for any name -- which is
+    ///   also what let a trait from ANY module be named without importing it.
+    ///   Spelling the prelude out keeps the first and drops the second.
+    /// - **`using`**. An explicit list binds those names; a batch import
+    ///   (`using "std";`) has no symbol edges and binds every importable trait
+    ///   the target declares.
+    module_private register_imported_trait_names(
+        self,
+        nodes List[Pair[LoadedNode, List[String]]],
+    ) Void = {
+        for pair in nodes then {
+            self.bind_prelude_trait_names(pair.second);
+        };
+        let graph = self.storage.import_graph or else {
+            return;
+        };
+        for edge in graph.symbol_imports then {
+            // The DECLARATION, reached through the target module's own spelling
+            // for it. The unqualified index is not consulted: it is last-wins
+            // across modules and cannot say which `Tag` the target exported.
+            let info = when self.storage.trait_registry.get_in_module(
+                edge.original_symbol,
+                edge.target,
+            ) in {
+                .Some(found) then found,
+                .None() then {
+                    continue;
+                },
+            };
+            self.bind_imported_trait_name(edge.symbol, edge.module, info.def_id);
+        };
+        // A batch import (`using "std";`) has no symbol edges at all -- the
+        // spelling is the target's own for every member.
+        for edge in graph.edges then {
+            when edge.kind in {
+                .BatchImport() then {
+                    for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
+                        let info = entry.second;
+                        if info.module_path <> edge.target then {
+                            continue;
+                        };
+                        if not self.importable_trait_access(info.def_id) then {
+                            continue;
+                        };
+                        self.bind_imported_trait_name(info.name, edge.source, info.def_id);
+                    };
+                },
+                _ then {},
+            };
+        };
+    };
+
+    /// std's root traits, bound into `importing_module`. The prelude is a real
+    /// import -- just one the language writes for you.
+    module_private bind_prelude_trait_names(self, importing_module List[String]) Void = {
+        for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
+            let info = entry.second;
+            if not self.is_std_root_module_path(info.module_path) then {
+                continue;
+            };
+            if not self.importable_trait_access(info.def_id) then {
+                continue;
+            };
+            self.bind_imported_trait_name(info.name, importing_module, info.def_id);
+        };
+    };
+
+    /// The module std's root declarations live in. The package is named once
+    /// here; everything that asks "is this std?" compares a declaration
+    /// identity or this path, never a user spelling.
+    module_private is_std_root_module_path(self, module_path List[String]) Bool = {
+        return module_path.count() == 1 and (module_path[0(UInt)] == "Std" or module_path[0(UInt)] == "std");
+    };
+
+    /// Whether a batch import may bring this trait in. `module_private` /
+    /// `file_private` never travel; `package_private` travels within a package
+    /// and is re-checked at use by the visibility checker.
+    module_private importable_trait_access(self, def_id DefId) Bool = {
+        return when self.storage.context.get_access(def_id) in {
+            .Some(access) then when access in {
+                .Public() or .PackagePrivate() then true,
+                .ModulePrivate() or .FilePrivate() then false,
+            },
+            .None() then true,
+        };
+    };
+
+    /// Bind `local_name` to the trait declared at `trait_def_id`, in the module
+    /// that IMPORTED it. Both name tables need it: sema resolves through
+    /// `trait_registry`, monomorphization through `generic_templates.traits`.
+    module_private bind_imported_trait_name(
+        self,
+        local_name String,
+        importing_module List[String],
+        trait_def_id DefId,
+    ) Void = {
+        when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
+            .Some(info) then self.storage.trait_registry.register_imported_name(
+                local_name,
+                importing_module,
+                info,
+            ),
+            .None() then {},
+        };
+        when self.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) in {
+            .Some(decl) then {
+                self.storage.generic_templates.traits.insert(
+                    qualified_symbol_key(importing_module, local_name),
+                    decl,
+                );
+                self.storage.generic_templates.traits.insert(local_name, decl);
+            },
+            .None() then {},
+        };
     };
 
     module_private register_trait_metadata(
@@ -2135,6 +2260,11 @@ given TypeChecker {
                 _ then {},
             };
         };
+        // Every trait is registered by now, so a `using` that names one can
+        // bind its local spelling to the same declaration before any body is
+        // checked.
+        self.register_imported_trait_names(nodes);
+
         // Every trait is registered by now, so a parent list can be resolved.
         // `Any` gets no free pass here: it is an ordinary trait name and, like
         // any other, is an error when nothing declares it.
@@ -3476,6 +3606,9 @@ given TypeChecker {
                         resolved_target,
                     );
                     let trait_name = self.type_node_name(trait_type);
+                    // The name is written in THIS module -- this is where it
+                    // becomes a declaration. Downstream only compares that.
+                    let trait_def_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
                     let resolved_trait_args = self.trait_type_args_with_bindings(
                         trait_type,
                         bindings,
@@ -3487,12 +3620,14 @@ given TypeChecker {
                     };
                     self.record_explicit_trait_conformance(
                         resolved_target,
+                        trait_def_id,
                         trait_name,
                         resolved_trait_args,
                     );
                     self.record_generic_trait_conformance_template(
                         resolved_target,
                         type_params,
+                        trait_def_id,
                         trait_name,
                         resolved_trait_args,
                     );
@@ -3883,7 +4018,12 @@ given TypeChecker {
         for tp in type_params then {
             let mutable constraints = List[Bound].new();
             for constraint in tp.constraints then {
-                constraints.push(constraint);
+                // The spelling becomes a declaration HERE. Monomorphization
+                // reads these constraints back off the registry and decides
+                // whether a type argument satisfies them; if the bound still
+                // carried only a name it would have to look the name up again
+                // in a table that is last-wins across modules.
+                constraints.push(self.resolved_bound(constraint));
             };
             out.push(TypeParameterDecl(tp.name, constraints));
         };

@@ -288,6 +288,17 @@ extension TypeChecker {
         try? handleError(error)
       }
       
+      // TRAIT NAMES must be bound BEFORE TypeResolver: a signature like
+      // `given[T Any] Stack[T] as Default` resolves its trait name while its
+      // signature is collected. Binding afterwards is what made std's
+      // `Default` unnameable from `std.container` once the unqualified
+      // fallback went away.
+      //
+      // Only the trait-name binding moves up. The rest of import registration
+      // -- collision reporting, type and symbol bindings -- needs the source
+      // map and scope that the later passes build, and stays where it was.
+      registerTraitNameBindings()
+
       // === PASS 2: Resolve type signatures using TypeResolver ===
       // TypeResolver resolves type members and function signatures,
       // builds complete type information, registers given method signatures,
@@ -383,7 +394,42 @@ extension TypeChecker {
     }
   }
   
+  /// Everything a module can name as a trait without saying so, plus what its
+  /// `using` brings in. Must run before TypeResolver. See the call site.
+  private func registerTraitNameBindings() {
+    registerPreludeTraitNames()
+    guard let importGraph else {
+      return
+    }
+
+    // A `using` that names a trait binds it under THIS module's spelling,
+    // renamed or not. Resolved through the TARGET module's own key -- the
+    // unqualified index cannot say which `Tag` the target exported.
+    //
+    // `moduleSymbols` is not built yet at this point (it is a later pass), so
+    // the trait is reached from the trait registry rather than from the
+    // module's public-symbol table.
+    for symbolImport in importGraph.symbolImports {
+      guard let decl = traitDeclared(in: symbolImport.target, named: symbolImport.originalSymbol) else { continue }
+      registerImportedTraitName(localName: symbolImport.symbol, defId: decl.defId, modulePath: symbolImport.module)
+    }
+
+    // A batch import (`using "std";`) has no symbol edges -- the spelling is
+    // the target's own for every member. Bind every importable trait the
+    // target declares, reached by DECLARATION so the table the batch edge is
+    // indexed by cannot miss it.
+    for edge in importGraph.edges where edge.kind == .batchImport {
+      for decl in traitDeclsByDefId.values {
+        guard decl.modulePath == edge.target else { continue }
+        guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .package_private else { continue }
+        registerImportedTraitName(localName: decl.name, defId: decl.defId, modulePath: edge.source)
+      }
+    }
+
+  }
+
   private func registerExplicitModuleImports() throws {
+    registerTraitNameBindings()
     guard let importGraph else {
       return
     }
@@ -442,9 +488,13 @@ extension TypeChecker {
 
       if let importedType = moduleInfo.publicTypes[originalName],
          canImportType(importedType, intoPackageID: sourcePackageID) {
+        // The identity of the imported NAME. A trait is not a nominal, so
+        // `nominalTypeId` says nil for it and two nils read as "different
+        // declarations" -- which made the type and symbol passes report a
+        // collision with each other for the same import.
         try checkImportNameCollision(
           name: localName,
-          bound: nominalTypeId(importedType),
+          bound: nominalTypeId(importedType) ?? importedTraitDefId(importedType),
           sourceFile: sourceFile,
           fromModule: symbolImport.target,
           span: symbolImport.span,
@@ -454,6 +504,14 @@ extension TypeChecker {
         if currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
           try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: importedType)
         }
+        // A TRAIT imported under any spelling is still a trait under that
+        // spelling: the reader writes `Tag` or `Tag as AlphaTag` and then uses
+        // it as a bound or a trait-object type. Binding only the TYPE left the
+        // spelling invisible to trait lookup (`visibleTraitInfo("AlphaTag")`
+        // found nothing), so an imported trait could not be named at all.
+        // Register the same declaration under the local spelling -- the DefId
+        // is unchanged, so a rename is a spelling and identity is unaffected.
+        registerImportedTraitName(localName: localName, defId: nominalTypeId(importedType) ?? importedTraitDefId(importedType), modulePath: symbolImport.module)
       }
 
       if let importedSymbol = moduleInfo.publicSymbols[originalName] {
@@ -590,6 +648,81 @@ extension TypeChecker {
     }
   }
 
+  /// The trait declaration a trait-object type names. A trait is not a
+  /// nominal, so `nominalTypeId` says nil for it.
+  private func importedTraitDefId(_ t: Type) -> DefId {
+    if case .traitObject(let id, _) = t { return id }
+    return .invalid
+  }
+
+  /// std's root traits, bound into every module.
+  ///
+  /// The prelude is a real import -- just one the language writes for you. It
+  /// used to happen by accident: the unqualified index answered for any name,
+  /// which also let a trait from ANY module be named without importing it.
+  /// Spelling the prelude out keeps the first and drops the second. A module's
+  /// own declaration wins: `registerImportedTraitName` does not overwrite.
+  private func registerPreludeTraitNames() {
+    var seen = Set<String>()
+    var modulePaths: [[String]] = []
+    for info in nodeSourceInfoMap.values {
+      let key = info.modulePath.joined(separator: ".")
+      if seen.insert(key).inserted {
+        modulePaths.append(info.modulePath)
+      }
+    }
+    for decl in traitDeclsByDefId.values {
+      guard isStdRootModulePath(decl.modulePath) else { continue }
+      for modulePath in modulePaths {
+        registerImportedTraitName(localName: decl.name, defId: decl.defId, modulePath: modulePath)
+      }
+    }
+  }
+
+  /// The trait declared as `name` in exactly `modulePath`. Reaches the
+  /// DECLARATION record rather than a spelling table, so two same-named traits
+  /// in sibling modules cannot answer for each other.
+  private func traitDeclared(in modulePath: [String], named name: String) -> TraitDeclInfo? {
+    for decl in traitDeclsByDefId.values where decl.modulePath == modulePath && decl.name == name {
+      return decl
+    }
+    return nil
+  }
+
+  /// The module std's root declarations live in. Named once here; everything
+  /// else asks "is this std?" of a declaration identity.
+  private func isStdRootModulePath(_ modulePath: [String]) -> Bool {
+    guard modulePath.count == 1 else { return false }
+    return modulePath[0] == "Std" || modulePath[0] == "std"
+  }
+
+  /// Registers `localName` as a spelling of the trait `defId` declares, in the
+  /// module that IMPORTED it.
+  ///
+  /// The key is (importing module, local spelling), never the bare spelling and
+  /// never an ambient `currentModulePath`. Two modules can each import a trait
+  /// called `Tag`, and `traits[name]` is last-wins across modules, so it cannot
+  /// say which one a bound written in either file means. `registerExplicitModuleImports`
+  /// walks every file's imports in one pass, so the ambient path is whatever the
+  /// last declaration left behind and is wrong for every file but that one.
+  ///
+  /// The declaration is unchanged -- a rename is a spelling and identity is
+  /// unaffected. See the call sites in `registerExplicitModuleImports`.
+  private func registerImportedTraitName(
+    localName: String,
+    defId: DefId,
+    modulePath: [String]
+  ) {
+    guard defId.isValid, let decl = traitDeclsByDefId[defId] else { return }
+    if traits[localName] == nil {
+      traits[localName] = decl
+    }
+    let key = qualifiedTraitKey(localName, modulePath: modulePath)
+    if qualifiedTraits[key] == nil {
+      qualifiedTraits[key] = decl
+    }
+  }
+
   private func registerImportedSymbol(
     name: String,
     symbol: Symbol,
@@ -608,6 +741,15 @@ extension TypeChecker {
     case .variable:
       currentScope.defineImportedSymbol(name, sourceFile: sourceFile, defId: symbol.defId)
     case .type:
+      // A TRAIT is not bound as a type here: its name lives in the trait
+      // registry, and adding a second type binding for it made `Error` in
+      // `Result[T].Error(...)` resolve to a synthetic trait object that no
+      // longer accepted the `String` the case is written with. Bind the local
+      // spelling as a trait name and leave the type table alone.
+      if traitDeclsByDefId[symbol.defId] != nil {
+        registerImportedTraitName(localName: name, defId: symbol.defId, modulePath: sourceModulePath)
+        return
+      }
       if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
         try currentScope.definePrivateType(name, sourceFile: sourceFile, type: symbol.type)
       }
@@ -736,6 +878,27 @@ extension TypeChecker {
       }
       return nil
       
+    case .traitDeclaration(let name, _, _, _, _, _, _):
+      // A trait is a type symbol: `using "m" { Tag as AlphaTag }` has to bind
+      // `AlphaTag` as a trait name. Without this case traits never reached
+      // `publicTypes`, so an aliased trait import bound nothing at all and the
+      // alias could not be used as a bound or a trait-object type. The
+      // unaliased form only appeared to work because the declaration itself
+      // had already registered `Tag`.
+      if let defId = defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
+        ?? defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile),
+         defId.isValid, let decl = traitDeclsByDefId[defId] {
+        let symbol = Symbol(
+          defId: defId,
+          type: .traitObject(traitDefId: defId, typeArgs: []),
+          kind: .type
+        )
+        return (name, symbol, nil)
+      }
+      return nil
+
     case .globalStructDeclaration(let name, let typeParameters, _, _, _, _, _):
       // Skip generic structs for now
       if !typeParameters.isEmpty { return nil }

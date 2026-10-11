@@ -68,13 +68,17 @@ public enum VariableKind {
 }
 
 /// Capture kind for lambda closures
+///
+/// Capture is copy-only. A mutable binding cannot be captured at all -- the
+/// closure would hold a pointer to storage it does not own, so an escaping
+/// closure would dangle -- so there is no mutable-capture case. sema enforces
+/// this: `Cannot capture mutable variable '...'; hold the state in a Cell and
+/// capture the cell instead`.
 public enum CaptureKind {
   /// Value capture: copy the variable's value
   case byValue
   /// Reference capture: capture reference type, increment reference count
   case byReference
-  /// Mutable capture: capture let mutable variable by pointer so mutations are visible outside
-  case byMutReference
 }
 
 /// Captured variable information for lambda closures

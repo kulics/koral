@@ -25,7 +25,7 @@ given MIRVerifier {
                 .TraitVTable(vtable) then {
                     let key = self.render_vtable_key(
                         vtable.concrete_type,
-                        vtable.trait_name,
+                        vtable.trait_def_id,
                         vtable.trait_type_args,
                     );
                     if seen.contains(key) then {
@@ -956,28 +956,26 @@ given MIRVerifier {
         return true;
     };
 
+    /// Identity of a vtable: (trait DECLARATION, trait arguments, concrete
+    /// type). This is a KEY, so it may not contain a spelling or a display
+    /// name -- `type_display_name` renders two same-named traits from different
+    /// modules identically, and the inventory then reported a false
+    /// "duplicate vtable key" for two genuinely different vtables.
     file_private render_vtable_key(
         self,
         concrete_type Type,
-        trait_name String,
+        trait_def_id DefId,
         trait_type_args List[Type],
     ) String = {
         let mutable rendered = StringBuilder.new();
-        rendered.push_string(trait_name);
-        if not trait_type_args.is_empty() then {
-            rendered.push_byte('<');
-            let mutable first = true;
-            for trait_arg in trait_type_args then {
-                if not first then {
-                    rendered.push_string(", ");
-                };
-                rendered.push_string(self.program.context.type_display_name(trait_arg));
-                first = false;
-            };
-            rendered.push_byte('>');
+        rendered.push_string("d");
+        rendered.push_string(trait_def_id.id.to_string());
+        for trait_arg in trait_type_args then {
+            rendered.push_string("|");
+            rendered.push_string(stable_type_key(trait_arg));
         };
         rendered.push_string(" for ");
-        rendered.push_string(self.program.context.type_display_name(concrete_type));
+        rendered.push_string(stable_type_key(concrete_type));
         return rendered.to_string();
     };
 

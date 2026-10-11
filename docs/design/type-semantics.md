@@ -97,6 +97,19 @@ let v = Vec(1, 2);
 weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 `downgrade(T)` 得 `?T`，`upgrade(?T)` 回 `Option[T]`。弱引用不保活。
 
+**`?T` 是句柄，不透明。** 在 `upgrade` 之前它不携带被引用对象的字段、分支或
+载荷，所以**一切试探或利用形状的操作都必须在 `?T` 上拒绝**：成员读写、方法调用、
+解构、迭代、分支匹配。把句柄**整体**绑定（`let x = w`、`for x in ws`、传参、
+返回、存入集合）是合法的，并且保留 `?T`。
+
+这条裁定的落点是**解析后所有读取类型形状的地方**，不是某一处 if：引用可以剥
+（`&T` 是被引用对象的别名），弱句柄不可以（它不是别名，是指向 control block
+的独立句柄，见 [`thin-pointer-design.md`](thin-pointer-design.md) §3.4）。任何
+一处「为方便把 `?T` 剥成 `T`」都会重新打开这个洞——2026-10-10 修过一轮：
+成员访问、`for` 的被迭代者、`let (a,b)` / `for (a,b)` 的被解构者都曾剥过，
+结果是把弱句柄当强对象用，落到 C 里是 `(*(struct T*)weak_local).ptr`，
+clang 直接拒绝。
+
 ### `foreign` 是 FFI 边界
 
 `foreign` 是**类型种类约束**，与 `mutable` 同类（写在约束位：`[T foreign]`），不是 trait，

@@ -67,6 +67,30 @@ given TraitRegistry {
         self.object_safety_cache = Dict[String, List[String]].new();
     };
 
+    /// A spelling `using` binds in an IMPORTING module -- `Tag` and
+    /// `Tag as AlphaTag` alike.
+    ///
+    /// The key is (importing module, local spelling), never the bare spelling.
+    /// Two modules can each import a trait called `Tag`, and the unqualified
+    /// index is last-wins across modules, so it cannot say which one a bound
+    /// written in either file means. The local spelling is also registered bare
+    /// so the "Import it explicitly" path can still name a module that declares
+    /// it; that entry must never decide a lookup.
+    ///
+    /// The declaration is unchanged -- a rename is a spelling and identity is
+    /// unaffected, so nothing downstream can tell the two spellings apart.
+    public register_imported_name(
+        self,
+        local_name String,
+        module_path List[String],
+        info TraitInfo,
+    ) Void = {
+        self.traits.insert(qualified_symbol_key(module_path, local_name), info);
+        self.traits.insert(local_name, info);
+        self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
+        self.object_safety_cache = Dict[String, List[String]].new();
+    };
+
     public get_by_def_id(self, def_id DefId) Option[TraitInfo] = {
         return self.traits_by_def_id.get(def_id.id);
     };
@@ -75,12 +99,25 @@ given TraitRegistry {
         return self.traits.get(name);
     };
 
+    /// The trait `name` denotes in `module_path`: its own declaration, or one
+    /// it IMPORTED under that spelling. Both land on the same key.
+    ///
+    /// The unqualified index is NOT consulted. It is last-wins across modules,
+    /// so it cannot answer "which `Tag`?" -- and answering from it is what let
+    /// a bound written against one module's trait be satisfied by another's.
+    /// That index exists only to name the declaring module in the
+    /// "Import it explicitly" diagnostic; see `declared_somewhere`.
     public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
-        let qualified = qualified_symbol_key(module_path, name);
-        return when self.traits.get(qualified) in {
-            .Some(info) then Option[TraitInfo].Some(info),
-            .None() then self.traits.get(name),
-        };
+        return self.traits.get(qualified_symbol_key(module_path, name));
+    };
+
+    /// A trait declared SOMEWHERE under this spelling, imported here or not.
+    ///
+    /// NOT resolution. The only use is naming the declaring module in
+    /// "Import it explicitly", exactly like `unimportedTemplateDefId` on the
+    /// generic-template side -- it must never win over `get_in_module`.
+    public declared_somewhere(self, name String) Option[TraitInfo] = {
+        return self.traits.get(name);
     };
 
     public validate_inheritance_graph(self, trait_name String) Result[Void] = {

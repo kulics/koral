@@ -1588,6 +1588,29 @@ let weak = downgrade(node);      // ?Node
 let upgraded = upgrade(weak);    // Option[Node]
 ```
 
+**A weak reference is a handle, not a value.** Until it is upgraded it carries
+no fields, no cases and no payload of the referent, so anything that tests or
+exploits the referent's *shape* is refused against a `?T`:
+
+- member access, read or write — `w.value`, `w.value = 1`
+- a method call — `w.get()`
+- destructuring — `let (a, b) = w`, `for (a, b) in ws`
+- iteration — `for x in w`
+- matching cases — `when w in { Box(x) then ... }`
+
+Binding the handle *whole* is fine and keeps the `?T`:
+
+```koral
+let w = downgrade(node);
+let w2 ?Node = w;              // ok: the handle is copied
+let xs = List[?Node].new();
+xs.push(w);
+for h in xs then {             // ok: `h` is `?Node`
+    let v = upgrade(h);        // the only way to reach the referent
+    // ...
+};
+```
+
 ## 4. Pattern Matching
 
 Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions. (`for` loops take a plain `let`-shaped binding instead — see [for Loop](#for-loop).)
@@ -2387,7 +2410,11 @@ using "std/io" { Reader as IoReader }; // per-name alias
 1. `{ ... }` omitted means "every visible member"; if written, it may not be empty
    (`{ .. }` / `{ * }` are no longer spellings of anything);
 2. An item is `Name` or `Name as Alias`, trailing comma allowed. The alias must keep the referenced
-   name's case class: `Reader as IoReader` is valid, `Reader as reader` is an error;
+   name's case class: `Reader as IoReader` is valid, `Reader as reader` is an error.
+   The item may be a trait: `Tag as AlphaTag` binds `AlphaTag` as a trait name and it can be
+   used as a generic bound or a trait-object type. The alias is a spelling -- the trait it
+   names is the same declaration. An unrenamed `Tag` binds the same way, under the name
+   written here, so a bound `[T Tag]` in this file means the trait this import names;
 3. `as` renames one imported symbol, never the module -- a module name is not a
    namespace, so after `using "std/io" { Reader };` you write `Reader`, not `io.Reader`;
 4. Imported names are file-local bindings and are not re-exported;

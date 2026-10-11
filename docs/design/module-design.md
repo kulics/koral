@@ -499,6 +499,11 @@ error: 未知符号 ".."
 - 迁移期：迁移脚本必须一次改完 243 处裸名，不留尾巴；
 - 迁移后：源码里不应再有裸名文件合并，风险消失。
 
+> **修正（2026-10-10）**：迁移**已完成**，上面「迁移期…不留尾巴」是当时的施工要求，不是待办。
+> 今天的实况：源码里已无裸名文件合并，文件合并一律写 `using "./…"`。**现存量 233 处**
+> （`*.koral` 里以 `using "./` 开头的语句，已剔除注释行）。原文的「243 处」是迁移脚本当时
+> 要改的量，不是现在的存量。
+
 ### 迁移面
 
 | 对象 | 内容 | 量级 |
@@ -513,6 +518,20 @@ error: 未知符号 ".."
 | 文档 | `grammar.bnf` / `document.md` / `document-zh.md` | 中 |
 
 > bootstrap 目前 semantic 通过率 139/456。语法面变更应等它稳定后再动，或并行推进并单独验收。
+
+> **修正（2026-10-10）**：上表「量级」列与上面那句 bootstrap 通过率是**迁移前的计划基线**，均非现状。
+> 今天的实况（计数口径见括号）：
+> - **模块导入**：`using "…"`（非 `./`）语句 **376 处 / 255 文件**（不是 330 处 / 236 文件）。
+> - **测试**：`tests/compiler-cases` 现有 **644 个用例**（不是 559）。按
+>   `tests/compiler-runner/discovery.koral` 的纳入规则数出：**583 个顶层 `*.koral` 单文件用例
+>   \+ 61 个 `dir/dir.koral` 多文件用例根**。另有 3 个多程序/夹具目录
+>   （`multi_program_test`、`module_error_tests`、`using_relative_merge_path_test`）不符合
+>   `dir/dir.koral` 根约定，不被该规则纳入为用例。
+> - **bootstrap**：已**全绿并自举**，不再是 139/456。实现记录
+>   [`../implementation/bootstrap-productization-plan.md`](../implementation/bootstrap-productization-plan.md)
+>   记的是全链绿 + 自举不动点 + 悬空 0（例：「Swift 566/566 · stage1 566/566 ·
+>   自举 FIXED POINT + 悬空 0 · stage2 566/566」）。当下的确切通过数**无法静态核实**
+>   （要现跑一轮），故不填具体比值。
 
 
 ## 示例 —— 原文「6. 示例」

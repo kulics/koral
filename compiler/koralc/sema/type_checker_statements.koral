@@ -1468,6 +1468,10 @@ given TypeChecker {
                 let typed_val = if pair_type == raw_typed_val.expr_type then raw_typed_val
                 else retype_typed_expr(raw_typed_val, pair_type);
 
+                // A weak handle has no fields to destructure: it is opaque
+                // until `upgrade`d. The `for` form is told this by the pattern
+                // pass; a tuple `let` has no pattern pass and asks here.
+                self.reject_weak_destructuring_subject(pair_type, span);
                 // Positional destructuring: the number of slots equals the
                 // number of fields, and slot i binds field i. Field types come
                 // from the subject's DECLARATION, never from a name.
@@ -1514,28 +1518,32 @@ given TypeChecker {
                     },
                     .None() then {},
                 };
-                when self.first_immutable_field_in_assignment_target(typed_target) in {
-                    .Some(name) then {
-                        self.push_diagnostic(
-                            "Cannot assign to immutable variable: \(name)",
-                            span,
-                        );
-                    },
-                    .None() then {
-                        if not self.assignment_target_root_is_mutable(
-                            target,
-                            typed_target,
-                            scope,
-                        ) then {
-                            let target_name = self.assignment_target_error_name(
-                                typed_target,
-                            );
+                // A target whose member already failed to resolve has been
+                // diagnosed; mutability is not the rule that applies to it.
+                if not self.assignment_target_has_unresolved_member(typed_target) then {
+                    when self.first_immutable_field_in_assignment_target(typed_target) in {
+                        .Some(name) then {
                             self.push_diagnostic(
-                                "Cannot assign to immutable variable: \(target_name)",
+                                "Cannot assign to immutable variable: \(name)",
                                 span,
                             );
-                        };
-                    },
+                        },
+                        .None() then {
+                            if not self.assignment_target_root_is_mutable(
+                                target,
+                                typed_target,
+                                scope,
+                            ) then {
+                                let target_name = self.assignment_target_error_name(
+                                    typed_target,
+                                );
+                                self.push_diagnostic(
+                                    "Cannot assign to immutable variable: \(target_name)",
+                                    span,
+                                );
+                            };
+                        },
+                    };
                 };
                 self.report_managed_reference_writeback_if_needed(typed_target, span);
                 let raw_typed_val = when op in {
@@ -2034,7 +2042,9 @@ given TypeChecker {
                     ),
                     _ then inferred_base,
                 };
-                // Resolve member path on the writable base, computing field types
+                // Resolve member path on the writable base, computing field types.
+                // A weak handle is NOT peeled: it is a HANDLE, opaque until
+                // `upgrade`d, with no fields of the referent to write to.
                 let mutable current_type = typed_base.expr_type;
                 let mutable typed_path = List[Symbol].new();
                 for member in path then {
@@ -2043,13 +2053,23 @@ given TypeChecker {
                         .ReferenceType(inner) then inner,
                         .BorrowedReferenceType(inner) then inner,
                         .MutableBorrowedReferenceType(inner) then inner,
-                        .WeakReferenceType(inner) then inner,
-                        .MutableWeakReferenceType(inner) then inner,
                         .PointerType(inner) then inner,
                         .MutablePointerType(inner) then inner,
                         _ then current_type,
                     };
                     let member_type = self.resolve_member_type(inner_type, member);
+                    // Blame a member that does not resolve the same way a read
+                    // does, rather than letting the write path call it
+                    // "immutable" -- a member that does not exist is not a
+                    // mutability question. A field that DOES resolve is left to
+                    // the mutability check below.
+                    if member_type is .Unknown() then {
+                        let _ = self.report_missing_member_if_needed(
+                            inner_type,
+                            member,
+                            expr_span(target),
+                        );
+                    };
                     typed_path.push(
                         self.make_member_path_symbol(
                             member,
@@ -2232,6 +2252,32 @@ given TypeChecker {
                 .None() then true,
             },
             _ then true,
+        };
+    };
+
+    /// Whether any segment of a writable member path failed to resolve.
+    ///
+    /// A member that does not exist is not a mutability question: the write
+    /// path has already said `Member 'x' not found in type 'T'`, and the
+    /// immutability rules below would only add a second line naming the wrong
+    /// rule ("Cannot assign to immutable variable: x").
+    module_private assignment_target_has_unresolved_member(
+        self,
+        target TypedExpr,
+    ) Bool = {
+        return when target.expr_kind in {
+            .MemberPath(base, path) then {
+                if self.assignment_target_has_unresolved_member(base) then {
+                    return true;
+                };
+                for segment in path then {
+                    if segment.symbol_type is .Unknown() then {
+                        return true;
+                    };
+                };
+                false
+            },
+            _ then false,
         };
     };
 

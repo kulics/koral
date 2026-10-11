@@ -3119,9 +3119,11 @@ extension TypeChecker {
 
   private func resolveQualifiedTraitInvocation(
     _ traitType: TypeNode
-  ) throws -> (traitName: String, traitTypeArgs: [Type]) {
+  ) throws -> (traitName: String, traitDefId: DefId, traitTypeArgs: [Type]) {
     let traitConstraint = try SemaUtils.resolveTraitConstraint(from: traitType)
     let traitName = traitConstraint.baseName
+    // Identity from the bound, not from a second lookup of its spelling.
+    let traitDefId = resolveBound(traitConstraint).defId ?? .invalid
 
     guard let traitInfo = traits[traitName] else {
       throw SemanticError.undefinedType(traitName)
@@ -3146,7 +3148,7 @@ extension TypeChecker {
       try enforceGenericConstraints(typeParameters: traitInfo.typeParameters, args: traitTypeArgs)
     }
 
-    return (traitName, traitTypeArgs)
+    return (traitName, traitDefId, traitTypeArgs)
   }
 
   /// The trait's method signature for `Self = selfType`, resolving the method
@@ -3246,7 +3248,7 @@ extension TypeChecker {
     methodTypeArgs: [TypeNode]?,
     callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
-    let (traitName, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
+    let (traitName, resolvedTraitDefId, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
     let selfType = try resolveTypeNode(typeNode)
     let resolvedMethodTypeArgs = try methodTypeArgs.map { try $0.map { try resolveTypeNode($0) } }
 
@@ -3315,7 +3317,7 @@ extension TypeChecker {
         baseType: selfType, methodName: methodName, methodTypeArgs: resolvedMethodTypeArgs ?? [])
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
-        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+        traitDefId: resolvedTraitDefId,
         methodName: methodName,
         base: receiver,
         methodTypeArgs: resolvedMethodTypeArgs ?? [],
@@ -3957,7 +3959,7 @@ extension TypeChecker {
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
     if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _) = typedCallee,
-       isStdDropTrait(visibleTraitInfo(traitName)?.defId) && methodName == "drop" {
+       isStdDropTrait(traitDefId) && methodName == "drop" {
       throw SemanticError(
         .generic("compiler protocol method drop cannot be called explicitly"),
         span: currentSpan)
@@ -4055,9 +4057,12 @@ extension TypeChecker {
         typedArguments.append(typedArg)
       }
       
+      // Keep the placeholder's OWN identity. Re-deriving `traitDefId` from
+      // `traitName` here is what threw away the declaration and looked up
+      // whichever trait of that spelling is registered first.
       let adjustedCallee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
-        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+        traitDefId: traitDefId,
         methodName: methodName,
         base: adjustedBase,
         methodTypeArgs: methodTypeArgs,
@@ -5108,10 +5113,12 @@ extension TypeChecker {
     // Check if this is a trait method placeholder (for generic parameter types)
     let finalCallee: TypedExpressionNode
     if let traitName = methodResult.traitName {
-      // Create a traitMethodPlaceholder instead of methodReference
+      // Create a traitMethodPlaceholder instead of methodReference.
+      // Identity comes from the bound that supplied the method, not from a
+      // second lookup of its spelling.
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
-        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+        traitDefId: methodResult.traitDefId ?? .invalid,
         methodName: methodName,
         base: finalBase,
         methodTypeArgs: resolvedMethodTypeArgs,
@@ -5753,6 +5760,9 @@ extension TypeChecker {
     {
       for traitConstraint in bounds {
         let traitName = traitConstraint.baseName
+        // Identity from the bound that supplied the method. A second lookup of
+        // the spelling picks whichever trait of that name is registered first.
+        let traitDefId = resolveBound(traitConstraint).defId ?? .invalid
         let methods = try flattenedTraitMethods(traitName)
         if let sig = methods[memberName] {
           if sig.parameters.first?.name != "self" {
@@ -5788,7 +5798,7 @@ extension TypeChecker {
           )
           return .traitMethodPlaceholder(
             traitName: traitName,
-            traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+            traitDefId: traitDefId,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -5812,7 +5822,7 @@ extension TypeChecker {
           )
           return .traitMethodPlaceholder(
             traitName: traitName,
-            traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+            traitDefId: traitDefId,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -5825,14 +5835,14 @@ extension TypeChecker {
     // Trait object method lookup: when the type is a trait object, look up the method
     // in the trait's method signatures and return a methodReference with Self replaced
     if case .traitObject(let tplDefId, let traitTypeArgs) = typeToLookup {
-      let methods = try flattenedTraitMethods(Type.spelling(tplDefId))
+      let methods = try flattenedTraitMethods(forDefId: tplDefId)
       if let sig = methods[memberName] {
         // Only instance methods (with self parameter)
         if sig.parameters.first?.name != "self" {
           return nil
         }
 
-        let traitInfo = visibleTraitInfo(Type.spelling(tplDefId))
+        let traitInfo = traitDeclsByDefId[tplDefId]
         let traitObjType: Type = traitObjectType(traitName: Type.spelling(tplDefId), typeArgs: traitTypeArgs)
 
         // Resolve the method type with Self replaced by the trait object type
@@ -6777,9 +6787,20 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
+    // Identity of the trait `==` dispatches through: the receiver's own `Eq`
+    // bound when it has one, otherwise std's `Eq` -- a LANG ITEM reached by the
+    // unique `(Std, name)` pair. A bare name lookup would find whichever trait
+    // spelled `Eq` is registered first.
     let traitName = "Eq"
-    let methodName = "equals"
     let receiverType = lhs.type
+    let boundDefId: DefId? = {
+      if case .genericParameter(let paramName) = receiverType {
+        return resolvedTraitBound(paramName, traitName: traitName)?.traitDefId
+      }
+      return nil
+    }()
+    let traitDefId = boundDefId ?? context.stdTraitDefId("Eq") ?? .invalid
+    let methodName = "equals"
     let shouldUseTraitPlaceholder: Bool = {
       switch receiverType {
       case .genericParameter, .reference, .mutableReference, .weakReference, .mutableWeakReference:
@@ -6815,7 +6836,7 @@ extension TypeChecker {
 
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
-        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+        traitDefId: traitDefId,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -6854,9 +6875,18 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
+    // Identity of the trait `<=>`/`compare` dispatches through -- see `Eq` in
+    // `buildEqualsCall`.
     let traitName = "Ord"
-    let methodName = "compare"
     let receiverType = lhs.type
+    let boundDefId: DefId? = {
+      if case .genericParameter(let paramName) = receiverType {
+        return resolvedTraitBound(paramName, traitName: traitName)?.traitDefId
+      }
+      return nil
+    }()
+    let traitDefId = boundDefId ?? context.stdTraitDefId("Ord") ?? .invalid
+    let methodName = "compare"
     let shouldUseTraitPlaceholder: Bool = {
       switch receiverType {
       case .genericParameter, .reference, .mutableReference, .weakReference, .mutableWeakReference:
@@ -6892,7 +6922,7 @@ extension TypeChecker {
 
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
-        traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+        traitDefId: traitDefId,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -7016,6 +7046,17 @@ extension TypeChecker {
     case .divide:    traitName = "Div"; methodName = "div"
     case .remainder: traitName = "Rem"; methodName = "rem"
     }
+    // Identity of the trait the operator dispatches through: the receiver's own
+    // bound when it has one, otherwise std's operator trait -- a LANG ITEM
+    // reached by the unique `(Std, name)` pair. A bare name lookup would find
+    // whichever trait spelled `Add` is registered first.
+    let boundDefId: DefId? = {
+      if case .genericParameter(let paramName) = lhs.type {
+        return resolvedTraitBound(paramName, traitName: traitName)?.traitDefId
+      }
+      return nil
+    }()
+    let traitDefId = boundDefId ?? context.stdTraitDefId(traitName) ?? .invalid
 
     if let call = try buildOperatorMethodCall(
       base: lhs,
@@ -7143,7 +7184,10 @@ extension TypeChecker {
         span: currentSpan)
     }
 
-    let traitInfo = traits[matchedTraitRef.traitName]
+    // Identity from the matched bound -- a name lookup here would find
+    // whichever trait of that spelling is registered first.
+    let traitDefId = matchedTraitRef.traitDefId
+    let traitInfo = traitDeclsByDefId[traitDefId]
     let traitTypeArgs = matchedTraitRef.traitTypeArgs
 
     if let required = requiredTraitArgs {
@@ -7176,7 +7220,7 @@ extension TypeChecker {
 
     let callee: TypedExpressionNode = .traitMethodPlaceholder(
       traitName: traitName,
-      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+      traitDefId: traitDefId,
       methodName: methodName,
       base: base,
       methodTypeArgs: [],
@@ -7518,8 +7562,13 @@ extension TypeChecker {
             span: currentSpan
           )
         }
-        throw SemanticError.invalidOperation(
-          op: "member access on non-struct", type1: typeToLookup.description, type2: "")
+        // Same missing-member text a READ reports. This used to be
+        // `.invalidOperation(op: "member access on non-struct", type1: ..., type2: "")`,
+        // rendering as `Invalid operation member access on non-struct between
+        // types ?Box and ` -- `type2` is spelled empty, so the sentence stops
+        // mid-clause -- and it blamed a mutability rule for a member that does
+        // not exist. `w.value = 3` and `println(w.value)` now agree.
+        throw SemanticError.undefinedMember(memberName, typeToLookup.description)
       }
       return .memberPath(source: typedBase, path: resolvedPath)
 
@@ -7814,6 +7863,14 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     if isStringType(expr.type) {
       return expr
+    }
+
+    // `.error` is the type of an expression that already failed to check.
+    // Asking it for `ToString` on top adds `Type '?' does not implement ToString
+    // trait` under a message that already explains the failure -- a cascade,
+    // not a second mistake. koralc has never done this.
+    if expr.type == .error {
+      return .stringLiteral(value: "", type: builtinStringType())
     }
 
     if let call = try buildOperatorMethodCall(
@@ -8211,6 +8268,10 @@ extension TypeChecker {
       // `(a, b, c)` -- positional destructuring of a struct with exactly that
       // many fields, in declaration order. Field types come from the subject's
       // DECLARATION, never from a name.
+      //
+      // A weak handle has no fields to destructure: it is opaque until
+      // `upgrade`d. Binding the handle whole (`for w in ws`) is fine.
+      try rejectWeakPatternSubject(elementType, span: span)
       let innerType = unwrapTupleSubjectType(elementType)
       guard let members = try tupleDestructuringMembers(of: innerType),
             members.count == bindings.count else {

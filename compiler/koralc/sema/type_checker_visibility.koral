@@ -860,19 +860,31 @@ given TypeChecker {
         };
     };
 
-    /// Build the conformance key. Name -> declaration identity happens here,
-    /// once, and every record and lookup goes through this function, so both
-    /// sides always agree on the identity.
+    /// The declaration a language construct demands, from the spelling its
+    /// syntax carries (`a == b` requires `Eq`).
+    ///
+    /// RESOLUTION happens here and only here for those demands: the operator
+    /// spelling has no declaration attached, so this is where it becomes one.
+    /// Every later question compares the result and never the name.
+    module_private lang_trait_def_id(self, trait_name String) DefId = {
+        return self.trait_def_id_of(trait_name) or else DefId(0(UInt));
+    };
+
+    /// Build the conformance key. Identity is the trait's DECLARATION plus its
+    /// type arguments; `trait_name` rides along only so a message can print it
+    /// and is not part of equality or hashing. The spelling is NOT resolved
+    /// here -- the caller holds the declaration and must pass it, so two
+    /// same-named traits cannot collapse into one slot.
     module_private trait_conformance_key(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_arg_types List[Type],
     ) ExplicitTraitConformanceKey = {
-        let def_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         return ExplicitTraitConformanceKey(
             target_type,
-            def_id,
+            trait_def_id,
             trait_name,
             trait_arg_types,
         );
@@ -896,7 +908,7 @@ given TypeChecker {
     module_private generic_param_has_trait_bound(
         self,
         name String,
-        trait_name String,
+        trait_def_id DefId,
         trait_arg_types List[Type],
     ) Bool = {
         return when self.storage.generic_param_constraints.get(name) in {
@@ -905,7 +917,7 @@ given TypeChecker {
                     if self.generic_constraint_satisfies_trait_bound(
                         constraint,
                         Type.GenericParameter(name),
-                        trait_name,
+                        trait_def_id,
                         trait_arg_types,
                     ) then {
                         return true;
@@ -921,22 +933,21 @@ given TypeChecker {
         self,
         constraint GenericConstraintBound,
         self_type Type,
-        trait_name String,
+        want_def_id DefId,
         trait_arg_types List[Type],
     ) Bool = {
         // Match on declaration identity, not on spelling.
-        let want = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
-        if constraint.trait_def_id == want and constraint.trait_def_id.id > 0(UInt) then {
+        if constraint.trait_def_id == want_def_id and constraint.trait_def_id.id > 0(UInt) then {
             return trait_arg_types.is_empty() or self.trait_args_match(
                 constraint.type_args,
                 trait_arg_types,
             );
         };
 
-        return when self.storage.trait_registry.get_in_module(
-            constraint.trait_name,
-            self.storage.module_path,
-        ) in {
+        // The parent's DECLARATION, reached by identity from the constraint --
+        // the constraint's spelling is only a display handle and would have to
+        // be resolved in whatever module happens to be checking.
+        return when self.storage.trait_registry.get_by_def_id(constraint.trait_def_id) in {
             .Some(info) then {
                 let previous_scope = self.storage.current_scope;
                 defer {
@@ -965,7 +976,7 @@ given TypeChecker {
                     if self.generic_constraint_satisfies_trait_bound(
                         GenericConstraintBound(parent.def_id, parent.name, parent_args),
                         self_type,
-                        trait_name,
+                        want_def_id,
                         trait_arg_types,
                     ) then {
                         return true;
@@ -980,21 +991,21 @@ given TypeChecker {
     module_private record_explicit_trait_conformance(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_arg_types List[Type],
     ) Void = {
         self.invalidate_trait_requirement_caches();
         self.storage.explicit_trait_conformances.insert(
-            self.trait_conformance_key(target_type, trait_name, trait_arg_types),
+            self.trait_conformance_key(target_type, trait_def_id, trait_name, trait_arg_types),
         );
     };
 
     module_private is_implicitly_satisfied_trait_requirement(
         self,
         target_type Type,
-        trait_name String,
+        target_id DefId,
     ) Bool = {
-        let target_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
         when target_type in {
             .TraitObject(trait_object_def_id, _) then {
                 return self.storage.trait_registry.has_inheritance(
@@ -1009,7 +1020,11 @@ given TypeChecker {
 
     /// Does `subject` satisfy `b` right now? The single satisfaction predicate:
     /// every consumer asks this question here, dispatching on the bound's KIND
-    /// rather than on its spelling.
+    /// rather than on its spelling. A trait bound carries the DECLARATION it
+    /// requires -- resolved when the enclosing generic declaration was
+    /// registered -- and that is what is compared; re-resolving its spelling
+    /// here would ask whatever module happens to be checking which `Tag` was
+    /// meant.
     module_private satisfies_bound(
         self,
         subject Type,
@@ -1019,8 +1034,9 @@ given TypeChecker {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
             .Foreign() then self.satisfies_foreign_constraint(subject),
-            .Trait(_, trait_name, _) then self.satisfies_trait_requirement_with_args(
+            .Trait(trait_def_id, trait_name, _) then self.satisfies_trait_requirement_with_args(
                 subject,
+                trait_def_id,
                 trait_name,
                 self.bound_trait_args_with_bindings(b, bindings),
             ),
@@ -1040,8 +1056,9 @@ given TypeChecker {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
             .Foreign() then self.satisfies_foreign_constraint(subject),
-            .Trait(_, trait_name, _) then self.trait_bound_may_hold(
+            .Trait(trait_def_id, trait_name, _) then self.trait_bound_may_hold(
                 subject,
+                trait_def_id,
                 trait_name,
                 self.bound_trait_args_with_bindings(b, bindings),
             ),
@@ -1088,11 +1105,12 @@ given TypeChecker {
                     false
                 }
             },
-            .Trait(_, trait_name, _) then {
+            .Trait(trait_def_id, trait_name, _) then {
                 let trait_args = self.bound_trait_args_with_bindings(b, bindings);
                 if trait_args.is_empty() then {
                     self.enforce_explicit_trait_requirement_with_context(
                         bound_type,
+                        trait_def_id,
                         trait_name,
                         param_name,
                         "",
@@ -1101,6 +1119,7 @@ given TypeChecker {
                 } else {
                     self.enforce_explicit_generic_trait_conformance(
                         bound_type,
+                        trait_def_id,
                         trait_name,
                         trait_args,
                         span,
@@ -1113,22 +1132,27 @@ given TypeChecker {
     module_private satisfies_trait_requirement(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
     ) Bool = {
         return self.satisfies_trait_requirement_with_args(
             target_type,
+            trait_def_id,
             trait_name,
             List[Type].new(),
         );
     };
 
+    /// Whether `target_type` conforms to the trait DECLARATION `trait_def_id`.
+    /// `trait_name` is display-only; identity is `trait_def_id` plus `trait_args`.
     module_private satisfies_trait_requirement_with_args(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) Bool = {
-        let key = self.trait_conformance_key(target_type, trait_name, trait_args);
+        let key = self.trait_conformance_key(target_type, trait_def_id, trait_name, trait_args);
         if self.storage.trait_requirement_in_progress.contains(key) then {
             return false;
         };
@@ -1141,16 +1165,18 @@ given TypeChecker {
         self.storage.trait_requirement_in_progress.insert(key);
         let result = if trait_args.is_empty() and self.is_implicitly_satisfied_trait_requirement(
             target_type,
-            trait_name,
+            trait_def_id,
         ) then true
         else if self.has_explicit_trait_conformance_with_args(
             target_type,
+            trait_def_id,
             trait_name,
             trait_args,
         ) then true
         else {
             when self.generic_trait_conformance_status(
                 target_type,
+                trait_def_id,
                 trait_name,
                 trait_args,
             ) in {
@@ -1166,10 +1192,12 @@ given TypeChecker {
     module_private has_explicit_trait_conformance(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
     ) Bool = {
         return self.has_explicit_trait_conformance_with_args(
             target_type,
+            trait_def_id,
             trait_name,
             List[Type].new(),
         );
@@ -1198,6 +1226,7 @@ given TypeChecker {
     module_private has_explicit_trait_conformance_with_args(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_arg_types List[Type],
     ) Bool = {
@@ -1205,7 +1234,7 @@ given TypeChecker {
             .GenericParameter(name) then {
                 return self.generic_param_has_trait_bound(
                     name,
-                    trait_name,
+                    trait_def_id,
                     trait_arg_types,
                 );
             },
@@ -1213,12 +1242,12 @@ given TypeChecker {
         };
         // Check direct explicit conformance
         if self.storage.explicit_trait_conformances.contains(
-            self.trait_conformance_key(target_type, trait_name, trait_arg_types),
+            self.trait_conformance_key(target_type, trait_def_id, trait_name, trait_arg_types),
         ) then {
             return true;
         };
         // Check trait hierarchy: if target_type conforms to a child trait that
-        // extends trait_name, then target_type also satisfies trait_name.
+        // extends the required one, then target_type also satisfies it.
         // For example, if Int conforms to Integer and Integer extends Div[Self],
         // then Int satisfies Div.
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -1229,7 +1258,7 @@ given TypeChecker {
                 return false;
             },
         };
-        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
+        let requested_trait_id = trait_def_id;
         for template in templates then {
             let bindings = self.conformance_type_key_bindings(
                 template.target_type,
@@ -1272,14 +1301,18 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        when bound_trait_name(constraint) in {
-                            .Some(required_trait_name) then {
+                        // Match on the bound's KIND and carry its DECLARATION.
+                        // Pulling the spelling out first would make the
+                        // requirement re-resolve in whatever module is checking.
+                        when constraint in {
+                            .Trait(required_trait_def_id, required_trait_name, _) then {
                                 let required_trait_args = self.bound_trait_args_with_bindings(
                                     constraint,
                                     bindings,
                                 );
                                 if not self.satisfies_trait_requirement_with_args(
                                     bound_type,
+                                    required_trait_def_id,
                                     required_trait_name,
                                     required_trait_args,
                                 ) then {
@@ -1288,7 +1321,7 @@ given TypeChecker {
                             },
                             // Shape bounds (`mutable`, `Deref`) are not trait
                             // conformances, so they are not owner requirements here.
-                            .None() then {},
+                            .Mutable() or .Foreign() then {},
                         };
                     };
                 };
@@ -1365,6 +1398,7 @@ given TypeChecker {
         self,
         target_type Type,
         owner_type_params List[TypeParameter],
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) Void = {
@@ -1373,7 +1407,7 @@ given TypeChecker {
             target_type,
             self.to_template_type_params(owner_type_params),
             trait_name,
-            self.trait_def_id_of(trait_name) or else DefId(0(UInt)),
+            trait_def_id,
             trait_args,
         );
         self.storage.generic_trait_conformance_templates.push(template);
@@ -1416,6 +1450,7 @@ given TypeChecker {
     module_private modifier_blanket_trait_conformance_status(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) Option[GenericTraitConformanceStatus] = {
@@ -1430,7 +1465,12 @@ given TypeChecker {
             },
             _ then {},
         };
-        if self.satisfies_trait_requirement_with_args(inner_type, trait_name, trait_args) then {
+        if self.satisfies_trait_requirement_with_args(
+            inner_type,
+            trait_def_id,
+            trait_name,
+            trait_args,
+        ) then {
             return Option[GenericTraitConformanceStatus].Some(
                 GenericTraitConformanceStatus.Satisfied(),
             );
@@ -1484,14 +1524,15 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        when bound_trait_name(constraint) in {
-                            .Some(required_trait_name) then {
+                        when constraint in {
+                            .Trait(required_trait_def_id, required_trait_name, _) then {
                                 let required_trait_args = self.bound_trait_args_with_bindings(
                                     constraint,
                                     bindings,
                                 );
                                 if not self.satisfies_trait_requirement_with_args(
                                     bound_type,
+                                    required_trait_def_id,
                                     required_trait_name,
                                     required_trait_args,
                                 ) then {
@@ -1504,7 +1545,7 @@ given TypeChecker {
                                     );
                                 };
                             },
-                            .None() then {},
+                            .Mutable() or .Foreign() then {},
                         };
                     };
                 };
@@ -1748,10 +1789,11 @@ given TypeChecker {
     module_private generic_trait_conformance_status(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) GenericTraitConformanceStatus = {
-        let key = self.trait_conformance_key(target_type, trait_name, trait_args);
+        let key = self.trait_conformance_key(target_type, trait_def_id, trait_name, trait_args);
         if self.storage.generic_trait_status_in_progress.contains(key) then {
             return GenericTraitConformanceStatus.MissingConformance();
         };
@@ -1764,6 +1806,7 @@ given TypeChecker {
         self.storage.generic_trait_status_in_progress.insert(key);
         let result = self.compute_generic_trait_conformance_status(
             target_type,
+            trait_def_id,
             trait_name,
             trait_args,
         );
@@ -1775,11 +1818,13 @@ given TypeChecker {
     module_private compute_generic_trait_conformance_status(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) GenericTraitConformanceStatus = {
         when self.modifier_blanket_trait_conformance_status(
             target_type,
+            trait_def_id,
             trait_name,
             trait_args,
         ) in {
@@ -1798,7 +1843,7 @@ given TypeChecker {
                 return GenericTraitConformanceStatus.MissingConformance();
             },
         };
-        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
+        let requested_trait_id = trait_def_id;
         for template in templates then {
             if template.trait_def_id <> requested_trait_id then {
                 continue;
@@ -1832,14 +1877,15 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        when bound_trait_name(constraint) in {
-                            .Some(required_trait_name) then {
+                        when constraint in {
+                            .Trait(required_trait_def_id, required_trait_name, _) then {
                                 let required_trait_args = self.bound_trait_args_with_bindings(
                                     constraint,
                                     bindings,
                                 );
                                 if not self.satisfies_trait_requirement_with_args(
                                     bound_type,
+                                    required_trait_def_id,
                                     required_trait_name,
                                     required_trait_args,
                                 ) then {
@@ -1851,7 +1897,7 @@ given TypeChecker {
                                     return result;
                                 };
                             },
-                            .None() then {},
+                            .Mutable() or .Foreign() then {},
                         };
                     };
                 };
@@ -2110,12 +2156,14 @@ given TypeChecker {
     module_private enforce_explicit_generic_trait_conformance(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
         span SourceSpan,
     ) Bool = {
         return self.enforce_explicit_generic_trait_conformance_with_note(
             target_type,
+            trait_def_id,
             trait_name,
             trait_args,
             "",
@@ -2129,6 +2177,7 @@ given TypeChecker {
     module_private enforce_explicit_generic_trait_conformance_with_note(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
         note String,
@@ -2137,7 +2186,7 @@ given TypeChecker {
         // Check generic parameter constraints first (like Swift's hasTraitBound)
         when target_type in {
             .GenericParameter(name) then {
-                if self.generic_param_has_trait_bound(name, trait_name, trait_args) then {
+                if self.generic_param_has_trait_bound(name, trait_def_id, trait_args) then {
                     return true;
                 };
             },
@@ -2145,6 +2194,7 @@ given TypeChecker {
         };
         return when self.generic_trait_conformance_status(
             target_type,
+            trait_def_id,
             trait_name,
             trait_args,
         ) in {
@@ -2196,11 +2246,13 @@ given TypeChecker {
     module_private enforce_explicit_trait_requirement(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         span SourceSpan,
     ) Bool = {
         return self.enforce_explicit_trait_requirement_with_context(
             target_type,
+            trait_def_id,
             trait_name,
             "",
             "",
@@ -2252,9 +2304,12 @@ given TypeChecker {
     /// -- and is printed with the message. `constraint_param` names a generic
     /// parameter whose bound is unmet and takes the `(checking constraint ...)`
     /// form instead. The two are different reasons and print differently.
+    /// `trait_def_id` is the DECLARATION the requirement is on; `trait_name` is
+    /// what the message prints. Satisfaction is decided by the identity alone.
     module_private enforce_explicit_trait_requirement_with_context(
         self,
         target_type Type,
+        trait_def_id DefId,
         trait_name String,
         constraint_param String,
         note String,
@@ -2273,24 +2328,25 @@ given TypeChecker {
         // Check generic parameter constraints first (like Swift's hasTraitBound)
         when target_type in {
             .GenericParameter(name) then {
-                if self.generic_param_has_trait_bound(name, trait_name, List[Type].new()) then {
+                if self.generic_param_has_trait_bound(name, trait_def_id, List[Type].new()) then {
                     return true;
                 };
             },
             _ then {},
         };
 
-        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_def_id) then {
             return true;
         };
 
-        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+        if self.has_explicit_trait_conformance(target_type, trait_def_id, trait_name) then {
             return true;
         };
 
         let empty_trait_args = List[Type].new();
         return when self.generic_trait_conformance_status(
             target_type,
+            trait_def_id,
             trait_name,
             empty_trait_args,
         ) in {

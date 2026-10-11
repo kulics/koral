@@ -10,10 +10,21 @@ extension TypeChecker {
     return modulePath.joined(separator: ".") + "." + name
   }
 
+  /// The trait `name` denotes in `modulePath`: its own declaration, or one it
+  /// imported under that spelling. Both land on the same key.
+  ///
+  /// The unqualified index (`traits[name]`) is NOT consulted here. It is
+  /// last-wins across modules, so it cannot answer "which `Tag`?" -- and
+  /// answering from it is what let a bound written against one module's trait
+  /// be satisfied by another's. That index exists only to name the declaring
+  /// module in the "Import it explicitly" diagnostic.
   func traitInfo(_ name: String, modulePath: [String]) -> TraitDeclInfo? {
-    if let info = qualifiedTraits[qualifiedTraitKey(name, modulePath: modulePath)] {
-      return info
-    }
+    return qualifiedTraits[qualifiedTraitKey(name, modulePath: modulePath)]
+  }
+
+  /// A trait declared SOMEWHERE under this spelling, imported here or not.
+  /// NOT resolution -- see `traitInfo`.
+  func declaredSomewhere(_ name: String) -> TraitDeclInfo? {
     return traits[name]
   }
 
@@ -80,37 +91,63 @@ extension TypeChecker {
     }
   }
 
-  func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
-    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
-    let cacheKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+  /// The flattened methods of the trait DECLARATION at `defId`.
+  ///
+  /// For callers that hold the identity -- a trait-object type carries it.
+  /// Spelling the declaration out and resolving the name again is a
+  /// DefId -> name -> DefId round-trip, and the name lands in whichever module
+  /// is checking rather than the one that wrote the expectation.
+  func flattenedTraitMethods(forDefId defId: DefId) throws -> [String: TraitMethodSignature] {
+    guard let decl = traitDeclsByDefId[defId] else {
+      let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+      throw SemanticError(.generic("Undefined trait: \(defId)"), span: span)
+    }
+    let cacheKey = "d\(defId.id)"
     if let cached = flattenedTraitMethodsCache[cacheKey] {
       return cached
     }
-    var visited: Set<String> = []
-    let result = try flattenedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &visited)
+    var visited: Set<UInt64> = []
+    let result = try flattenedTraitMethodsHelper(decl, name: decl.name, visited: &visited)
     flattenedTraitMethodsCache[cacheKey] = result
     return result
   }
 
-  private func flattenedTraitMethodsHelper(
-    _ traitName: String,
-    modulePath: [String],
-    visited: inout Set<String>
-  ) throws -> [String: TraitMethodSignature] {
-    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
-    if visited.contains(visitKey) {
-      return [:]
-    }
-    visited.insert(visitKey)
-
-    guard let decl = traitInfo(traitName, modulePath: modulePath) else {
+  func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
+    guard let decl = visibleTraitInfo(traitName) else {
       let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
     }
+    let cacheKey = qualifiedTraitKey(traitName, modulePath: currentModulePath)
+    if let cached = flattenedTraitMethodsCache[cacheKey] {
+      return cached
+    }
+    var visited: Set<UInt64> = []
+    let result = try flattenedTraitMethodsHelper(decl, name: traitName, visited: &visited)
+    flattenedTraitMethodsCache[cacheKey] = result
+    return result
+  }
+
+  /// Walks the trait DECLARATION and its parents by identity. Looking the name
+  /// up again under the trait's own module path is wrong the moment the name is
+  /// an import alias -- `AlphaTag` is bound in the importing module's key
+  /// space, not in the module that declares the trait it names.
+  private func flattenedTraitMethodsHelper(
+    _ decl: TraitDeclInfo,
+    name: String,
+    visited: inout Set<UInt64>
+  ) throws -> [String: TraitMethodSignature] {
+    if visited.contains(decl.defId.id) {
+      return [:]
+    }
+    visited.insert(decl.defId.id)
 
     var methods: [String: TraitMethodSignature] = [:]
     for parent in decl.superTraits {
-      let parentMethods = try flattenedTraitMethodsHelper(parent.baseName, modulePath: decl.modulePath, visited: &visited)
+      guard let parentDecl = traitInfo(parent.baseName, modulePath: decl.modulePath) else {
+        let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+        throw SemanticError(.generic("Undefined trait: \(parent.baseName)"), span: span)
+      }
+      let parentMethods = try flattenedTraitMethodsHelper(parentDecl, name: parent.baseName, visited: &visited)
       for (name, sig) in parentMethods {
         methods[name] = sig
       }
@@ -590,8 +627,8 @@ extension TypeChecker {
     var reasons: [String] = []
 
     // Check all methods (including inherited)
-    var flattenVisited: Set<String> = []
-    let allMethods = try flattenedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &flattenVisited)
+    var flattenVisited: Set<UInt64> = []
+    let allMethods = try flattenedTraitMethodsHelper(traitInfo, name: traitName, visited: &flattenVisited)
 
     for (name, method) in allMethods {
       // Rule 1: method must not have generic type parameters
@@ -705,6 +742,48 @@ extension TypeChecker {
     return result
   }
 
+  /// The trait a receiver's type names, by DECLARATION.
+  ///
+  /// Identity in, declaration out. A name lookup here would pick whichever
+  /// trait of that spelling is registered first, and two modules may declare
+  /// the same trait name.
+  func traitObjectDeclId(of type: Type) -> DefId? {
+    switch type {
+    case .traitObject(let defId, _):
+      return defId
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner):
+      return traitObjectDeclId(of: inner)
+    default:
+      return nil
+    }
+  }
+
+  /// The ordered methods of the trait declared at `defId`.
+  /// Parent trait methods come first (in declaration order), then the trait's own.
+  func orderedTraitMethods(forDefId defId: DefId) throws -> [(name: String, signature: TraitMethodSignature)] {
+    guard let decl = traitDeclsByDefId[defId] else {
+      throw SemanticError(.generic("Undefined trait: \(defId)"), span: currentSpan)
+    }
+    var result: [(name: String, signature: TraitMethodSignature)] = []
+    var seen: Set<String> = []
+    for parent in decl.superTraits {
+      guard let parentDecl = visibleTraitInfo(parent.baseName) else { continue }
+      let parentMethods = try orderedTraitMethods(forDefId: parentDecl.defId)
+      for entry in parentMethods where !seen.contains(entry.name) {
+        result.append(entry)
+        seen.insert(entry.name)
+      }
+    }
+    for m in decl.methods where !seen.contains(m.name) {
+      result.append((name: m.name, signature: m))
+      seen.insert(m.name)
+    }
+    return result
+  }
+
   /// Computes the vtable index for a method in a trait.
   /// Methods are ordered by declaration order, with parent trait methods first.
   func vtableMethodIndex(traitName: String, methodName: String) throws -> Int {
@@ -712,6 +791,18 @@ extension TypeChecker {
     guard let index = ordered.firstIndex(where: { $0.name == methodName }) else {
       throw SemanticError(
         .generic("Method '\(methodName)' not found in trait '\(traitName)'"),
+        span: currentSpan
+      )
+    }
+    return index
+  }
+
+  /// Same, keyed by the trait's DECLARATION rather than its spelling.
+  func vtableMethodIndex(traitDefId: DefId, methodName: String) throws -> Int {
+    let ordered = try orderedTraitMethods(forDefId: traitDefId)
+    guard let index = ordered.firstIndex(where: { $0.name == methodName }) else {
+      throw SemanticError(
+        .generic("Method '\(methodName)' not found in trait '\(traitDefId)'"),
         span: currentSpan
       )
     }

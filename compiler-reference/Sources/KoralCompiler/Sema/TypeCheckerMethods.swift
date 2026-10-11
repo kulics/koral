@@ -746,13 +746,18 @@ extension TypeChecker {
     let methodTypeArgs: [Type]
     /// If non-nil, this is a trait method placeholder that should be resolved at monomorphization time
     let traitName: String?
-    
-    init(methodSymbol: Symbol, methodType: Type, typeArgs: [Type]?, methodTypeArgs: [Type], traitName: String? = nil) {
+    /// The trait's DECLARATION, taken from the bound that supplied the method.
+    /// `traitName` is display only -- re-deriving the identity from it looks up
+    /// whichever trait of that spelling is registered first.
+    let traitDefId: DefId?
+
+    init(methodSymbol: Symbol, methodType: Type, typeArgs: [Type]?, methodTypeArgs: [Type], traitName: String? = nil, traitDefId: DefId? = nil) {
       self.methodSymbol = methodSymbol
       self.methodType = methodType
       self.typeArgs = typeArgs
       self.methodTypeArgs = methodTypeArgs
       self.traitName = traitName
+      self.traitDefId = traitDefId
     }
   }
 
@@ -1039,7 +1044,8 @@ extension TypeChecker {
           methodType: functionType,
           typeArgs: nil,
           methodTypeArgs: methodTypeArgs,
-          traitName: traitName
+          traitName: traitName,
+          traitDefId: resolveBound(traitConstraint).defId
         )
       }
     }
@@ -1284,7 +1290,19 @@ extension TypeChecker {
     returns: Type,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
-    let methodIndex = try vtableMethodIndex(traitName: traitName, methodName: methodName)
+    // Identity: the receiver's trait-object type carries the trait's
+    // DECLARATION. Resolving the trait from its SPELLING
+    // (`visibleTraitInfo(traitName)?.defId`) picks whichever trait of that
+    // name is registered first -- with two `Tag` traits in two modules that is
+    // the wrong one, and the MIR verifier rejects the call for its receiver
+    // not matching its own trait metadata.
+    guard let traitDefId = traitObjectDeclId(of: base.type) else {
+      throw SemanticError(
+        .generic("Trait method '\(methodName)' called on a non-trait-object receiver"),
+        span: currentSpan
+      )
+    }
+    let methodIndex = try vtableMethodIndex(traitDefId: traitDefId, methodName: methodName)
 
     // For trait object method calls, the receiver is passed as-is to the vtable dispatch.
     // The vtable wrapper handles the conversion from trait object to concrete type internally.
@@ -1316,7 +1334,7 @@ extension TypeChecker {
     let call: TypedExpressionNode = .traitMethodCall(
       receiver: finalBase,
       traitName: traitName,
-      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+      traitDefId: traitDefId,
       methodName: methodName,
       methodIndex: methodIndex,
       arguments: typedArguments,

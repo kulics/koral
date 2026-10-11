@@ -479,6 +479,15 @@ public final class CompilerContext: @unchecked Sendable {
     /// implements drop glue for?" compares against this declaration, never
     /// against the spelling (rustc: `rustc_hir::LangItem::Drop`).
     public var stdDropTraitDefId: DefId? { defIdMap.lookup(modulePath: ["Std"], name: "Drop") }
+
+    /// Any std trait, by the unique `(Std, name)` pair -- the same lang-item
+    /// pattern as `stdDropTraitDefId`. The operator and comparison traits
+    /// (`Eq`, `Ord`, `Add`, ...) are reached through this and never through a
+    /// bare name lookup: a user trait also spelled `Eq` is a different trait
+    /// and must not be mistaken for the one the compiler specialises on.
+    public func stdTraitDefId(_ name: String) -> DefId? {
+        defIdMap.lookup(modulePath: ["Std"], name: name)
+    }
     public var stdPairTemplateDefId: DefId? {
         defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Pair")
     }

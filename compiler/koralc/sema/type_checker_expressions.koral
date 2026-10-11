@@ -117,22 +117,6 @@ given TypeChecker {
         };
     };
 
-    module_private report_weak_member_access_issue_if_needed(
-        self,
-        resolved Type,
-        has_method Bool,
-        base_type Type,
-        member String,
-    ) Void = {
-        if resolved is not .Unknown() or has_method then {
-            return;
-        };
-        self.push_diagnostic(
-            "Invalid operation member access between types \(self.display_type_name(base_type)) and ",
-            unknown_span(),
-        );
-    };
-
     module_private expr_contains_or_return(self, expr Expr) Bool = {
         let _ = self;
         return when expr in {
@@ -335,6 +319,15 @@ given TypeChecker {
     };
 
     module_private has_explicit_std_drop_conformance(self, base_type Type) Bool = {
+        // Mint the Drop protocol's DECLARATION first, then compare against it.
+        // Asking `has_explicit_trait_conformance(_, "Drop")` before that is a
+        // spelling lookup, and a user trait also called `Drop` would answer.
+        if not self.is_std_drop_trait("Drop") then {
+            return false;
+        };
+        let drop_def_id = self.context().std_drop_trait_def_id() or else {
+            return false;
+        };
         let normalized = when base_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
@@ -344,10 +337,7 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner,
             _ then base_type,
         };
-        if not self.has_explicit_trait_conformance(normalized, "Drop") then {
-            return false;
-        };
-        return self.is_std_drop_trait("Drop");
+        return self.has_explicit_trait_conformance(normalized, drop_def_id, "Drop");
     };
 
     module_private resolve_source_method_signature(
@@ -481,40 +471,43 @@ given TypeChecker {
                 .Some(template) then {
                     for tp in template.type_parameters then {
                         for constraint in tp.constraints then {
-                            // Shape bounds name no trait, so there is no trait
-                            // declaration to check visibility for.
-                            let trait_name = bound_trait_name(constraint) or else {
-                                continue;
-                            };
-                            when self.storage.trait_registry.get_in_module(
-                                trait_name,
-                                self.storage.module_path,
-                            ) in {
-                                .Some(info) then {
-                                    if self.make_visibility_checker() is .Some(checker) then {
-                                        when checker.check_symbol(
-                                            info.module_path,
-                                            trait_name,
-                                            false,
-                                        ) in {
-                                            .Ok(_) then {},
-                                            .Error(message) then {
-                                                self.push_diagnostic(
-                                                    message.message(),
-                                                    span,
-                                                );
-                                                return make_typed_expr_at(
-                                                    TypedExprKind.Variable(
-                                                        normalized_sym,
-                                                    ),
-                                                    normalized_sym.symbol_type,
-                                                    span,
-                                                );
-                                            },
-                                        };
+                            // Match on the bound's KIND. A shape bound names no
+                            // trait, so there is no declaration to check
+                            // visibility for; a trait bound carries the one it
+                            // requires and that is what is looked up.
+                            when constraint in {
+                                .Trait(trait_def_id, trait_name, _) then {
+                                    when self.storage.trait_registry.get_by_def_id(
+                                        trait_def_id,
+                                    ) in {
+                                        .Some(info) then {
+                                            if self.make_visibility_checker() is .Some(checker) then {
+                                                when checker.check_symbol(
+                                                    info.module_path,
+                                                    trait_name,
+                                                    false,
+                                                ) in {
+                                                    .Ok(_) then {},
+                                                    .Error(message) then {
+                                                        self.push_diagnostic(
+                                                            message.message(),
+                                                            span,
+                                                        );
+                                                        return make_typed_expr_at(
+                                                            TypedExprKind.Variable(
+                                                                normalized_sym,
+                                                            ),
+                                                            normalized_sym.symbol_type,
+                                                            span,
+                                                        );
+                                                    },
+                                                };
+                                            };
+                                        },
+                                        .None() then {},
                                     };
                                 },
-                                .None() then {},
+                                .Mutable() or .Foreign() then {},
                             };
                         };
                     };
@@ -934,27 +927,25 @@ given TypeChecker {
                 member,
             ),
             .BorrowedReferenceType(inner) then self.resolve_member_type(inner, member),
-            .WeakReferenceType(inner) then {
-                let resolved = self.resolve_member_type(inner, member);
-                let has_method = raw_method is .Some(_) or visible_method is .Some(_);
-                self.report_weak_member_access_issue_if_needed(
-                    resolved,
-                    has_method,
+            .WeakReferenceType(_) then {
+                // A weak handle carries no members of its own: the referent's
+                // fields and methods are reachable only after `upgrade`. Report
+                // the member against the HANDLE's type so the reader sees `?T`,
+                // not the type hiding behind it.
+                let _ = self.report_missing_member_if_needed(
                     typed_base.expr_type,
                     member,
+                    expr_span(base),
                 );
-                resolved
+                Type.Unknown()
             },
-            .MutableWeakReferenceType(inner) then {
-                let resolved = self.resolve_member_type(inner, member);
-                let has_method = raw_method is .Some(_) or visible_method is .Some(_);
-                self.report_weak_member_access_issue_if_needed(
-                    resolved,
-                    has_method,
+            .MutableWeakReferenceType(_) then {
+                let _ = self.report_missing_member_if_needed(
                     typed_base.expr_type,
                     member,
+                    expr_span(base),
                 );
-                resolved
+                Type.Unknown()
             },
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
@@ -1555,6 +1546,16 @@ given TypeChecker {
         actual_type Type,
         expected_trait_type Type,
     ) Bool = {
+        // The expected type IS a trait object and carries the trait's
+        // DECLARATION. Spelling it out and resolving the name back is a
+        // DefId -> name -> DefId round-trip, and the name lands in whichever
+        // module is checking rather than the one that wrote the expectation.
+        let expected_trait_id = when expected_trait_type in {
+            .TraitObject(trait_object_def_id, _) then trait_object_def_id,
+            _ then self.trait_def_id_of(self.trait_name_from_type(expected_trait_type)) or else DefId(
+                0(UInt),
+            ),
+        };
         let expected_trait_name = self.trait_name_from_type(expected_trait_type);
         let normalized = when actual_type in {
             .MutableReferenceType(inner) then inner,
@@ -1572,9 +1573,6 @@ given TypeChecker {
             ) in {
                 .Some(constraints) then {
                     let mutable matched = false;
-                    let expected_trait_id = self.trait_def_id_of(expected_trait_name) or else DefId(
-                        0(UInt),
-                    );
                     for constraint in constraints then {
                         if constraint.trait_def_id == expected_trait_id then {
                             matched = true;
@@ -1584,13 +1582,14 @@ given TypeChecker {
                 },
                 .None() then false,
             },
-            // The expected type is a trait OBJECT and carries the trait's type
-            // arguments (`Sink[Int]`). Passing the name alone asks "does this
-            // conform to Sink with NO arguments", which every parameterized
-            // conformance answers no to -- `let s Sink[Int] = b` used to fail
-            // with `Type mismatch: expected *Sink, got Box[Int]`.
+            // The expected type carries the trait's type arguments
+            // (`Sink[Int]`). Passing no arguments would ask "does this conform
+            // to Sink with NO arguments", which every parameterized conformance
+            // answers no to -- `let s Sink[Int] = b` used to fail with
+            // `Type mismatch: expected *Sink, got Box[Int]`.
             _ then self.satisfies_trait_requirement_with_args(
                 normalized,
+                expected_trait_id,
                 expected_trait_name,
                 self.trait_object_type_args(expected_trait_type),
             ),

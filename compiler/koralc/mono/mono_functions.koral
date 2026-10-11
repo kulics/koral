@@ -52,13 +52,20 @@ file_private let skip_instantiation_with_unsatisfied_constraints(
             // here: sema already rejects a call that violates one, and skipping
             // the instantiation of a function the compiler itself still needs
             // leaves a hole in the emitted C.
-            when bound_trait_name(constraint) in {
-                .Some(trait_name) then {
-                    if not type_satisfies_trait_constraint(mono, actual_type, trait_name) then {
+            //
+            // A trait bound carries the DECLARATION it requires, resolved when
+            // the template was registered in the module that wrote it.
+            when constraint in {
+                .Trait(trait_def_id, _, _) then {
+                    if not type_satisfies_trait_constraint(
+                        mono,
+                        actual_type,
+                        trait_def_id,
+                    ) then {
                         return true;
                     };
                 },
-                .None() then {},
+                .Mutable() or .Foreign() then {},
             };
         };
         i += 1;
@@ -665,16 +672,16 @@ file_private let resolve_template_name_and_args(
     };
 };
 
-file_private let trait_name_matches(mono Monomorphizer, left String, right String) Bool = {
-    let left_def_id = when mono.storage.generic_templates.traits.get(left) in {
-        .Some(info) then info.def_id,
-        .None() then def_id_invalid(),
-    };
-    let right_def_id = when mono.storage.generic_templates.traits.get(right) in {
-        .Some(info) then info.def_id,
-        .None() then def_id_invalid(),
-    };
-    return left_def_id.is_valid() and right_def_id.is_valid() and left_def_id == right_def_id;
+/// Whether two trait identities name the same DECLARATION.
+///
+/// This is the only shape the comparison may take. Accepting two spellings and
+/// resolving each one here is what let two same-named traits from different
+/// modules answer for each other: both spellings land on whichever declaration
+/// last wrote the unqualified index, so the test came out true for any pair.
+/// Callers hold the identity on the record they are filtering (`conformance_trait_def_id`,
+/// `GivenTraitDecl.trait_def_id`, the bound's own `def_id`) and must pass that.
+public let trait_identity_matches(left DefId, right DefId) Bool = {
+    return left.is_valid() and right.is_valid() and left == right;
 };
 
 file_private let lookup_extension_methods_fuzzy(
@@ -737,26 +744,9 @@ file_private let lookup_extension_methods_fuzzy(
     return Option[List[GenericExtensionMethodTemplate]].Some(merged);
 };
 
-/// Owner identity of a trait known only by its spelling.
-///
-/// RESOLUTION happens here, once: the spelling is matched to a declaration and
-/// the identity is that declaration's. A call site that already holds the
-/// trait's `DefId` must use `MethodOwner.Decl` directly instead.
-/// Owner identity of a trait known only by its spelling.
-///
-/// RESOLUTION, not identity: this runs where only the trait's name is in hand.
-/// The identity is the trait's declaration (rustc_resolve). A call site that
-/// already holds the trait's `DefId` must use `MethodOwner.Decl` directly.
-public let trait_owner_by_name(mono Monomorphizer, trait_name String) Option[MethodOwner] = {
-    return when mono.storage.generic_templates.traits.get(trait_name) in {
-        .Some(info) then Option[MethodOwner].Some(MethodOwner.Decl(info.def_id)),
-        .None() then Option[MethodOwner].None(),
-    };
-};
-
 file_private let select_trait_tool_template_cached(
     mono Monomorphizer,
-    trait_name String,
+    trait_def_id DefId,
     method_name String,
     method_type_arg_count Option[UInt],
     trait_arg_count Option[UInt],
@@ -769,21 +759,14 @@ file_private let select_trait_tool_template_cached(
         .Some(count) then count.to_string(),
         .None() then "*",
     };
-    // Resolve the owner ONCE and key the cache on its identity. Keying on
-    // `trait_name` would put two same-named traits from different modules in one
-    // slot. A `Builtin` owner's name is its identity inside the closed
-    // primitive space, not a lookup (see `primitive_extension_template_name`).
-    let trait_owner_opt = trait_owner_by_name(mono, trait_name);
-    let owner_key = when trait_owner_opt in {
-        .Some(owner) then when owner in {
-            .Decl(def_id) then "d\(def_id.id)",
-            .Builtin(builtin_name) then "b:\(builtin_name)",
-        },
-        .None() then {
-            return Option[GenericExtensionMethodTemplate].None();
-        },
+    // The owner IS the trait's declaration -- no spelling is consulted on the
+    // way in. The cache key is that identity too, so two same-named traits from
+    // different modules cannot share a slot.
+    if not trait_def_id.is_valid() then {
+        return Option[GenericExtensionMethodTemplate].None();
     };
-    let cache_key = "\(owner_key)|\(method_name)|\(method_count_key)|\(trait_count_key)";
+    let trait_owner = MethodOwner.Decl(trait_def_id);
+    let cache_key = "d\(trait_def_id.id)|\(method_name)|\(method_count_key)|\(trait_count_key)";
 
     if mono.storage.trait_tool_template_missing.contains(cache_key) then {
         return Option[GenericExtensionMethodTemplate].None();
@@ -795,16 +778,13 @@ file_private let select_trait_tool_template_cached(
         .None() then {},
     };
 
-    let selected = when trait_owner_opt in {
-        .Some(trait_owner) then when lookup_extension_methods_fuzzy(mono, trait_owner) in {
-            .Some(tool_templates) then select_extension_template(
-                tool_templates,
-                method_name,
-                method_type_arg_count,
-                trait_arg_count,
-            ),
-            .None() then Option[GenericExtensionMethodTemplate].None(),
-        },
+    let selected = when lookup_extension_methods_fuzzy(mono, trait_owner) in {
+        .Some(tool_templates) then select_extension_template(
+            tool_templates,
+            method_name,
+            method_type_arg_count,
+            trait_arg_count,
+        ),
         .None() then Option[GenericExtensionMethodTemplate].None(),
     };
 
@@ -820,12 +800,15 @@ file_private let select_trait_tool_template_cached(
 
 file_private let lookup_given_trait_decls_fuzzy(
     mono Monomorphizer,
-    trait_name String,
+    trait_def_id DefId,
 ) Option[List[TypedDecl]] = {
-    if mono.storage.fuzzy_given_trait_decls_missing.contains(trait_name) then {
+    // Keyed on the DECLARATION, never on a spelling: two same-named traits
+    // would otherwise share a cache slot and hand each other's `given`s out.
+    let key = "d\(trait_def_id.id)";
+    if mono.storage.fuzzy_given_trait_decls_missing.contains(key) then {
         return Option[List[TypedDecl]].None();
     };
-    when mono.storage.fuzzy_given_trait_decls_cache.get(trait_name) in {
+    when mono.storage.fuzzy_given_trait_decls_cache.get(key) in {
         .Some(cached) then {
             return Option[List[TypedDecl]].Some(cached);
         },
@@ -835,8 +818,8 @@ file_private let lookup_given_trait_decls_fuzzy(
     let mutable matches = List[TypedDecl].new();
     for node_ref in mono.storage.source_given_decls then {
         when node_ref in {
-            .GivenTraitDecl(_, node_trait_name, _, _, _, _) then {
-                if trait_name_matches(mono, node_trait_name, trait_name) then {
+            .GivenTraitDecl(_, _, _, _, _, given_trait_def_id) then {
+                if trait_identity_matches(given_trait_def_id, trait_def_id) then {
                     matches.push(node_ref);
                 };
             },
@@ -845,10 +828,10 @@ file_private let lookup_given_trait_decls_fuzzy(
     };
 
     if matches.is_empty() then {
-        mono.storage.fuzzy_given_trait_decls_missing.insert(trait_name);
+        mono.storage.fuzzy_given_trait_decls_missing.insert(key);
         return Option[List[TypedDecl]].None();
     };
-    mono.storage.fuzzy_given_trait_decls_cache.insert(trait_name, matches);
+    mono.storage.fuzzy_given_trait_decls_cache.insert(key, matches);
     return Option[List[TypedDecl]].Some(matches);
 };
 
@@ -1206,7 +1189,7 @@ file_private let infer_trait_extension_type_args_for_template_binding(
     mono Monomorphizer,
     conformance_target Type,
     parameterized_base_type Type,
-    trait_name String,
+    trait_def_id DefId,
 ) List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches_for_template_binding(
@@ -1225,7 +1208,7 @@ file_private let infer_trait_extension_type_args_for_template_binding(
         bindings,
     );
 
-    when mono.storage.generic_templates.traits.get(trait_name) in {
+    when mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) in {
         .Some(info) then {
             for tp in info.type_params then {
                 out.push(bindings.get(tp.name) or else Type.Unknown());
@@ -1321,8 +1304,14 @@ public let resolve_extension_template_conformance_trait_args(
             return out;
         },
     };
+    let trait_def_id = when template.conformance_trait_def_id in {
+        .Some(id) then id,
+        .None() then {
+            return out;
+        },
+    };
     let parameterized_base_type = resolve_parameterized_type(mono, base_type);
-    when lookup_given_trait_decls_fuzzy(mono, trait_name) in {
+    when lookup_given_trait_decls_fuzzy(mono, trait_def_id) in {
         .Some(given_nodes) then {
             for node_ref in given_nodes then {
                 when node_ref in {
@@ -1349,7 +1338,7 @@ public let resolve_extension_template_conformance_trait_args(
                             mono,
                             target_type,
                             parameterized_base_type,
-                            trait_name,
+                            trait_def_id,
                         );
                         if not inferred.is_empty() then {
                             return inferred;
@@ -1362,52 +1351,6 @@ public let resolve_extension_template_conformance_trait_args(
         .None() then {},
     };
     return out;
-};
-
-file_private let conformance_method_has_explicit_body(
-    mono Monomorphizer,
-    base_type Type,
-    trait_name String,
-    method_name String,
-    has_checked_body Bool,
-) Bool = {
-    let _ = has_checked_body;
-    let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
-    let mutable explicit = false;
-    when lookup_given_trait_decls_fuzzy(mono, trait_name) in {
-        .Some(given_nodes) then {
-            for node_ref in given_nodes then {
-                when node_ref in {
-                    .GivenTraitDecl(target_type, _, _, members, _, _) then {
-                        let target_matches = trait_conformance_target_matches(
-                            mono,
-                            target_type,
-                            parameterized_base_type,
-                        ) or trait_conformance_target_matches_for_template_binding(
-                            mono,
-                            target_type,
-                            parameterized_base_type,
-                        );
-                        if not target_matches then {
-                            continue;
-                        };
-                        for member_ref in members then {
-                            if member_ref.name == method_name then {
-                                explicit = true;
-                                break;
-                            };
-                        };
-                    },
-                    _ then {},
-                };
-                if explicit then {
-                    break;
-                };
-            };
-        },
-        .None() then {},
-    };
-    return explicit;
 };
 
 public let instantiate_conformance_trait_methods_for_type(
@@ -1446,7 +1389,7 @@ public let instantiate_conformance_trait_methods_for_type(
                     mono,
                     target_type,
                     parameterized_base_type,
-                    trait_name,
+                    trait_def_id,
                 )
                 else resolve_given_trait_args(
                     mono,
@@ -1520,10 +1463,14 @@ public let instantiate_conformance_trait_methods_for_type(
     );
 };
 
+/// Instantiate the conformance method `method_name` for `base_type`, under the
+/// trait DECLARATION `trait_def_id`. The `given`s that can provide the method
+/// are selected by identity -- two same-named traits do not answer for each
+/// other.
 public let instantiate_conformance_trait_method_for_type(
     mono Monomorphizer,
     base_type Type,
-    trait_name String,
+    trait_def_id DefId,
     method_name String,
     method_type_args List[Type],
 ) Void = {
@@ -1538,8 +1485,8 @@ public let instantiate_conformance_trait_method_for_type(
 
     for node_ref in mono.storage.source_given_decls then {
         when node_ref in {
-            .GivenTraitDecl(target_type, given_trait_name, trait_args, members, _, _) then {
-                if not trait_name_matches(mono, given_trait_name, trait_name) then {
+            .GivenTraitDecl(target_type, _, trait_args, members, _, given_trait_def_id) then {
+                if not trait_identity_matches(given_trait_def_id, trait_def_id) then {
                     continue;
                 };
                 if not trait_conformance_target_shallow_matches(
@@ -1563,7 +1510,7 @@ public let instantiate_conformance_trait_method_for_type(
                     mono,
                     target_type,
                     parameterized_base_type,
-                    given_trait_name,
+                    given_trait_def_id,
                 )
                 else resolve_given_trait_args(
                     mono,
@@ -1573,7 +1520,7 @@ public let instantiate_conformance_trait_method_for_type(
                 );
                 when select_trait_tool_template_cached(
                     mono,
-                    given_trait_name,
+                    given_trait_def_id,
                     method_name,
                     method_type_arg_count,
                     Option[UInt].Some(effective_trait_args.count()),
@@ -1581,9 +1528,7 @@ public let instantiate_conformance_trait_method_for_type(
                     .Some(tool_template_ref) then {
                         let _ = mono.instantiate_extension_method_impl(
                             parameterized_base_type,
-                            trait_owner_by_name(mono, given_trait_name) or else MethodOwner.Builtin(
-                                given_trait_name,
-                            ),
+                            MethodOwner.Decl(given_trait_def_id),
                             tool_template_ref,
                             effective_trait_args,
                             method_type_args,
@@ -1599,13 +1544,13 @@ public let instantiate_conformance_trait_method_for_type(
 
     for ext_entry in mono.storage.generic_templates.extension_methods then {
         for template_ref in ext_entry.second then {
-            let conformance_trait_name = when template_ref.conformance_trait_name in {
-                .Some(name) then name,
+            let conformance_trait_def_id = when template_ref.conformance_trait_def_id in {
+                .Some(id) then id,
                 .None() then {
                     continue;
                 },
             };
-            if not trait_name_matches(mono, conformance_trait_name, trait_name) then {
+            if not trait_identity_matches(conformance_trait_def_id, trait_def_id) then {
                 continue;
             };
             if template_ref.method.name <> method_name then {
@@ -2725,7 +2670,7 @@ file_private let infer_trait_extension_type_args(
     mono Monomorphizer,
     conformance_target Type,
     parameterized_base_type Type,
-    trait_name String,
+    trait_def_id DefId,
 ) List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches(
@@ -2744,7 +2689,10 @@ file_private let infer_trait_extension_type_args(
         bindings,
     );
 
-    when mono.storage.generic_templates.traits.get(trait_name) in {
+    // The trait DECLARATION, not whichever same-named one last wrote the
+    // unqualified index -- the parameter names being read here belong to the
+    // trait the caller means.
+    when mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) in {
         .Some(info) then {
             for tp in info.type_params then {
                 out.push(bindings.get(tp.name) or else Type.Unknown());
@@ -2979,7 +2927,7 @@ file_private let infer_trait_args_from_extension_template_binding(
     mono Monomorphizer,
     template GenericExtensionMethodTemplate,
     concrete_extension_type_args List[Type],
-    trait_name String,
+    trait_def_id DefId,
 ) List[Type] = {
     let mutable out = List[Type].new();
     let mutable bindings = Dict[String, Type].new();
@@ -2992,7 +2940,10 @@ file_private let infer_trait_args_from_extension_template_binding(
         i += 1;
     };
 
-    when mono.storage.generic_templates.traits.get(trait_name) in {
+    // The trait DECLARATION: the members being unified against are the ones the
+    // caller means, not whichever same-named trait last wrote the unqualified
+    // index.
+    when mono.storage.generic_templates.lookup_trait_by_def_id(trait_def_id) in {
         .Some(info) then {
             let mutable wanted = Set[String].new();
             for trait_tp in info.type_params then {
@@ -3060,45 +3011,6 @@ file_private let infer_trait_args_from_extension_template_binding(
     return out;
 };
 
-file_private let infer_trait_args_from_owner_next_template(
-    mono Monomorphizer,
-    owner MethodOwner,
-    trait_name String,
-    concrete_extension_type_args List[Type],
-) List[Type] = {
-    let mutable out = List[Type].new();
-    when mono.storage.generic_templates.lookup_extension_methods(owner) in {
-        .Some(owner_templates) then {
-            for owner_template in owner_templates then {
-                if owner_template.method.name <> "next" then {
-                    continue;
-                };
-                when owner_template.conformance_trait_name in {
-                    .Some(owner_trait_name) then {
-                        if not trait_name_matches(mono, owner_trait_name, trait_name) then {
-                            continue;
-                        };
-                    },
-                    .None() then {
-                        continue;
-                    },
-                };
-                let inferred = infer_trait_args_from_extension_template_binding(
-                    mono,
-                    owner_template,
-                    concrete_extension_type_args,
-                    trait_name,
-                );
-                if not inferred.is_empty() then {
-                    return inferred;
-                };
-            };
-        },
-        .None() then {},
-    };
-    return out;
-};
-
 /// The built-in's name within the CLOSED primitive space, so extension methods
 /// declared on `Int` / `Bool` / ... can be reached.
 ///
@@ -3128,20 +3040,24 @@ file_private let primitive_extension_template_name(t Type) Option[String] = {
 };
 
 /// Whether `actual_type` satisfies one bound. Dispatches on the bound's KIND,
-/// never on its spelling: a trait bound asks the conformance registry, a shape
-/// bound (`mutable` / `foreign`) asks the type's own declaration. Ignoring a
-/// shape bound here is what let `given[T foreign]` methods vanish from the
-/// emitted C while the call still compiled.
+/// never on its spelling: a trait bound asks the conformance registry for the
+/// trait's DECLARATION, a shape bound (`mutable` / `foreign`) asks the type's
+/// own declaration. Ignoring a shape bound here is what let `given[T foreign]`
+/// methods vanish from the emitted C while the call still compiled.
 file_private let type_satisfies_bound_constraint(
     mono Monomorphizer,
     actual_type Type,
     constraint Bound,
 ) Bool = {
     return when constraint in {
-        .Trait(_, _, _) then type_satisfies_trait_constraint(
+        // `def_id` was resolved when the enclosing template was registered, in
+        // the module that wrote the bound. Looking the spelling up again here
+        // would ask a table that is last-wins across modules which `Tag` was
+        // meant, and two same-named traits would answer for each other.
+        .Trait(def_id, _, _) then type_satisfies_trait_constraint(
             mono,
             actual_type,
-            bound_base_name(constraint),
+            def_id,
         ),
         .Mutable() then type_satisfies_mutable_bound(mono, actual_type),
         .Foreign() then type_satisfies_foreign_bound(mono, actual_type),
@@ -3177,10 +3093,13 @@ file_private let type_satisfies_foreign_bound(mono Monomorphizer, actual_type Ty
     };
 };
 
+/// Whether `actual_type` has a conformance for the trait DECLARATION
+/// `trait_def_id`. The match is on identity, so two same-named traits from
+/// different modules cannot answer for each other.
 file_private let type_satisfies_trait_constraint(
     mono Monomorphizer,
     actual_type Type,
-    trait_name String,
+    trait_def_id DefId,
 ) Bool = {
 
     let mutable parameterized_actual_type = resolve_parameterized_type(mono, actual_type);
@@ -3264,12 +3183,11 @@ file_private let type_satisfies_trait_constraint(
             ) or else List[GenericExtensionMethodTemplate].new();
             let mutable saw_matching_template = false;
             for template_ref in matching_templates then {
-                when template_ref.conformance_trait_name in {
-                    .Some(conformance_trait_name) then {
-                        if not trait_name_matches(
-                            mono,
-                            conformance_trait_name,
-                            trait_name,
+                when template_ref.conformance_trait_def_id in {
+                    .Some(conformance_trait_def_id) then {
+                        if not trait_identity_matches(
+                            conformance_trait_def_id,
+                            trait_def_id,
                         ) then {
                             continue;
                         };
@@ -3299,8 +3217,8 @@ file_private let type_satisfies_trait_constraint(
 
     for node_ref in mono.storage.source_given_decls then {
         when node_ref in {
-            .GivenTraitDecl(target_type, given_trait_name, _, _, _, _) then {
-                if not trait_name_matches(mono, given_trait_name, trait_name) then {
+            .GivenTraitDecl(target_type, _, _, _, _, given_trait_def_id) then {
+                if not trait_identity_matches(given_trait_def_id, trait_def_id) then {
                     continue;
                 };
                 if trait_conformance_target_matches(
@@ -3620,9 +3538,12 @@ file_private let instantiate_trait_vtable_methods_core(
         when mono.storage.generic_templates.lookup_extension_methods(candidate_owner) in {
             .Some(templates) then {
                 for template_ref in templates then {
-                    when template_ref.conformance_trait_name in {
-                        .Some(name) then {
-                            if not trait_name_matches(mono, name, trait_name) then {
+                    when template_ref.conformance_trait_def_id in {
+                        .Some(conformance_trait_def_id) then {
+                            if not trait_identity_matches(
+                                conformance_trait_def_id,
+                                trait_def_id,
+                            ) then {
                                 continue;
                             };
                         },
@@ -4215,7 +4136,7 @@ public let instantiate_trait_placeholder_method(
         .None() then {
             for node_ref in mono.storage.source_given_decls then {
                 when node_ref in {
-                    .GivenTraitDecl(target_type, trait_name, trait_args, _, _, _) then {
+                    .GivenTraitDecl(target_type, _, trait_args, _, _, given_trait_def_id) then {
                         if not trait_conformance_target_matches(
                             mono,
                             target_type,
@@ -4235,7 +4156,7 @@ public let instantiate_trait_placeholder_method(
                         );
                         when select_trait_tool_template_cached(
                             mono,
-                            trait_name,
+                            given_trait_def_id,
                             method_name,
                             method_type_arg_count,
                             Option[UInt].Some(inferred_trait_args.count()),
@@ -4247,9 +4168,7 @@ public let instantiate_trait_placeholder_method(
                                 // a body — the conformance must provide one via GivenTraitDecl.
                                 let _ = mono.instantiate_extension_method_impl(
                                     resolved_base_type,
-                                    trait_owner_by_name(mono, trait_name) or else MethodOwner.Builtin(
-                                        trait_name,
-                                    ),
+                                    MethodOwner.Decl(given_trait_def_id),
                                     tool_template_ref,
                                     inferred_trait_args,
                                     method_type_args,
@@ -4305,8 +4224,8 @@ public let instantiate_trait_placeholder_method(
             ) in {
                 .Some(ext_templates) then {
                     for ext_ref in ext_templates then {
-                        when ext_ref.conformance_trait_name in {
-                            .Some(trait_name) then {
+                        when ext_ref.conformance_trait_def_id in {
+                            .Some(conformance_trait_def_id) then {
                                 let inferred_trait_args_from_conformance = resolve_extension_template_conformance_trait_args(
                                     mono,
                                     resolved_base_type,
@@ -4320,12 +4239,12 @@ public let instantiate_trait_placeholder_method(
                                         mono,
                                         ext_ref,
                                         conformance_binding_type_args,
-                                        trait_name,
+                                        conformance_trait_def_id,
                                     )
                                 };
                                 when select_trait_tool_template_cached(
                                     mono,
-                                    trait_name,
+                                    conformance_trait_def_id,
                                     method_name,
                                     method_type_arg_count,
                                     Option[UInt].Some(inferred_trait_args.count()),
@@ -4359,8 +4278,8 @@ public let instantiate_trait_placeholder_method(
             };
             for ext_entry in mono.storage.generic_templates.extension_methods then {
                 for ext_ref in ext_entry.second then {
-                    let trait_name = when ext_ref.conformance_trait_name in {
-                        .Some(name) then name,
+                    let conformance_trait_def_id = when ext_ref.conformance_trait_def_id in {
+                        .Some(id) then id,
                         .None() then {
                             continue;
                         },
@@ -4391,7 +4310,7 @@ public let instantiate_trait_placeholder_method(
                         mono,
                         ext_ref,
                         conformance_binding_type_args,
-                        trait_name,
+                        conformance_trait_def_id,
                     );
                     let effective_trait_args = if not resolved_from_conformance.is_empty(
                     ) then {
@@ -4401,7 +4320,7 @@ public let instantiate_trait_placeholder_method(
                     ) else Option[UInt].Some(effective_trait_args.count());
                     when select_trait_tool_template_cached(
                         mono,
-                        trait_name,
+                        conformance_trait_def_id,
                         method_name,
                         method_type_arg_count,
                         trait_arg_count_filter,
@@ -4428,7 +4347,7 @@ public let instantiate_trait_placeholder_method(
             };
             for node_ref in mono.storage.source_given_decls then {
                 when node_ref in {
-                    .GivenTraitDecl(target_type, trait_name, trait_args, _, _, _) then {
+                    .GivenTraitDecl(target_type, _, trait_args, _, _, given_trait_def_id) then {
                         if not trait_conformance_target_matches(
                             mono,
                             target_type,
@@ -4452,12 +4371,11 @@ public let instantiate_trait_placeholder_method(
                                     if owner_template.method.name <> method_name then {
                                         continue;
                                     };
-                                    when owner_template.conformance_trait_name in {
-                                        .Some(owner_trait_name) then {
-                                            if trait_name_matches(
-                                                mono,
-                                                owner_trait_name,
-                                                trait_name,
+                                    when owner_template.conformance_trait_def_id in {
+                                        .Some(owner_trait_def_id) then {
+                                            if trait_identity_matches(
+                                                owner_trait_def_id,
+                                                given_trait_def_id,
                                             ) then {
                                                 found = Option[GenericExtensionMethodTemplate].Some(
                                                     owner_template,
@@ -4476,7 +4394,7 @@ public let instantiate_trait_placeholder_method(
                             mono,
                             target_type,
                             parameterized_resolved_base_type,
-                            trait_name,
+                            given_trait_def_id,
                         );
                         let resolved_trait_args = if trait_args.is_empty() then List[Type].new(
                         )
@@ -4499,7 +4417,7 @@ public let instantiate_trait_placeholder_method(
                                 mono,
                                 owner_template_ref,
                                 conformance_binding_type_args,
-                                trait_name,
+                                given_trait_def_id,
                             ),
                             .None() then List[Type].new(),
                         };
@@ -4512,7 +4430,7 @@ public let instantiate_trait_placeholder_method(
                         } else inferred_trait_args;
                         when select_trait_tool_template_cached(
                             mono,
-                            trait_name,
+                            given_trait_def_id,
                             method_name,
                             method_type_arg_count,
                             Option[UInt].Some(effective_trait_args.count()),
@@ -4549,13 +4467,13 @@ public let instantiate_trait_placeholder_method(
         },
     };
 
-    let should_use_trait_fallback = when matched_template.conformance_trait_name in {
+    let should_use_trait_fallback = when matched_template.conformance_trait_def_id in {
         .Some(_) then true,
         .None() then false,
     };
     if should_use_trait_fallback then {
-        when matched_template.conformance_trait_name in {
-            .Some(trait_name) then {
+        when matched_template.conformance_trait_def_id in {
+            .Some(conformance_trait_def_id) then {
                 let resolved_from_conformance = resolve_extension_template_conformance_trait_args(
                     mono,
                     resolved_base_type,
@@ -4565,7 +4483,7 @@ public let instantiate_trait_placeholder_method(
                     mono,
                     matched_template,
                     conformance_binding_type_args,
-                    trait_name,
+                    conformance_trait_def_id,
                 );
                 let effective_trait_args = if not resolved_from_conformance.is_empty() then {
                     resolved_from_conformance
@@ -4574,7 +4492,7 @@ public let instantiate_trait_placeholder_method(
                 } else List[Type].new();
                 when select_trait_tool_template_cached(
                     mono,
-                    trait_name,
+                    conformance_trait_def_id,
                     method_name,
                     method_type_arg_count,
                     Option[UInt].Some(effective_trait_args.count()),
@@ -4606,7 +4524,7 @@ public let instantiate_trait_placeholder_method(
         };
         for node_ref in mono.storage.source_given_decls then {
             when node_ref in {
-                .GivenTraitDecl(target_type, trait_name, trait_args, _, _, _) then {
+                .GivenTraitDecl(target_type, _, trait_args, _, _, given_trait_def_id) then {
                     if not trait_conformance_target_matches(
                         mono,
                         target_type,
@@ -4622,7 +4540,7 @@ public let instantiate_trait_placeholder_method(
                         mono,
                         target_type,
                         parameterized_resolved_base_type,
-                        trait_name,
+                        given_trait_def_id,
                     );
                     let resolved_trait_args = if trait_args.is_empty() then List[Type].new(
                     )
@@ -4641,7 +4559,7 @@ public let instantiate_trait_placeholder_method(
                         mono,
                         matched_template,
                         conformance_binding_type_args,
-                        trait_name,
+                        given_trait_def_id,
                     );
                     let effective_trait_args = if not resolved_trait_args.is_empty() then {
                         resolved_trait_args
@@ -4652,7 +4570,7 @@ public let instantiate_trait_placeholder_method(
                     } else inferred_trait_args;
                     when select_trait_tool_template_cached(
                         mono,
-                        trait_name,
+                        given_trait_def_id,
                         method_name,
                         method_type_arg_count,
                         Option[UInt].Some(effective_trait_args.count()),

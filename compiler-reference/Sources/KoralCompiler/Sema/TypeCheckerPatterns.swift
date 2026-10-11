@@ -548,14 +548,16 @@ extension TypeChecker {
 
   /// The matched value behind a positional destructuring: a reference subject
   /// is destructured at its pointee, exactly like the named struct pattern.
+  /// A reference is an alias of the referent, so it peels. A weak handle is
+  /// NOT: it is a HANDLE, opaque until `upgrade`d, with no fields. Peeling it
+  /// here is what let `let (a, b) = <a ?Pair>` destructure the referent behind
+  /// the handle.
   func unwrapTupleSubjectType(_ subjectType: Type) -> Type {
     switch subjectType {
     case .reference(let inner),
          .mutableReference(let inner),
          .borrowedReference(let inner),
-         .mutableBorrowedReference(let inner),
-         .weakReference(let inner),
-         .mutableWeakReference(let inner):
+         .mutableBorrowedReference(let inner):
       return inner
     default:
       return subjectType

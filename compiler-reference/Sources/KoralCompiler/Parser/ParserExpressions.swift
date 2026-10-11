@@ -67,43 +67,254 @@ extension Parser {
     // Named labels are now allowed for all calls (functions, methods, constructors)
   }
 
-  private func tryParseMethodTypeArguments() throws -> [TypeNode]? {
-    guard currentToken === .leftBracket else { return nil }
+  // MARK: - Bounded shape classification
+  //
+  // Parsing ambiguity is decided by SHAPE, not by "try to parse, fall back and
+  // re-parse". A trial parse has to save and restore the lexer, has to invent a
+  // failure path per alternative, and the branch that fails swallows the
+  // diagnostic the real parse would have produced. These predicates only look
+  // at a BOUNDED run of tokens: they build no tree and report nothing. The
+  // stream is restored either way -- that is how a streaming lexer gets
+  // lookahead -- and the caller then parses the alternative for real.
+  //
+  // The shapes mirror `parseType` exactly: type prefixes (`?`, `*unsafe`
+  // [`mutable`]) plus a type head (`Self`, an upper-first identifier, or
+  // `Func(...)` followed by its return type), with an optional
+  // `[` `<type-list>` `]` after the head. Bare `*` is NOT a type start: `f(*p)`
+  // dereferences, it does not cast.
 
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-
-    do {
-      let typeArgs = try parseBracketedTypeArguments()
-      guard currentToken === .leftParen else {
-        lexer.restoreState(savedLexer)
-        currentToken = savedToken
-        return nil
-      }
-      return typeArgs
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return nil
+  /// Non-throwing advance, for the shape scanner only: classification must not
+  /// fail on a lexer error, it just runs out of tokens and says "no".
+  private func advanceShape() {
+    if let next = try? lexer.getNextToken() {
+      currentToken = next
+    } else {
+      currentToken = .eof
     }
   }
 
-  private func hasBareMethodTypeArguments() -> Bool {
-    guard currentToken === .leftBracket else { return false }
+  /// Whether a type starts at the cursor.
+  private func shapeStartsType() -> Bool {
+    switch currentToken {
+    case .questionMark, .selfTypeKeyword:
+      return true
+    case .multiply:
+      return lexer.peekNextToken() === .unsafeKeyword
+    case .identifier(let name):
+      return isValidTypeName(name)
+    default:
+      return false
+    }
+  }
 
+  /// Whether the run at the cursor is exactly one type. Restores the stream.
+  @discardableResult
+  private func scanTypeShape() -> Bool {
     let savedLexer = lexer.saveState()
     let savedToken = currentToken
     defer {
       lexer.restoreState(savedLexer)
       currentToken = savedToken
     }
+    return scanTypeShapeConsuming()
+  }
 
-    do {
-      _ = try parseBracketedTypeArguments()
-      return currentToken !== .leftParen
-    } catch {
+  /// The same scan, leaving the cursor just past the type it saw. Returns
+  /// false (without promising anything about the cursor) when the run is not
+  /// a type -- the caller only reaches this after `scanTypeShape` said yes.
+  private func scanTypeShapeConsuming() -> Bool {
+    // Prefixes: `?T`, `*unsafe T`, `*unsafe mutable T`. They nest.
+    var morePrefixes = true
+    while morePrefixes {
+      switch currentToken {
+      case .questionMark:
+        advanceShape()
+      case .multiply where lexer.peekNextToken() === .unsafeKeyword:
+        advanceShape()
+        advanceShape()
+        if currentToken === .mutableKeyword { advanceShape() }
+      default:
+        morePrefixes = false
+      }
+    }
+
+    switch currentToken {
+    case .selfTypeKeyword:
+      advanceShape()
+      return true
+    case .identifier(let name):
+      advanceShape()
+      if name == "Func", currentToken === .leftParen {
+        guard scanTypeParamListConsuming() else { return false }
+        return scanTypeShapeConsuming()
+      }
+      guard isValidTypeName(name) else { return false }
+      if currentToken === .leftBracket {
+        return scanTypeArgListConsuming()
+      }
+      return true
+    default:
       return false
     }
+  }
+
+  /// Whether `[` `<type-list>` `]` starts at the cursor. Restores the stream.
+  private func scanTypeArgList() -> Bool {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    return scanTypeArgListConsuming()
+  }
+
+  private func scanTypeArgListConsuming() -> Bool {
+    guard currentToken === .leftBracket else { return false }
+    advanceShape()
+    if currentToken === .rightBracket {
+      advanceShape()
+      return true
+    }
+    while true {
+      guard scanTypeShapeConsuming() else { return false }
+      switch currentToken {
+      case .comma:
+        advanceShape()
+        // A trailing comma is allowed: `[A, B,]`.
+        if currentToken === .rightBracket {
+          advanceShape()
+          return true
+        }
+      case .rightBracket:
+        advanceShape()
+        return true
+      default:
+        return false
+      }
+    }
+  }
+
+  private func scanTypeParamListConsuming() -> Bool {
+    guard currentToken === .leftParen else { return false }
+    advanceShape()
+    if currentToken === .rightParen {
+      advanceShape()
+      return true
+    }
+    while true {
+      guard scanTypeShapeConsuming() else { return false }
+      switch currentToken {
+      case .comma:
+        advanceShape()
+        if currentToken === .rightParen {
+          advanceShape()
+          return true
+        }
+      case .rightParen:
+        advanceShape()
+        return true
+      default:
+        return false
+      }
+    }
+  }
+
+  /// Whether `( <type> )` starts at the cursor -- the shape of both a postfix
+  /// cast `expr(Type)` and a Rust-style qualified path `Type(Trait)`. Which of
+  /// the two it is depends on the base, not on these tokens. Restores the
+  /// stream.
+  private func scanParenTypeSuffix() -> Bool {
+    guard currentToken === .leftParen else { return false }
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    advanceShape()
+    guard scanTypeShapeConsuming() else { return false }
+    guard currentToken === .rightParen else { return false }
+    return true
+  }
+
+  /// Whether `->`, or `<type> ->`, follows a lambda's parameter list.
+  /// Restores the stream.
+  private func lambdaReturnClauseFollows() -> Bool {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    if currentToken === .arrow { return true }
+    guard scanTypeShapeConsuming() else { return false }
+    return currentToken === .arrow
+  }
+
+  /// Whether the `(` at the cursor opens a lambda.
+  ///
+  /// SHAPE, not a trial parse: a lambda is `(params) [Type] -> ...`, so the
+  /// tell is a `->` immediately after the parameter list's `)`, or after an
+  /// optional return type written there. Nothing is built and nothing is
+  /// rolled back. This replaces a full trial parse of the parameters and body
+  /// that needed anti-backtracking patches -- it re-threw `rejectedConstruct`
+  /// and typed parameters "instead of backtracking into a worse diagnostic" --
+  /// which was the trial design telling on itself.
+  private func shapeIsLambda() -> Bool {
+    guard currentToken === .leftParen else { return false }
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    advanceShape() // `(`
+    if currentToken === .rightParen {
+      advanceShape()
+      return lambdaReturnClauseFollows()
+    }
+    // Non-empty parameters: the first token is a parameter name.
+    guard case .identifier = currentToken else { return false }
+    while true {
+      guard case .identifier = currentToken else { return false }
+      advanceShape()
+      // A parameter is `name [Type]`. `name: Type` is a MISTAKEN lambda
+      // parameter, and still a lambda: the real parse reports
+      // `Lambda parameters use 'name Type', not 'name: Type'`. A classifier
+      // that refused it would re-read the construct as a parenthesized
+      // expression and blame the `->` instead.
+      if currentToken === .colon {
+        advanceShape()
+        guard scanTypeShapeConsuming() else { return false }
+      } else if currentToken !== .comma && currentToken !== .rightParen {
+        guard scanTypeShapeConsuming() else { return false }
+      }
+      if currentToken === .comma {
+        advanceShape()
+      } else {
+        break
+      }
+    }
+    guard currentToken === .rightParen else { return false }
+    advanceShape()
+    return lambdaReturnClauseFollows()
+  }
+
+  /// `m[T](...)` after a `.member`: `[` `<type-list>` `]` `(` is a generic
+  /// method call; the same without the `(` is type arguments written on a
+  /// method that takes none. Restores the stream. `nil` when the cursor is not
+  /// on a bracketed type list at all.
+  private func methodTypeArgumentsShape() -> Bool? {
+    guard currentToken === .leftBracket else { return nil }
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    guard scanTypeArgListConsuming() else { return nil }
+    return currentToken === .leftParen
   }
 
   /// The left-hand type of a Rust-style qualified path `Type(Trait)`, or nil
@@ -120,72 +331,35 @@ extension Parser {
   }
 
   /// Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
-  /// Returns nil (restoring the parser position) when this is not a trait ref.
-  private func tryParseQualifiedTraitRef() throws -> TypeNode? {
-    guard currentToken === .leftParen else { return nil }
-
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-    do {
-      try match(.leftParen)
-      guard case .identifier(let traitName) = currentToken, isValidTypeName(traitName) else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-      }
-      let trait = try parseType()
-      guard currentToken === .rightParen else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-      }
-      try match(.rightParen)
-      return trait
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return nil
+  /// The SHAPE has already been decided by `scanParenTypeSuffix` -- this only
+  /// builds the node, so there is nothing to roll back.
+  private func parseQualifiedTraitRef() throws -> TypeNode {
+    try match(.leftParen)
+    let trait = try parseType()
+    guard currentToken === .rightParen else {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }
+    try match(.rightParen)
+    return trait
   }
 
-  private func tryParsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode? {
-    guard currentToken === .leftParen else { return nil }
-
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-
-    do {
-      try match(.leftParen)
-      let targetType = try parseType()
-      guard currentToken === .rightParen else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-      }
-      try match(.rightParen)
-      return .castExpression(type: targetType, expression: base, span: SourceSpan(start: base.span.start, end: currentSpan.end))
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return nil
+  /// A postfix cast `expr(Type)`. The SHAPE has already been decided by
+  /// `scanParenTypeSuffix` -- this only builds the node.
+  private func parsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode {
+    try match(.leftParen)
+    let targetType = try parseType()
+    guard currentToken === .rightParen else {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }
+    try match(.rightParen)
+    return .castExpression(type: targetType, expression: base, span: SourceSpan(start: base.span.start, end: currentSpan.end))
   }
 
-  private func tryParsePostfixGenericApplication(base: ExpressionNode) throws -> ExpressionNode? {
-    guard currentToken === .leftBracket else { return nil }
-
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-
-    do {
-      let typeArgs = try parseTypeListInBrackets()
-      switch base {
-      case .identifier(let name, _):
-        return .genericInstantiation(base: name, args: typeArgs, span: SourceSpan(start: base.span.start, end: currentSpan.end))
-      default:
-        lexer.restoreState(savedLexer)
-        currentToken = savedToken
-        return nil
-      }
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return nil
-    }
+  /// A postfix generic application `Name[Types]`. The SHAPE has already been
+  /// decided by `scanTypeArgList` -- this only builds the node.
+  private func parsePostfixGenericApplication(name: String, base: ExpressionNode) throws -> ExpressionNode {
+    let typeArgs = try parseTypeListInBrackets()
+    return .genericInstantiation(base: name, args: typeArgs, span: SourceSpan(start: base.span.start, end: currentSpan.end))
   }
   
   // MARK: - Expression Entry Point
@@ -627,8 +801,12 @@ extension Parser {
         }
         try match(.identifier(member))
 
-        let bareMethodTypeArgs = hasBareMethodTypeArguments()
-        let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
+        // One shape scan answers both: `[` `<type-list>` `]` `(` is a generic
+        // method call; the same without the `(` is type arguments on a method
+        // that takes none (a diagnostic). Nothing is tried and rolled back.
+        let typeArgsShape = methodTypeArgumentsShape()
+        let bareMethodTypeArgs = typeArgsShape == false
+        let methodTypeArgs: [TypeNode] = typeArgsShape == true ? try parseBracketedTypeArguments() : []
 
         if case .traitQualificationExpression(let qualifiedType, let traitType, _) = expr {
           guard currentToken === .leftParen else {
@@ -739,19 +917,25 @@ extension Parser {
           expr = .memberPath(base: expr, path: [member], span: SourceSpan(start: expr.span.start, end: currentSpan.end))
         }
       } else if currentToken === .leftParen {
-        // Rust-style qualified path `Type(Trait)`: the base must be a type name
-        // and the parenthesized part must be a trait reference.
-        if let qualifiedType = qualifiedPathBaseType(of: expr),
-           let traitRef = try tryParseQualifiedTraitRef() {
+        // One bounded shape scan decides what `(` opens. `( <type> )` is a
+        // Rust-style qualified path `Type(Trait)` when the base is a type name,
+        // and a postfix cast `expr(Type)` otherwise; anything else is an
+        // ordinary call. Trying each in turn and rolling back is what made a
+        // failed branch swallow the diagnostic the real parse would give.
+        let isTypeSuffix = scanParenTypeSuffix()
+        if isTypeSuffix, let qualifiedType = qualifiedPathBaseType(of: expr) {
+          let traitRef = try parseQualifiedTraitRef()
           expr = .traitQualificationExpression(type: qualifiedType, trait: traitRef, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
-        } else if let castExpr = try tryParsePostfixCastSuffix(base: expr) {
-          expr = castExpr
+        } else if isTypeSuffix {
+          expr = try parsePostfixCastSuffix(base: expr)
         } else {
           expr = try parseCall(expr)
         }
       } else if currentToken === .leftBracket {
-        if let genericExpr = try tryParsePostfixGenericApplication(base: expr) {
-          expr = genericExpr
+        // `[` `<type-list>` `]` is a generic application; anything else is a
+        // subscript. One bounded scan decides -- no trial parse, no rollback.
+        if case .identifier(let name, _) = expr, scanTypeArgList() {
+          expr = try parsePostfixGenericApplication(name: name, base: expr)
         } else {
           try match(.leftBracket)
           var args: [ExpressionNode] = []
@@ -791,21 +975,21 @@ extension Parser {
         message: "Default-fill '...' is not supported; use named parameter defaults instead")
     }
 
+    // A bounded two-token shape rule decides named vs positional: a lower-first
+    // `ident` immediately followed by `:`. Once that matches, the argument IS
+    // labeled -- `ident : …` can never be a positional argument (there is no
+    // `:` operator in expressions), so a failure inside it is reported as what
+    // it is. This used to restore and re-parse positionally, which always
+    // produced the wrong diagnostic: `f(a: (1, 2))` said "unexpected `:`" after
+    // re-parsing `a`, instead of the pair-literal error the labeled parse had.
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
-      let savedState = lexer.saveState()
-      let savedToken = currentToken
       // Anchored at the label: an argument-shape diagnostic is about the
       // `label: value` pair as written, and the label is where it starts.
       let labelSpan = currentSpan
-      do {
-        try match(.identifier(name))
-        try match(.colon)
-        let expr = try expression()
-        return CallArg(label: name, expression: expr, span: labelSpan)
-      } catch {
-        lexer.restoreState(savedState)
-        currentToken = savedToken
-      }
+      try match(.identifier(name))
+      try match(.colon)
+      let expr = try expression()
+      return CallArg(label: name, expression: expr, span: labelSpan)
     }
     // Parse as positional argument
     let expr = try expression()
@@ -1099,141 +1283,76 @@ extension Parser {
   ///   (x Int, y Int) Int -> expr    // with return type
   private func parseParenOrLambda() throws -> ExpressionNode {
     let startSpan = currentSpan
-    try match(.leftParen)
-    
-    // Empty parens: () -> must be lambda
-    if currentToken === .rightParen {
-      try match(.rightParen)
-      // Check for optional return type before arrow
-      var returnType: TypeNode? = nil
-      if currentToken !== .arrow {
-        if canStartTypeSyntax() {
-          returnType = try parseType()
-        }
-      }
-      if currentToken === .arrow {
-        try match(.arrow)
-        let body = try expression()
-        return .lambdaExpression(parameters: [], returnType: returnType, body: body, span: startSpan)
-      } else {
-        if returnType != nil {
-          throw ParserError.expectedArrow(span: currentSpan)
-        }
-        // Not a lambda, but () is not a valid expression by itself
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "'->'")
-      }
+
+    // `(` opens either a lambda or a parenthesized expression. The shape
+    // classifier decides BEFORE anything is built -- a lambda is
+    // `(params) [Type] -> ...`, so the `->` is the tell -- and then the chosen
+    // alternative is parsed for real. There is no trial to roll back and no
+    // failed branch to swallow the diagnostic the real parse would produce.
+    if shapeIsLambda() {
+      return try parseLambdaExpression(startSpan: startSpan)
     }
-    
-    // Save state to backtrack if this is not a lambda
-    let savedState = lexer.saveState()
-    let savedToken = currentToken
-    
-    // Try to parse as lambda parameters
+
+    try match(.leftParen)
+    let first = try expression()
+    if currentToken === .comma {
+      // There is no tuple/pair literal. A `Pair` is built with its own
+      // constructor, like any other type. The blame lands on the `,` -- the
+      // token that says "literal" here.
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "A pair literal is not an expression: construct a Pair with 'Pair(first, second)'"
+      )
+    }
+    try match(.rightParen)
+    return first
+  }
+
+  /// Parses a lambda whose SHAPE `shapeIsLambda` has already confirmed.
+  private func parseLambdaExpression(startSpan: SourceSpan) throws -> ExpressionNode {
+    try match(.leftParen)
+
     var parameters: [(name: String, type: TypeNode?)] = []
-    var isLambda = false
-    var sawExplicitReturnType = false
-    
-    do {
-      while currentToken !== .rightParen {
+    if currentToken !== .rightParen {
+      while true {
         guard case .identifier(let paramName) = currentToken else {
-          // Not a valid lambda parameter, restore and parse as expression
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
         if !isValidVariableName(paramName) {
           throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
         }
         try match(.identifier(paramName))
-        
-        // Check for named parameter syntax in lambda - not allowed
+
+        // Lambda parameters are `name Type`, not `name: Type`.
         if currentToken === .colon {
           throw ParserError.rejectedConstruct(span: currentSpan, message: "Lambda parameters use 'name Type', not 'name: Type'")
         }
-        
-        // Check for optional type annotation
+
         var paramType: TypeNode? = nil
         if currentToken !== .comma && currentToken !== .rightParen {
-          // Could be a type annotation or an operator (if this is an expression)
-          if canStartTypeSyntax() {
-            paramType = try parseType()
-          } else {
-            // Not a type, this might be an expression like (a + b)
-            throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-          }
+          paramType = try parseType()
         }
-        
         parameters.append((name: paramName, type: paramType))
-        
+
         if currentToken === .comma {
           try match(.comma)
+        } else {
+          break
         }
       }
-      
-      try match(.rightParen)
-      
-      // Check for optional return type before arrow
-      var returnType: TypeNode? = nil
-      if currentToken !== .arrow {
-        // Could be a return type
-        if canStartTypeSyntax() {
-          returnType = try parseType()
-          sawExplicitReturnType = true
-        }
-      }
-      
-      // Must have arrow for lambda
-      if currentToken === .arrow {
-        isLambda = true
-        try match(.arrow)
-        let body = try expression()
-        return .lambdaExpression(parameters: parameters, returnType: returnType, body: body, span: startSpan)
-      }
-      
-      // No arrow - typed params without arrow is an error; untyped multi-params become Pair
-      if parameters.contains(where: { $0.type != nil }) {
-        throw ParserError.expectedArrow(span: currentSpan)
-      }
-      
-      // Single untyped param without arrow - restore and parse as expression
-      // This handles cases like (a) which could be just a parenthesized identifier
-    } catch let error as ParserError {
-      // A rejected construct is a definite language violation, not evidence
-      // that this was never a lambda: re-reading the same tokens as an
-      // expression cannot make the construct legal. Propagate it instead of
-      // backtracking into a worse diagnostic.
-      if case .rejectedConstruct = error {
-        throw error
-      }
-      if parameters.contains(where: { $0.type != nil }) || sawExplicitReturnType {
-        throw error
-      }
-      // Parsing as lambda failed, restore state
-      isLambda = false
-    } catch {
-      // Parsing as lambda failed, restore state
-      isLambda = false
     }
-    
-    if !isLambda {
-      // Restore state and parse as parenthesized expression
-      lexer.restoreState(savedState)
-      currentToken = savedToken
-      let first = try expression()
-      if currentToken === .comma {
-        // There is no tuple/pair literal. A `Pair` is built with its own
-        // constructor, like any other type. The blame lands on the `,` -- the
-        // token that says "literal" here.
-        throw ParserError.rejectedConstruct(
-          span: currentSpan,
-          message: "A pair literal is not an expression: construct a Pair with 'Pair(first, second)'"
-        )
-      }
-      try match(.rightParen)
-      return first
+    try match(.rightParen)
+
+    var returnType: TypeNode? = nil
+    if currentToken !== .arrow {
+      returnType = try parseType()
     }
-    
-    // Should not happen - if lambda parsing succeeded, we would have returned above
-    // If it failed, isLambda should be false
-    fatalError("Internal error: unreachable state in parenthesized expression parsing")
+    guard currentToken === .arrow else {
+      throw ParserError.expectedArrow(span: currentSpan)
+    }
+    try match(.arrow)
+    let body = try expression()
+    return .lambdaExpression(parameters: parameters, returnType: returnType, body: body, span: startSpan)
   }
 
   private func buildDurationLiteralExpression(

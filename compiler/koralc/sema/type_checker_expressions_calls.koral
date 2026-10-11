@@ -452,13 +452,14 @@ given TypeChecker {
                             for tp in template.type_parameters then {
                                 if resolved_bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {
-                                        // Only trait bounds name a declaration
-                                        // whose visibility can be checked.
-                                        when bound_trait_name(constraint) in {
-                                            .Some(trait_name) then {
-                                                when self.storage.trait_registry.get_in_module(
-                                                    trait_name,
-                                                    self.storage.module_path,
+                                        // Match on the bound's KIND. A trait
+                                        // bound carries the DECLARATION whose
+                                        // visibility is being checked; a shape
+                                        // bound names none.
+                                        when constraint in {
+                                            .Trait(trait_def_id, trait_name, _) then {
+                                                when self.storage.trait_registry.get_by_def_id(
+                                                    trait_def_id,
                                                 ) in {
                                                     .Some(info) then {
                                                         if self.make_visibility_checker() is .Some(checker) then {
@@ -481,7 +482,7 @@ given TypeChecker {
                                                     .None() then {},
                                                 };
                                             },
-                                            .None() then {},
+                                            .Mutable() or .Foreign() then {},
                                         };
                                         if not self.enforce_bound_requirement(
                                             bound_type,

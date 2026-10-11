@@ -2560,6 +2560,7 @@ given MIRFunctionCodeEmitter {
         let expression = self.codegen.generate_trait_object_conversion_from_ref_value(
             ref_expression,
             conversion.trait_name,
+            conversion.trait_def_id,
             self.codegen.mir_type_args_to_ref_list(conversion.trait_type_args),
             conversion.concrete_type,
             should_retain,
@@ -2587,6 +2588,19 @@ given MIRFunctionCodeEmitter {
                 inner,
             ),
             _ then Option[String].None(),
+        };
+    };
+
+    module_private trait_object_target_def_id(self, t Type) Option[DefId] = {
+        return when t in {
+            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            .ReferenceType(inner) then self.trait_object_target_def_id(inner),
+            .MutableReferenceType(inner) then self.trait_object_target_def_id(inner),
+            .BorrowedReferenceType(inner) then self.trait_object_target_def_id(inner),
+            .MutableBorrowedReferenceType(inner) then self.trait_object_target_def_id(
+                inner,
+            ),
+            _ then Option[DefId].None(),
         };
     };
 
@@ -2639,6 +2653,9 @@ given MIRFunctionCodeEmitter {
             };
             return expression;
         };
+        let target_trait_def_id = self.trait_object_target_def_id(
+            target_type,
+        ) or else def_id_invalid();
         return when self.trait_object_target_name(target_type) in {
             .Some(trait_name) then when self.trait_object_source_concrete_type(
                 source_type,
@@ -2654,6 +2671,7 @@ given MIRFunctionCodeEmitter {
                         self.codegen.generate_trait_object_conversion_from_ref_value(
                             expression,
                             trait_name,
+                            target_trait_def_id,
                             self.trait_object_target_type_args(target_type),
                             concrete_type,
                             retain_source,
@@ -2683,6 +2701,7 @@ given MIRFunctionCodeEmitter {
                         self.codegen.generate_trait_object_conversion_from_ref_value(
                             ref_temp,
                             trait_name,
+                            target_trait_def_id,
                             self.trait_object_target_type_args(target_type),
                             concrete_type,
                             false,
@@ -3170,7 +3189,7 @@ given MIRFunctionCodeEmitter {
                 value,
                 result_type,
             ),
-            .TraitObjectMatches(value, trait_name, _, trait_type_args, concrete_type) then {
+            .TraitObjectMatches(value, trait_name, trait_def_id, trait_type_args, concrete_type) then {
                 let emission = self.emit_value_source(value);
                 let concrete_c_name = self.codegen.concrete_type_c_name_fallback(
                     concrete_type,
@@ -3179,6 +3198,7 @@ given MIRFunctionCodeEmitter {
                 );
                 let vtable_name = self.codegen.vtable_instance_name(
                     trait_name,
+                    trait_def_id,
                     concrete_c_name,
                 );
                 let expression = self.codegen.next_temp_with_init(

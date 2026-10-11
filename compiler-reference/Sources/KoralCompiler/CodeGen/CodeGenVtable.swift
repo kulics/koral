@@ -128,9 +128,11 @@ extension CodeGen {
     // Track which trait vtable struct definitions have been generated
     var generatedVtableStructs: Set<String> = []
     
-    // Sort requests for deterministic output
+    // Sort requests for deterministic output. Ordered by IDENTITY (trait
+    // declaration first), not by spelling: two same-named traits would
+    // otherwise compare equal at the first step.
     let sortedRequests = requests.sorted { a, b in
-      if a.traitName != b.traitName { return a.traitName < b.traitName }
+      if a.traitDefId != b.traitDefId { return a.traitDefId.id < b.traitDefId.id }
       let aArgs = a.traitTypeArguments.map(\.stableKey).joined(separator: ",")
       let bArgs = b.traitTypeArguments.map(\.stableKey).joined(separator: ",")
       if aArgs != bArgs { return aArgs < bArgs }
@@ -150,8 +152,8 @@ extension CodeGen {
       let orderedMethods = request.methods
       
       // For generic traits, the vtable struct key includes type args
-      let vtableStructKey = vtableStructKeyName(traitName: traitName, traitTypeArgs: request.traitTypeArguments)
-      let vtableStructCName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: request.traitTypeArguments)
+      let vtableStructKey = vtableStructKeyName(traitName: traitName, traitDefId: request.traitDefId, traitTypeArgs: request.traitTypeArguments)
+      let vtableStructCName = vtableStructCIdentifier(traitName: traitName, traitDefId: request.traitDefId, traitTypeArgs: request.traitTypeArguments)
       
       // Step 1: Generate vtable struct definition (once per trait specialization)
       if !generatedVtableStructs.contains(vtableStructKey) {
@@ -212,6 +214,7 @@ extension CodeGen {
         concreteType: request.concreteType,
         concreteTypeCName: concreteTypeCName,
         traitName: traitName,
+        traitDefId: request.traitDefId,
         traitTypeArgs: request.traitTypeArguments,
         methods: orderedMethods,
         actualMethodCNames: actualMethodCNames
@@ -413,27 +416,35 @@ extension CodeGen {
 
 extension CodeGen {
   
-  /// Returns a deduplication key for a vtable struct definition.
-  /// For non-generic traits, this is just the trait name.
-  /// For generic traits, this includes the type args to distinguish specializations.
-  func vtableStructKeyName(traitName: String, traitTypeArgs: [Type]) -> String {
-    if traitTypeArgs.isEmpty {
-      return traitName
+  /// The trait's identity as a C-safe string: its DECLARATION, never its
+  /// spelling, plus its type arguments.
+  ///
+  /// Two same-named traits declared in different modules are different traits.
+  /// Keying a vtable on the spelling gave them one name, one dedup slot and one
+  /// C symbol. The `d<id>` disambiguator is the same one type names already
+  /// carry (`List_I_d58`).
+  private func mangledTraitName(traitName: String, traitDefId: DefId, traitTypeArgs: [Type]) -> String {
+    var mangled = "\(traitName)_d\(traitDefId.id)"
+    if !traitTypeArgs.isEmpty {
+      mangled += "_" + traitTypeArgs.map { sanitizeCIdentifier(cTypeName($0)) }.joined(separator: "_") + "_"
     }
-    let argKeys = traitTypeArgs.map { $0.stableKey }.joined(separator: ",")
-    return "\(traitName)<\(argKeys)>"
+    return mangled
   }
-  
+
+  /// Returns a deduplication key for a vtable struct definition.
+  ///
+  /// Identity, not spelling: the trait's DECLARATION plus its type arguments.
+  func vtableStructKeyName(traitName: String, traitDefId: DefId, traitTypeArgs: [Type]) -> String {
+    let argKeys = traitTypeArgs.map { $0.stableKey }.joined(separator: ",")
+    return "d\(traitDefId.id)<\(argKeys)>"
+  }
+
   /// Returns the C identifier for a vtable struct.
-  /// For non-generic traits: `__koral_vtable_Error`
-  /// For generic traits: `__koral_vtable_Converter_std_String`
-  func vtableStructCIdentifier(traitName: String, traitTypeArgs: [Type]) -> String {
-    let sanitizedTraitName = sanitizeCIdentifier(traitName)
-    if traitTypeArgs.isEmpty {
-      return "__koral_vtable_\(sanitizedTraitName)"
-    }
-    let argSuffix = traitTypeArgs.map { sanitizeCIdentifier(cTypeName($0)) }.joined(separator: "_")
-    return "__koral_vtable_\(sanitizedTraitName)_\(argSuffix)"
+  /// For non-generic traits: `__koral_vtable_Error_d42`
+  /// For generic traits: `__koral_vtable_Converter_d42_std_String`
+  func vtableStructCIdentifier(traitName: String, traitDefId: DefId, traitTypeArgs: [Type]) -> String {
+    let sanitizedTraitName = sanitizeCIdentifier(mangledTraitName(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: traitTypeArgs))
+    return "__koral_vtable_\(sanitizedTraitName)"
   }
 }
 
@@ -448,10 +459,11 @@ extension CodeGen {
   func vtableInstanceName(
     concreteTypeCName: String,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type] = []
   ) -> String {
     let sanitizedConcreteTypeCName = sanitizeCIdentifier(concreteTypeCName)
-    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: traitTypeArgs)
     return "\(vtableStructName)_for_\(sanitizedConcreteTypeCName)"
   }
   
@@ -466,6 +478,7 @@ extension CodeGen {
     concreteType: Type,
     concreteTypeCName: String,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type] = [],
     methods: [MIRTraitVTableMethod],
     actualMethodCNames: [String: String]
@@ -473,16 +486,19 @@ extension CodeGen {
     let instanceName = vtableInstanceName(
       concreteTypeCName: concreteTypeCName,
       traitName: traitName,
+      traitDefId: traitDefId,
       traitTypeArgs: traitTypeArgs
     )
 
-    // Deduplicate: skip if already generated
+    // Deduplicate: skip if already generated. `instanceName` mangles the
+    // trait's DECLARATION, so the name is a faithful key and two same-named
+    // traits cannot share a slot.
     if generatedVtableInstances.contains(instanceName) {
       return nil
     }
     generatedVtableInstances.insert(instanceName)
 
-    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: traitTypeArgs)
 
     var code = "static const struct \(vtableStructName) \(instanceName) = {\n"
     // 公共前缀：trait object 释放时从这里取具体类型的 drop glue。
@@ -527,6 +543,7 @@ extension CodeGen {
     innerType: Type,
     sourceOwnership: MIROwnershipUse,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type] = [],
     concreteType: Type
   ) -> String {
@@ -535,6 +552,7 @@ extension CodeGen {
     let vtableName = vtableInstanceName(
       concreteTypeCName: concreteTypeCName,
       traitName: traitName,
+      traitDefId: traitDefId,
       traitTypeArgs: traitTypeArgs
     )
 
@@ -566,12 +584,13 @@ extension CodeGen {
     receiverResult: String,
     receiverOwnership: MIROwnershipUse,
     traitName: String,
+    traitDefId: DefId,
     traitTypeArgs: [Type] = [],
     methodName: String,
     arguments: [CodeGenTraitCallArgument],
     type: Type
   ) -> String {
-    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: traitTypeArgs)
     let vtVar = nextTempWithInit(cType: "const struct \(vtableStructName)*", initExpr: "(const struct \(vtableStructName)*)\(receiverResult).vtable")
 
     // 5. Build argument list: construct struct Ref from TraitRef fields as first arg, then the rest.

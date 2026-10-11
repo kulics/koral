@@ -1227,16 +1227,13 @@ final class MIRFunctionCodeEmitter {
       }
       let dest = "\(envVar)->\(fieldName)"
       codeGen.addIndent()
-      if capture.captureKind == .byMutReference {
-        // Store a pointer to the original variable for mutable captures
-        codeGen.appendToBuffer("\(dest) = &(\(source));\n")
-      } else {
-        // Both byValue and byReference use copy assignment.
-        // For ref-containing types (like AtomicBool), _copy retains internal refs.
-        // For plain structs, _copy is a simple struct copy.
-        // The original variable remains valid and will be dropped by its own scope.
-        codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
-      }
+      // Closure capture is copy-only: sema rejects a mutable capture outright
+      // (`Cannot capture mutable variable ... hold the state in a Cell and
+      // capture the cell instead`), so there is no pointer-to-original form.
+      // For ref-containing types (like AtomicBool), _copy retains internal refs.
+      // For plain structs, _copy is a simple struct copy.
+      // The original variable remains valid and will be dropped by its own scope.
+      codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
     }
 
     return codeGen.nextTempWithInit(
@@ -1320,12 +1317,7 @@ final class MIRFunctionCodeEmitter {
 
     var localNameOverridesByDefId: [UInt64: String] = [:]
     for capture in captures {
-      if capture.captureKind == .byMutReference {
-        // Mutable captures are pointers — dereference to access the original variable
-        localNameOverridesByDefId[capture.symbol.defId.id] = "(*__captured->\(captureFieldName(for: capture.symbol)))"
-      } else {
-        localNameOverridesByDefId[capture.symbol.defId.id] = "__captured->\(captureFieldName(for: capture.symbol))"
-      }
+      localNameOverridesByDefId[capture.symbol.defId.id] = "__captured->\(captureFieldName(for: capture.symbol))"
     }
     let nested = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
 
@@ -1379,23 +1371,17 @@ final class MIRFunctionCodeEmitter {
     var structBuffer = "\nstruct \(name) {\n"
     structBuffer += "  _Atomic intptr_t __refcount;\n"
     for capture in captures {
-      if capture.captureKind == .byMutReference {
-        // Mutable captures are stored as pointers to the original variable
-        structBuffer += "  \(codeGen.cTypeName(capture.symbol.type))* \(captureFieldName(for: capture.symbol));\n"
-      } else {
-        structBuffer += "  \(codeGen.cTypeName(capture.symbol.type)) \(captureFieldName(for: capture.symbol));\n"
-      }
+      structBuffer += "  \(codeGen.cTypeName(capture.symbol.type)) \(captureFieldName(for: capture.symbol));\n"
     }
     structBuffer += "};\n"
 
     structBuffer += "\nstatic void __koral_\(name)_drop(void* raw_env) {\n"
     structBuffer += "  struct \(name)* env = (struct \(name)*)raw_env;\n"
     for capture in captures {
-      if capture.captureKind != .byMutReference {
-        // Pointer captures don't own the value — don't drop
-        let fieldExpr = "env->\(captureFieldName(for: capture.symbol))"
-        appendIndented(dropCodeForCapturedField(capture.symbol.type, fieldExpr: fieldExpr), to: &structBuffer, indent: "  ")
-      }
+      // Every capture is copy-only and owned by the environment, so every
+      // field is dropped. There is no pointer-capture form to skip.
+      let fieldExpr = "env->\(captureFieldName(for: capture.symbol))"
+      appendIndented(dropCodeForCapturedField(capture.symbol.type, fieldExpr: fieldExpr), to: &structBuffer, indent: "  ")
     }
     structBuffer += "  free(raw_env);\n"
     structBuffer += "}\n"
@@ -1876,6 +1862,7 @@ final class MIRFunctionCodeEmitter {
       innerType: innerType,
       sourceOwnership: conversion.sourceOwnership,
       traitName: conversion.traitName,
+      traitDefId: conversion.traitDefId,
       traitTypeArgs: conversion.traitTypeArguments,
       concreteType: conversion.concreteType
     )
@@ -1896,6 +1883,7 @@ final class MIRFunctionCodeEmitter {
       receiverResult: receiver.expression,
       receiverOwnership: call.receiverOwnership,
       traitName: call.traitName,
+      traitDefId: call.traitDefId,
       traitTypeArgs: call.traitTypeArguments,
       methodName: call.methodName,
       arguments: abiArguments,
@@ -2149,13 +2137,14 @@ final class MIRFunctionCodeEmitter {
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
 
-    case .traitObjectMatches(let value, let traitName, _, let traitTypeArguments, let concreteType):
+    case .traitObjectMatches(let value, let traitName, let traitDefId, let traitTypeArguments, let concreteType):
       let valueEmission = emitValue(value, sourceMode: true)
       // DEBUG
       let concreteTypeCName = codeGen.concreteTypeCIdentifier(concreteType) ?? codeGen.cTypeName(concreteType)
       let vtableName = codeGen.vtableInstanceName(
         concreteTypeCName: concreteTypeCName,
         traitName: traitName,
+        traitDefId: traitDefId,
         traitTypeArgs: traitTypeArguments
       )
       let expression = codeGen.nextTempWithInit(

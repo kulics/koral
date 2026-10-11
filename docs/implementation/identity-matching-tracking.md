@@ -1551,3 +1551,290 @@ DefId→名→表 / DefId→名→DefId 往返          0  ✅
 自举      FIXED POINT + 0 悬空
 诊断      一字未改
 ```
+
+## 25. vtable 身份：去重键、inventory 键、C 名（2026-10-10）
+
+§24.3 的审计说「名字键访问集」里的键都带声明。复查发现**三处没有**，
+都在 vtable 这条线上——同一个「身份是声明」的规则，落点漏了。
+
+### 25.1 清点（改前）
+
+| 处 | 键（改前） | 判定 |
+|---|---|---|
+| koralc codegen 请求去重 `unique_keys` | `trait_name<稳定类型键>\|稳定类型键` | ❌ 含拼写 |
+| koralc MIR inventory `render_vtable_key` | `trait_name` + `type_display_name(...)` | ❌ 拼写 + 显示名 |
+| koralc / Swift 实例去重 `generated_vtable_instances` | C 符号名（由拼写生成） | ❌ |
+| koralc / Swift 结构体去重 `generated_vtable_structs` | 同上 | ❌ |
+| Swift `vtableStructKeyName` | `traitName` / `traitName<args>` | ❌ |
+| koralc `MIRTraitVTable.matches` · Swift `MIRTraitVTableKey` | DefId + 稳定类型键 | ✅ 本就正确 |
+| mono 请求身份 `VtableRequest` | DefId | ✅ 本就正确 |
+
+### 25.2 一个反例同时撞三处
+
+`tests/compiler-cases/trait_same_name_cross_module_same_type_test/`：两个模块各声明
+`trait Tag`，又各有同名的具体类型 `type Box`，各自 `given Box as Tag`。
+
+改前 koralc 报 `MIR verification failed in trait vtable inventory: duplicate vtable key`
+（inventory 用显示名，两个 `Tag` 渲染成同一串）；Swift 报
+`trait method call receiver type does not match call trait metadata`。
+两者都没有产出可运行的程序。
+
+### 25.3 裁定
+
+**身份 = (具体类型, trait 声明 DefId, trait 类型实参)，三处一起改。**
+
+1. 去重键 / inventory 键改成纯身份：`d<DefId>|<稳定类型键...> for <稳定类型键>`。
+2. C 符号必须区分同名 trait：`<拼写>_d<DefId>[_<类型实参>]`——与类型名的
+   `_d<id>`（`List_I_d58`）同一套消歧。键由符号名派生的去重表因此自动变对，
+   不必再并行维护第二套键。
+3. 排序也按身份，否则两个同名 trait 在第一步就比成相等，输出次序不确定。
+
+### 25.4 顺带修的：traitDefId 从名字反查
+
+Swift `inferTraitObjectMethodCall` 写的是
+`traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid`——**按拼写查声明**。
+两个 `Tag` 时拿到先注册的那个，接收者的 trait-object 类型里却是另一个，于是
+MIR 校验器按身份比对立刻失败。改成从接收者的类型取
+（`traitObjectDeclId(of:)`），方法序号也一并改成按 DefId 查
+（`orderedTraitMethods(forDefId:)`）。
+
+与 §0 一致：名字只在解析边界、显示、C 改编三处合法。这里是第四处偷用了名字。
+
+### 25.5 状态
+
+```
+工作树    见本轮 commit
+套件      653/653 ×3（seed / stage1 / stage2）+ differential 653/653
+自举      FIXED POINT + 0 悬空
+工具链    koralfmt 123/123 · corpus 220/0 · koral_doc 自检通过 · 14 模块最新
+诊断      vtable 一处改了（inventory 键的报错文案随之不再误报）；
+          其余一字未改
+```
+
+## 26. 名字反查身份的残留点清零（2026-10-10）
+
+§25 修完 vtable 之后顺手查了「还有谁从名字反查身份」，找到并改掉两批。
+
+### 26.1 Swift 的 `traitMethodPlaceholder` × 8
+
+`.traitMethodPlaceholder(traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid, ...)`
+八处，都在泛型参数接收者上。约束本身带 `traitDefId`（`Bound.trait(defId:...)`），
+却回头按名字查——两个同名 trait 时拿到先注册的那个。
+
+全部改成从约束 / 匹配到的 bound 取（见 `docs/design/traits-and-givens.md` 的表）。
+顺带修掉 `buildTraitMethodCall` 里的 `traits[matchedTraitRef.traitName]`（名字键）
+→ `traitDeclsByDefId[matchedTraitRef.traitDefId]`。
+
+### 26.2 导入别名不能命名 trait
+
+`using "m" { Tag as AlphaTag }` 的 `AlphaTag` 用不了：Swift 的
+`extractSymbolInfo` 没有 `.traitDeclaration` 分支，trait 根本不进 `publicTypes`；
+koralc 的 trait 注册表也没有别名入口。
+
+**别名只进名字表。** 给 trait 多绑一条类型会让 `Result[T].Error(...)` 的 `Error`
+解析到合成的 trait object，`String` 传不进去（76 个用例红）。
+
+koralc 的别名要注册**两处**：`trait_registry`（sema 的名字查找）与
+`generic_templates.traits`（mono 的名字查找）。只注册前者时，泛型约束
+`[T AlphaTag]` 在单态化阶段按名字查 `generic_templates.traits` 落空，
+实例化不触发，报 `function operand has unresolved generic type`。
+
+回归用例：`tests/compiler-cases/trait_same_name_bound_same_type_test/`
+（两个 `Tag` + 两个 `Box`，同一文件里当泛型约束）。
+
+### 26.3 状态
+
+```
+工作树    见本轮 commit
+套件      654/654 ×3（seed / stage1 / stage2）+ differential 654/654
+自举      FIXED POINT + 0 悬空
+工具链    koralfmt 123/123 · corpus 220/0 · koral_doc 自检通过 · 14 模块最新
+```
+
+## 27. 导入绑定键 + `Bound` 的身份 + 单态化按声明比（2026-10-11）
+
+复核 §26 时记下的「mono 的 `type_satisfies_bound_constraint` 用 `bound_base_name`
+查满足性」，动手时发现它压在两层更早的问题上：`Bound` 的 `def_id` **从未填过**，
+而 bound 里的名字在两个同名 trait 时**根本解析不到导入的那一个**。三层一起改。
+
+### 27.1 复现：`using "m" { Tag }` 报「Import it explicitly」
+
+两个模块各一个 `trait Tag`，root 用**不改名**的 `using` 导入其中一个并写 `let read[T Tag]`：
+
+```
+/tmp/probe/probe.koral:5:13: error: 'Tag' is defined in module 'Probe::Beta'.
+    Import it explicitly with using Probe::Beta { Tag }.
+```
+
+文件里明明写着 `using "probe/alpha" { Tag, a_box }`。两个编译器都报，都指到**另一个**
+模块的那一个。只有 alpha 一个模块时正常——差别就在同名。
+
+三个原因叠在一起：
+
+1. **没改名的导入被跳过。** `register_imported_trait_names` 早先是
+   `if edge.symbol == edge.original_symbol then continue`，只给 `as` 重命名的边注册。
+   `using { Tag }` 这条最常见写法从来进不了 trait 名表。
+2. **绑定键写成裸拼写。** 注册进 `traits["Tag"]`，而未限定索引跨模块 last-wins。
+3. **绑定时用环境里的 `currentModulePath`。** 导入注册是一次性走完所有文件的导入边的
+   （`registerExplicitModuleImports` / `register_imported_trait_names`），环境里那个值是
+   最后一条声明留下的，对除那个文件之外的每个文件都是错的。`qualifiedTraitKey(name, [])`
+   还会退化成裸名，等于再写一遍第 2 条。
+
+改成 **(导入方模块, 本地拼写)**，模块取自导入边自己的 `edge.module` / `symbolImport.module`，
+不改名的边也走同一路径。见 `docs/design/name-resolution.md`。
+
+用例：`trait_plain_import_bound_identity_test/`（接受，7）、
+`trait_plain_import_bound_wrong_trait_error/`（拒绝：`BBox` 只满足 beta 的 `Tag`）。
+两边诊断逐字相同：`Type BBox does not explicitly implement trait Tag (checking constraint T: Tag)`。
+
+### 27.2 `Bound.Trait.def_id` 从未填过
+
+`nodes.koral` 的注释写着「`def_id` is `DefId(0)` until sema resolves the name」，
+但**没有任何一处解析它**：`bound_from_type_node` 立的一直是 `DefId(0)`，`copied_bound`
+原样拷。Swift 那边有 `resolveBound`（「Bounds leave the parser with `.invalid` identity」），
+koralc 的 `resolve_constraint_bound` 只覆盖 `GenericConstraintBound`，`Bound` 本身漏了。
+
+补 `resolved_bound`：在**注册进模板注册表时**解析一次（`to_template_type_params` /
+`copied_bound`），那是写这个 bound 的模块还在上下文里的最后一个时刻。幂等；
+解析不到就留 `DefId(0)`，**不退回去比拼写**。
+
+`TraitDeclInfo.type_params` 的约束是唯一可能落空的（trait 自己的类型参数约束在 trait
+注册循环里解析，bound 可能指着还没注册的 trait）。查过 mono 没有消费点
+（四处读的都是 `.name`），落空的 `DefId(0)` 是惰性的。
+
+### 27.3 单态化按声明比
+
+`type_satisfies_bound_constraint` 原本丢掉 `Bound` 自带的 `def_id`、取 `bound_base_name`
+交给 `trait_name_matches`，后者把**两边的拼写**各自查一次未限定索引再比结果。两个同名
+trait 时两个拼写落在同一个声明上，判定对任意一对都为真——过宽匹配。
+
+`trait_name_matches` 换成 `trait_identity_matches(left DefId, right DefId)`，两侧各取
+记录上现成的身份（`conformance_trait_def_id` / `GivenTraitDecl.trait_def_id` /
+bound 自己的 `def_id`）。同一条线上的：
+
+| 处 | 改法 |
+|---|---|
+| `type_satisfies_trait_constraint` | 收 `trait_def_id`，比两侧 DefId |
+| `lookup_given_trait_decls_fuzzy` | 收 DefId；缓存键 `d<id>`（原先裸名，两个同名 trait 共槽） |
+| `select_trait_tool_template_cached` | 收 DefId；`MethodOwner.Decl(id)` 直接用，不再 `trait_owner_by_name` 反查 |
+| `infer_trait_(extension_)type_args*` | 收 DefId；`lookup_trait_by_def_id` 读成员与类型参数 |
+| `instantiate_trait_target_static_method` | 输入 `Option[DefId]`，不再是 `Option[String]` |
+| `trait_target_static_candidate_given_decls` | 与 `lookup_given_trait_decls_fuzzy` 同一判定，缓存键同上 |
+
+**输入端的往返**：两处调用点写着 `def_id_spelling(trait_def_id)` 把身份先拆成拼写传下去，
+下游 `trait_target_static_trait_name_matches` 又拼回 DefId。§24.3 的审计把「DefId→名→DefId」
+记成 0，这里就是漏的。改完 `trait_target_static_trait_name_matches` 与
+`trait_owner_by_name` 一并删掉。
+
+顺带删掉的死代码（都零调用点）：`conformance_method_has_explicit_body`、
+`infer_trait_args_from_owner_next_template`、`method_trait_conformance_name`、
+`bound_base_name`。
+
+### 27.4 尚存
+
+`Bound` 在 **sema** 侧仍有几处拿 `bound_trait_name(constraint)` 当存在性判断再交给
+`satisfies_bound`（`type_checker_members.koral:1652` 等）——那几处比的是
+`GenericConstraintBound.trait_def_id`，判定本身走身份，只是入口形状还是「取名字」。
+`trait_registry.get_in_module` 的未限定回退仍在（「裸名不是解析」的缺口），
+本批未动。
+
+### 27.5 状态
+
+```
+工作树    未提交（No Auto Commit）
+套件      656/656 ×3（seed / stage1 / stage2）+ differential 656/656
+自举      FIXED POINT + 0 悬空
+诊断      反例两侧逐字相同
+工具链    koralfmt 123/123 · corpus 220/0 · koral_doc 自检通过 · 14 模块最新
+```
+
+## 28. 未限定回退其实是 prelude，拆出来显式写（2026-10-11）
+
+§27.4 把两条列为「尚存」。第 2 条（`bound_trait_name` 入口形状）是一层外壳；第 1 条
+（`get_in_module` 的未限定回退）动起来才发现它不是一个小缺口，而是**隐式 std 的实现方式**。
+
+### 28.1 入口形状：`bound_trait_name` 与它背后的整条链
+
+`bound_trait_name(constraint)` 当存在性判断只是表象。往下走是
+`satisfies_bound` → `satisfies_trait_requirement_with_args` → `trait_conformance_key`
+→ `trait_def_id_of(trait_name)`：**拆掉 `Bound` 自带的 `def_id`，拿拼写在当前模块重新解析**。
+`Bound` 的身份是注册时在写它的模块里解析的；在另一个模块的上下文里再解析一次，两个同名
+trait 就换人了。
+
+整条链改成吃 `trait_def_id`：`trait_conformance_key` / `satisfies_trait_requirement*` /
+`has_explicit_trait_conformance*` / `generic_param_has_trait_bound` /
+`generic_constraint_satisfies_trait_bound` / `generic_trait_conformance_status` /
+`enforce_explicit_trait_requirement*` / `enforce_explicit_generic_trait_conformance*` /
+`modifier_blanket_trait_conformance_status` / `trait_bound_may_hold`。
+名字只留给 `trait_missing_conformance_message` 那几个打消息的函数。
+
+`generic_constraint_satisfies_trait_bound` 里查约束所属 trait 的
+`get_in_module(constraint.trait_name, ...)` 一并换成 `get_by_def_id(constraint.trait_def_id)`。
+`record_explicit_trait_conformance` / `record_generic_trait_conformance_template` 的调用点
+（`given X as Tag`）在**声明处**解析一次名字，之后全比身份。
+
+运算符那边的 `"Eq"` / `"Ord"` / `"ToString"` / `"Neg"` / `"Iterator"` / `"Iterable"` 是
+**lang item 拼写**——语法本身不带声明。新增 `lang_trait_def_id(name)` 当解析边界，
+把解析从链深处提到构造点；行为不变，但下游不再拿名字做判定。
+`has_explicit_std_drop_conformance` 改成先铸 std 的 `Drop` 身份
+（`context.std_drop_trait_def_id()`），再比它。
+
+顺带删掉死代码 `bound_trait_name`、`conformance_method_has_explicit_body`、
+`infer_trait_args_from_owner_next_template`、`method_trait_conformance_name`、`bound_base_name`。
+
+### 28.2 未限定回退 = 隐式 std
+
+把 `get_in_module` 的裸名回退一删，`trait_constraint_validation.koral` 立刻报
+`Undefined trait: Eq`——`[T Eq]` 从来没写过 `using "std" { Eq }`。
+
+**回退就是 prelude。** 它顺带还把**任何**模块的 trait 都变成了不写 `using` 也能命名的东西，
+那才是 bug。拆开：
+
+- **prelude 显式化**：std 根模块的 public trait 绑进每个模块的
+  (模块, 拼写) 键空间。`bind_prelude_trait_names` / `registerPreludeTraitNames`。
+- **解析只走限定键**：`TraitRegistry.get_in_module` / `GenericTemplateRegistry.lookup_trait_in_module`
+  / `codegen_vtable.trait_info` 去掉回退；`declared_somewhere` 留给「Import it explicitly」
+  用来说出声明在哪个模块（对齐 `unimportedTemplateDefId`）。
+
+顺带修的两个漏：
+
+1. **批量导入没绑 trait**。`using "std";` 没有符号边，§27.1 的注册只走了
+   `symbol_imports`。`std.container` 的 `Default` 于是不可命名。批量边要从**声明**发。
+2. **Swift 的绑定时机太晚**。koralc 在 trait 注册循环之后立刻绑；Swift 原在 TypeResolver
+   **之后**。而 `given[T Any] Stack[T] as Default` 的 trait 名是在收签名时解析的——
+   绑定必须更早。拆成 `registerTraitNameBindings()`（只绑名字，收签名前）与
+   `registerExplicitModuleImports()`（碰撞检查与类型/符号绑定，维持原位）：
+   碰撞检查要 `nodeSourceInfoMap` 与 scope，早了会静默漏报。
+
+### 28.3 身份从类型上取，不从它的拼写
+
+拿掉回退后，一批「`def_id_spelling(def_id)` 把身份拆成拼写，下游又拼回去」的往返当场暴露——
+trait object 的 trait 在使用方模块**根本不需要在作用域里**。
+
+| 处 | 改法 |
+|---|---|
+| Swift `flattenedTraitMethodsHelper` | 按声明遍历；原先拿别名的**声明模块**去查别名，而别名只在导入方键空间里 |
+| Swift trait-object 方法查找 | `flattenedTraitMethods(forDefId:)` + `traitDeclsByDefId[tplDefId]` |
+| koralc `trait_method_bindings` | 收 `trait_def_id`，`get_by_def_id` |
+| koralc `resolve_trait_registry_method_signature` / `resolve_trait_method_param_types` / `resolve_trait_method_self_type` / `resolve_qualified_method_return_type` | 同上；`.TraitObject(trait_def_id, _)` 处直接把身份传下去 |
+| `trait_name_from_type` | 明确为 display-only，新增 `trait_def_id_from_type` |
+
+### 28.4 尚存
+
+- `trait_registry` 的**裸名索引仍在**，只是解析不再读它。它与空模块路径的限定键
+  （`qualified_symbol_key([], name) == name`）共用一个槽——真正的键拆分还没做。
+- `std` 的 prelude 边界目前是「模块路径 == `["Std"]`」，与 `is_std_drop_trait` 一致；
+  若 std 拆包，这条要改成按包身份。
+- `resolve_trait_method_param_types` 等几处在 `.as(Trait)` 路径上仍以
+  `trait_def_id_of(trait_name)` 收尾——那是**书写处**的解析边界，合法；
+  但签名仍以名字为入口。
+
+### 28.5 状态
+
+```
+工作树    未提交（No Auto Commit）
+套件      656/656 ×3（seed / stage1 / stage2）+ differential 656/656
+自举      FIXED POINT + 0 悬空
+诊断      一字未改
+工具链    koralfmt 123/123 · corpus 220/0 · koral_doc 自检通过 · 14 模块最新
+```

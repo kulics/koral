@@ -12,12 +12,42 @@ given TypeChecker {
         };
     };
 
+    /// Bind a bound's spelling to its declaration identity.
+    ///
+    /// A bound leaves the parser with `DefId(0)` -- the parser has no symbol
+    /// table. Registration into a template registry is the last point where the
+    /// declaring module is still in context, so the name resolves once here and
+    /// every later comparison is identity-to-identity. This is the crossing
+    /// `resolve_constraint_bound` makes for `GenericConstraintBound`; `Bound`
+    /// needs the same one because monomorphization reads the constraints back
+    /// off the registry and must not resolve them again by spelling.
+    ///
+    /// Idempotent: a bound that already carries an identity is passed through.
+    /// A shape bound (`mutable` / `foreign`) has no declaration and stays as it
+    /// is. A name that resolves to nothing keeps `DefId(0)` -- there is no
+    /// falling back to comparing spellings.
+    module_private resolved_bound(self, b Bound) Bound = {
+        return when b in {
+            .Trait(def_id, name, args) then {
+                if def_id.is_valid() then {
+                    Bound.Trait(def_id, name, args)
+                } else {
+                    Bound.Trait(self.trait_def_id_of(name) or else def_id, name, args)
+                }
+            },
+            .Mutable() then Bound.Mutable(),
+            .Foreign() then Bound.Foreign(),
+        };
+    };
+
     module_private copied_bound(self, b Bound) Bound = {
         return when b in {
-            .Trait(def_id, name, args) then Bound.Trait(
-                def_id,
-                name,
-                self.copy_type_node_list(args),
+            .Trait(def_id, name, args) then self.resolved_bound(
+                Bound.Trait(
+                    def_id,
+                    name,
+                    self.copy_type_node_list(args),
+                ),
             ),
             .Mutable() then Bound.Mutable(),
             .Foreign() then Bound.Foreign(),

@@ -770,14 +770,16 @@ given TypeChecker {
     };
 
     module_private resolve_member_type_ref(self, base_type_ref Type, member String) Type = {
+        // A weak reference has no fields to find: the handle is not the payload.
+        // Peeling it here is what turned `w.value` into a payload access and
+        // produced C that clang refuses. `?T` keeps its wrapper, so the lookup
+        // lands in the no-fields case below and the caller reports the member.
         let inner_type = when base_type_ref in {
             .MutableReferenceType(inner) then inner,
             .MutablePointerType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             .PointerType(inner) then inner,
             _ then base_type_ref,
         };
@@ -876,14 +878,14 @@ given TypeChecker {
     };
 
     module_private member_decl_is_mutable(self, base_type Type, member String) Bool = {
+        // Same no-peel rule as `resolve_member_type_ref`: a weak handle declares
+        // no members, so nothing on one can be mutable by declaration.
         let inner_type = when base_type in {
             .MutableReferenceType(inner) then inner,
             .MutablePointerType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             .PointerType(inner) then inner,
             _ then base_type,
         };
@@ -1663,7 +1665,11 @@ given TypeChecker {
         // `trait_method_bindings`.
         when template.conformance_trait_name in {
             .Some(trait_name) then {
-                for entry in self.trait_method_bindings(trait_name, inner_type) then {
+                for entry in self.trait_method_bindings(
+                    template.conformance_trait_def_id or else def_id_invalid(),
+                    trait_name,
+                    inner_type,
+                ) then {
                     bindings.insert(entry.first, entry.second);
                 };
             },
@@ -1783,6 +1789,7 @@ given TypeChecker {
                     // arguments — the same map `resolve_trait_registry_method_signature`
                     // builds — otherwise the parameter types come back as bare `T`.
                     let mutable bindings = self.trait_method_bindings(
+                        self.trait_def_id_of(trait_name) or else def_id_invalid(),
                         trait_name,
                         base_type,
                     );
@@ -2253,13 +2260,14 @@ given TypeChecker {
         method_name String,
         span SourceSpan,
     ) Option[Symbol] = {
+        // A weak handle is NOT peeled: it is opaque until `upgrade`d and
+        // carries none of the referent's conformances. Peeling here is what let
+        // `for x in <a ?List[Int]>` find `iterator` behind the handle.
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -2467,13 +2475,13 @@ given TypeChecker {
         receiver_type Type,
         method_name String,
     ) Option[Symbol] = {
+        // Same no-peel rule as `resolve_conformance_method_signature`: a weak
+        // handle has none of the referent's conformances.
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         let key = self.conformance_template_key(normalized_receiver);
@@ -2823,8 +2831,13 @@ given TypeChecker {
         return self.apply_type_bindings(t, bindings);
     };
 
+    /// Type-parameter bindings for the trait DECLARATION `trait_def_id`.
+    /// `trait_name` is display-only; the declaration is reached by identity, so
+    /// a spelling that is not bound in the checking module (an import alias, or
+    /// a trait object's trait named from another module) still resolves.
     module_private trait_method_bindings(
         self,
+        trait_def_id DefId,
         trait_name String,
         receiver_type Type,
     ) Dict[String, Type] = {
@@ -2921,10 +2934,7 @@ given TypeChecker {
         // the declaration side of this trait. It must never be filled in by
         // looking the name up: a user's `type T` would then become the meaning
         // of the trait's `T`, and the two types print identically.
-        when self.storage.trait_registry.get_in_module(
-            trait_name,
-            self.storage.module_path,
-        ) in {
+        when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
             .Some(info) then {
                 for type_param in info.type_params then {
                     if not bindings.contains_key(type_param) then {
@@ -2940,8 +2950,6 @@ given TypeChecker {
                 return bindings;
             },
         };
-        // The spelling is resolved once, here; the walk is by declaration.
-        let trait_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
         let mutable visited = Set[UInt].new();
         return self.collect_trait_method_bindings_recursive(
             trait_def_id,
@@ -3019,11 +3027,12 @@ given TypeChecker {
 
     module_private resolve_trait_registry_method_signature(
         self,
+        trait_def_id DefId,
         trait_name String,
         method_name String,
         receiver_type Type,
     ) Option[Symbol] = {
-        let bindings = self.trait_method_bindings(trait_name, receiver_type);
+        let bindings = self.trait_method_bindings(trait_def_id, trait_name, receiver_type);
         if self.lookup_trait_method_signature(trait_name, method_name) is .Some(raw_method) then {
             let mutable bound_param_types = List[Type].new();
             for parameter_type in self.method_param_types(raw_method) then {
@@ -4293,13 +4302,16 @@ given TypeChecker {
         let mutable normalized_base_type = self.normalize_method_receiver_type(
             base_type,
         );
+        // A weak reference is NOT peeled here. It is a HANDLE: opaque until
+        // `upgrade`d, with no fields and no methods of the referent. Peeling it
+        // made `w.get()` resolve `get` on the strong type behind the handle and
+        // lower to a payload access through a `__koral_WeakRef`. References peel
+        // because they are aliases of the referent; a weak handle is not.
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then normalized_base_type,
         };
 
@@ -4309,6 +4321,7 @@ given TypeChecker {
                     for constraint in constraints then {
                         let cn = constraint.trait_name;
                         when self.resolve_trait_registry_method_signature(
+                            constraint.trait_def_id,
                             cn,
                             method_name,
                             inner_type,
@@ -4334,8 +4347,13 @@ given TypeChecker {
             },
             // The spelling is read from the DECLARATION for the trait lookups.
             .TraitObject(trait_def_id, _) then {
+                // The DECLARATION travels; the spelling is display-only. Handing
+                // the spelling on makes the callee look it up in whichever
+                // module is checking -- a trait object's trait need not be named
+                // there at all.
                 let trait_spelling = def_id_spelling(trait_def_id);
                 when self.resolve_trait_registry_method_signature(
+                    trait_def_id,
                     trait_spelling,
                     method_name,
                     inner_type,
@@ -4523,6 +4541,7 @@ given TypeChecker {
     // 从 trait registry 中提取 trait 方法的参数类型列表（不含 self）。
     module_private resolve_trait_method_param_types(
         self,
+        trait_def_id DefId,
         trait_name String,
         method_name String,
         receiver_type Type,
@@ -4546,7 +4565,11 @@ given TypeChecker {
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) then {
-            let bindings = self.trait_method_bindings(trait_name, receiver_type);
+            let bindings = self.trait_method_bindings(
+                trait_def_id,
+                trait_name,
+                receiver_type,
+            );
             // member.params 包含 self，跳过第一个
             if member.params.count() > 0(UInt) then {
                 let mutable out = List[Type].new();
@@ -4595,6 +4618,7 @@ given TypeChecker {
 
     module_private resolve_trait_method_self_type(
         self,
+        trait_def_id DefId,
         trait_name String,
         method_name String,
         receiver_type Type,
@@ -4616,7 +4640,11 @@ given TypeChecker {
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) and member.params.count() > 0(UInt) then {
-            let bindings = self.trait_method_bindings(trait_name, receiver_type);
+            let bindings = self.trait_method_bindings(
+                trait_def_id,
+                trait_name,
+                receiver_type,
+            );
             return Option[Type].Some(
                 self.concretize_default_literal_type(
                     self.apply_type_bindings(member.params[0(UInt)].param_type, bindings),
@@ -4733,6 +4761,7 @@ given TypeChecker {
     // 先查 trait registry，再回退到 base_type 的 method_table。
     module_private resolve_qualified_method_return_type(
         self,
+        trait_def_id DefId,
         trait_name String,
         method_name String,
         base_type Type,
@@ -4751,7 +4780,11 @@ given TypeChecker {
             .Ok(methods) then {
                 when methods.get(method_name) in {
                     .Some(member) then {
-                        let bindings = self.trait_method_bindings(trait_name, base_type);
+                        let bindings = self.trait_method_bindings(
+                            trait_def_id,
+                            trait_name,
+                            base_type,
+                        );
                         when member.return_type in {
                             .Unknown() then {},
                             _ then {
@@ -5016,6 +5049,7 @@ given TypeChecker {
                 let trait_name = self.trait_name_from_type(trait_type);
                 let method_name = self.context().symbol_name(method);
                 let mutable qualified_return_type = self.resolve_qualified_method_return_type(
+                    self.trait_def_id_from_type(trait_type),
                     trait_name,
                     method_name,
                     base.expr_type,
@@ -5052,6 +5086,7 @@ given TypeChecker {
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type);
                 let mutable qualified_return_type = self.resolve_qualified_method_return_type(
+                    self.trait_def_id_from_type(trait_type),
                     trait_name,
                     method_name,
                     base.expr_type,
@@ -5139,6 +5174,7 @@ given TypeChecker {
                 let trait_name = self.trait_name_from_type(trait_type);
                 let method_name = self.context().symbol_name(method);
                 let trait_params = self.resolve_trait_method_param_types(
+                    self.trait_def_id_from_type(trait_type),
                     trait_name,
                     method_name,
                     base.expr_type,
@@ -5162,6 +5198,7 @@ given TypeChecker {
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type);
                 let trait_params = self.resolve_trait_method_param_types(
+                    self.trait_def_id_from_type(trait_type),
                     trait_name,
                     method_name,
                     base.expr_type,

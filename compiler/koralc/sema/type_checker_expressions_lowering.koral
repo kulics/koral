@@ -1301,6 +1301,22 @@ given TypeChecker {
         };
     };
 
+    /// The one diagnostic for destructuring a weak handle. `let (a, b) = x`
+    /// has no pattern pass to say this, so it asks here; `for (a, b) in xs`
+    /// gets the same sentence from `lower_typed_pattern` and must not ask again.
+    module_private reject_weak_destructuring_subject(
+        self,
+        element_type Type,
+        span SourceSpan,
+    ) Void = {
+        if self.is_weak_reference_type(element_type) then {
+            self.push_diagnostic_at_span(
+                "Cannot match a pattern against a weak reference: upgrade it first",
+                span,
+            );
+        };
+    };
+
     /// The element type's field types, in declaration order, for positional
     /// destructuring. The count must match the number of binding slots.
     ///
@@ -1308,6 +1324,13 @@ given TypeChecker {
     /// `let (a, b) = x` and `for (a, b) in xs` have no other common entry: a
     /// NAMED field cannot be bound positionally, and an unreadable field may
     /// only be discarded with `_`.
+    ///
+    /// A weak subject is handled EARLY and SILENTLY: the handle is opaque, so
+    /// there are no field types to hand back, but the diagnostic belongs to the
+    /// caller. `for (a, b) in xs` already gets it from the pattern pass, and
+    /// `let (a, b) = x` asks for it through
+    /// `reject_weak_destructuring_subject`. Reporting here as well would put a
+    /// second line under the first one.
     module_private for_tuple_binding_types(
         self,
         element_type Type,
@@ -1315,13 +1338,22 @@ given TypeChecker {
         span SourceSpan,
     ) List[Type] = {
         let count = bindings.count();
+        if self.is_weak_reference_type(element_type) then {
+            let mutable opaque_slots = List[Type].new();
+            let mutable i UInt = 0;
+            while i < count then {
+                opaque_slots.push(Type.Unknown());
+                i += 1;
+            };
+            return opaque_slots;
+        };
+        // A reference is an alias of the referent, so it peels. A weak handle is
+        // not: it is a HANDLE, opaque until `upgrade`d, with no fields.
         let inner_type = when element_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then element_type,
         };
         // Identity comes from the subject's own DECLARATION, never from a name.
@@ -1534,13 +1566,14 @@ given TypeChecker {
             .None() then {},
         };
         let mutable for_scope = Scope.new_child(scope);
+        // A weak handle is NOT peeled here either: it is opaque until
+        // `upgrade`d, so `for x in <a ?List[Int]>` must report "not iterable"
+        // rather than iterate the referent behind the handle.
         let iterable_type = when typed_iter.expr_type in {
             .MutableReferenceType(inner) then inner,
             .ReferenceType(inner) then inner,
             .MutableBorrowedReferenceType(inner) then inner,
             .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
             _ then typed_iter.expr_type,
         };
         let mutable iter_item_type = self.infer_for_pattern_item_type(iterable_type);
@@ -1572,6 +1605,7 @@ given TypeChecker {
             iterator_trait_args.push(iter_item_type);
             self.enforce_explicit_generic_trait_conformance_with_note(
                 iterator_type,
+                self.lang_trait_def_id("Iterator"),
                 "Iterator",
                 iterator_trait_args,
                 "for-in iterator result check",
@@ -1583,6 +1617,7 @@ given TypeChecker {
                 iterable_trait_args.push(iterator_type);
                 self.enforce_explicit_generic_trait_conformance_with_note(
                     iterable_type,
+                    self.lang_trait_def_id("Iterable"),
                     "Iterable",
                     iterable_trait_args,
                     "for-in iterable check",

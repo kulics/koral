@@ -330,17 +330,6 @@ given Parser {
         return self.tokens[self.index + 1].kind is .KwElse();
     };
 
-    module_private lookahead_lambda_return_clause(self, start_index UInt) Bool = {
-        let saved = self.save_state();
-        self.restore_state(start_index);
-        let mutable looks_like_return_type = when self.parse_type() in {
-            .Ok(_) then true,
-            .Error(_) then false,
-        };
-        self.restore_state(saved);
-        return looks_like_return_type;
-    };
-
     module_private next_is_return(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
@@ -538,6 +527,69 @@ given Parser {
     /// slot `type mutable` and `let mutable` established. Access modifiers stay
     /// in the prefix slot: they say who can see the declaration, not what kind
     /// of thing it is. The two are mutually exclusive and may not repeat.
+    /// The same qualifiers, read as a bounded token peek from `start_index`.
+    /// Reads the buffer only -- never moves the cursor -- so a caller that just
+    /// needs to know what is there does not have to parse and roll back.
+    module_private peek_decl_qualifiers_at(self, start_index UInt) DeclQualifiers = {
+        let mutable is_foreign = false;
+        let mutable is_intrinsic = false;
+        let mutable invalid_message = Option[String].None();
+        let mutable i = start_index;
+        let mutable done = false;
+        while not done then {
+            if i >= self.tokens.count() then {
+                done = true;
+                continue;
+            };
+            when self.tokens[i].kind in {
+                .KwForeign() then {
+                    if is_foreign then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "Duplicate declaration modifier: foreign",
+                            );
+                        };
+                        done = true;
+                    } else if is_intrinsic then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "foreign and intrinsic cannot be used together",
+                            );
+                        };
+                        done = true;
+                    } else {
+                        is_foreign = true;
+                        i += 1;
+                    };
+                },
+                .KwIntrinsic() then {
+                    if is_intrinsic then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "Duplicate declaration modifier: intrinsic",
+                            );
+                        };
+                        done = true;
+                    } else if is_foreign then {
+                        if invalid_message is .None() then {
+                            invalid_message = .Some(
+                                "foreign and intrinsic cannot be used together",
+                            );
+                        };
+                        done = true;
+                    } else {
+                        is_intrinsic = true;
+                        i += 1;
+                    };
+                },
+                _ then {
+                    done = true;
+                },
+            };
+        };
+        return DeclQualifiers(is_foreign, is_intrinsic, invalid_message);
+    };
+
     module_private parse_decl_qualifiers(self) DeclQualifiers = {
         let mutable is_foreign = false;
         let mutable is_intrinsic = false;
@@ -791,6 +843,215 @@ given Parser {
             .Identifier(_) then true,
             _ then false,
         };
+    };
+
+    // ── 有界前看：形状归类 ─────────────────────────────────────────────────
+    //
+    // 解析歧义一律用「形状归类」决定，不用「试着解析、失败就回退」。后者要
+    // 保存/恢复词法位置、要为每个分支实现一套失败路径，而且失败的分支会把
+    // 更好的诊断吃掉。形状归类只读 token 缓冲、不建树、不改状态，回答一个
+    // 有界问题：从某个下标起的 token 串是不是一个类型的形状，到哪里结束。
+    //
+    // 形状必须与 `parse_type` 接受的语法逐条对齐：类型前缀（`?`、`*unsafe`
+    // [`mutable`]）+ 类型头（`Self`、大写标识符、`Func(...)` + 返回类型），
+    // 类型头后可跟 `[` 类型实参表 `]`。裸 `*` 不算类型起始——`f(*p)` 是解引用
+    // 实参，不是转型；只有 `*unsafe` 才是类型。
+
+    /// Whether `kind` at `index` can begin a type.
+    module_private token_kind_starts_type_at(self, index UInt) Bool = {
+        if index >= self.tokens.count() then {
+            return false;
+        };
+        return when self.tokens[index].kind in {
+            .QuestionMark() then true,
+            .KwSelfType() then true,
+            .Star() then self.index_followed_by_unsafe_at(index),
+            .Identifier(name) then self.is_upper_first(name),
+            _ then false,
+        };
+    };
+
+    /// `*unsafe` — the only spelling of a raw-pointer type. Bare `*` is the
+    /// dereference operator and must not read as a type start.
+    module_private index_followed_by_unsafe_at(self, index UInt) Bool = {
+        return index + 1 < self.tokens.count() and self.tokens[index + 1].kind is .KwUnsafe();
+    };
+
+    /// The index just past a `[` ... `]` type argument list that starts at
+    /// `start_index`, or `None` when the run is not exactly one.
+    module_private scan_type_list_at(self, start_index UInt) Option[UInt] = {
+        if start_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[start_index].kind is not .LBracket() then {
+            return Option[UInt].None();
+        };
+        let mutable i = start_index + 1;
+        if i < self.tokens.count() and self.tokens[i].kind is .RBracket() then {
+            return Option[UInt].Some(i + 1);
+        };
+        let mutable done = false;
+        let mutable result = Option[UInt].None();
+        while not done then {
+            let next = self.scan_type_shape_at(i) or else {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            i = next;
+            if i >= self.tokens.count() then {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            when self.tokens[i].kind in {
+                .Comma() then {
+                    i += 1;
+                    // A trailing comma is allowed: `[A, B,]`.
+                    if i < self.tokens.count() and self.tokens[i].kind is .RBracket() then {
+                        done = true;
+                        result = Option[UInt].Some(i + 1);
+                    };
+                },
+                .RBracket() then {
+                    done = true;
+                    result = Option[UInt].Some(i + 1);
+                },
+                _ then {
+                    done = true;
+                    result = Option[UInt].None();
+                },
+            };
+        };
+        return result;
+    };
+
+    /// The index just past a `(` ... `)` function-type parameter list that
+    /// starts at `start_index`, or `None`.
+    module_private scan_type_param_list_at(self, start_index UInt) Option[UInt] = {
+        if start_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[start_index].kind is not .LParen() then {
+            return Option[UInt].None();
+        };
+        let mutable i = start_index + 1;
+        if i < self.tokens.count() and self.tokens[i].kind is .RParen() then {
+            return Option[UInt].Some(i + 1);
+        };
+        let mutable done = false;
+        let mutable result = Option[UInt].None();
+        while not done then {
+            let next = self.scan_type_shape_at(i) or else {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            i = next;
+            if i >= self.tokens.count() then {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            when self.tokens[i].kind in {
+                .Comma() then {
+                    i += 1;
+                    if i < self.tokens.count() and self.tokens[i].kind is .RParen() then {
+                        done = true;
+                        result = Option[UInt].Some(i + 1);
+                    };
+                },
+                .RParen() then {
+                    done = true;
+                    result = Option[UInt].Some(i + 1);
+                },
+                _ then {
+                    done = true;
+                    result = Option[UInt].None();
+                },
+            };
+        };
+        return result;
+    };
+
+    /// The index just past one type starting at `start_index`, or `None` when
+    /// the run there is not a type.
+    module_private scan_type_shape_at(self, start_index UInt) Option[UInt] = {
+        let mutable i = start_index;
+        // Prefixes: `?T`, `*unsafe T`, `*unsafe mutable T`. They nest: `?*unsafe T`.
+        let mutable more_prefixes = true;
+        while more_prefixes then {
+            if i >= self.tokens.count() then {
+                return Option[UInt].None();
+            };
+            if self.tokens[i].kind is .QuestionMark() then {
+                i += 1;
+            } else if self.tokens[i].kind is .Star() and self.index_followed_by_unsafe_at(i) then {
+                i += 2;
+                if i < self.tokens.count() and self.tokens[i].kind is .KwMut() then {
+                    i += 1;
+                };
+            } else {
+                more_prefixes = false;
+            };
+        };
+
+        if i >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        when self.tokens[i].kind in {
+            .KwSelfType() then {
+                return Option[UInt].Some(i + 1);
+            },
+            .Identifier(name) then {
+                i += 1;
+                if name == "Func" and i < self.tokens.count() and self.tokens[i].kind is .LParen() then {
+                    let after_params = self.scan_type_param_list_at(i) or else {
+                        return Option[UInt].None();
+                    };
+                    return self.scan_type_shape_at(after_params);
+                };
+                if not self.is_upper_first(name) then {
+                    return Option[UInt].None();
+                };
+                if i < self.tokens.count() and self.tokens[i].kind is .LBracket() then {
+                    return self.scan_type_list_at(i);
+                };
+                return Option[UInt].Some(i);
+            },
+            _ then {
+                return Option[UInt].None();
+            },
+        };
+    };
+
+    /// The index just past a `( <type> )` suffix that starts at `start_index`,
+    /// or `None`. This is the SHAPE of a postfix cast and of a Rust-style
+    /// qualified path `Type(Trait)`; which one it is depends on the base, not
+    /// on the tokens here.
+    module_private scan_paren_type_suffix_at(self, start_index UInt) Option[UInt] = {
+        if start_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[start_index].kind is not .LParen() then {
+            return Option[UInt].None();
+        };
+        let after_type = self.scan_type_shape_at(start_index + 1) or else {
+            return Option[UInt].None();
+        };
+        if after_type >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[after_type].kind is not .RParen() then {
+            return Option[UInt].None();
+        };
+        return Option[UInt].Some(after_type + 1);
+    };
+
+    /// The index just past a `[ <type-list> ]` suffix that starts at
+    /// `start_index`, or `None`.
+    module_private scan_type_arg_list_suffix_at(self, start_index UInt) Option[UInt] = {
+        return self.scan_type_list_at(start_index);
     };
 
     module_private parse_type_arg_list(self) Result[List[TypeNode]] = {

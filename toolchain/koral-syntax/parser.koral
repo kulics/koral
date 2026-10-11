@@ -87,6 +87,259 @@ given CstParser {
         _ then .Error(self.expected_error(what)),
     };
 
+    // ── 有界前看：形状归类 ─────────────────────────────────────────────────
+    //
+    // 与编译器同一套规则：歧义由「形状」决定，不由「试解析、失败再回退」决定。
+    // 形状扫描只读 token 缓冲、不建树、不改 `self.pos`，回答一个有界问题：
+    // 从某个下标起的 token 串是不是一个类型的形状，到哪里结束。
+
+    /// Whether `i` is in range and the token there can begin a type.
+    /// Mirrors `is_type_start`, except that bare `*` is excluded: `f(*p)`
+    /// dereferences, it does not cast. Only `*unsafe` is a type.
+    /// The index of the first token at or after `i` that is not a newline.
+    /// The parser's `peek()` skips newlines; the scanner must too, or a
+    /// multi-line call argument makes it see `Newline` where the parser sees `(`.
+    file_private sig_index_at(self, i UInt) UInt = {
+        let mutable j = i;
+        while j < self.tokens.count() and self.tokens[j] is .Newline() then {
+            j += 1;
+        };
+        return j;
+    };
+
+    /// Whether `i` (after skipping newlines) is in range and the token there
+    /// can begin a type. Mirrors `is_type_start`, except that bare `*` is
+    /// excluded: `f(*p)` dereferences, it does not cast. Only `*unsafe` is a
+    /// type.
+    file_private token_starts_type_at(self, raw_i UInt) Bool = {
+        let i = self.sig_index_at(raw_i);
+        if i >= self.tokens.count() then {
+            return false;
+        };
+        return when self.tokens[i] in {
+            .KwWeakref() or .KwSelfType() then true,
+            .Star() then {
+                let n = self.sig_index_at(i + 1);
+                n < self.tokens.count() and self.tokens[n] is .KwUnsafe()
+            },
+            .Ident(name) then self.is_type_start(.Ident(name)),
+            _ then false,
+        };
+    };
+
+    /// The index just past one type starting at `start_index`, or `None`.
+    file_private scan_type_shape_at(self, raw_start UInt) Option[UInt] = {
+        let mutable i = self.sig_index_at(raw_start);
+        let mutable more_prefixes = true;
+        while more_prefixes then {
+            i = self.sig_index_at(i);
+            if i >= self.tokens.count() then {
+                return Option[UInt].None();
+            };
+            if self.tokens[i] is .KwWeakref() then {
+                i += 1;
+            } else if self.tokens[i] is .Star() then {
+                let n = self.sig_index_at(i + 1);
+                if n >= self.tokens.count() or self.tokens[n] is not .KwUnsafe() then {
+                    more_prefixes = false;
+                } else {
+                    i = self.sig_index_at(n + 1);
+                    if i < self.tokens.count() and self.tokens[i] is .KwMut() then {
+                        i += 1;
+                    };
+                };
+            } else {
+                more_prefixes = false;
+            };
+        };
+        i = self.sig_index_at(i);
+        if i >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[i] is .KwSelfType() then {
+            return Option[UInt].Some(i + 1);
+        };
+        if self.tokens[i] is .Ident(name) then {
+            let after_name = self.sig_index_at(i + 1);
+            if name == "Func" and after_name < self.tokens.count() and self.tokens[after_name] is .LParen() then {
+                let after_params = self.scan_type_list_at(after_name) or else {
+                    return Option[UInt].None();
+                };
+                return self.scan_type_shape_at(after_params);
+            };
+            if not self.is_type_start(.Ident(name)) then {
+                return Option[UInt].None();
+            };
+            if after_name < self.tokens.count() and self.tokens[after_name] is .LBracket() then {
+                return self.scan_type_list_at(after_name);
+            };
+            return Option[UInt].Some(after_name);
+        };
+        return Option[UInt].None();
+    };
+
+    /// The index just past a `[` `<type-list>` `]` (or `(` `<type-list>` `)`)
+    /// run starting at `start_index`, or `None`.
+    file_private scan_type_list_at(self, raw_start UInt) Option[UInt] = {
+        let start_index = self.sig_index_at(raw_start);
+        if start_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        let is_bracket_list = self.tokens[start_index] is .LBracket();
+        let is_paren_list = self.tokens[start_index] is .LParen();
+        if not is_bracket_list and not is_paren_list then {
+            return Option[UInt].None();
+        };
+        let mutable i = start_index + 1;
+        let mutable done = false;
+        let mutable result = Option[UInt].None();
+        while not done then {
+            i = self.sig_index_at(i);
+            if i >= self.tokens.count() then {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            let token_is_close = if is_bracket_list then self.tokens[i] is .RBracket()
+            else self.tokens[i] is .RParen();
+            if token_is_close then {
+                done = true;
+                result = Option[UInt].Some(i + 1);
+                continue;
+            };
+            if self.tokens[i] is .Comma() then {
+                i += 1;
+                continue;
+            };
+            let next = self.scan_type_shape_at(i) or else {
+                done = true;
+                result = Option[UInt].None();
+                continue;
+            };
+            i = next;
+        };
+        return result;
+    };
+
+    /// Whether `expr` is written as a TYPE NAME: a bare upper-first identifier
+    /// or a generic instantiation of one. That is what makes `(Trait)` after it
+    /// a Rust-style qualified path rather than a cast.
+    file_private expr_is_type_name(self, expr CstExpr) Bool = {
+        return when expr in {
+            .Ident(tok) then when tok in {
+                .Ident(name) then self.is_type_start(.Ident(name)),
+                _ then false,
+            },
+            .GenericInst(base, _, _, _) then self.expr_is_type_name(base),
+            _ then false,
+        };
+    };
+
+    /// Whether `(params) [Type] ->` starts at `start_index`.
+    ///
+    /// SHAPE, not a trial parse: the tell is a `->` after the parameter list's
+    /// `)`, or after an optional return type written there. Reads the buffer
+    /// only. This replaces a trial that parsed the whole lambda (body included)
+    /// speculatively and rolled back on any failure.
+    file_private shape_is_lambda_at(self, raw_start UInt) Bool = {
+        let start_index = self.sig_index_at(raw_start);
+        if start_index >= self.tokens.count() then {
+            return false;
+        };
+        if self.tokens[start_index] is not .LParen() then {
+            return false;
+        };
+        let mutable i = self.sig_index_at(start_index + 1);
+        if i < self.tokens.count() and self.tokens[i] is .RParen() then {
+            return self.lambda_return_clause_follows_at(i + 1);
+        };
+        // Non-empty parameters: `name [Type] (, name [Type])* ,?`
+        while true then {
+            i = self.sig_index_at(i);
+            if i >= self.tokens.count() then {
+                return false;
+            };
+            if self.tokens[i] is not .Ident(_) then {
+                return false;
+            };
+            i = self.sig_index_at(i + 1);
+            if i >= self.tokens.count() then {
+                return false;
+            };
+            // A parameter is `name [Type]`. `name: Type` is a MISTAKEN lambda
+            // parameter, and still a lambda: the real parse reports
+            // `Lambda parameters use 'name Type', not 'name: Type'`.
+            if self.tokens[i] is .Colon() then {
+                i = self.sig_index_at(i + 1);
+                let after_type = self.scan_type_shape_at(i) or else {
+                    return false;
+                };
+                i = after_type;
+            } else if (self.tokens[i] is not .Comma()) and (self.tokens[i] is not .RParen()) then {
+                let after_type = self.scan_type_shape_at(i) or else {
+                    return false;
+                };
+                i = after_type;
+            };
+            i = self.sig_index_at(i);
+            if i >= self.tokens.count() then {
+                return false;
+            };
+            if self.tokens[i] is .Comma() then {
+                i += 1;
+            } else {
+                break;
+            };
+        };
+        i = self.sig_index_at(i);
+        if i >= self.tokens.count() then {
+            return false;
+        };
+        if self.tokens[i] is not .RParen() then {
+            return false;
+        };
+        return self.lambda_return_clause_follows_at(i + 1);
+    };
+
+    /// After a lambda's parameter list: `->`, or `<type> ->`.
+    file_private lambda_return_clause_follows_at(self, raw_start UInt) Bool = {
+        let start_index = self.sig_index_at(raw_start);
+        if start_index >= self.tokens.count() then {
+            return false;
+        };
+        if self.tokens[start_index] is .Arrow() then {
+            return true;
+        };
+        let after_type = self.scan_type_shape_at(start_index) or else {
+            return false;
+        };
+        let arrow_index = self.sig_index_at(after_type);
+        return arrow_index < self.tokens.count() and self.tokens[arrow_index] is .Arrow();
+    };
+
+    /// The index just past a `( <type> )` suffix starting at `start_index`, or
+    /// `None`. This is the SHAPE of a postfix cast `expr(Type)`.
+    file_private scan_paren_type_suffix_at(self, raw_start UInt) Option[UInt] = {
+        let start_index = self.sig_index_at(raw_start);
+        if start_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[start_index] is not .LParen() then {
+            return Option[UInt].None();
+        };
+        let after_type = self.scan_type_shape_at(start_index + 1) or else {
+            return Option[UInt].None();
+        };
+        let rp_index = self.sig_index_at(after_type);
+        if rp_index >= self.tokens.count() then {
+            return Option[UInt].None();
+        };
+        if self.tokens[rp_index] is not .RParen() then {
+            return Option[UInt].None();
+        };
+        return Option[UInt].Some(rp_index + 1);
+    };
+
     file_private is_type_start(self, t Token) Bool = when t in {
         .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         .Ident(name) then {
@@ -1210,38 +1463,32 @@ given CstParser {
             };
 
             // Postfix cast: expr(Type)
+            //
+            // One bounded shape scan decides: `( <type> )` is a cast or a
+            // Rust-style qualified path, anything else is a call. Nothing is
+            // parsed speculatively and rolled back. Which of the two it is
+            // depends on the BASE, not on these tokens: a TYPE NAME followed by
+            // `(Trait)` names the trait for disambiguation (`Num(Tag)`), any
+            // other base is being cast (`x(Int)`).
             if self.check(.LParen()) then {
-                let saved = self.pos;
-                let lp = self.eat();
-                if self.is_type_start(self.peek()) then {
-                    let cast_type = when self.parse_type_node() in {
+                if self.scan_paren_type_suffix_at(self.pos) is .Some(_) then {
+                    let lp = self.eat();
+                    let inner_type = self.parse_type_node() or return;
+                    let rp = when self.expect(.RParen(), "')'") in {
                         .Ok(t) then t,
-                        .Error(_) then {
-                            self.pos = saved;
-                            let lp2 = self.eat();
-                            let args2 = when self.parse_call_args() in {
-                                .Ok(a) then a,
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
-                            let rp2 = when self.expect(.RParen(), "')'") in {
-                                .Ok(t) then t,
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
-                            expr = .Call(expr, lp2, args2, rp2);
-                            continue;
+                        .Error(e) then {
+                            return .Error(e);
                         },
                     };
-                    if self.check(.RParen()) then {
-                        let rp = self.eat();
-                        expr = .TypeCast(lp, cast_type, rp, expr);
-                        continue;
-                    };
+                    expr = if self.expr_is_type_name(expr) then .QualifiedTrait(
+                        lp,
+                        inner_type,
+                        rp,
+                        expr,
+                    )
+                    else .TypeCast(lp, inner_type, rp, expr);
+                    continue;
                 };
-                self.pos = saved;
                 let call_lp = self.eat();
                 let args = when self.parse_call_args() in {
                     .Ok(a) then a,
@@ -1707,16 +1954,13 @@ given CstParser {
     // ========================================================================
 
     file_private parse_paren_or_lambda(self) Result[CstExpr] = {
-        // Try lambda: (params) [RetType] -> body
-        let saved = self.pos;
-        let lambda_result = self.try_parse_lambda();
-        when lambda_result in {
-            .Some(e) then {
-                return .Ok(e);
-            },
-            .None() then {
-                self.pos = saved;
-            },
+        // `(` opens either a lambda or a parenthesized expression. The shape
+        // classifier decides BEFORE anything is built -- a lambda is
+        // `(params) [Type] -> ...`, so the `->` is the tell -- and then the
+        // chosen alternative is parsed for real. No trial to roll back.
+        if self.shape_is_lambda_at(self.pos) then {
+            let lambda_expr = self.parse_lambda_node() or return;
+            return .Ok(lambda_expr);
         };
         // Parenthesized expression
         let lp = when self.expect(.LParen(), "'('") in {
@@ -1766,73 +2010,68 @@ given CstParser {
         };
     };
 
-    file_private try_parse_lambda(self) Option[CstExpr] = {
+    /// Parses a lambda whose SHAPE `shape_is_lambda_at` has already confirmed.
+    /// Errors are real errors -- there is no alternative to fall back to.
+    file_private parse_lambda_node(self) Result[CstExpr] = {
         let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
-            .Error(_) then {
-                return .None();
+            .Error(e) then {
+                return .Error(e);
             },
         };
         let mutable params = List[CstLambdaParam].new();
         while not self.check(.RParen()) and not self.is_eof() then {
-            if self.peek() is not .Ident(_) then {
-                return .None();
+            let name = when self.expect_ident("lambda parameter") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
-            let name = self.eat();
-            // Optional type annotation
             let mutable pt = Option[CstType].None();
-            if self.peek() is .Ident(_) or self.peek() is .LBracket() or self.peek() is .KwSelfType() then {
-                // Check if this looks like a type (uppercase start or [)
-                let is_type = self.is_type_start(self.peek());
-                if is_type then {
-                    let t = when self.parse_type_node() in {
-                        .Ok(parsed_type) then parsed_type,
-                        .Error(_) then {
-                            return .None();
-                        },
-                    };
-                    pt = .Some(t);
+            if not self.check(.Comma()) and not self.check(.RParen()) then {
+                let t = when self.parse_type_node() in {
+                    .Ok(parsed_type) then parsed_type,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
                 };
+                pt = .Some(t);
             };
             let comma = self.eat_comma();
             params.push(CstLambdaParam(name, pt, comma));
         };
-        if not self.check(.RParen()) then {
-            return .None();
-        };
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
-            .Error(_) then {
-                return .None();
+            .Error(e) then {
+                return .Error(e);
             },
         };
 
         // Optional return type
         let mutable ret = Option[CstType].None();
-        if self.peek() is .Ident(_) or self.peek() is .LBracket() or self.peek() is .KwSelfType() then {
-            let is_type = self.is_type_start(self.peek());
-            if is_type then {
-                let t = when self.parse_type_node() in {
-                    .Ok(parsed_type) then parsed_type,
-                    .Error(_) then {
-                        return .None();
-                    },
-                };
-                ret = .Some(t);
+        if not self.check(.Arrow()) then {
+            let t = when self.parse_type_node() in {
+                .Ok(parsed_type) then parsed_type,
+                .Error(e) then {
+                    return .Error(e);
+                },
             };
+            ret = .Some(t);
         };
 
-        if not self.check(.Arrow()) then {
-            return .None();
-        };
-        let arrow = self.eat();
-        let body = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(_) then {
-                return .None();
+        let arrow = when self.expect(.Arrow(), "'->'") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
             },
         };
-        return .Some(.Lambda(lp, params, rp, ret, arrow, body));
+        let body = when self.parse_expr_node() in {
+            .Ok(e) then e,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Lambda(lp, params, rp, ret, arrow, body));
     };
 
     // ========================================================================

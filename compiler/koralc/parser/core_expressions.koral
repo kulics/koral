@@ -11,8 +11,15 @@
 file_private type StaticDispatchReceiver(type_name String, type_args List[TypeNode]);
 
 given Parser {
+    /// Whether the `(` at the cursor opens a lambda.
+    ///
+    /// SHAPE, not a trial parse: a lambda is `(params) [Type] -> ...`, so the
+    /// tell is a `->` immediately after the parameter list's `)`, or after an
+    /// optional return type written there. Nothing is built and nothing is
+    /// rolled back. This also closes two holes the trial had -- it used to
+    /// accept `(...)` followed by ANY type as a lambda (no `->` required) and
+    /// it skipped the first parameter token without checking it was a name.
     module_private is_lambda_expression(self) Bool = {
-        // Must start with (
         when self.current().kind in {
             .LParen() then {},
             _ then {
@@ -22,30 +29,20 @@ given Parser {
 
         let mutable i = self.index + 1; // skip (
 
-        // Empty params: () ...
-        if i < self.tokens.count() then {
-            when self.tokens[i].kind in {
-                .RParen() then {
-                    // () followed by optional type then ->
-                    i += 1;
-                    if i >= self.tokens.count() then {
-                        return false;
-                    };
-                    if self.tokens[i].kind is .Arrow() then {
-                        return true;
-                    };
-                    return self.lookahead_lambda_return_clause(i);
-                },
-                _ then {},
-            };
+        // Empty params: `()`
+        if i < self.tokens.count() and self.tokens[i].kind is .RParen() then {
+            return self.lambda_return_clause_follows_at(i + 1);
         };
 
-        // Non-empty params: first token must be an identifier (param name)
+        // Non-empty params: the first token is a parameter name.
         if i >= self.tokens.count() then {
             return false;
         };
+        if self.tokens[i].kind is not .Identifier(_) then {
+            return false;
+        };
+
         let mutable depth UInt = 1; // we already consumed the opening (
-        i += 1; // skip first identifier
         while i < self.tokens.count() and depth > 0 then {
             when self.tokens[i].kind in {
                 .LParen() then {
@@ -75,15 +72,23 @@ given Parser {
         if depth > 0 then {
             return false;
         };
-        i += 1; // skip ;
+        i += 1; // skip `)`
 
-        if i >= self.tokens.count() then {
+        return self.lambda_return_clause_follows_at(i);
+    };
+
+    /// After a lambda's parameter list: `->`, or `<type> ->`.
+    module_private lambda_return_clause_follows_at(self, start_index UInt) Bool = {
+        if start_index >= self.tokens.count() then {
             return false;
         };
-        if self.tokens[i].kind is .Arrow() then {
+        if self.tokens[start_index].kind is .Arrow() then {
             return true;
         };
-        return self.lookahead_lambda_return_clause(i);
+        let after_type = self.scan_type_shape_at(start_index) or else {
+            return false;
+        };
+        return after_type < self.tokens.count() and self.tokens[after_type].kind is .Arrow();
     };
 
     // Parse a lambda expression: (params) [ReturnType] -> body
@@ -510,17 +515,12 @@ given Parser {
 
     module_private parse_parenthesized_expression(self) Result[Expr] = {
         let start = self.current();
-        let saved = self.save_state();
-        when self.parse_lambda_expression() in {
-            .Ok(lambda_expr) then {
-                return .Ok(lambda_expr);
-            },
-            .Error(err) then {
-                self.restore_state(saved);
-                if self.is_lambda_expression() then {
-                    return .Error(err);
-                };
-            },
+        // `(` opens either a lambda or a parenthesized expression. The shape
+        // classifier decides BEFORE anything is built, so there is no trial
+        // parse to roll back and no failed branch to swallow the better
+        // diagnostic.
+        if self.is_lambda_expression() then {
+            return self.parse_lambda_expression();
         };
 
         self.advance();
@@ -663,9 +663,12 @@ given Parser {
         return .Ok(Expr.Block(statements, tail_expression, span));
     };
 
+    /// Named or positional? Decided by a BOUNDED two-token shape rule -- a
+    /// lower-first `ident` immediately followed by `:` -- so nothing is parsed
+    /// speculatively. The only rewind left is on the error path: the argument
+    /// is reported at its first token, not after the label and colon.
     module_private parse_call_argument(self, context String) Result[Expr] = {
         let start = self.current();
-        let saved = self.save_state();
 
         if self.current().kind is .Ellipsis() then {
             let _ = start;
@@ -678,6 +681,7 @@ given Parser {
 
         when self.current_labeled_argument_name(true) in {
             .Some(label) then {
+                let saved = self.save_state();
                 self.advance();
                 self.advance();
                 let expr = when self.parse_expression_checked(
@@ -694,15 +698,13 @@ given Parser {
             .None() then {},
         };
 
-        self.restore_state(saved);
         return self.parse_expression_checked("\(context) arguments");
     };
 
     module_private parse_pattern_argument(self, stop_on_in Bool) Result[PatternElement] = {
-        let saved = self.save_state();
-
         when self.current_labeled_argument_name(false) in {
             .Some(label) then {
+                let saved = self.save_state();
                 self.advance();
                 self.advance();
                 let pattern = when self.parse_pattern_or(stop_on_in) in {
@@ -717,7 +719,6 @@ given Parser {
             .None() then {},
         };
 
-        self.restore_state(saved);
         let pattern = self.parse_pattern_or(stop_on_in) or return;
         return .Ok(PatternElement(Option[String].None(), pattern));
     };
@@ -912,32 +913,21 @@ given Parser {
         return .Ok(arms);
     };
 
-    module_private try_parse_postfix_cast_suffix(self, base Expr) Option[Expr] = {
-        let saved = self.save_state();
-        when self.current().kind in {
-            .LParen() then {},
-            _ then {
-                return Option[Expr].None();
-            },
-        };
-
+    /// A postfix cast `expr(Type)`. The SHAPE has already been decided by
+    /// `scan_paren_type_suffix_at` -- this only builds the node, so there is
+    /// nothing to roll back and no second branch to fall into.
+    module_private parse_postfix_cast_suffix(self, base Expr) Result[Expr] = {
         self.advance();
-
-        let mutable cast_type = self.parse_type() or else {
-            self.restore_state(saved);
-            return Option[Expr].None();
-        };
-
+        let cast_type = self.parse_type() or return;
         when self.current().kind in {
             .RParen() then {
                 self.advance();
             },
             _ then {
-                self.restore_state(saved);
-                return Option[Expr].None();
+                return .Error(self.parser_error("Expected ')' after cast type"));
             },
         };
-        return Option[Expr].Some(
+        return .Ok(
             Expr.CastExpr(cast_type, base, self.span_from_expr_start(base)),
         );
     };
@@ -1671,48 +1661,22 @@ given Parser {
         };
     };
 
-    module_private try_parse_postfix_generic_application(self, base Expr) Option[Expr] = {
-        let saved = self.save_state();
-        let parsed = self.parse_postfix_generic_application(base);
-        return when parsed in {
-            .Ok(expr) then Option[Expr].Some(expr),
-            .Error(_) then {
-                self.restore_state(saved);
-                Option[Expr].None()
-            },
-        };
-    };
-
-    module_private try_parse_method_type_args(self) Option[List[TypeNode]] = {
+    // `m[T](...)` after a `.member`: `[` `<type-list>` `]` `(` is a generic
+    // method call. The same `[` `<type-list>` `]` WITHOUT the `(` is type
+    // arguments written on a method that takes none. Both are decided by one
+    // bounded scan of the bracketed run plus the token after it -- no trial
+    // parse, no rollback.
+    module_private method_type_args_shape(self) Option[Bool] = {
         if self.current().kind is not .LBracket() then {
-            return Option[List[TypeNode]].None();
+            return Option[Bool].None();
         };
-
-        let saved = self.save_state();
-        let type_args = self.parse_type_arg_list() or else {
-            self.restore_state(saved);
-            return Option[List[TypeNode]].None();
+        let after_list = self.scan_type_list_at(self.index) or else {
+            return Option[Bool].None();
         };
-        if self.current().kind is .LParen() then {
-            return Option[List[TypeNode]].Some(type_args);
+        if after_list >= self.tokens.count() then {
+            return Option[Bool].None();
         };
-
-        self.restore_state(saved);
-        return Option[List[TypeNode]].None();
-    };
-
-    module_private has_bare_method_type_args(self) Bool = {
-        if self.current().kind is not .LBracket() then {
-            return false;
-        };
-
-        let saved = self.save_state();
-        let has_missing_call = when self.parse_type_arg_list() in {
-            .Ok(_) then self.current().kind is not .LParen(),
-            .Error(_) then false,
-        };
-        self.restore_state(saved);
-        return has_missing_call;
+        return Option[Bool].Some(self.tokens[after_list].kind is .LParen());
     };
 
     // Rust-style qualified path `Type(Trait)`: the base must be a type name and
@@ -1729,33 +1693,22 @@ given Parser {
         };
     };
 
-    // Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
-    // Returns None (restoring the parser position) when this is not a trait ref.
-    module_private try_parse_qualified_trait_ref(self) Option[TypeNode] = {
-        if self.current().kind is not .LParen() then {
-            return Option[TypeNode].None();
-        };
-        let saved = self.save_state();
+    /// Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
+    /// The SHAPE has already been decided by `scan_paren_type_suffix_at` -- the
+    /// base being a type name is what makes this a qualified path rather than a
+    /// cast. This only builds the node.
+    module_private parse_qualified_trait_ref(self) Result[TypeNode] = {
         self.advance();
-        let name_token = self.current();
-        if name_token.kind is .Identifier(trait_name) then {
-            if not self.is_upper_first(trait_name) then {
-                self.restore_state(saved);
-                return Option[TypeNode].None();
-            };
-            let trait_type = self.parse_type();
-            when trait_type in {
-                .Ok(resolved_trait_type) then {
-                    if self.current().kind is .RParen() then {
-                        self.advance();
-                        return Option[TypeNode].Some(resolved_trait_type);
-                    };
-                },
-                .Error(_) then {},
-            };
+        let trait_type = self.parse_type() or return;
+        when self.current().kind in {
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected ')' after qualified trait"));
+            },
         };
-        self.restore_state(saved);
-        return Option[TypeNode].None();
+        return .Ok(trait_type);
     };
 
     module_private parse_call_suffix(self, base Expr) Result[Expr] = {
@@ -1937,9 +1890,19 @@ given Parser {
 
         let member = self.expect_identifier("member access") or return;
         self.parse_debug("dot suffix member=\(member)");
-        let bare_method_type_args = self.has_bare_method_type_args();
-        let method_type_args = when self.try_parse_method_type_args() in {
-            .Some(type_args) then type_args,
+        // One shape scan answers both: `[` `<type-list>` `]` `(` is a generic
+        // method call; the same without the `(` is type arguments on a method
+        // that takes none (a diagnostic). Nothing is tried and rolled back.
+        let type_args_shape = self.method_type_args_shape();
+        let bare_method_type_args = when type_args_shape in {
+            .Some(has_call) then not has_call,
+            .None() then false,
+        };
+        let method_type_args = when type_args_shape in {
+            .Some(has_call) then {
+                if has_call then self.parse_type_arg_list() or return
+                else List[TypeNode].new()
+            },
             .None() then List[TypeNode].new(),
         };
 
@@ -2116,47 +2079,48 @@ given Parser {
                     if not self.should_continue_postfix_after_expression() then {
                         break;
                     };
-                    // Swift's postfix-`(` order (ParserExpressions.swift:734-742):
-                    // qualified path `Type(Trait)` first, then a postfix cast,
-                    // then an ordinary call. Trying the cast first makes
-                    // `Num(Tag)` a cast of `Num` to `Tag`.
-                    let qualified_expr = if self.qualified_path_base_is_type_name(expr) then {
-                        when self.try_parse_qualified_trait_ref() in {
-                            .Some(trait_type) then Option[Expr].Some(
-                                Expr.TraitQualificationExpr(
-                                    expr,
-                                    trait_type,
-                                    self.span_from_expr_start(expr),
-                                ),
-                            ),
-                            .None() then Option[Expr].None(),
-                        }
+                    // One bounded shape scan decides what `(` opens. `( <type> )`
+                    // is a Rust-style qualified path `Type(Trait)` when the base
+                    // is a type name, and a postfix cast `expr(Type)` otherwise;
+                    // anything else is an ordinary call. Trying each in turn and
+                    // rolling back is what used to make `Num(Tag)` a cast of
+                    // `Num` to `Tag` and made a failed branch eat the better
+                    // diagnostic.
+                    let is_type_suffix = self.scan_paren_type_suffix_at(
+                        self.index,
+                    ) is .Some(_);
+                    if is_type_suffix and self.qualified_path_base_is_type_name(expr) then {
+                        let trait_type = self.parse_qualified_trait_ref() or return;
+                        expr = Expr.TraitQualificationExpr(
+                            expr,
+                            trait_type,
+                            self.span_from_expr_start(expr),
+                        );
+                    } else if is_type_suffix then {
+                        expr = self.parse_postfix_cast_suffix(expr) or return;
                     } else {
-                        Option[Expr].None()
-                    };
-                    expr = when qualified_expr in {
-                        .Some(qualified) then qualified,
-                        .None() then when self.try_parse_postfix_cast_suffix(expr) in {
-                            .Some(cast_expr) then cast_expr,
-                            .None() then self.parse_call_suffix(expr) or return,
-                        },
+                        expr = self.parse_call_suffix(expr) or return;
                     };
                 },
                 .LBracket() then {
                     if not self.should_continue_postfix_after_expression() then {
                         break;
                     };
+                    // `[` `<type-list>` `]` is a generic application; anything
+                    // else is a subscript. One bounded scan of the bracketed
+                    // run decides -- no trial parse, no rollback. An upper-first
+                    // base that is NOT followed by a type list is a type name
+                    // written where a list was expected, so it keeps the
+                    // dedicated complaint instead of silently subscripting.
+                    let is_type_arg_list = self.scan_type_list_at(self.index) is .Some(_);
                     when expr in {
                         .Identifier(name, _) then {
-                            if self.is_upper_first(name) then {
+                            if is_type_arg_list then {
+                                expr = self.parse_postfix_generic_application(expr) or return;
+                            } else if self.is_upper_first(name) then {
                                 expr = self.parse_postfix_generic_application(expr) or return;
                             } else {
-                                expr = when self.try_parse_postfix_generic_application(
-                                    expr,
-                                ) in {
-                                    .Some(generic_expr) then generic_expr,
-                                    .None() then self.parse_subscript_suffix(expr) or return,
-                                };
+                                expr = self.parse_subscript_suffix(expr) or return;
                             };
                         },
                         _ then {

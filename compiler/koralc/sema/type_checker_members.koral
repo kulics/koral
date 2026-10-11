@@ -264,10 +264,22 @@ given TypeChecker {
         };
     };
 
+    /// The trait's SPELLING, for display. `trait_def_id_from_type` is what
+    /// decides; a name taken off a type and looked up again resolves in
+    /// whichever module is checking, and the trait a trait object names need
+    /// not be in scope there at all.
     module_private trait_name_from_type(self, trait_type Type) String = {
         return when trait_type in {
             .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             _ then self.context().type_display_name(trait_type),
+        };
+    };
+
+    /// The trait DECLARATION a trait reference names, straight off the type.
+    module_private trait_def_id_from_type(self, trait_type Type) DefId = {
+        return when trait_type in {
+            .TraitObject(trait_def_id, _) then trait_def_id,
+            _ then def_id_invalid(),
         };
     };
 
@@ -1649,8 +1661,11 @@ given TypeChecker {
             for constraint in type_param.constraints then {
                 // Shape bounds are not trait conformances and are not tool
                 // materialization requirements, so they are not checked here.
-                when bound_trait_name(constraint) in {
-                    .Some(_) then {
+                // Dispatch on the bound's KIND -- pulling the spelling out
+                // first to ask "is there a trait?" is the same name-as-identity
+                // move the rest of the chain no longer makes.
+                when constraint in {
+                    .Trait(_, _, _) then {
                         if self.bound_may_hold(bound_type, constraint, bindings) then {
                             continue;
                         };
@@ -1658,7 +1673,7 @@ given TypeChecker {
                             return false;
                         };
                     },
-                    .None() then {},
+                    .Mutable() or .Foreign() then {},
                 };
             };
         };
@@ -1683,6 +1698,7 @@ given TypeChecker {
     module_private trait_bound_may_hold(
         self,
         bound_type Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) Bool = {
@@ -1695,7 +1711,7 @@ given TypeChecker {
             },
             _ then {},
         };
-        when self.generic_trait_conformance_status(bound_type, trait_name, trait_args) in {
+        when self.generic_trait_conformance_status(bound_type, trait_def_id, trait_name, trait_args) in {
             .Satisfied() then {
                 return true;
             },

@@ -1103,18 +1103,15 @@ given Parser {
         };
 
         // `foreign` / `intrinsic` are written immediately after the keyword,
-        // not before it. Peek past the keyword to read them without disturbing
-        // the branch parser that consumes it.
-        let saved_after_flags = self.save_state();
+        // not before it. A bounded token peek reads them without disturbing the
+        // branch parser that consumes the keyword -- no parse-and-rollback.
         let mutable qualifiers = DeclQualifiers(false, false, Option[String].None());
         when self.current().kind in {
             .KwLet() or .KwType() or .KwGiven() then {
-                self.advance();
-                qualifiers = self.parse_decl_qualifiers();
+                qualifiers = self.peek_decl_qualifiers_at(self.index + 1);
             },
             _ then {},
         };
-        self.restore_state(saved_after_flags);
         when qualifiers.invalid_message in {
             .Some(message) then {
                 return .Error(self.parser_error_at_current(message));

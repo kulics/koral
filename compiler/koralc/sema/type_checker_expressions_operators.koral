@@ -279,6 +279,9 @@ given TypeChecker {
         };
         if is_non_numeric_candidate then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
+                // The operator spelling becomes a declaration here; below,
+                // only the identity decides.
+                let trait_def_id = self.lang_trait_def_id(trait_name);
                 let mutable trait_args = List[Type].new();
                 if same_type then {
                     trait_args.push(left_t);
@@ -296,6 +299,7 @@ given TypeChecker {
                     .GenericParameter(_) then {
                         if not self.generic_parameter_satisfies_trait_constraint(
                             unwrapped_left,
+                            trait_def_id,
                             trait_name,
                             trait_args,
                         ) then {
@@ -323,6 +327,7 @@ given TypeChecker {
                 };
                 if not self.enforce_explicit_generic_trait_conformance_with_note(
                     left_t,
+                    trait_def_id,
                     trait_name,
                     trait_args,
                     "operator '\(self.arithmetic_method_name(op))'",
@@ -1362,6 +1367,7 @@ given TypeChecker {
         ) then {
             if not self.enforce_explicit_trait_requirement_with_context(
                 typed_left.expr_type,
+                self.lang_trait_def_id("Eq"),
                 "Eq",
                 "",
                 "operator 'equals'",
@@ -1388,6 +1394,7 @@ given TypeChecker {
         ) then {
             if not self.enforce_explicit_trait_requirement_with_context(
                 typed_left.expr_type,
+                self.lang_trait_def_id("Ord"),
                 "Ord",
                 "",
                 "operator 'compare'",
@@ -1592,6 +1599,7 @@ given TypeChecker {
     ) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(
             lhs.expr_type,
+            self.lang_trait_def_id("Eq"),
             "Eq",
             "",
             "operator 'equals'",
@@ -1668,6 +1676,7 @@ given TypeChecker {
     ) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(
             lhs.expr_type,
+            self.lang_trait_def_id("Ord"),
             "Ord",
             "",
             "operator 'compare'",
@@ -1769,13 +1778,14 @@ given TypeChecker {
     module_private generic_parameter_satisfies_trait_constraint(
         self,
         t Type,
+        trait_def_id DefId,
         trait_name String,
         trait_args List[Type],
     ) Bool = {
         return when t in {
             .GenericParameter(name) then self.generic_param_has_trait_bound(
                 name,
-                trait_name,
+                trait_def_id,
                 trait_args,
             ),
             _ then false,
@@ -1900,6 +1910,7 @@ given TypeChecker {
                     else {
                         let _ = self.enforce_explicit_trait_requirement_with_context(
                             typed.expr_type,
+                            self.lang_trait_def_id("ToString"),
                             "ToString",
                             "",
                             "operator 'to_string'",

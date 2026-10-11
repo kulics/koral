@@ -1557,6 +1557,28 @@ let weak = downgrade(node);      // ?Node
 let upgraded = upgrade(weak);    // Option[Node]
 ```
 
+**弱引用是句柄，不是值。** 在 `upgrade` 之前它不携带被引用对象的任何字段、
+分支或载荷，因此一切试探或利用被引用对象**形状**的操作，对 `?T` 一律拒绝：
+
+- 成员访问，读或写 —— `w.value`、`w.value = 1`
+- 方法调用 —— `w.get()`
+- 解构 —— `let (a, b) = w`、`for (a, b) in ws`
+- 迭代 —— `for x in w`
+- 匹配分支 —— `when w in { Box(x) then ... }`
+
+把句柄**整体**绑定是允许的，并且保留 `?T`：
+
+```koral
+let w = downgrade(node);
+let w2 ?Node = w;              // 可以：复制的是句柄
+let xs = List[?Node].new();
+xs.push(w);
+for h in xs then {             // 可以：`h` 是 `?Node`
+    let v = upgrade(h);        // 唯一能到达被引用对象的途径
+    // ...
+};
+```
+
 ## 4. 模式匹配
 
 Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件里的绑定形态。（`for` 循环改用普通的 `let` 形态绑定，见 [for 循环](#for-循环)。）
@@ -2338,7 +2360,10 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 ```
 
 1. `{ ... }` 省略即「全部可见成员」；出现则不能为空（`{ .. }` / `{ * }` 不再是写法）；
-2. 列表项是 `符号名` 或 `符号名 as 新名`，允许尾逗号；
+2. 列表项是 `符号名` 或 `符号名 as 新名`，允许尾逗号。符号可以是 trait：
+   `Tag as AlphaTag` 绑出的 `AlphaTag` 是一个 trait 名，可以当泛型约束或 trait object
+   类型用。别名是拼写——它指向的还是同一个声明。不改名的 `Tag` 同样是绑定，
+   用的就是这里写的名字，所以本文件里的约束 `[T Tag]` 指的是这次导入的那个 trait；
 3. `as` 作用于每个被导入符号，不是模块——模块名不绑定为命名空间，
    导入 `Reader` 后写 `Reader`，不写 `io.Reader`；
 4. 被导入的名字是文件局部绑定，不自动再导出；

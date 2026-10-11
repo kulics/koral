@@ -372,23 +372,41 @@
                    | <qualified-path-suffix>
 
 // `(` 是三个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
-// 但解析时是**有序试验**，不是任选其一；下表就是消歧结果，与实现一一对应
-// （koralc parser/core_expressions.koral:parse_postfix_suffixes）。
+// 但解析时是**形状归类 + 有界前看**，不是「试解析、失败就回退」：先用一次
+// 有界扫描判断括号里的记号串是不是**类型形状**（只读 token 缓冲，不建树、
+// 不发诊断），再按判断结果走对应产生式。与实现一一对应
+// （koralc parser/core.koral:scan_type_shape_at / scan_paren_type_suffix_at，
+//  parser/core_expressions.koral:parse_postfix_suffixes）。
 //
-//   `(` 的试验次序（一旦成功就定案，不再回退）：
-//     1. <qualified-path-suffix>  -- 仅当 base 是类型名（首字母大写的标识符）
-//                                    且括号内能解析成 <trait-ref>
-//     2. <cast-suffix>            -- 仅当括号内是单个 <type> 且后面紧跟 `)`
-//     3. <call-suffix>            -- 其余一律是调用；调用失败即报错，不回退
-//   例：Num(Tag) 是限定路径；x(Int) 是把 x 转型到 Int；f(1, 2) 是调用。
+//   **类型形状**（与 <type> 的文法逐条对齐）：
+//     类型前缀：`?`、`*unsafe` [`mutable`]（可嵌套，如 `?*unsafe T`）
+//     类型头  ：`Self`、首字母大写的标识符、`Func(...)` + 返回类型
+//     类型头后可跟 `[` <type-list> `]`
+//     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参，不是转型；只有 `*unsafe` 才是类型。
 //
-//   `[` 的试验次序：
-//     base 是首字母大写的标识符 -> 强制按 <generic-application> 解析（类型实参）
-//     base 是首字母小写的标识符 -> 先试 <generic-application>，失败则回退 <subscript-suffix>
-//     其它 base                -> <subscript-suffix>
+//   `(` 的归类：
+//     括号内是**单个类型**且后面紧跟 `)`：
+//        base 是类型名 -> <qualified-path-suffix>
+//        其它 base     -> <cast-suffix>
+//     其余一律是 <call-suffix>；调用失败即报错，不回退。
+//   例：Num(Tag) 是限定路径；x(Int) 是把 x 转型到 Int；f(1, 2) 是调用；
+//       f(*p) 是调用（`*p` 是解引用）。
+//
+//   `[` 的归类：
+//     括号内是 <type-list> -> <generic-application>
+//     其余                 -> <subscript-suffix>
 //   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义。
 //
-//   `[` 实参的判据是**能否解析成类型**：能则是泛型实参，否则是下标表达式。
+//   `.member[...]` 后的归类（`m[T](...)`）：
+//     `[` <type-list> `]` `(` -> 泛型方法调用
+//     `[` <type-list> `]`     -> 方法上的类型实参（方法不接受时报错）
+//
+//   **lambda 与括号表达式**共用 `(`，判据是 `->`：
+//     (params) [ReturnType] `->` ... 是 lambda，其余是括号表达式。
+//     params 是 `name [Type] (, name [Type])* ,?`；`name: Type` 是写错的
+//     lambda 参数，仍按 lambda 解析并报
+//     `Lambda parameters use 'name Type', not 'name: Type'`。
+//     形状判类不建树，因此失败的分支不会吞掉真正该报的诊断。
 
 <call-suffix> ::= "(" <argument-list>? ")"
 <subscript-suffix> ::= "[" <expression> "]"

@@ -52,6 +52,48 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 候选键的优先级实现见 `compiler/koralc/mono/generic_template_registry.koral`（1→4，裸名最后）。
 
+### prelude 是一条显式绑定，不是一个回退
+
+出处：记录 §28.2。
+
+`[T Eq]` 不写 `using "std" { Eq }` 也能用。这件事过去是靠**未限定索引**顺带做到的——
+而那个索引同时把**任何**模块的 trait 变成了不写 `using` 也能命名的东西。
+
+拆开写：
+
+- **prelude**：std 根模块的 public trait 绑进每个模块的 (模块, 拼写) 键空间。
+  它是一条导入，只是语言替你写的。
+- **解析只走限定键**：`get_in_module` / `lookup_trait_in_module` 不读未限定索引。
+  那个索引只留给「Import it explicitly」，用来**说出声明在哪个模块**——
+  与 `unimportedTemplateDefId` 同一用途，永远不得反过来赢过解析。
+
+批量导入 `using "m";` 没有符号边，绑定要从**声明**发：枚举目标模块的 trait，
+逐个绑到导入方的键空间。只走显式符号列表会让 `using "std";` 一条都绑不上。
+
+**绑定时机**：必须在收签名之前。`given[T Any] Stack[T] as Default` 的 trait 名是在
+签名被收集时解析的；绑定晚一步，那个名字就解析不到。碰撞检查则相反——它要
+`nodeSourceInfoMap` 与 scope，早了会静默漏报。两件事分开跑。
+
+**身份从类型上取，不从它的拼写。** trait object 的 trait 在使用方模块不需要在作用域里，
+所以 `def_id_spelling(def_id)` 把身份拆成拼写再查一遍是错的：拼写在那个模块查不到，
+而且就算查得到，也是在「正在检查的那个模块」里解析，不是在写下它的那个。
+
+### trait 的 `using` 也是绑定，键是 (导入方模块, 本地拼写)
+
+出处：记录 §27.1。
+
+`using "m" { Tag }` 与 `using "m" { Tag as AlphaTag }` **同样是一条绑定**，都要把
+本地拼写挂到被导入的那个声明上。绑定键是 **(导入方模块, 本地拼写)**：
+
+- 写裸键等于没修。两个模块可以各导入一个叫 `Trait` 的 trait，未限定索引跨模块
+  last-wins，回答不了「这个 bound 里的 `Tag` 指哪个」。
+- **不能用环境里的当前模块路径**。`registerExplicitModuleImports` / `check_loaded_nodes`
+  是一次性走完所有文件的导入边的，环境里的 `currentModulePath` 是最后一条声明留下的，
+  对除那个文件之外的每一个文件都是错的。导入边自己带 `module`，要用它。
+- 没改名的导入**不能跳过**。只给 `as` 重命名的边注册，等于 `using { Tag }` 这条最常见的
+  写法从来进不了 trait 名表，bound 里的 `Tag` 于是掉到最后的裸名层。
+- 声明身份不变。重命名是拼写，`def_id` 原样，下游分不出两个拼写。
+
 ### 名字 → 身份只有一个边界
 
 出处：记录 §21.1、§21.5。
