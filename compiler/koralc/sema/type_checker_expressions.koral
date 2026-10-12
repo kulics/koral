@@ -1458,12 +1458,13 @@ given TypeChecker {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for constraint in constraints then {
                         let cn = constraint.trait_name;
-                        // `cn` is a spelling; resolve it to the trait's declaration
-                        // once, then compare by identity.
-                        if self.lookup_trait_method_signature(cn, method_name) is .Some(_) then {
+                        // The bound carries the DECLARATION's identity; `cn` is
+                        // only what diagnostics print.
+                        let cn_def_id = constraint.trait_def_id;
+                        if self.lookup_trait_method_signature(cn_def_id, method_name) is .Some(_) then {
                             return Option[String].Some(cn);
                         };
-                        when self.storage.trait_registry.flatten_methods(cn) in {
+                        when self.storage.trait_registry.flatten_methods_for_def(cn_def_id) in {
                             .Ok(methods) then {
                                 if methods.get(method_name) is .Some(_) then {
                                     return Option[String].Some(cn);
@@ -1532,7 +1533,8 @@ given TypeChecker {
                             e,
                         ),
                     };
-                    if self.lookup_trait_method_signature(trait_name, method_name) is .Some(_) then {
+                    let named_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
+                    if self.lookup_trait_method_signature(named_def_id, method_name) is .Some(_) then {
                         return Option[String].Some(trait_name);
                     };
                 };

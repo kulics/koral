@@ -23,10 +23,10 @@
 
 | 文件 | 记的是什么 |
 |---|---|
-| [`module-design-implementation.md`](module-design-implementation.md) | 模块与导入的实现裁定、CLI 信封规则、未决缺陷 |
+| [`module-design-implementation.md`](module-design-implementation.md) | 模块与导入的实现裁定、CLI 信封规则 |
 | [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）模型、演进、硬性约束与被否方案 |
-| [`bootstrap-productization-plan.md`](bootstrap-productization-plan.md) | bootstrap 产品化的约束、信任边界、panic 判定方法 |
-| [`samples-capability-plan.md`](samples-capability-plan.md) | 样本验证的分界判据、语言缺口、被否掉的下沉 |
+| [`bootstrap-productization.md`](bootstrap-productization.md) | bootstrap 产品化的约束、信任边界、panic 判定方法 |
+| [`samples-capability.md`](samples-capability.md) | 样本验证的分界判据、语言缺口、被否掉的下沉 |
 
 写法：
 
@@ -45,6 +45,8 @@
 ## 写新文档前
 
 1. 读者需要**照做**吗？→ 给 `developer-guide.md` 加一节，别开新文件。
-2. 是**某个改造的实现裁定**吗？→ 开 `<topic>-tracking.md` 或 `<topic>-plan.md`，
+2. 是**某个改造的实现裁定**吗？→ 开 `<topic>-tracking.md` 或 `<topic>.md`，
    写现状 / 演进 / 被否方案，顶部写状态。
+   **已经实现的东西不叫 `plan`。** `plan` 是给「还没做」的；一旦落地，文件名和正文都改成
+   现在的陈述——名字说 plan、正文写「已修」，读者会以为问题还在。
 3. 是**为什么这样设计**吗？→ 去 [`../design/`](../design/)。

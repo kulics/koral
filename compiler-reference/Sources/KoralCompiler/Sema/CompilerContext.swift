@@ -719,11 +719,24 @@ public final class CompilerContext: @unchecked Sendable {
         case .bool: return "B"
         case .void: return "V"
         case .never: return "N"
-        case .function: return "Fn"
+        // A layout key names a monomorphized C entity, so it has to be injective
+        // on the type: two types that get one key share one C symbol. That is why
+        // a function type keeps its signature -- with the parameter COUNT, because
+        // a bare `Fn_<params>_<ret>` join is ambiguous (`Func() R_I` and `Func(R)
+        // I` both spell `Fn_R_I`) -- and why a borrowed reference is not folded
+        // into an owning one. They are different types, and instances
+        // parameterized by them are different instances.
+        case .function(let parameters, let returns):
+            var out = "Fn_\(parameters.count)"
+            for p in parameters {
+                out += "_" + getLayoutKey(p.type)
+            }
+            out += "_" + getLayoutKey(returns)
+            return out
         case .reference(let inner): return "R_\(getLayoutKey(inner))"
         case .mutableReference(let inner): return "MR_\(getLayoutKey(inner))"
-        case .borrowedReference(let inner): return "R_BR_\(getLayoutKey(inner))"
-        case .mutableBorrowedReference(let inner): return "MR_BR_\(getLayoutKey(inner))"
+        case .borrowedReference(let inner): return "BR_\(getLayoutKey(inner))"
+        case .mutableBorrowedReference(let inner): return "MBR_\(getLayoutKey(inner))"
         case .pointer(let element): return "P_\(getLayoutKey(element))"
         case .mutablePointer(let element): return "MP_\(getLayoutKey(element))"
         case .weakReference(let inner): return "W_\(getLayoutKey(inner))"
@@ -773,7 +786,10 @@ public final class CompilerContext: @unchecked Sendable {
         }
         parts.append(metadata.name)
         if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
-            // For generic instantiations, the layout name already includes type args.
+            // For generic instantiations, the layout name already includes type
+            // args -- it is a `make_layout_name` product -- so appending them
+            // again counts one set of arguments twice and the same type ends up
+            // with two spellings depending on how it was reached.
             if (defIdMap.isGenericInstantiation(defId) ?? false) == false {
                 let argsStr = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
                 parts.append(argsStr)

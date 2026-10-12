@@ -1,4 +1,4 @@
-# 流程运算符与布尔运算符分层（Flow / Logical Layers）
+# 流程层与逻辑层（Flow / Logical Layers）
 
 > **Status**：Implemented · 2026-10-11
 > **范围**：`and then` / `or else` / `or return` 与 `and` / `or` 的分组规则
@@ -159,18 +159,18 @@ and-then 链       := 操作数 ("and" "then" 操作数)*
 共性是：**值兜底是一个中间层，不是布尔逻辑的一部分**。Koral 采用同一取向——
 `and then` / `or else` / `or return` 是那个中间层。
 
-## 风险与未决
+## 约束
 
-- **工具链三方必须收敛。** parser、BNF、手册按各自节奏更新就会漂移；按 `docs/README`
-  约定三者一起改，不能只改文档。
-- **求值顺序是另一件事**，已记在 [`control-flow.md`](control-flow.md)「流程算子的求值顺序：短路」。
+- **工具链三方一起改。** parser、BNF、手册按各自节奏更新就会漂移；按 `docs/README`
+  约定三者同批，不能只改文档。
+- **求值顺序是另一件事**，记在 [`control-flow.md`](control-flow.md)「流程算子的求值顺序：短路」。
   本设计只定「怎么分组」。
 
-## 实施
+## 实现与看护
 
-2026-10-11 落地。三个前端同批改：`compiler/koralc/parser/core_precedence.koral`、
+三个前端同批实现，诊断文本逐字相同：`compiler/koralc/parser/core_precedence.koral`、
 `compiler-reference/Sources/KoralCompiler/Parser/ParserExpressions.swift`、
-`toolchain/koral-syntax/parser.koral`。存量里断言旧分组的 3 个用例随规则改义。
+`toolchain/koral-syntax/parser.koral`。
 
 看护两侧：编译器侧 9 个用例（5 个拒绝各一句诊断、2 个括号跨层按括号求值、2 个守层内
 优先级未被误伤），formatter 侧 5 条拒绝断言 + 4 条接受断言。

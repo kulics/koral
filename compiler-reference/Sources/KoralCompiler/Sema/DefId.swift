@@ -642,68 +642,6 @@ public class DefIdMap {
     
     /// 检测 C 标识符冲突
     ///
-    /// 检查所有已分配的 DefId 是否存在 C 标识符冲突。
-    /// 如果存在冲突，返回冲突的 DefId 对列表。
-    ///
-    /// - Returns: 冲突的 DefId 对数组，每对包含两个具有相同 C 标识符的 DefId
-    public func detectCIdentifierConflicts() -> [(DefId, DefId)] {
-        var cIdentifierToDefIds: [String: [DefId]] = [:]
-        
-        for defId in allDefIds {
-            guard let cId = getCIdentifier(defId) else {
-                continue
-            }
-            cIdentifierToDefIds[cId, default: []].append(defId)
-        }
-        
-        var conflicts: [(DefId, DefId)] = []
-        for (_, defIds) in cIdentifierToDefIds {
-            if defIds.count > 1 {
-                // Report all pairs of conflicts
-                for i in 0..<defIds.count {
-                    for j in (i+1)..<defIds.count {
-                        conflicts.append((defIds[i], defIds[j]))
-                    }
-                }
-            }
-        }
-        
-        return conflicts
-    }
-    
-    /// 生成唯一的 C 标识符（带冲突解决）
-    ///
-    /// 如果给定的 DefId 的 C 标识符与其他 DefId 冲突，
-    /// 则添加后缀以确保唯一性。
-    ///
-    /// - Parameter defId: 要生成 C 标识符的 DefId
-    /// - Returns: 唯一的 C 标识符
-    public func uniqueCIdentifier(for defId: DefId) -> String {
-        let baseCId = getCIdentifier(defId) ?? ""
-        
-        // Check if there are other DefIds with the same C identifier
-        var conflictCount = 0
-        var myIndex = 0
-        
-        for other in allDefIds {
-            if getCIdentifier(other) == baseCId {
-                if other.id < defId.id {
-                    conflictCount += 1
-                }
-                if other.id == defId.id {
-                    myIndex = conflictCount
-                }
-            }
-        }
-        
-        // If no conflicts, return the base identifier
-        if myIndex == 0 {
-            return baseCId
-        }
-        
-        // Add suffix to resolve conflict
-        return "\(baseCId)_\(myIndex)"
-    }
     
     /// 检查是否存在指定的定义
     ///

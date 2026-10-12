@@ -37,9 +37,23 @@ file_private let generic_enum_def_id(mono Monomorphizer, name String) DefId = {
     };
 };
 
+/// The trait `name` denotes, through `resolve_trait_name`'s candidate-key
+/// sequence: this module's own declaration first, then each import edge, then
+/// the bare spelling. Going straight at `traits.get(name)` reads the bare
+/// index, which is last-wins across modules and cannot say which `Tag` a name
+/// means -- so a match there can be another module's trait.
+file_private let trait_info_from_registry(
+    mono Monomorphizer,
+    name String,
+) Option[TraitDeclInfo] = {
+    return when mono.storage.generic_templates.resolve_trait_name(name) in {
+        .Some(resolved_name) then mono.storage.generic_templates.traits.get(resolved_name),
+        .None() then Option[TraitDeclInfo].None(),
+    };
+};
+
 file_private let trait_def_id_from_registry(mono Monomorphizer, name String) DefId = {
-    let resolved_name = mono.storage.generic_templates.resolve_trait_name(name) or else name;
-    return when mono.storage.generic_templates.traits.get(resolved_name) in {
+    return when trait_info_from_registry(mono, name) in {
         .Some(info) then info.def_id,
         .None() then def_id_invalid(),
     };
@@ -375,7 +389,7 @@ file_private let trait_object_type_from_registry(
 ) Type = {
     let mutable trait_type_args = List[Type].new();
     let mutable trait_def_id = def_id_invalid();
-    when mono.storage.generic_templates.traits.get(trait_name) in {
+    when trait_info_from_registry(mono, trait_name) in {
         .Some(info) then {
             trait_def_id = info.def_id;
             for type_param in info.type_params then {
@@ -913,7 +927,7 @@ file_private let resolve_parameterized_type_single(mono Monomorphizer, t Type) T
             when mono.storage.context.lookup_type(def_id) in {
                 .Some(mapped) then {
                     let resolved_mapped = resolve_parameterized_type_cached(mono, mapped);
-                    if layout_key(resolved_mapped) == layout_key(t) then t
+                    if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(t) then t
                     else resolved_mapped
                 },
                 .None() then t,
@@ -1258,7 +1272,7 @@ public let resolve_parameterized_type(mono Monomorphizer, t Type) Type = {
             when mono.storage.context.lookup_type(def_id) in {
                 .Some(mapped) then {
                     let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                    if layout_key(resolved_mapped) == layout_key(t) then t
+                    if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(t) then t
                     else resolved_mapped
                 },
                 .None() then t,
@@ -1376,7 +1390,8 @@ public let resolve_type_node(
                                                         .None() then {
                                                             // Keep trait identifiers resolvable during monomorphization
                                                             // so types like Error ref are preserved as trait-object refs.
-                                                            when mono.storage.generic_templates.traits.get(
+                                                            when trait_info_from_registry(
+                                                                mono,
                                                                 name,
                                                             ) in {
                                                                 .Some(_) then trait_object_type_from_registry(
@@ -1407,7 +1422,7 @@ public let resolve_type_node(
                 let resolved = resolve_type_node(mono, arg, substitution);
                 resolved_args.push(resolved);
             };
-            if mono.storage.generic_templates.traits.get(base) is .Some(_) then {
+            if trait_info_from_registry(mono, base) is .Some(_) then {
                 return Type.TraitObject(
                     trait_def_id_from_registry(mono, base),
                     resolved_args,
@@ -1435,7 +1450,8 @@ public let resolve_type_node(
         // TypeNode.Reference: recursively resolve inner type and wrap.
         .Reference(inner, is_mutable, _) then {
             let trait_ref_override = when inner in {
-                .Identifier(name, span) then if mono.storage.generic_templates.traits.get(
+                .Identifier(name, span) then if trait_info_from_registry(
+                    mono,
                     name,
                 ) is .Some(_) then {
                     let trait_ref_inner = trait_object_type_from_registry(mono, name);
@@ -1445,7 +1461,7 @@ public let resolve_type_node(
                     )
                 } else Option[Type].None(),
                 .Generic(base, args, _) then {
-                    if mono.storage.generic_templates.traits.get(base) is .Some(_) then {
+                    if trait_info_from_registry(mono, base) is .Some(_) then {
                         let mutable resolved_args = List[Type].new();
                         for arg in args then {
                             let resolved = resolve_type_node(mono, arg, substitution);
@@ -1608,9 +1624,7 @@ public let resolve_type_node_identity(
             for arg in args then {
                 resolved_args.push(resolve_type_node_identity(mono, arg, type_params));
             };
-            if mono.storage.generic_templates.traits.get(
-                mono.storage.generic_templates.resolve_trait_name(base) or else base,
-            ) is .Some(_) then {
+            if trait_info_from_registry(mono, base) is .Some(_) then {
                 return Type.TraitObject(
                     trait_def_id_from_registry(mono, base),
                     resolved_args,
@@ -1800,6 +1814,7 @@ file_private let normalize_vtable_conformance_actual_type(
 };
 
 file_private let collect_vtable_conformance_bindings(
+    mono Monomorphizer,
     pattern Type,
     actual Type,
     bindings Dict[String, Type],
@@ -1807,7 +1822,7 @@ file_private let collect_vtable_conformance_bindings(
     return when pattern in {
         .GenericParameter(name) then {
             when bindings.get(name) in {
-                .Some(bound) then layout_key(bound) == layout_key(actual),
+                .Some(bound) then mono.storage.context.get_layout_key(bound) == mono.storage.context.get_layout_key(actual),
                 .None() then {
                     bindings.insert(name, actual);
                     true
@@ -1816,6 +1831,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .ReferenceType(pattern_inner) then when actual in {
             .ReferenceType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1824,6 +1840,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .MutableReferenceType(pattern_inner) then when actual in {
             .MutableReferenceType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1832,6 +1849,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .WeakReferenceType(pattern_inner) then when actual in {
             .WeakReferenceType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1840,6 +1858,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .MutableWeakReferenceType(pattern_inner) then when actual in {
             .MutableWeakReferenceType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1848,6 +1867,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .PointerType(pattern_inner) then when actual in {
             .PointerType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1856,6 +1876,7 @@ file_private let collect_vtable_conformance_bindings(
         },
         .MutablePointerType(pattern_inner) then when actual in {
             .MutablePointerType(actual_inner) then collect_vtable_conformance_bindings(
+                mono,
                 pattern_inner,
                 actual_inner,
                 bindings,
@@ -1873,6 +1894,7 @@ file_private let collect_vtable_conformance_bindings(
                     let mutable i UInt = 0;
                     while i < pattern_args.count() then {
                         if not collect_vtable_conformance_bindings(
+                            mono,
                             (pattern_args[i]),
                             (actual_args[i]),
                             bindings,
@@ -1896,6 +1918,7 @@ file_private let collect_vtable_conformance_bindings(
                     let mutable i UInt = 0;
                     while i < pattern_args.count() then {
                         if not collect_vtable_conformance_bindings(
+                            mono,
                             (pattern_args[i]),
                             (actual_args[i]),
                             bindings,
@@ -1910,7 +1933,7 @@ file_private let collect_vtable_conformance_bindings(
             },
             _ then false,
         },
-        _ then layout_key(pattern) == layout_key(actual),
+        _ then mono.storage.context.get_layout_key(pattern) == mono.storage.context.get_layout_key(actual),
     };
 };
 
@@ -1932,6 +1955,7 @@ file_private let resolve_vtable_trait_args(
                 };
                 let mutable bindings = Dict[String, Type].new();
                 if not collect_vtable_conformance_bindings(
+                    mono,
                     target_type,
                     normalized_concrete_type,
                     bindings,
@@ -2560,12 +2584,12 @@ file_private let adapt_receiver_expr_for_method(
 
     return when expected_self_type_opt in {
         .Some(expected_self_type) then {
-            if layout_key(expected_self_type) == layout_key(effective_current_type) then {
+            if mono.storage.context.get_layout_key(expected_self_type) == mono.storage.context.get_layout_key(effective_current_type) then {
                 current_expr
             } else when expected_self_type in {
                 .ReferenceType(inner) then {
                     let mutable inner_type = resolve_parameterized_type(mono, inner);
-                    if layout_key(inner_type) == layout_key(effective_current_type) then {
+                    if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(effective_current_type) then {
                         when effective_current_type in {
                             .ReferenceType(_) then TypedExpr(
                                 current_expr.expr_kind,
@@ -2619,7 +2643,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2634,7 +2658,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2649,7 +2673,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2664,7 +2688,7 @@ file_private let adapt_receiver_expr_for_method(
                 },
                 .MutableReferenceType(inner) then {
                     let mutable inner_type = resolve_parameterized_type(mono, inner);
-                    if layout_key(inner_type) == layout_key(effective_current_type) then {
+                    if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(effective_current_type) then {
                         when effective_current_type in {
                             .ReferenceType(_) then TypedExpr(
                                 current_expr.expr_kind,
@@ -2718,7 +2742,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2733,7 +2757,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2748,7 +2772,7 @@ file_private let adapt_receiver_expr_for_method(
                                 mono,
                                 actual_inner,
                             );
-                            if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(actual_inner_type) then {
                                 TypedExpr(
                                     current_expr.expr_kind,
                                     expected_self_type,
@@ -2764,7 +2788,7 @@ file_private let adapt_receiver_expr_for_method(
                 _ then when effective_current_type in {
                     .ReferenceType(inner) then {
                         let mutable inner_type = resolve_parameterized_type(mono, inner);
-                        if layout_key(inner_type) == layout_key(expected_self_type) then {
+                        if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(expected_self_type) then {
                             TypedExpr(
                                 TypedExprKind.DerefExpr(current_expr),
                                 expected_self_type,
@@ -2776,7 +2800,7 @@ file_private let adapt_receiver_expr_for_method(
                     },
                     .MutableReferenceType(inner) then {
                         let mutable inner_type = resolve_parameterized_type(mono, inner);
-                        if layout_key(inner_type) == layout_key(expected_self_type) then {
+                        if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(expected_self_type) then {
                             TypedExpr(
                                 TypedExprKind.DerefExpr(current_expr),
                                 expected_self_type,
@@ -2813,9 +2837,9 @@ file_private let adapt_call_arg_for_expected_param(
                 mono,
                 concrete_type,
             );
-            if layout_key(resolved_expected_type) == layout_key(resolved_concrete_type) or layout_key(
+            if mono.storage.context.get_layout_key(resolved_expected_type) == mono.storage.context.get_layout_key(resolved_concrete_type) or mono.storage.context.get_layout_key(
                 resolved_expected_type,
-            ) == layout_key(resolved_inner_type) then inner else arg
+            ) == mono.storage.context.get_layout_key(resolved_inner_type) then inner else arg
         },
         _ then arg,
     };
@@ -2860,7 +2884,7 @@ file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) T
         .StructureType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped) then {
                 let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                if layout_key(resolved_mapped) == layout_key(resolved) then resolved
+                if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(resolved) then resolved
                 else resolve_alias_receiver_match_type(mono, resolved_mapped)
             },
             .None() then resolved,
@@ -2868,7 +2892,7 @@ file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) T
         .EnumType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped) then {
                 let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                if layout_key(resolved_mapped) == layout_key(resolved) then resolved
+                if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(resolved) then resolved
                 else resolve_alias_receiver_match_type(mono, resolved_mapped)
             },
             .None() then resolved,
@@ -2876,7 +2900,7 @@ file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) T
         .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped) then {
                 let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                if layout_key(resolved_mapped) == layout_key(resolved) then resolved
+                if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(resolved) then resolved
                 else resolve_alias_receiver_match_type(mono, resolved_mapped)
             },
             .None() then resolved,
@@ -2936,7 +2960,7 @@ file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) T
 };
 
 file_private let receiver_match_layout_key(mono Monomorphizer, t Type) String = {
-    return layout_key(resolve_alias_receiver_match_type(mono, t));
+    return mono.storage.context.get_layout_key(resolve_alias_receiver_match_type(mono, t));
 };
 
 file_private let receiver_match_keys_equal(
@@ -3172,7 +3196,7 @@ file_private let resolve_concrete_qualified_trait_member(
         trait_name,
     );
 
-    return when mono.storage.generic_templates.traits.get(trait_name) in {
+    return when trait_info_from_registry(mono, trait_name) in {
         .Some(trait_info) then {
             let mutable bindings = Dict[String, Type].new();
             bindings.insert("Self", resolved_concrete_type);
@@ -4072,7 +4096,7 @@ file_private let try_lower_wrapping_method_name_call(
     if args.count() == 1(UInt) then {
         let rhs = args[0(UInt)];
         let mutable rhs_type = resolve_parameterized_type(mono, rhs.expr_type);
-        let compatible_rhs = layout_key(base_type) == layout_key(rhs_type) or is_concrete_integer_type(
+        let compatible_rhs = mono.storage.context.get_layout_key(base_type) == mono.storage.context.get_layout_key(rhs_type) or is_concrete_integer_type(
             rhs_type,
         );
         if method_name == "wrapping_add" and compatible_rhs then {
@@ -4592,7 +4616,7 @@ file_private let method_symbol_matches_expected_return(
     return when resolved_method_type in {
         .FunctionType(_, return_type_ref) then {
             let concrete_return = resolve_parameterized_type(mono, return_type_ref);
-            layout_key(concrete_return) == layout_key(concrete_expected_return)
+            mono.storage.context.get_layout_key(concrete_return) == mono.storage.context.get_layout_key(concrete_expected_return)
         },
         _ then true,
     };
@@ -5387,7 +5411,7 @@ file_private let resolve_method_reference_call_callee(
     );
     let effective_receiver_type = when inferred_receiver_type in {
         .TraitObject(_, _) then inferred_receiver_type,
-        _ then if layout_key(declared_receiver_type) <> layout_key(
+        _ then if mono.storage.context.get_layout_key(declared_receiver_type) <> mono.storage.context.get_layout_key(
             inferred_receiver_type,
         ) and not has_generic_parameter(inferred_receiver_type) then inferred_receiver_type
         else declared_receiver_type,
@@ -5419,9 +5443,9 @@ file_private let resolve_method_reference_call_callee(
         mono,
         resolved_base,
     );
-    let mutable method_resolution_receiver_type = if layout_key(
+    let mutable method_resolution_receiver_type = if mono.storage.context.get_layout_key(
         method_lookup_receiver_type,
-    ) == layout_key(effective_receiver_type) then effective_receiver_type
+    ) == mono.storage.context.get_layout_key(effective_receiver_type) then effective_receiver_type
     else method_lookup_receiver_type;
     let exact_concrete_bound_method = method.def_id.id > 0 and not has_generic_parameter(
         expected_method_type,
@@ -6580,7 +6604,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
             };
             if bound_callee.expr_kind is .AndExpr(_, _) or bound_callee.expr_kind is .OrExpr(_, _) then {
                 mono.report_monomorphization_internal_error(
-                    "mono produced invalid call callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())",
+                    "mono produced invalid call callee: original=\(mono_debug_expr_kind(mono, callee)) resolved=\(mono_debug_expr_kind(mono, new_callee)) bound=\(mono_debug_expr_kind(mono, bound_callee)) result=\(mono.storage.context.get_layout_key(resolved_type)) args=\(new_args.count().to_string())",
                 );
                 return TypedExpr(
                     TypedExprKind.Block(
@@ -6606,7 +6630,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                         };
                         if not bound_is_callable then {
                             mono.report_monomorphization_internal_error(
-                                "mono invalid function callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())",
+                                "mono invalid function callee: original=\(mono_debug_expr_kind(mono, callee)) resolved=\(mono_debug_expr_kind(mono, new_callee)) bound=\(mono_debug_expr_kind(mono, bound_callee)) result=\(mono.storage.context.get_layout_key(resolved_type)) args=\(new_args.count().to_string())",
                             );
                             return TypedExpr(
                                 TypedExprKind.Block(
@@ -6670,7 +6694,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
             let right_t = right.expr_type;
             let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
             let mutable result_type = declared_type;
-            if layout_key(left_t) == layout_key(right_t) then {
+            if mono.storage.context.get_layout_key(left_t) == mono.storage.context.get_layout_key(right_t) then {
                 result_type = left_t;
             } else if mono_is_unresolved_expr_type(mono, declared_type) then {
                 if is_concrete_numeric_type(left_t) then {
@@ -6686,7 +6710,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
             let right_t = right.expr_type;
             let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
             let mutable result_type = declared_type;
-            if layout_key(left_t) == layout_key(right_t) then {
+            if mono.storage.context.get_layout_key(left_t) == mono.storage.context.get_layout_key(right_t) then {
                 result_type = left_t;
             } else if mono_is_unresolved_expr_type(mono, declared_type) then {
                 if is_concrete_integer_type(left_t) then {
@@ -6729,12 +6753,12 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
     return TypedExpr(resolved_kind, resolved_type, expr.span);
 };
 
-file_private let mono_debug_expr_kind(expr TypedExpr) String = {
+file_private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String = {
     return when expr.expr_kind in {
-        .Variable(symbol) then "variable:\(symbol.def_id.id):\(layout_key(symbol.symbol_type))",
-        .MethodReference(base, _, method, _, _, _) then "method-ref:\(method.def_id.id):base=\(layout_key(base.expr_type))",
-        .Call(callee, args) then "call(callee=\(mono_debug_expr_kind(callee)),args=\(args.count().to_string()))",
-        .StaticMethodCall(receiver_type, method_name, method, _, _, args) then "static:\(method_name)#\(method.def_id.id):receiver=\(layout_key(receiver_type)):args=\(args.count().to_string())",
+        .Variable(symbol) then "variable:\(symbol.def_id.id):\(mono.storage.context.get_layout_key(symbol.symbol_type))",
+        .MethodReference(base, _, method, _, _, _) then "method-ref:\(method.def_id.id):base=\(mono.storage.context.get_layout_key(base.expr_type))",
+        .Call(callee, args) then "call(callee=\(mono_debug_expr_kind(mono, callee)),args=\(args.count().to_string()))",
+        .StaticMethodCall(receiver_type, method_name, method, _, _, args) then "static:\(method_name)#\(method.def_id.id):receiver=\(mono.storage.context.get_layout_key(receiver_type)):args=\(args.count().to_string())",
         .MemberPath(base, path) then {
             let mutable path_builder = StringBuilder.new();
             let mutable first_segment = true;
@@ -6746,7 +6770,7 @@ file_private let mono_debug_expr_kind(expr TypedExpr) String = {
                 first_segment = false;
             };
             let path_text = path_builder.to_string();
-            "member:\(path_text):base=\(layout_key(base.expr_type))"
+            "member:\(path_text):base=\(mono.storage.context.get_layout_key(base.expr_type))"
         },
         .AndExpr(_, _) then "and",
         .OrExpr(_, _) then "or",
@@ -6756,11 +6780,11 @@ file_private let mono_debug_expr_kind(expr TypedExpr) String = {
         .WrappingShiftExpr(_, _, _) then "wrapping-shift",
         .BitwiseExpr(_, _, _) then "bitwise",
         .Unary(_, _) then "unary",
-        .CastExpr(target_type, inner) then "cast:\(layout_key(inner.expr_type))->\(layout_key(target_type))",
-        .RefExpr(inner) then "ref:\(layout_key(inner.expr_type))",
-        .PtrExpr(inner) then "ptr:\(layout_key(inner.expr_type))",
-        .DerefExpr(inner) then "deref:\(layout_key(inner.expr_type))",
-        .UnsafeDerefExpr(inner) then "unsafe-deref:\(layout_key(inner.expr_type))",
+        .CastExpr(target_type, inner) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
+        .RefExpr(inner) then "ref:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .PtrExpr(inner) then "ptr:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .DerefExpr(inner) then "deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .UnsafeDerefExpr(inner) then "unsafe-deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
         .Block(_, _) then "block",
         .IfExpr(_, _, _) then "if",
         .WhenExpr(_, _) then "when",
@@ -6768,11 +6792,11 @@ file_private let mono_debug_expr_kind(expr TypedExpr) String = {
         .TypeConstruction(identifier, _, args) then "type:\(identifier.def_id.id):args=\(args.count().to_string())",
         .EnumConstruction(_, case_name, args) then "enum:\(case_name):args=\(args.count().to_string())",
         .TraitMethodPlaceholder(_, _, method, _, _) then "trait-placeholder:\(method.def_id.id)",
-        .TraitObjectConversion(_, trait_type, _) then "trait-object:\(layout_key(trait_type))",
-        .TraitMethodCall(_, trait_type, method_name, _, args) then "trait-call:\(method_name):trait=\(layout_key(trait_type)):args=\(args.count().to_string())",
+        .TraitObjectConversion(_, trait_type, _) then "trait-object:\(mono.storage.context.get_layout_key(trait_type))",
+        .TraitMethodCall(_, trait_type, method_name, _, args) then "trait-call:\(method_name):trait=\(mono.storage.context.get_layout_key(trait_type)):args=\(args.count().to_string())",
         .GenericCall(function_symbol, _, args) then "generic:\(function_symbol.def_id.id):args=\(args.count().to_string())",
         .IntrinsicCall(_) then "intrinsic",
-        .GenericInstantiation(base_type, _) then "generic-inst:\(layout_key(base_type))",
+        .GenericInstantiation(base_type, _) then "generic-inst:\(mono.storage.context.get_layout_key(base_type))",
         .IsExpr(_, _, _) then "is",
         .IntegerLiteral(_) then "int",
         .FloatLiteral(_) then "float",
@@ -6786,7 +6810,7 @@ file_private let instantiated_extension_method_type_matches_expected_pattern(
     actual Type,
     expected Type,
 ) Bool = {
-    if layout_key(resolve_parameterized_type(mono, actual)) == layout_key(
+    if mono.storage.context.get_layout_key(resolve_parameterized_type(mono, actual)) == mono.storage.context.get_layout_key(
         resolve_parameterized_type(mono, expected),
     ) then {
         return true;
@@ -6933,7 +6957,7 @@ file_private let instantiated_extension_method_type_matches_expected(
                 mono,
                 expected_method_type,
             );
-            if layout_key(normalized_candidate) == layout_key(normalized_expected) then {
+            if mono.storage.context.get_layout_key(normalized_candidate) == mono.storage.context.get_layout_key(normalized_expected) then {
                 return true;
             };
             if not has_generic_parameter(normalized_expected) then {
@@ -7752,7 +7776,7 @@ file_private let bind_generic_function_call_callee(
                                     mono,
                                     remapped.second,
                                 );
-                                if layout_key(candidate_type) == layout_key(
+                                if mono.storage.context.get_layout_key(candidate_type) == mono.storage.context.get_layout_key(
                                     expected_call_type,
                                 ) then {
                                     let concrete_name = when mono.storage.context.get_name(
@@ -8803,14 +8827,14 @@ file_private let unify_generic_type_pattern(
     let normalized_actual = canonical_type_for_generic_binding(mono, actual);
     return when normalized_pattern in {
         .GenericParameter(name) then {
-            if not is_generic_type_param_name(name, type_param_names) then layout_key(
+            if not is_generic_type_param_name(name, type_param_names) then mono.storage.context.get_layout_key(
                 normalized_pattern,
-            ) == layout_key(normalized_actual)
+            ) == mono.storage.context.get_layout_key(normalized_actual)
             else when normalized_actual in {
                 .GenericParameter(actual_name) then {
                     if is_generic_type_param_name(actual_name, type_param_names) then true
                     else when inferred.get(name) in {
-                        .Some(existing) then layout_key(existing) == layout_key(
+                        .Some(existing) then mono.storage.context.get_layout_key(existing) == mono.storage.context.get_layout_key(
                             normalized_actual,
                         ),
                         .None() then {
@@ -8820,7 +8844,7 @@ file_private let unify_generic_type_pattern(
                     }
                 },
                 _ then when inferred.get(name) in {
-                    .Some(existing) then layout_key(existing) == layout_key(
+                    .Some(existing) then mono.storage.context.get_layout_key(existing) == mono.storage.context.get_layout_key(
                         normalized_actual,
                     ),
                     .None() then {
@@ -9149,7 +9173,7 @@ file_private let unify_generic_type_pattern(
                 _ then false,
             }
         },
-        _ then layout_key(normalized_pattern) == layout_key(normalized_actual),
+        _ then mono.storage.context.get_layout_key(normalized_pattern) == mono.storage.context.get_layout_key(normalized_actual),
     };
 };
 
@@ -11726,29 +11750,38 @@ public let try_bind_generic_method_call_by_name(
 
 // ── StaticMethodCall resolution helpers ───────────────────────────────────────
 
-file_private let static_method_receiver_key_for_type_resolution(t Type) String = {
+file_private let static_method_receiver_key_for_type_resolution(
+    mono Monomorphizer,
+    t Type,
+) String = {
     return when t in {
-        .ReferenceType(inner) then static_method_receiver_key_for_type_resolution(inner),
+        .ReferenceType(inner) then static_method_receiver_key_for_type_resolution(mono, inner),
         .MutableReferenceType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
         .BorrowedReferenceType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
         .MutableBorrowedReferenceType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
         .WeakReferenceType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
         .MutableWeakReferenceType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
-        .PointerType(inner) then static_method_receiver_key_for_type_resolution(inner),
+        .PointerType(inner) then static_method_receiver_key_for_type_resolution(mono, inner),
         .MutablePointerType(inner) then static_method_receiver_key_for_type_resolution(
+            mono,
             inner,
         ),
-        _ then layout_key(t),
+        _ then mono.storage.context.get_layout_key(t),
     };
 };
 
@@ -11795,7 +11828,7 @@ file_private let static_method_receiver_aliases_for_type_resolution(
     let mutable aliases = List[String].new();
     aliases = push_static_method_receiver_alias_for_type_resolution(
         aliases,
-        static_method_receiver_key_for_type_resolution(t),
+        static_method_receiver_key_for_type_resolution(mono, t),
     );
 
     when t in {
@@ -12032,12 +12065,12 @@ file_private let resolve_static_method_call_to_call(
                     let mutable owner_matches_receiver = true;
                     if mono.concrete_callable_info(candidate_def_id) is .Some(info) then {
                         if info.owner_type is .Some(owner_type) then {
-                            owner_matches_receiver = layout_key(
+                            owner_matches_receiver = mono.storage.context.get_layout_key(
                                 resolve_parameterized_type(mono, owner_type),
-                            ) == layout_key(new_receiver_type);
+                            ) == mono.storage.context.get_layout_key(new_receiver_type);
                         };
                     };
-                    if owner_matches_receiver and layout_key(candidate_type) == layout_key(
+                    if owner_matches_receiver and mono.storage.context.get_layout_key(candidate_type) == mono.storage.context.get_layout_key(
                         expected_call_type,
                     ) then {
                         remapped_method_match = Option[Symbol].Some(
@@ -12203,7 +12236,7 @@ file_private let resolve_static_method_call_to_call(
                 );
                 if not has_generic_parameter(expected_receiver_candidate) and expected_receiver_candidate is not .Unknown() and not is_placeholder_inferred_type(
                     expected_receiver_candidate,
-                ) and layout_key(expected_receiver_candidate) <> layout_key(
+                ) and mono.storage.context.get_layout_key(expected_receiver_candidate) <> mono.storage.context.get_layout_key(
                     new_receiver_type,
                 ) then {
                     concrete_sym = lookup_concrete_method_for_static_call(
@@ -12283,31 +12316,31 @@ file_private let resolve_static_method_call_to_call(
                                     owner_type,
                                 );
                                 let owner_is_self_param = when receiver_param_type in {
-                                    .ReferenceType(inner_ref) then layout_key(
+                                    .ReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    .MutableReferenceType(inner_ref) then layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    .MutableReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    .BorrowedReferenceType(inner_ref) then layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    .BorrowedReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    .MutableBorrowedReferenceType(inner_ref) then layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    .MutableBorrowedReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    .WeakReferenceType(inner_ref) then layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    .WeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    .MutableWeakReferenceType(inner_ref) then layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    .MutableWeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
-                                    ) == layout_key(normalized_owner_type),
-                                    _ then layout_key(receiver_param_type) == layout_key(
+                                    ) == mono.storage.context.get_layout_key(normalized_owner_type),
+                                    _ then mono.storage.context.get_layout_key(receiver_param_type) == mono.storage.context.get_layout_key(
                                         normalized_owner_type,
                                     ),
                                 };
-                                owner_is_self_param and layout_key(
+                                owner_is_self_param and mono.storage.context.get_layout_key(
                                     normalized_owner_type,
-                                ) == layout_key(
+                                ) == mono.storage.context.get_layout_key(
                                     resolve_parameterized_type(mono, new_receiver_type),
                                 )
                             },
@@ -12555,8 +12588,8 @@ file_private let resolve_static_call_emitted_scope_name(
             ),
             .None() then resolve_static_call_template_name(mono, resolved),
         },
-        .GenericStruct(_, _) then layout_key(resolved),
-        .GenericEnum(_, _) then layout_key(resolved),
+        .GenericStruct(_, _) then mono.storage.context.get_layout_key(resolved),
+        .GenericEnum(_, _) then mono.storage.context.get_layout_key(resolved),
         _ then resolve_static_call_template_name(mono, resolved),
     };
 };
@@ -12575,7 +12608,7 @@ file_private let specialized_static_method_symbol_name(
     let mutable method_arg_keys = List[String].new();
     for method_type_arg in method_type_args then {
         method_arg_keys.push(
-            layout_key(resolve_parameterized_type(mono, method_type_arg)),
+            mono.storage.context.get_layout_key(resolve_parameterized_type(mono, method_type_arg)),
         );
     };
     let arg_keys_text = join_strings(method_arg_keys, "_");
@@ -12657,6 +12690,7 @@ file_private let instantiate_trait_target_static_method(
                 );
                 let mutable bindings = Dict[String, Type].new();
                 if not collect_vtable_conformance_bindings(
+                    mono,
                     conformance.target_type,
                     normalized_base_type,
                     bindings,
@@ -12730,6 +12764,7 @@ file_private let instantiate_trait_target_static_method(
                 );
                 let mutable bindings = Dict[String, Type].new();
                 if not collect_vtable_conformance_bindings(
+                    mono,
                     target_type,
                     normalized_base_type,
                     bindings,
@@ -12869,7 +12904,7 @@ file_private let trait_target_static_lookup_cache_key(
     expected_return_type Type,
 ) String = {
     let mutable key = StringBuilder.new();
-    key.push_string(layout_key(resolve_parameterized_type(mono, base_type)));
+    key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, base_type)));
     key.push_string("|m:");
     key.push_string(method_name);
     key.push_string("|t:");
@@ -12881,16 +12916,16 @@ file_private let trait_target_static_lookup_cache_key(
     };
     key.push_string("|mt:");
     for method_type_arg in provided_method_type_args then {
-        key.push_string(layout_key(resolve_parameterized_type(mono, method_type_arg)));
+        key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, method_type_arg)));
         key.push_byte(',');
     };
     key.push_string("|a:");
     for arg in args then {
-        key.push_string(layout_key(resolve_parameterized_type(mono, arg.expr_type)));
+        key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, arg.expr_type)));
         key.push_byte(',');
     };
     key.push_string("|r:");
-    key.push_string(layout_key(resolve_parameterized_type(mono, expected_return_type)));
+    key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, expected_return_type)));
     key.push_string("|g:");
     key.push_string(mono.storage.generated_nodes.count().to_string());
     key.push_string("|e:");
@@ -12911,21 +12946,21 @@ file_private let concrete_method_lookup_cache_key(
     expected_return_type Type,
 ) String = {
     let mutable key = StringBuilder.new();
-    key.push_string(layout_key(resolve_parameterized_type(mono, base_type)));
+    key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, base_type)));
     key.push_string("|m:");
     key.push_string(method_name);
     key.push_string("|mt:");
     for method_type_arg in provided_method_type_args then {
-        key.push_string(layout_key(resolve_parameterized_type(mono, method_type_arg)));
+        key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, method_type_arg)));
         key.push_byte(',');
     };
     key.push_string("|a:");
     for arg in args then {
-        key.push_string(layout_key(resolve_parameterized_type(mono, arg.expr_type)));
+        key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, arg.expr_type)));
         key.push_byte(',');
     };
     key.push_string("|r:");
-    key.push_string(layout_key(resolve_parameterized_type(mono, expected_return_type)));
+    key.push_string(mono.storage.context.get_layout_key(resolve_parameterized_type(mono, expected_return_type)));
     key.push_string("|g:");
     key.push_string(mono.storage.generated_nodes.count().to_string());
     key.push_string("|e:");
@@ -13082,7 +13117,7 @@ file_private let lookup_concrete_method_for_static_call(
                             mono,
                             (param_types[arg_i + receiver_param_offset]),
                         );
-                        if layout_key(actual_arg_type) <> layout_key(
+                        if mono.storage.context.get_layout_key(actual_arg_type) <> mono.storage.context.get_layout_key(
                             expected_param_type,
                         ) then {
                             signature_matches = false;
@@ -13103,7 +13138,7 @@ file_private let lookup_concrete_method_for_static_call(
                             mono,
                             return_type_ref,
                         );
-                        if layout_key(concrete_return_type) <> layout_key(
+                        if mono.storage.context.get_layout_key(concrete_return_type) <> mono.storage.context.get_layout_key(
                             concrete_expected_return,
                         ) then {
                             signature_matches = false;
@@ -13357,7 +13392,7 @@ file_private let find_declared_static_receiver_method(
                                         mono,
                                         (param_types[arg_i]),
                                     );
-                                    if layout_key(actual_arg_type) <> layout_key(
+                                    if mono.storage.context.get_layout_key(actual_arg_type) <> mono.storage.context.get_layout_key(
                                         expected_param_type,
                                     ) then {
                                         signature_matches = false;
@@ -13377,7 +13412,7 @@ file_private let find_declared_static_receiver_method(
                                         mono,
                                         return_type_ref,
                                     );
-                                    if layout_key(concrete_member_return) <> layout_key(
+                                    if mono.storage.context.get_layout_key(concrete_member_return) <> mono.storage.context.get_layout_key(
                                         concrete_expected_return,
                                     ) then {
                                         signature_matches = false;
@@ -13521,16 +13556,16 @@ file_private let enqueue_extension_method_for_static_call(
 ) Option[Symbol] = {
     let type_key = when base_type in {
         .StructureType(def_id) then {
-            let key = layout_key(base_type);
+            let key = mono.storage.context.get_layout_key(base_type);
             if key.is_empty() then mono.storage.context.get_name(def_id) or else key
             else key
         },
         .EnumType(def_id) then {
-            let key = layout_key(base_type);
+            let key = mono.storage.context.get_layout_key(base_type);
             if key.is_empty() then mono.storage.context.get_name(def_id) or else key
             else key
         },
-        _ then layout_key(base_type),
+        _ then mono.storage.context.get_layout_key(base_type),
     };
 
     let mutable provided_method_type_arg_refs = List[Type].new();

@@ -652,7 +652,7 @@ file_private let mono_decl_kind_name(decl TypedDecl) String = {
     };
 };
 
-file_private let mono_decl_dedup_key(decl TypedDecl) Option[String] = {
+file_private let mono_decl_dedup_key(mono Monomorphizer, decl TypedDecl) Option[String] = {
     when decl_def_id(decl) in {
         .Some(node_def_id) then {
             return Option[String].Some("def:\(node_def_id.id)");
@@ -663,7 +663,7 @@ file_private let mono_decl_dedup_key(decl TypedDecl) Option[String] = {
     return when decl in {
         .GivenDecl(target_type, members, _) then {
             let mutable out = StringBuilder.new();
-            out.push_string("given:\(layout_key(target_type))");
+            out.push_string("given:\(mono.storage.context.get_layout_key(target_type))");
             for m_ref in members then {
                 out.push_string("|");
                 out.push_string("\(m_ref.def_id.id)");
@@ -672,10 +672,10 @@ file_private let mono_decl_dedup_key(decl TypedDecl) Option[String] = {
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, _, _) then {
             let mutable out = StringBuilder.new();
-            out.push_string("given-trait:\(layout_key(target_type)):\(trait_name)");
+            out.push_string("given-trait:\(mono.storage.context.get_layout_key(target_type)):\(trait_name)");
             for trait_arg in trait_args then {
                 out.push_string("#");
-                out.push_string(layout_key(trait_arg));
+                out.push_string(mono.storage.context.get_layout_key(trait_arg));
             };
             for m_ref in members then {
                 out.push_string("|");
@@ -685,7 +685,7 @@ file_private let mono_decl_dedup_key(decl TypedDecl) Option[String] = {
         },
         .IntrinsicGivenDecl(target_type, members, _) then {
             let mutable out = StringBuilder.new();
-            out.push_string("intrinsic-given:\(layout_key(target_type))");
+            out.push_string("intrinsic-given:\(mono.storage.context.get_layout_key(target_type))");
             for m_ref in members then {
                 out.push_string("|");
                 out.push_string("\(m_ref.def_id.id)");
@@ -1414,7 +1414,7 @@ given Monomorphizer {
         let mutable deduped_nodes = List[TypedDecl].new();
         let mutable dedup_removed = 0(UInt);
         for node_ref in self.storage.generated_nodes then {
-            when mono_decl_dedup_key(node_ref) in {
+            when mono_decl_dedup_key(self, node_ref) in {
                 .Some(dedup_key) then {
                     if dedup_seen_keys.contains(dedup_key) then {
                         dedup_removed += 1(UInt);

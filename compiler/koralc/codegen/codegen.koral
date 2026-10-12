@@ -176,23 +176,19 @@ given CodeGen {
     /// the same symbol as an escaped `int`), and `_` followed by an uppercase
     /// letter or another `_` is a reserved identifier pattern.
     ///
-    /// The `__koral_` / `__mir_` exemption is NOT in the reference, and is not
-    /// a licence for a user symbol to squat the runtime namespace: those
-    /// prefixes reach this function only for compiler-EMITTED names, which are
-    /// passed in already owning their spelling. A user symbol goes through
-    /// `sanitize_codegen_identifier` from a declaration name and is escaped
-    /// normally. Removing the exemption without first routing generated names
-    /// around this function escapes the runtime's own symbols and breaks the
-    /// link -- see `docs/implementation/bootstrap-productization-plan.md`.
+    /// SCOPE: this turns a Koral identifier into a legal C identifier. A
+    /// spelling that is ALREADY a C symbol never comes through here -- a
+    /// declared `cname`, a foreign declaration's name, and a compiler-minted
+    /// name (`__koral_*`, `__mir_*`) are all used verbatim by their callers.
+    /// Re-escaping one of those escapes a symbol that already exists and the
+    /// link fails; that is why they bypass this function rather than being
+    /// exempted from it.
     escape_codegen_keyword(self, name String) String = {
         if name.is_empty() then {
             return name;
         };
 
         let prefix = c_escape_prefix();
-        if name.starts_with("__koral_") or name.starts_with("__mir_") then {
-            return name;
-        };
         if self.c_keywords.contains(name) then {
             return prefix + name;
         };
@@ -1218,10 +1214,6 @@ given CodeGen {
         return self.foreign_type_def_ids.contains(def_id.id);
     };
 
-    normalize_codegen_lookup_name(self, name String) String = {
-        return if name.starts_with("_k__k__") then name.substring(3..) else name;
-    };
-
     module_private concrete_callable_info(self, def_id DefId) Option[ConcreteCallableInfo] = {
         return self.program.concrete_callables_by_def_id.get(def_id);
     };
@@ -1607,7 +1599,10 @@ given CodeGen {
         };
         return when self.concrete_callable_info(symbol.def_id) in {
             .Some(info) then when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then self.sanitize_codegen_identifier(c_id),
+                // A `cname` -- whether written on the declaration or minted by the
+                // Monomorphizer -- is already a C symbol spelling. It must be used
+                // verbatim: re-escaping it escapes a name that already exists.
+                .Some(c_id) then c_id,
                 .None() then when self.context.get_name(symbol.def_id) in {
                     .Some(name) then when info.owner_type in {
                         .Some(owner_type) then {
@@ -1640,7 +1635,7 @@ given CodeGen {
                 },
             },
             .None() then when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then self.sanitize_codegen_identifier(c_id),
+                .Some(c_id) then c_id,
                 .None() then when self.method_owner_type(symbol.def_id) in {
                     .Some(owner_type) then {
                         let raw_method_name = self.context.symbol_name(symbol);
@@ -2199,7 +2194,7 @@ given CodeGen {
         let prefix = "\(type_c_name)_";
         let raw_name = if method_component.starts_with(prefix) then method_component
         else "\(type_c_name)_\(method_component)";
-        return self.normalize_codegen_lookup_name(raw_name);
+        return raw_name;
     };
 
     /// 比较两个模块路径是否相等
@@ -2412,9 +2407,7 @@ given CodeGen {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
                 .None() then {
-                    let symbol_name = self.context.symbol_name(symbol);
-                    if symbol_name.starts_with("_k__") then symbol_name
-                    else self.sanitize_codegen_identifier(symbol_name)
+                    self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
                 },
             };
         };

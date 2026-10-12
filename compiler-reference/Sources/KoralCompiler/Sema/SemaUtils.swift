@@ -281,46 +281,21 @@ public enum SemaUtils {
                 returns: substituteType(returns, substitution: substitution, context: context)
             )
             
-        case .structure(let defId):
-            let members = context.getStructMembers(defId) ?? []
-            let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            let newMembers = members.map { member in
-                (
-                    name: member.name,
-                    type: substituteType(member.type, substitution: substitution, context: context),
-                    mutable: member.mutable,
-                    access: member.access,
-                    named: member.named
-                )
-            }
-            let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
-            context.updateStructInfo(
-                defId: defId,
-                members: newMembers,
-                isGenericInstantiation: isGenericInstantiation,
-                typeArguments: newTypeArguments
-            )
-            return .structure(defId: defId)
-            
-        case .`enum`(let defId):
-            let cases = context.getEnumCases(defId) ?? []
-            let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
-            let newCases = cases.map { enumCase in
-                EnumCase(
-                    name: enumCase.name,
-                    parameters: enumCase.parameters.map { param in
-                        (name: param.name, type: substituteType(param.type, substitution: substitution, context: context), access: param.access, named: param.named)
-                    }
-                )
-            }
-            let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
-            context.updateEnumInfo(
-                defId: defId,
-                cases: newCases,
-                isGenericInstantiation: isGenericInstantiation,
-                typeArguments: newTypeArguments
-            )
-            return .`enum`(defId: defId)
+        case .structure:
+            // The type IS its DefId; its members are not part of the type
+            // expression, so there is nothing here for a substitution to
+            // rewrite. Walking into the declaration instead is what made
+            // `List.sort_by` over a mutable newtype overflow the compiler's
+            // stack: the walk is over the DECLARATION graph, which is cyclic
+            // (a nominal whose members reach back to it), and it also wrote
+            // substituted members back into the shared context from inside a
+            // pure-looking function. Monomorphization concretizes an
+            // instantiation's members where that belongs. Same as koralc's
+            // `substitute_type`, which never opens a nominal.
+            return type
+
+        case .`enum`:
+            return type
             
         case .genericStruct(let defId, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }

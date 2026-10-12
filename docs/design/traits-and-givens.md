@@ -203,6 +203,12 @@ trait 时两个拼写落在同一个声明上，判定对任意一对都为真�
 - Trait-object exact type patterns are open-world checks. In `when`, they do not make a match exhaustive; keep a default `_` arm.
 - Trait objects are direct trait-name types; no `Object` marker trait is required.
 
+**绑定是被匹配类型的具体值。** `err is io IoError` 把 `io` 绑成 `IoError`，不是擦除后的
+trait object（`guide/document.md`「Exact Type Patterns」）。同一条规则里
+*the subject stays a trait object; it is not auto-dereferenced* 说的是**测试**作用在擦除后的
+subject 上——判「这个擦除值的具体类型是不是 `IoError`」，不先解引用——不是说绑定物是擦除值。
+两条合起来只有一解：**测试看擦除层，绑定给具体值**。
+
 「能不能变成 trait object」由 **object safety** 把关，不由一个空 marker 把关。
 精确类型模式是**开放世界**检查——它不能让 `when` 变穷尽。
 
@@ -228,20 +234,11 @@ trait 时两个拼写落在同一个声明上，判定对任意一对都为真�
 - **`Weak` marker trait**——同上，只有一行结论。
 - **`Any` 作为一种约束**——曾经是（退化成 `"?"` 哨兵），已否掉；理由记在 `Bound` 的注释里
   （每个消费方都要特判），但没记录当初为何那么设计。
+- **把精确类型模式的绑定当作擦除后的 subject**——否掉。那要求绑定标成 trait object 类型、
+  方法走 trait 派发，写 `io IoError` 就没有意义了；手册写的绑定物是 `IoError`。
 
 ## 风险与未决
 
-- **trait object 精确类型模式的绑定到底是什么**：**未裁定，且现状会出野指针。**
-  上文「trait object 不设 marker」写着这类模式 *operate on the erased trait-object
-  subject; they do not auto-deref to the concrete value type*，而两个编译器都把
-  `inner Box` 的绑定**标成具体类型 `Box`**，于是按 `Box` 去调方法、指针却是擦除后的
-  subject——编译通过、打印垃圾（`bound 4306866680`）；`mutable inner Box` 一样。
-  两条路都通，但语义不同，得先定：
-  - **绑定是擦除后的 subject** —— 那绑定就该标成 trait object 类型，方法走 trait 派发；
-  - **绑定是具体值** —— 那 lowering 就该把具体 payload 取出来，而不是复用擦除指针。
-  现状是两者都不是。修法见
-  [`../implementation/bootstrap-productization-plan.md`](../implementation/bootstrap-productization-plan.md)
-  未决第 4 条。
 - **object safety 的完整判据**：`../guide/document.md` 的「Object Safety」是**规则清单**，
   不是取舍记录——哪些规则是硬性的、哪些是实现权衡，未记。
 - **`given` 与 trait 分开的完整论证**：只从语法形状反推，无正面论证。

@@ -2158,9 +2158,15 @@ final class MIRFunctionCodeEmitter {
       let valueEmission = emitValue(value, sourceMode: true)
       let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
       if codeGen.usesManagedNominalRepresentation(resultType) {
-        // Managed nominal type: copy the thin handle and take a reference
+        // A managed nominal is stored in the trait object's payload as its C
+        // value -- the thin handle -- so the payload address is NOT the handle.
+        // Load the handle out of the payload, the same read the vtable wrapper
+        // makes, then take a reference to the payload the handle points at.
+        // Aliasing the payload address as the handle reads the handle's own
+        // bytes as if they were the object's payload.
+        let managedCType = codeGen.cTypeName(resultType)
         codeGen.addIndent()
-        codeGen.appendToBuffer("\(expression).ptr = \(valueEmission.expression).ptr;\n")
+        codeGen.appendToBuffer("\(expression) = *(\(managedCType)*)\(valueEmission.expression).ptr;\n")
         codeGen.addIndent()
         codeGen.appendToBuffer("__koral_retain_value(\(expression).ptr);\n")
       } else {

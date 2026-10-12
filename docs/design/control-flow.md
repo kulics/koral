@@ -66,7 +66,7 @@ values; `while` and `for` always produce `Void`.
 
 副作用因此只发生在被选中的那一侧。这与主流语言的值兜底算子一致
 （`??` / `?:` 一律短路），对照见
-[`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)「其它语言怎么做的」。
+[`flow-logical-layers.md`](flow-logical-layers.md)「其它语言怎么做的」。
 
 实现上 `and then` 脱糖成对左操作数的 `when`：只有命中的分支体执行，变换体因此天然
 不在空值路径上求值。`or return` 是 `or else { return .Error(it) }` /
@@ -88,7 +88,7 @@ values; `while` and `for` always produce `Void`.
 ## 风险与未决
 
 - **求值顺序与副作用次序**：已记，见上「流程算子的求值顺序：短路」。
-  **分组**是另一件事，见 [`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md)。
+  **分组**是另一件事，见 [`flow-logical-layers.md`](flow-logical-layers.md)。
 - **`Never` 与控制流**：`while` / `for` 在 `Never` 提前终止时的求值形态只在文法注记里提了一句，
   无设计说明。
 
@@ -96,4 +96,4 @@ values; `while` and `for` always produce `Void`.
 
 无单独实现记录。`break` / `continue` 的绑定规则由回归用例看住——它一度把
 `or else` / `and then` 误判成分支边界。流程层 / 逻辑层分层的实施记在
-[`flow-operator-precedence-plan.md`](flow-operator-precedence-plan.md) 的「实施」一节。
+[`flow-logical-layers.md`](flow-logical-layers.md) 的「实现与看护」一节。

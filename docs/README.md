@@ -40,8 +40,8 @@ docs/
     developer-guide.md                    活的章程
     module-design-implementation.md       记录
     identity-matching-tracking.md         记录
-    bootstrap-productization-plan.md      记录
-    samples-capability-plan.md            记录
+    bootstrap-productization.md           章程
+    samples-capability.md                 记录
 ```
 
 ## 该放哪

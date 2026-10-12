@@ -1,0 +1,59 @@
+// EXPECT-EXACT: 42
+// EXPECT-EXACT: 42
+// EXPECT-EXACT: 42
+// EXPECT-EXACT: 7
+// EXPECT-EXACT: 7
+// EXPECT-EXACT: 7
+// Design guard: the binding of a trait-object exact type pattern is the CONCRETE
+// value of the matched type -- `guide/document.md` "Exact Type Patterns" writes
+// `err is io IoError` binds `io` as `IoError` -- so lowering has to hand back the
+// payload, not the erased subject.
+//
+// A managed nominal is stored in the trait object's payload as its C value, the
+// thin handle, so the payload address is not the handle. Aliasing the two reads
+// the handle's own bytes as if they were the object's fields: the binding then
+// prints a pointer instead of the field. Both binding spellings are pinned here,
+// on a managed type and on a value type.
+
+trait Problem {
+    render(self) Int;
+};
+
+type mutable ManagedBox(value Int);
+type ValueBox(value Int);
+
+given ManagedBox as Problem {
+    render(self) Int = self.value;
+};
+
+given ManagedBox {
+    get(self) Int = self.value;
+};
+
+given ValueBox as Problem {
+    render(self) Int = self.value;
+};
+
+given ValueBox {
+    get(self) Int = self.value;
+};
+
+let main() Int = {
+    let managed Problem = ManagedBox(42);
+    println(managed.render().to_string());
+    if managed is bound ManagedBox then {
+        println(bound.get().to_string());
+    };
+    if managed is mutable inner ManagedBox then {
+        println(inner.get().to_string());
+    };
+    let value Problem = ValueBox(7);
+    println(value.render().to_string());
+    if value is bound ValueBox then {
+        println(bound.get().to_string());
+    };
+    if value is mutable inner ValueBox then {
+        println(inner.get().to_string());
+    };
+    return 0;
+};

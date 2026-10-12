@@ -12,6 +12,18 @@ private func isASCIIUppercaseLetter(_ char: Character) -> Bool {
     return scalar.value >= 65 && scalar.value <= 90
 }
 
+/// A C identifier character: ASCII letter, ASCII digit, or `_`.
+///
+/// A C identifier is ASCII-only, so a non-ASCII Koral identifier character has
+/// to become `_` rather than ride through on `Character.isLetter` -- which is
+/// Unicode-aware and would emit an identifier the C compiler rejects. Scanned
+/// per scalar, not per grapheme cluster, so the two compilers agree on how many
+/// underscores a cluster produces.
+private func isCIdentifierScalar(_ scalar: Unicode.Scalar) -> Bool {
+    let v = scalar.value
+    return (v >= 65 && v <= 90) || (v >= 97 && v <= 122) || (v >= 48 && v <= 57) || v == 95
+}
+
 // MARK: - C Keyword Set
 
 /// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
@@ -85,9 +97,9 @@ public func escapeCKeyword(_ name: String) -> String {
 /// - Returns: 有效的 C 标识符
 public func sanitizeCIdentifier(_ name: String) -> String {
     var result = ""
-    for char in name {
-        if char.isLetter || char.isNumber || char == "_" {
-            result.append(char)
+    for scalar in name.unicodeScalars {
+        if isCIdentifierScalar(scalar) {
+            result.unicodeScalars.append(scalar)
         } else {
             result.append("_")
         }
@@ -159,7 +171,17 @@ public func generateCIdentifier(
     }
     
     // 添加清理后的名称
-    parts.append(sanitizeCIdentifier(name))
+    //
+    // A component that follows an underscore-joined prefix does not need the
+    // `_k_` escape: `Union_union` is not a C keyword, only a bare `union` is.
+    // Peeling it keeps the qualified spelling readable and matches koralc's
+    // `compose_method_c_name`, which does the same. The peel is of one prefix
+    // only, so a user's `_k_int` still cannot land on an escaped `int`.
+    let sanitized = sanitizeCIdentifier(name)
+    let component = sanitized.hasPrefix(cEscapePrefix)
+        ? String(sanitized.dropFirst(cEscapePrefix.count))
+        : sanitized
+    parts.append(component)
     
     // 添加类型参数（用于泛型实例化）
     if let typeArgs = typeArguments, !typeArgs.isEmpty {

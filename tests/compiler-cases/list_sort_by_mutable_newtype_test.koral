@@ -1,0 +1,36 @@
+// EXPECT-EXACT: a
+// EXPECT-EXACT: b
+// EXPECT-EXACT: c
+// Regression guard: `List.sort_by` over a mutable newtype used to overflow the
+// COMPILER's stack (SIGSEGV) before the program was ever run.
+//
+// The cause was `SemaUtils.substituteType` opening a nominal's members and
+// writing substituted members back into the shared context. Substitution is a
+// walk over a type EXPRESSION; opening declarations instead walks the
+// DECLARATION graph, which is cyclic here (`Entry` holds `List[Entry]`), so the
+// walk never returned. It is also not a pure function that way -- a substitution
+// of one type mutated every nominal it happened to touch.
+//
+// `Entry` is self-referential on purpose: that is the cycle. The wrapper is a
+// mutable newtype over it, which is the shape
+// `compiler/koralc/module/module_info.koral` was avoiding with its ordered
+// insert.
+
+type mutable Entry(label String, mutable kids List[Entry]);
+type mutable Wrapper(mutable storage Entry);
+
+given Wrapper {
+    label_of(self) String = self.storage.label;
+};
+
+let main() Int = {
+    let mutable xs = List[Wrapper].new();
+    xs.push(Wrapper(Entry("c", List[Entry].new())));
+    xs.push(Wrapper(Entry("a", List[Entry].new())));
+    xs.push(Wrapper(Entry("b", List[Entry].new())));
+    xs.sort_by((w) -> w.label_of());
+    println(xs[0].label_of());
+    println(xs[1].label_of());
+    println(xs[2].label_of());
+    return 0;
+};

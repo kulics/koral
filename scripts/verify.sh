@@ -2,7 +2,7 @@
 # Run the full verification chain. Works on macOS, Linux and Windows (Git Bash).
 #
 # The chain is fixed-order and must not be reordered -- see
-# docs/implementation/bootstrap-productization-plan.md.
+# docs/implementation/bootstrap-productization.md.
 # Each step is a different kind of evidence; reordering weakens what the run
 # proves.
 #

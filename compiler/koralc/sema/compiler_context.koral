@@ -1489,15 +1489,36 @@ given CompilerContext {
             .BoolType() then "B",
             .VoidType() then "V",
             .NeverType() then "N",
-            .FunctionType(_, _) then "Fn",
+            // A layout key names a monomorphized C entity, so it has to be
+            // injective on the type: two types that get one key share one C
+            // symbol. That is why a function type keeps its signature -- with
+            // the parameter COUNT, because a bare `Fn_<params>_<ret>` join is
+            // ambiguous (`Func() R_I` and `Func(R) I` both spell `Fn_R_I`) --
+            // and why a borrowed reference is not folded into an owning one.
+            // They are different types, and instances parameterized by them
+            // are different instances.
+            .FunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable out = StringBuilder.new();
+                out.push_string("Fn");
+                out.push_byte('_');
+                out.push_string(param_types.count().to_string());
+                for pt in param_types then {
+                    out.push_byte('_');
+                    out.push_string(self.get_layout_key(pt));
+                };
+                out.push_byte('_');
+                out.push_string(self.get_layout_key(return_type));
+                out.to_string()
+            },
             .ReferenceType(inner) then "R_\(self.get_layout_key(inner))",
             .MutableReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
             .PointerType(inner) then "P_\(self.get_layout_key(inner))",
             .MutablePointerType(inner) then "MP_\(self.get_layout_key(inner))",
             .WeakReferenceType(inner) then "W_\(self.get_layout_key(inner))",
             .MutableWeakReferenceType(inner) then "MW_\(self.get_layout_key(inner))",
-            .BorrowedReferenceType(inner) then "R_\(self.get_layout_key(inner))",
-            .MutableBorrowedReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
+            .BorrowedReferenceType(inner) then "BR_\(self.get_layout_key(inner))",
+            .MutableBorrowedReferenceType(inner) then "MBR_\(self.get_layout_key(inner))",
             .StructureType(def_id) then self.layout_key_for_def_id(def_id),
             .EnumType(def_id) then self.layout_key_for_def_id(def_id),
             .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
@@ -1602,7 +1623,9 @@ given CompilerContext {
             .None() then parts.push("T_\(def_id.id)"),
         };
 
-        // 泛型实例化的类型参数
+        // 类型实参。单态化出来的实例**不**在这里再拼一次：它的 `name` 已经是
+        // `make_layout_name` 的产物（`SendChannel_..._d378`），里面带着实参了，
+        // 再拼一次就把同一组实参数两遍，同一个类型会因到达路径不同拼出两个键。
         if self.def_id_map.get_type_arguments(def_id) is .Some(args) then {
             let is_inst = when self.def_id_map.get_generic_instantiation(def_id) in {
                 .Some(v) then v,

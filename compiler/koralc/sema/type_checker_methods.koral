@@ -465,14 +465,13 @@ given TypeChecker {
     };
 
     /// Owner identity of a trait known only by its spelling.
-    module_private method_owner_for_trait_name(
+    module_private method_owner_for_trait_def(
         self,
-        trait_name String,
+        trait_def_id DefId,
     ) Option[MethodOwner] = {
-        return when self.trait_def_id_of(trait_name) in {
-            .Some(def_id) then Option[MethodOwner].Some(MethodOwner.Decl(def_id)),
-            .None() then Option[MethodOwner].None(),
-        };
+        return if trait_def_id.is_valid() then Option[MethodOwner].Some(
+            MethodOwner.Decl(trait_def_id),
+        ) else Option[MethodOwner].None();
     };
 
     /// Method lookup by a type's SPELLING. The spelling is resolved to its
@@ -488,13 +487,14 @@ given TypeChecker {
         };
     };
 
-    /// Method lookup by a trait's SPELLING.
+    /// Method lookup on a trait's DECLARATION. The spelling, where one exists,
+    /// is resolved at the write site -- here it is identity only.
     module_private lookup_trait_method_signature(
         self,
-        trait_name String,
+        trait_def_id DefId,
         method_name String,
     ) Option[Symbol] = {
-        return when self.method_owner_for_trait_name(trait_name) in {
+        return when self.method_owner_for_trait_def(trait_def_id) in {
             .Some(owner) then self.lookup_method_signature(owner, method_name),
             .None() then Option[Symbol].None(),
         };
@@ -1667,7 +1667,6 @@ given TypeChecker {
             .Some(trait_name) then {
                 for entry in self.trait_method_bindings(
                     template.conformance_trait_def_id or else def_id_invalid(),
-                    trait_name,
                     inner_type,
                 ) then {
                     bindings.insert(entry.first, entry.second);
@@ -1790,7 +1789,6 @@ given TypeChecker {
                     // builds — otherwise the parameter types come back as bare `T`.
                     let mutable bindings = self.trait_method_bindings(
                         self.trait_def_id_of(trait_name) or else def_id_invalid(),
-                        trait_name,
                         base_type,
                     );
                     bindings.insert("Self", base_type);
@@ -2318,7 +2316,7 @@ given TypeChecker {
             };
 
             let raw_method_opt = self.lookup_trait_method_signature(
-                trait_name,
+                bound_trait_def_id,
                 method_name,
             );
             when raw_method_opt in {
@@ -2640,7 +2638,7 @@ given TypeChecker {
     module_private resolve_conformance_trait_method_signature(
         self,
         receiver_type Type,
-        trait_name String,
+        trait_def_id DefId,
         method_name String,
     ) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
@@ -2660,7 +2658,7 @@ given TypeChecker {
                 return Option[Symbol].None();
             },
         };
-        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(0(UInt));
+        let requested_trait_id = trait_def_id;
         let bound_trait_def_id = requested_trait_id;
         for template in templates then {
             if template.trait_def_id <> requested_trait_id then {
@@ -2677,10 +2675,7 @@ given TypeChecker {
             };
 
             let mutable method_bindings = bindings;
-            when self.storage.trait_registry.get_in_module(
-                trait_name,
-                self.storage.module_path,
-            ) in {
+            when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
                 .Some(info) then {
                     let param_count = info.type_params.count();
                     let arg_count = template.trait_arg_types.count();
@@ -2698,7 +2693,9 @@ given TypeChecker {
                 .None() then {},
             };
 
-            when self.storage.trait_registry.flatten_methods(trait_name) in {
+            when self.storage.trait_registry.flatten_methods_for_def(
+                trait_def_id,
+            ) in {
                 .Ok(methods) then {
                     when methods.get(method_name) in {
                         .Some(member) then {
@@ -2747,14 +2744,14 @@ given TypeChecker {
                     };
                 },
                 .Error(e) then self.report_trait_method_flatten_failure(
-                    trait_name,
+                    def_id_spelling(trait_def_id),
                     method_name,
                     "resolve_conformance_extension_template_signature",
                     e,
                 ),
             };
 
-            when self.lookup_trait_method_signature(trait_name, method_name) in {
+            when self.lookup_trait_method_signature(trait_def_id, method_name) in {
                 .Some(raw_method) then {
                     let mutable bound_param_types = List[Type].new();
                     for parameter_type in self.method_param_types(raw_method) then {
@@ -2835,10 +2832,14 @@ given TypeChecker {
     /// `trait_name` is display-only; the declaration is reached by identity, so
     /// a spelling that is not bound in the checking module (an import alias, or
     /// a trait object's trait named from another module) still resolves.
+    /// The bindings a trait's method signature needs for this receiver.
+    ///
+    /// Identity-first: the trait is passed as its `DefId`, never as a spelling.
+    /// A spelling would have to be resolved again here, and resolving it twice
+    /// is how two same-named traits from different modules got conflated.
     module_private trait_method_bindings(
         self,
         trait_def_id DefId,
-        trait_name String,
         receiver_type Type,
     ) Dict[String, Type] = {
         let concrete_receiver = when receiver_type in {
@@ -2866,15 +2867,11 @@ given TypeChecker {
             .GenericParameter(gp_name) then {
                 when self.storage.generic_param_constraints.get(gp_name) in {
                     .Some(constraints) then {
-                        let requested_trait_id = self.trait_def_id_of(trait_name) or else DefId(
-                            0(UInt),
-                        );
-                        let bound_trait_def_id = requested_trait_id;
+                        let requested_trait_id = trait_def_id;
                         for constraint in constraints then {
                             if constraint.trait_def_id == requested_trait_id then {
-                                when self.storage.trait_registry.get_in_module(
-                                    trait_name,
-                                    self.storage.module_path,
+                                when self.storage.trait_registry.get_by_def_id(
+                                    trait_def_id,
                                 ) in {
                                     .Some(info) then {
                                         let mutable idx UInt = 0;
@@ -2898,9 +2895,12 @@ given TypeChecker {
                     .None() then {},
                 };
             },
-            // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_def_id, receiver_trait_args) then {
-                when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
+            // Identity: the trait's DECLARATION, not its spelling. The pattern
+            // must not shadow the requested `trait_def_id` -- when it did, the
+            // only way left to ask "is this the same trait?" was to compare the
+            // two spellings, which is exactly what identity is not.
+            .TraitObject(receiver_trait_def_id, receiver_trait_args) then {
+                when self.storage.trait_registry.get_by_def_id(receiver_trait_def_id) in {
                     .Some(info) then {
                         let mutable idx UInt = 0;
                         while idx < info.type_params.count() and idx < receiver_trait_args.count(
@@ -2914,13 +2914,10 @@ given TypeChecker {
                     },
                     .None() then {},
                 };
-                // Both sides are spellings read from declarations.
-                let receiver_trait_spelling = def_id_spelling(trait_def_id);
-                if receiver_trait_spelling <> trait_name then {
+                if receiver_trait_def_id <> trait_def_id then {
                     let mutable receiver_visited = Set[UInt].new();
                     bindings = self.collect_trait_method_bindings_recursive(
-                        self.trait_def_id_of(receiver_trait_spelling) or else def_id_invalid(
-                        ),
+                        receiver_trait_def_id,
                         bindings,
                         receiver_visited,
                     );
@@ -2944,7 +2941,7 @@ given TypeChecker {
             },
             .None() then {
                 self.report_missing_trait_method_info(
-                    trait_name,
+                    trait_def_id,
                     "trait_method_bindings",
                 );
                 return bindings;
@@ -3007,7 +3004,7 @@ given TypeChecker {
                         },
                         .None() then {
                             self.report_missing_trait_method_info(
-                                parent.name,
+                                parent.def_id,
                                 "collect_trait_method_bindings_recursive",
                             );
                         },
@@ -3017,7 +3014,7 @@ given TypeChecker {
             },
             .None() then {
                 self.report_missing_trait_method_info(
-                    def_id_spelling(trait_def_id),
+                    trait_def_id,
                     "collect_trait_method_bindings_recursive",
                 );
                 return bindings;
@@ -3028,12 +3025,11 @@ given TypeChecker {
     module_private resolve_trait_registry_method_signature(
         self,
         trait_def_id DefId,
-        trait_name String,
         method_name String,
         receiver_type Type,
     ) Option[Symbol] = {
-        let bindings = self.trait_method_bindings(trait_def_id, trait_name, receiver_type);
-        if self.lookup_trait_method_signature(trait_name, method_name) is .Some(raw_method) then {
+        let bindings = self.trait_method_bindings(trait_def_id, receiver_type);
+        if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(raw_method) then {
             let mutable bound_param_types = List[Type].new();
             for parameter_type in self.method_param_types(raw_method) then {
                 bound_param_types.push(
@@ -3054,7 +3050,9 @@ given TypeChecker {
                 ),
             );
         };
-        return when self.storage.trait_registry.flatten_methods(trait_name) in {
+        return when self.storage.trait_registry.flatten_methods_for_def(
+            trait_def_id,
+        ) in {
             .Ok(methods) then when methods.get(method_name) in {
                 .Some(member) then {
                     let mutable typed_params = List[TypedParam].new();
@@ -3081,7 +3079,7 @@ given TypeChecker {
             },
             .Error(e) then {
                 self.report_trait_method_flatten_failure(
-                    trait_name,
+                    def_id_spelling(trait_def_id),
                     method_name,
                     "resolve_trait_registry_method_signature",
                     e,
@@ -4322,7 +4320,6 @@ given TypeChecker {
                         let cn = constraint.trait_name;
                         when self.resolve_trait_registry_method_signature(
                             constraint.trait_def_id,
-                            cn,
                             method_name,
                             inner_type,
                         ) in {
@@ -4354,7 +4351,6 @@ given TypeChecker {
                 let trait_spelling = def_id_spelling(trait_def_id);
                 when self.resolve_trait_registry_method_signature(
                     trait_def_id,
-                    trait_spelling,
                     method_name,
                     inner_type,
                 ) in {
@@ -4374,7 +4370,7 @@ given TypeChecker {
                     },
                     .None() then {},
                 };
-                if self.lookup_trait_method_signature(trait_spelling, method_name) is .Some(raw_method) then {
+                if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(raw_method) then {
                     return Option[Symbol].Some(raw_method);
                 };
             },
@@ -4542,13 +4538,12 @@ given TypeChecker {
     module_private resolve_trait_method_param_types(
         self,
         trait_def_id DefId,
-        trait_name String,
         method_name String,
         receiver_type Type,
     ) List[Type] = {
         when self.resolve_conformance_trait_method_signature(
             receiver_type,
-            trait_name,
+            trait_def_id,
             method_name,
         ) in {
             .Some(method) then {
@@ -4562,12 +4557,11 @@ given TypeChecker {
             },
             .None() then {},
         };
-        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(
+        if self.storage.trait_registry.flatten_methods_for_def(trait_def_id) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) then {
             let bindings = self.trait_method_bindings(
                 trait_def_id,
-                trait_name,
                 receiver_type,
             );
             // member.params 包含 self，跳过第一个
@@ -4589,7 +4583,7 @@ given TypeChecker {
             };
             return List[Type].new();
         };
-        if self.lookup_trait_method_signature(trait_name, method_name) is .Some(method) then {
+        if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(method) then {
             if self.method_param_count(method) > 0(UInt) then {
                 let mutable concrete_receiver_type = self.concrete_receiver_for_method(
                     receiver_type,
@@ -4619,13 +4613,12 @@ given TypeChecker {
     module_private resolve_trait_method_self_type(
         self,
         trait_def_id DefId,
-        trait_name String,
         method_name String,
         receiver_type Type,
     ) Option[Type] = {
         when self.resolve_conformance_trait_method_signature(
             receiver_type,
-            trait_name,
+            trait_def_id,
             method_name,
         ) in {
             .Some(method) then {
@@ -4637,12 +4630,11 @@ given TypeChecker {
             },
             .None() then {},
         };
-        if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(
+        if self.storage.trait_registry.flatten_methods_for_def(trait_def_id) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) and member.params.count() > 0(UInt) then {
             let bindings = self.trait_method_bindings(
                 trait_def_id,
-                trait_name,
                 receiver_type,
             );
             return Option[Type].Some(
@@ -4651,7 +4643,7 @@ given TypeChecker {
                 ),
             );
         };
-        if self.lookup_trait_method_signature(trait_name, method_name) is .Some(method) then {
+        if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(method) then {
             return self.resolve_bound_method_self_type(receiver_type, method);
         };
         return Option[Type].None();
@@ -4746,12 +4738,13 @@ given TypeChecker {
 
     module_private report_missing_trait_method_info(
         self,
-        trait_name String,
+        trait_def_id DefId,
         context String,
     ) Void = {
+        // Display only -- the name is read from the DECLARATION.
         let mutable message = StringBuilder.new();
         message.push_string("missing trait info for ");
-        message.push_string(trait_name);
+        message.push_string(def_id_spelling(trait_def_id));
         message.push_string(" in ");
         message.push_string(context);
         self.push_diagnostic(message.to_string(), unknown_span());
@@ -4762,13 +4755,12 @@ given TypeChecker {
     module_private resolve_qualified_method_return_type(
         self,
         trait_def_id DefId,
-        trait_name String,
         method_name String,
         base_type Type,
     ) Type = {
         when self.resolve_conformance_trait_method_signature(
             base_type,
-            trait_name,
+            trait_def_id,
             method_name,
         ) in {
             .Some(method) then {
@@ -4776,13 +4768,14 @@ given TypeChecker {
             },
             .None() then {},
         };
-        when self.storage.trait_registry.flatten_methods(trait_name) in {
+        when self.storage.trait_registry.flatten_methods_for_def(
+            trait_def_id,
+        ) in {
             .Ok(methods) then {
                 when methods.get(method_name) in {
                     .Some(member) then {
                         let bindings = self.trait_method_bindings(
                             trait_def_id,
-                            trait_name,
                             base_type,
                         );
                         when member.return_type in {
@@ -4801,13 +4794,13 @@ given TypeChecker {
                 };
             },
             .Error(e) then self.report_trait_method_flatten_failure(
-                trait_name,
+                def_id_spelling(trait_def_id),
                 method_name,
                 "resolve_qualified_method_return_type",
                 e,
             ),
         };
-        if self.lookup_trait_method_signature(trait_name, method_name) is .Some(method) then {
+        if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(method) then {
             return self.resolve_signature_return_type(
                 self.concrete_receiver_for_method(base_type, method),
                 method,
@@ -5046,11 +5039,9 @@ given TypeChecker {
                 );
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
-                let trait_name = self.trait_name_from_type(trait_type);
                 let method_name = self.context().symbol_name(method);
                 let mutable qualified_return_type = self.resolve_qualified_method_return_type(
                     self.trait_def_id_from_type(trait_type),
-                    trait_name,
                     method_name,
                     base.expr_type,
                 );
@@ -5084,10 +5075,8 @@ given TypeChecker {
                 return callee.expr_type;
             },
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
-                let trait_name = self.trait_name_from_type(trait_type);
                 let mutable qualified_return_type = self.resolve_qualified_method_return_type(
                     self.trait_def_id_from_type(trait_type),
-                    trait_name,
                     method_name,
                     base.expr_type,
                 );
@@ -5171,11 +5160,9 @@ given TypeChecker {
                 return out;
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
-                let trait_name = self.trait_name_from_type(trait_type);
                 let method_name = self.context().symbol_name(method);
                 let trait_params = self.resolve_trait_method_param_types(
                     self.trait_def_id_from_type(trait_type),
-                    trait_name,
                     method_name,
                     base.expr_type,
                 );
@@ -5196,10 +5183,8 @@ given TypeChecker {
                 return out;
             },
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
-                let trait_name = self.trait_name_from_type(trait_type);
                 let trait_params = self.resolve_trait_method_param_types(
                     self.trait_def_id_from_type(trait_type),
-                    trait_name,
                     method_name,
                     base.expr_type,
                 );
