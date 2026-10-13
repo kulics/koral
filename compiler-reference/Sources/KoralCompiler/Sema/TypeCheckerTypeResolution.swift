@@ -422,8 +422,14 @@ extension TypeChecker {
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
       
-    case .weakReference(let inner, let mutable, _):
-      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapWeakReference)
+    case .weakReference(let inner, let mutable, let span):
+      let resolved = try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapWeakReference)
+      if case .weakReference(let innerType) = resolved {
+        try enforceWeakReferenceReferent(innerType, span: span)
+      } else if case .mutableWeakReference(let innerType) = resolved {
+        try enforceWeakReferenceReferent(innerType, span: span)
+      }
+      return resolved
     }
   }
   
@@ -481,8 +487,14 @@ extension TypeChecker {
       }
       return try resolveTypeNode(node)
       
-    case .weakReference(let inner, let mutable, _):
-      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapWeakReference)
+    case .weakReference(let inner, let mutable, let span):
+      let resolved = try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapWeakReference)
+      if case .weakReference(let innerType) = resolved {
+        try enforceWeakReferenceReferent(innerType, span: span)
+      } else if case .mutableWeakReference(let innerType) = resolved {
+        try enforceWeakReferenceReferent(innerType, span: span)
+      }
+      return resolved
     }
   }
   
@@ -654,6 +666,30 @@ extension TypeChecker {
       throw SemanticError(.generic(
         "Type '\(type)' does not satisfy the 'mutable' constraint\(ctx). Only types declared with 'type mutable' can be used as weak references."
       ), span: currentSpan)
+    }
+  }
+
+  /// Checks that a ?T weak reference referent satisfies the mutable
+  /// constraint - i.e., T is declared 'type mutable'. The message names the
+  /// construct (?T), not the intrinsic that used to build it.
+  private func enforceWeakReferenceReferent(_ inner: Type, span: SourceSpan) throws {
+    let satisfied: Bool
+    switch inner {
+    case .error:
+      return
+    case .structure(let defId):
+      satisfied = context_isTypeMutable(defId)
+    case .genericStruct(let templateDefId, _):
+      satisfied = templateDefId.isValid ? context_isTypeMutable(templateDefId) : false
+    case .genericParameter(let name):
+      satisfied = genericParamHasShapeBound(name) { if case .mutable = $0 { return true }; return false }
+    default:
+      satisfied = false
+    }
+    if !satisfied {
+      throw SemanticError(.generic(
+        "'?\(inner)' requires a 'type mutable' referent, but '\(inner)' is not declared as 'type mutable'"
+      ), span: span)
     }
   }
 
@@ -907,6 +943,101 @@ extension TypeChecker {
     }
   }
 
+  // MARK: - Integer literal range checking
+
+  /// The largest magnitude a literal of this type may carry, split by sign.
+  /// `negative` is the largest `-m` allowed (so `Int8` is 128: `-128` fits);
+  /// `positive` is the largest `+m`. Zero for `negative` means the type is
+  /// unsigned and no negative literal fits.
+  private func integerTypeMagnitudeBounds(_ type: Type) -> (negative: UInt64, positive: UInt64)? {
+    switch type {
+    case .int, .int64: return (9223372036854775808, 9223372036854775807)
+    case .int8: return (128, 127)
+    case .int16: return (32768, 32767)
+    case .int32: return (2147483648, 2147483647)
+    case .uint, .uint64: return (0, 18446744073709551615)
+    case .uint8: return (0, 255)
+    case .uint16: return (0, 65535)
+    case .uint32: return (0, 4294967295)
+    default: return nil
+    }
+  }
+
+  /// Parses an integer literal's source text into sign + magnitude.
+  /// Accepts a leading `-`, optional `0x` / `0b` / `0o` base prefixes and `_`
+  /// digit separators. `overflow` means the magnitude does not fit in UInt64.
+  private func parseIntegerLiteralText(_ text: String) -> (negative: Bool, magnitude: UInt64, overflow: Bool) {
+    var s = text.replacingOccurrences(of: "_", with: "")
+    var negative = false
+    if s.hasPrefix("-") {
+      negative = true
+      s = String(s.dropFirst())
+    } else if s.hasPrefix("+") {
+      s = String(s.dropFirst())
+    }
+    var radix = 10
+    var digits = s
+    if s.hasPrefix("0x") || s.hasPrefix("0X") {
+      radix = 16
+      digits = String(s.dropFirst(2))
+    } else if s.hasPrefix("0b") || s.hasPrefix("0B") {
+      radix = 2
+      digits = String(s.dropFirst(2))
+    } else if s.hasPrefix("0o") || s.hasPrefix("0O") {
+      radix = 8
+      digits = String(s.dropFirst(2))
+    }
+    if digits.isEmpty {
+      return (negative, 0, true)
+    }
+    var magnitude: UInt64 = 0
+    let radixU = UInt64(radix)
+    for ch in digits {
+      let digit: UInt64
+      switch ch {
+      case "0"..."9": digit = UInt64(ch.wholeNumberValue ?? 0)
+      case "a"..."f": digit = UInt64(ch.wholeNumberValue ?? 0)
+      case "A"..."F": digit = UInt64(ch.wholeNumberValue ?? 0)
+      default: return (negative, 0, true)
+      }
+      if digit >= radixU { return (negative, 0, true) }
+      if magnitude > (UInt64.max - digit) / radixU {
+        return (negative, 0, true)
+      }
+      magnitude = magnitude * radixU + digit
+    }
+    return (negative, magnitude, false)
+  }
+
+  /// Enforces that an integer literal's value fits the target integer type.
+  /// Called whenever a numeric literal is cast or coerced to a concrete integer
+  /// type: `Int8(999)` and `let b Int8 = 999` are both errors.
+  func checkIntegerLiteralRange(value: String, targetType: Type, span: SourceSpan) throws {
+    guard let bounds = integerTypeMagnitudeBounds(targetType) else { return }
+    let parsed = parseIntegerLiteralText(value)
+    let fits: Bool
+    if parsed.overflow {
+      fits = false
+    } else if parsed.negative {
+      fits = parsed.magnitude <= bounds.negative
+    } else {
+      fits = parsed.magnitude <= bounds.positive
+    }
+    if !fits {
+      // Show the value as written (decimal-normalized so the two compilers
+      // agree even when one keeps the `0x` spelling).
+      let display: String
+      if parsed.overflow {
+        display = value.replacingOccurrences(of: "_", with: "")
+      } else {
+        display = (parsed.negative ? "-" : "") + String(parsed.magnitude)
+      }
+      throw SemanticError(.generic(
+        "Integer literal \(display) is out of range for \(targetType.description)"
+      ), span: span)
+    }
+  }
+
   /// Std's `String`, by declaration identity -- a user type also named `String`
   /// is a different type and must not be treated as one.
   func isStringType(_ type: Type) -> Bool {
@@ -935,8 +1066,10 @@ extension TypeChecker {
   }
 
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
-  func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode
+  func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type, span: SourceSpan? = nil)
+    throws -> TypedExpressionNode
   {
+    let blame = span ?? currentSpan
     // Something that already failed to check has no type to coerce.
     if expr.type == .error {
       return expr
@@ -953,6 +1086,7 @@ extension TypeChecker {
 
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
+        try checkIntegerLiteralRange(value: value, targetType: expected, span: blame)
         return .integerLiteral(value: value, type: expected)
       }
 

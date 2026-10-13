@@ -421,6 +421,7 @@ given TypeChecker {
         name String,
         span SourceSpan,
         scope Scope,
+        allow_type_name Bool,
     ) TypedExpr = {
         let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name);
         let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None()
@@ -465,6 +466,17 @@ given TypeChecker {
                 },
                 .None() then {},
             };
+        };
+        // A type name alone is not a value. It is fine as the base of
+        // `Point.x` or the callee of `Point(1)` -- those are static access and
+        // construction -- but standing alone in value position it names a
+        // type, and types have no value.
+        if not allow_type_name and normalized_sym.kind is .TypeSymbol() then {
+            self.push_diagnostic_at_span(
+                "Type '\(name)' cannot be used as an expression: types have no value",
+                span,
+            );
+            return self.empty_typed_block(Type.Unknown());
         };
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is .Function() then {
             when self.storage.generic_templates.lookup_function_by_def_id(gs.def_id) in {
@@ -526,7 +538,7 @@ given TypeChecker {
     };
 
     module_private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
-        return self.check_identifier_expr_at(name, unknown_span(), scope);
+        return self.check_identifier_expr_at(name, unknown_span(), scope, false);
     };
 
     module_private check_operand_expr_ref(
@@ -545,7 +557,12 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         return when expr in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                false,
+            ),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                 left,
                 op,
@@ -858,7 +875,12 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         let typed_base = when base in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                true,
+            ),
             _ then self.check_expr_core_ref(base, .None(), scope),
         };
         let raw_method = self.resolve_method_signature(typed_base.expr_type, member);
@@ -1075,15 +1097,30 @@ given TypeChecker {
 
     module_private check_call_callee_expr_ref(self, callee Expr, scope Scope) TypedExpr = {
         return when callee in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                true,
+            ),
             .MemberPath(_, _, _) then {
                 when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
-                        let raw_typed_receiver = self.check_expr_core_ref(
-                            parts.first,
-                            .None(),
-                            scope,
-                        );
+                        // A type name here is the receiver of static access or
+                        // an enum constructor call, not a bare value.
+                        let raw_typed_receiver = when parts.first in {
+                            .Identifier(receiver_name, receiver_span) then self.check_identifier_expr_at(
+                                receiver_name,
+                                receiver_span,
+                                scope,
+                                true,
+                            ),
+                            _ then self.check_expr_core_ref(
+                                parts.first,
+                                .None(),
+                                scope,
+                            ),
+                        };
                         let mutable normalized_receiver_type = self.concretize_default_literal_type(
                             raw_typed_receiver.expr_type,
                         );
@@ -1711,6 +1748,13 @@ given TypeChecker {
             when expr.expr_kind in {
                 .IntegerLiteral(value) then {
                     if self.is_numeric_type(expected_type) then {
+                        if self.is_integer_type(expected_type) then {
+                            let _ = self.check_integer_literal_range(
+                                value,
+                                expected_type,
+                                diagnostic_span,
+                            );
+                        };
                         return make_typed_expr(
                             TypedExprKind.IntegerLiteral(value),
                             expected_type,

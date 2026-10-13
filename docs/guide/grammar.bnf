@@ -65,10 +65,18 @@
 
 <let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"
              | "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"
-             | "let" <decl-qualifier> <identifier> <generic-params>? <function-signature> ";"   // body-less function
+             | "let" "intrinsic" <identifier> <generic-params>? <function-signature> ";"        // body-less intrinsic function
+             | "let" "foreign" <identifier> <positional-signature> ";"                          // body-less foreign function
              | "let" "foreign" "mutable"? <identifier> <type-annotation> ";"                    // body-less variable
 // 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）。
 // 带 <decl-qualifier> 的形式没有函数体；不带的必须有。
+// Global `let` bindings initialize in declaration order: a later binding may
+// read an earlier one and see its final value (`let a = 1; let b = a + 1;`
+// gives `b == 2`).
+// intrinsic 函数支持泛型与命名参数（含默认值），只允许出现在标准库里；
+// foreign 函数不支持泛型、不支持命名参数（parse 报 "Named parameters are
+// not supported in foreign declarations"），也不支持函数体。
+<positional-signature> ::= "(" <positional-param-list>? ")" <type-annotation>
 <positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
 <positional-param> ::= "mutable"? <identifier> <type-annotation>
 // 说明：
@@ -94,7 +102,7 @@
 <method-first-param> ::= "self"                                          // unified self receiver
                        | <func-param>
 // Receiver rules:
-// - self: unified self receiver
+// - self: unified self receiver (mutability follows the type declaration)
 // - func-param: explicit typed parameter (not self)
 
 <type-annotation> ::= <type>
@@ -143,7 +151,9 @@
 // Trait method params follow the same positional/named rules as func-param.
 // Named params in trait declarations must be matched by implementations.
 // Default values declared in trait are the only source; implementations must not re-declare defaults.
-// 说明：trait method 支持泛型参数，但不支持方法体
+// 说明：trait method 支持泛型参数，但不支持方法体。返回类型必须显式写出
+// （与文档 "Named functions and methods must spell out the return type
+// explicitly" 一致；bootstrap 会报 "Missing return type"）。
 
 // ============================================================================
 // Given Declarations (Type Implementations)
@@ -151,14 +161,17 @@
 
 <given-decl> ::= "given" <decl-qualifier>? <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}" ";"
 // `given` 只接受 `intrinsic`（实现在编译器里）。`given intrinsic T { ... };`
+// `given` 不接受访问修饰符（`public given ...` 是语法错误）。
 <given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> "=" <expression> ";"
-                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // body-less given method
+                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // body-less, `given intrinsic` only
 // Given implementations must match the trait's named/positional parameter classification.
 // If the trait declares defaults, the given implementation must NOT redeclare them.
 // If the trait declares no defaults, the given implementation cannot add them.
 // 说明：
 // 1) `given Type { members }` 为类型固有实现
 // 2) `given Type as Trait { members }` 为 trait 实现
+// 普通 `given` 方法必须带函数体和显式返回类型（少写返回类型会报
+// "Missing return type"）；无函数体的形式只属于 `given intrinsic`。
 
 // ============================================================================
 // Generic Parameters
@@ -237,9 +250,12 @@
 // A tuple binding destructures a STRUCT by position: `(a, b, c)` against a
 // struct with exactly three fields, in declaration order. N >= 2 -- `(x)` is a
 // parenthesized binding, not a tuple. A field may be discarded with `_`.
+// Slots may nest: `let (a, (b, c)) = ...` destructures a field that is itself
+// a struct, the same way a nested <tuple-pattern> does in `when`/`is`.
 <tuple-binding> ::= "(" <binding-element> ("," <binding-element>)+ ")"
 <binding-element> ::= "_"
                     | "mutable"? <identifier> <type-annotation>?
+                    | <tuple-binding>
 
 <assignment-statement> ::= <expression> <assign-op> <expression> ";"
 <assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
@@ -257,11 +273,19 @@
 // Expressions
 // ============================================================================
 
-<expression> ::= <flow-expression> | <logical-expression>
+<expression> ::= <layer-operand> <layered-tail>?
+// The operand is parsed first, and the operator that follows it picks the
+// chain. With no operator the expression is just the operand -- one parse,
+// never two. That is exactly the shape both parsers have.
+//
+// Everything under <layer-operand> -- comparison, range, `is`, `not` -- binds
+// TIGHTER than the flow layer and the logical layer. In particular
+// `a == b or else c` groups as `(a == b) or else c`, never `a == (b or else c)`.
+//
 // Flow operators and logical operators are TWO layers, and the layers do not
-// mix implicitly: an expression is a flow chain or a logical chain, never both
-// at the same level. Crossing from one layer to the other takes parentheses --
-// the way `??` refuses to sit beside `||` in the languages that have it.
+// mix implicitly: one tail is a flow tail or a logical tail, never both at the
+// same level. Crossing from one layer to the other takes parentheses -- the
+// way `??` refuses to sit beside `||` in the languages that have it.
 //
 //   `a and (b or else c)`              -- fine, and means that
 //   `(a and b) or else c`              -- fine, and means something else
@@ -292,28 +316,41 @@
 
 // Precedence INSIDE a layer is unchanged: `and then` binds tighter than
 // `or else` / `or return`, and `and` binds tighter than `or`. Both layers
-// start from the same operand nonterminal.
+// start from the same <layer-operand> -- which already includes comparison,
+// so comparison binds tighter than both layers.
 //
-// With no operator at all the two alternatives of <expression> coincide -- a
-// bare <layer-operand> is both -- so the choice only becomes observable once
-// an operator follows. That is the same shape the parsers have: parse the
-// operand, then let the next operator pick the chain.
+// After the operand the next operator picks the tail: `and then` / `or else` /
+// `or return` continue a flow tail, `and` / `or` continue a logical tail. The
+// two tails are disjoint because `then`, `else` and `return` are reserved
+// words, never <layer-operand>s.
 
 <layer-operand> ::= <not-expression>
 
-<flow-expression> ::= <and-then-expression>
-                    (("or" "else" <and-then-expression>)
-                    | ("or" "return"))*
+<layered-tail> ::= <flow-tail>
+                 | <logical-tail>
+
+// Flow tail. `and then` binds tightest, then `or else` / `or return` chain
+// left to right: `f() and then g(it) or else h()` is
+// `(f() and then g(it)) or else h()`. `or return` is a postfix link (early
+// return, no operand); `or else` takes one more <flow-operand>, which may
+// itself be an `and then` chain: `x or else y and then z` is
+// `x or else (y and then z)`.
+<flow-tail> ::= <and-then-link>+ <flow-link>*
+              | <flow-link>+
+<and-then-link> ::= "and" "then" <layer-operand>
+<flow-link> ::= "or" "else" <flow-operand>
+              | "or" "return"
+<flow-operand> ::= <layer-operand> <and-then-link>*
+// "and then" is optional chaining / value transformation for Option/Result types
 // "or else" is value coalescing for Option/Result types
 // "or return" is early-return propagation for Option/Result types
-// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
 
-<and-then-expression> ::= <layer-operand> ("and" "then" <layer-operand>)*
-// "and then" is optional chaining / value transformation for Option/Result types
-
-<logical-expression> ::= <logical-and-expression> ("or" <logical-and-expression>)*
-
-<logical-and-expression> ::= <layer-operand> ("and" <layer-operand>)*
+// Logical tail. `and` binds tightest: `a or b and c` is `a or (b and c)`.
+<logical-tail> ::= <and-link>+ <or-link>*
+                 | <or-link>+
+<and-link> ::= "and" <layer-operand>
+<or-link> ::= "or" <logical-and-operand>
+<logical-and-operand> ::= <layer-operand> <and-link>*
 
 <not-expression> ::= "not" <is-expression> | <is-expression>
 
@@ -344,11 +381,14 @@
 
 <equality-op> ::= "==" | "<>"
 
+// Ordering chains allow one or more links; a single `<` / `>` is the
+// one-link case. Direction mixing (`a < b > c`) and equality chains
+// (`a == b == c`) are refused at parse time.
 <ascending-chain-tail> ::= <ascending-op> <bitwise-or-expression>
-                           (<ascending-op> <bitwise-or-expression>)+
+                           (<ascending-op> <bitwise-or-expression>)*
 
 <descending-chain-tail> ::= <descending-op> <bitwise-or-expression>
-                            (<descending-op> <bitwise-or-expression>)+
+                            (<descending-op> <bitwise-or-expression>)*
 
 <ascending-op> ::= "<" | "<="
 <descending-op> ::= ">" | ">="
@@ -415,7 +455,7 @@
 //       f(1, 2) 是调用；f(*p) 是调用（`*p` 是解引用）。
 //
 //   `[` 的归类：
-//     括号内是 <type-list> -> <generic-application>
+//     括号内是 <type-list> -> 泛型实例化（由 <subscript-suffix> 承担，见下）
 //     其余                 -> <subscript-suffix>
 //   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义。
 //
@@ -435,7 +475,6 @@
 // Exactly ONE index. `[]` and `[a, b]` are errors, not empty or multi-index
 // subscripts: there is no collection in the language that indexes by a tuple.
 <member-suffix> ::= "." <identifier>
-<generic-application> ::= "[" <type-list> "]"
 
 // 类型应用：`Type(expr)` 把 expr 转换到 Type，或 `Type(args)` 构造 Type 的值。
 // 两者的区分是语义的（类型检查器按 Type 的种类决定），文法上同形：
@@ -543,10 +582,11 @@
 // ============================================================================
 
 <is-pattern> ::= <primary-pattern>
-               | <comparison-pattern>
                | "(" <match-pattern> ")"
 // `is` / `is not` accept a single pattern directly.
 // Logical pattern combinators under `is` must be grouped explicitly with parentheses.
+// (<primary-pattern> already covers <comparison-pattern>; it is not repeated
+// here -- repeating it derived the same pattern two ways.)
 
 <match-pattern> ::= <or-pattern>
 // Used only by `when` arms. Logical pattern combinators remain supported here.
@@ -559,7 +599,7 @@
 <primary-pattern> ::= "_"                                     // wildcard
                     | "-"? <integer-literal>                  // integer literal pattern (including negative)
                     | <bool-literal>                          // bool literal pattern
-                    | <string-literal>                        // string literal pattern
+                    | <string-literal>                        // string literal pattern (plain literal only -- no interpolation)
                     | <rune-literal>                          // rune literal pattern
                     | <trait-object-type-binding-pattern>     // exact trait-object implementation type binding
                     | <trait-object-type-pattern>             // exact trait-object implementation type test
@@ -647,6 +687,15 @@
                   | <octal-literal>
                   | <hex-literal>
 
+// Digit separators: `_` may separate digits inside every digit run -- integer
+// part, fractional part, exponent digits, any base (`1_000`, `1.0_0`,
+// `1_0e1_0`, `0xFF_FF`). The productions below say it exactly: a separator
+// sits between two digit groups, so it may NOT lead (including right after the
+// `0b`/`0o`/`0x` prefix: `0x_1`), NOT trail (`1_`, `1.0_`, `1e1_`), NOT
+// double (`1__0`), and NOT sit against `.` (`1_.0`). Each of those is a
+// lexical error ("Invalid digit separator '_' in numeric literal"). A number
+// never LEADS with `_` at all -- `_1` is an identifier -- and `1._x` is member
+// access on `1`, not a float, because a fraction needs a digit right after `.`.
 <decimal-literal> ::= [0-9]+ ("_" [0-9]+)*
 <binary-literal> ::= "0b" [0-1]+ ("_" [0-1]+)*
 <octal-literal> ::= "0o" [0-7]+ ("_" [0-7]+)*
@@ -655,6 +704,10 @@
 <float-literal> ::= <decimal-digits> "." <decimal-digits>
                  | <decimal-digits> "e" ("+" | "-")? <decimal-digits>
                  | <decimal-digits> "." <decimal-digits> "e" ("+" | "-")? <decimal-digits>
+// Only lowercase `e` opens an exponent, and only when a digit or [sign] digit
+// follows it. `1exp` is therefore the integer `1` and the identifier `exp`
+// (and `1e_1` is `1` and `e_1`), not a float. Base prefixes likewise accept
+// only lowercase `0b` / `0o` / `0x`. `1.5.6` (two dots) is a lexical error.
 
 <decimal-digits> ::= [0-9]+ ("_" [0-9]+)*
 
@@ -707,21 +760,24 @@
 // Default Value Literals (for named parameter defaults)
 // ============================================================================
 
-<default-value-literal> ::= <integer-literal>
-                          | <float-literal>
+<default-value-literal> ::= "-"? <integer-literal>
+                          | "-"? <float-literal>
                           | <bool-literal>
                           | <string-literal>
                           | <rune-literal>
                           | "[" "]"                    // empty collection (List, Set, or Dict, inferred from type)
                           | ".."                       // empty range (Range[T].Full)
 // Default values are only allowed on named parameters (name: Type = value).
+// Numbers may be negative (`= -1`, `= -2.5`); other defaults are positive
+// literals only.
 // The empty collection literal [] is resolved by type context:
 //   List[T] -> List.new(), Set[T] -> Set.new(), Dict[K,V] -> Dict.new()
 // The range literal .. resolves to Range[T].Full()
 
 <identifier> ::= "_"* [a-z] [a-zA-Z0-9_]*
              | "_"+
-// 说明：identifier 以小写 ASCII 字母开头，允许 _ 前缀；单独的下划线序列也合法（用于占位）
+// 说明：identifier 以小写 ASCII 字母开头，允许 _ 前缀；单独的下划线序列也合法（用于占位）。
+// 保留字（见 Keywords 节）不是 identifier。
 
 <type-identifier> ::= "_"* [A-Z] [a-zA-Z0-9_]*
 // 说明：type-identifier 以大写 ASCII 字母开头，允许 _ 前缀
@@ -754,6 +810,33 @@
 // Value coalescing: or else
 // Optional chaining: and then
 // Other: . , ; : ( ) [ ] { }
+
+// ============================================================================
+// Evaluation Order (semantic, not grammar)
+// ============================================================================
+
+// Expressions evaluate STRICTLY LEFT-TO-RIGHT. Wherever operands are
+// sequenced in the syntax, the source order is the evaluation order:
+//
+// 1. Call arguments, qualified-call receiver arguments, and constructor /
+//    type-application arguments: `f(trace(1), trace(2))` runs `trace(1)`
+//    before `trace(2)`.
+// 2. Binary operands (`+`, `*`, `==`, `&`, `<<`, ...): the left operand is
+//    fully evaluated before the right one.
+// 3. `and` / `or`: the left operand is evaluated first; the right is skipped
+//    when the left decides the result (short-circuit).
+// 4. `and then` / `or else` / `or return`: the left operand is evaluated
+//    first; the transform / default is skipped when the left decides the
+//    result (short-circuit).
+// 5. Collection and dict literals: elements in source order; for a dict entry
+//    the key is evaluated before its value. `[trace(1): trace(2)]` runs 1
+//    before 2.
+// 6. Constructor fields (positional and named): in source order, not in
+//    declaration order.
+//
+// There is no unspecified order anywhere: two operand expressions never
+// interleave or reverse. Comparison chains (`a < b < c`) evaluate each
+// operand at most once, left to right, short-circuiting after a failed link.
 
 // ============================================================================
 // Implicit Conversion Rules (semantic, not grammar)

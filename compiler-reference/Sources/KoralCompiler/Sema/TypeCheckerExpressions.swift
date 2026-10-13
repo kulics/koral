@@ -743,7 +743,7 @@ extension TypeChecker {
       typedArg = try inferTypedExpression(arg, expectedType: expectedType)
     }
 
-    typedArg = try coerceLiteral(typedArg, to: expectedType)
+    typedArg = try coerceLiteral(typedArg, to: expectedType, span: arg.span)
     if typedArg.type == .never {
       return typedArg
     }
@@ -759,11 +759,9 @@ extension TypeChecker {
     targetType: Type
   ) throws -> TypedExpressionNode? {
     switch expr {
-    case .integerLiteral(let value, _):
-      if isUnsignedIntegerType(targetType), value.hasPrefix("-") {
-        throw SemanticError(.generic("Cannot cast negative integer literal to unsigned type \(targetType.description)"), span: currentSpan)
-      }
+    case .integerLiteral(let value, let literalSpan):
       if isIntegerType(targetType) {
+        try checkIntegerLiteralRange(value: value, targetType: targetType, span: literalSpan)
         return .integerLiteral(value: value, type: targetType)
       }
       if isFloatType(targetType) {
@@ -3013,7 +3011,7 @@ extension TypeChecker {
       var typedArgs: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
@@ -3061,7 +3059,7 @@ extension TypeChecker {
       var typedArgs: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
@@ -3117,7 +3115,7 @@ extension TypeChecker {
       var typedArgs: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
@@ -3173,7 +3171,7 @@ extension TypeChecker {
       var typedArgs: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
@@ -3414,12 +3412,14 @@ extension TypeChecker {
     // Plan every argument — the receiver of an instance method is just the
     // method's first parameter.
     let paramMeta = callParamMeta(from: declared.parameters, argumentCount: params.count)
+    let paramTypeKeys = params.map { $0.type.description }
     let arguments = try planCallArgumentExpressions(
       effectiveArgs,
       paramNames: paramMeta.names,
       paramIsNamed: paramMeta.isNamed,
       callDescription: methodName,
-      defaultsKeyPrefix: methodName
+      defaultsKeyPrefix: methodName,
+      paramTypeKeys: paramTypeKeys
     )
     if arguments.count != params.count {
       throw SemanticError.invalidArgumentCount(
@@ -3439,7 +3439,7 @@ extension TypeChecker {
       } else {
         typedArg = try inferTypedExpression(arg)
       }
-      typedArg = try coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
       if typedArg.type != param.type {
         throw SemanticError.typeMismatch(
           expected: param.type.description,
@@ -3569,7 +3569,7 @@ extension TypeChecker {
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
-              typedArg = try coerceLiteral(typedArg, to: param.type)
+              typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
@@ -3608,7 +3608,7 @@ extension TypeChecker {
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
-              typedArg = try coerceLiteral(typedArg, to: param.type)
+              typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
@@ -3690,7 +3690,7 @@ extension TypeChecker {
               var typedArguments: [TypedExpressionNode] = []
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
-                typedArg = try coerceLiteral(typedArg, to: param.type)
+                typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
                 if typedArg.type != param.type {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
@@ -3799,7 +3799,7 @@ extension TypeChecker {
               var typedArguments: [TypedExpressionNode] = []
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
-                typedArg = try coerceLiteral(typedArg, to: param.type)
+                typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
                 if typedArg.type != param.type {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
@@ -4206,7 +4206,7 @@ extension TypeChecker {
         } else {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -4250,12 +4250,14 @@ extension TypeChecker {
         }
         return callParamMeta(from: [], argumentCount: params.count)
       }()
+      let paramTypeKeys = params.map { $0.type.description }
       let arguments = try planCallArgumentExpressions(
         callArgs,
         paramNames: functionMeta.names,
         paramIsNamed: functionMeta.isNamed,
         callDescription: calleeName,
-        defaultsKeyPrefix: calleeName
+        defaultsKeyPrefix: calleeName,
+        paramTypeKeys: paramTypeKeys
       )
 
       if arguments.count != params.count {
@@ -4288,7 +4290,7 @@ extension TypeChecker {
           // Pass expected type for implicit member expression support
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
-        typedArg = try coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
         if typedArg.type != param.type {
           typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
         }
@@ -4628,7 +4630,7 @@ extension TypeChecker {
       var typedArguments: [TypedExpressionNode] = []
       for (arg, expectedParam) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg)
-        typedArg = try coerceLiteral(typedArg, to: expectedParam.type)
+        typedArg = try coerceLiteral(typedArg, to: expectedParam.type, span: arg.span)
         if typedArg.type != expectedParam.type {
           throw SemanticError.typeMismatch(
             expected: expectedParam.type.description,
@@ -4662,12 +4664,14 @@ extension TypeChecker {
       from: template.parameters.map { (name: $0.name, named: $0.named) },
       argumentCount: template.parameters.count
     )
+    let paramTypeKeys = template.parameters.map { $0.type.description }
     let arguments = try planCallArgumentExpressions(
       callArgs,
       paramNames: genericMeta.names,
       paramIsNamed: genericMeta.isNamed,
       callDescription: name,
-      defaultsKeyPrefix: name
+      defaultsKeyPrefix: name,
+      paramTypeKeys: paramTypeKeys
     )
 
     if name == "null_ptr" && arguments.isEmpty {
@@ -4737,10 +4741,10 @@ extension TypeChecker {
       } else {
         typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
       }
-      typedArg = try coerceLiteral(typedArg, to: expectedType)
+      typedArg = try coerceLiteral(typedArg, to: expectedType, span: argExpr.span)
       typedArguments.append(typedArg)
     }
-    
+
     // Use enhanced unification with trait-based inference
     try unifyWithTraitInference(template: template, arguments: typedArguments, inferred: &inferred)
 
@@ -4894,12 +4898,22 @@ extension TypeChecker {
         fallbackDefId: method.defId,
         argumentCount: argumentCount
       )
+      let paramTypeKeys = params.map { $0.type.description }
+      let ownerKey: String = {
+        switch base.type {
+        case .structure(let defId): return context.getName(defId) ?? ""
+        case .enum(let defId): return context.getName(defId) ?? ""
+        case .traitObject(let defId, _): return context.getName(defId) ?? ""
+        default: return ""
+        }
+      }()
       let arguments = try planCallArgumentExpressions(
         callArgs,
         paramNames: paramMeta.names,
         paramIsNamed: paramMeta.isNamed,
         callDescription: methodName,
-        defaultsKeyPrefix: methodName
+        defaultsKeyPrefix: "\(ownerKey).\(methodName)",
+        paramTypeKeys: paramTypeKeys
       )
 
       if arguments.count != params.count - 1 {
@@ -4985,7 +4999,7 @@ extension TypeChecker {
           } else {
             typedArg = try inferTypedExpression(arg, expectedType: param.type)
           }
-          let coercedArg = try coerceLiteral(typedArg, to: param.type)
+          let coercedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
           if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, coercedArg.type, bindings: &methodTypeParamBindings)
           }
@@ -5030,7 +5044,7 @@ extension TypeChecker {
           }
         } else {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
-          typedArg = try coerceLiteral(typedArg, to: param.type)
+          typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
 
           // First, infer any generic method type parameters from this argument.
           if context.containsGenericParameter(param.type) {
@@ -5262,7 +5276,7 @@ extension TypeChecker {
       } else {
         typedArg = try inferTypedExpression(arg, expectedType: param.type)
       }
-      typedArg = try coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
       if typedArg.type != param.type {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
@@ -6605,7 +6619,7 @@ extension TypeChecker {
             var methodTypeParamBindings: [String: Type] = [:]
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
-              typedArg = try coerceLiteral(typedArg, to: param.type)
+              typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
               if context.containsGenericParameter(param.type) {
                 _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
               }
@@ -6710,7 +6724,7 @@ extension TypeChecker {
         typedArg = try inferTypedExpression(arg, expectedType: param.type)
       }
 
-      typedArg = try coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
       if typedArg.type != param.type {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
@@ -6815,7 +6829,7 @@ extension TypeChecker {
     var methodTypeParamBindings: [String: Type] = [:]
     for (arg, param) in zip(arguments, params) {
       var typedArg = try inferTypedExpression(arg)
-      typedArg = try coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
       _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
     }
 
@@ -8834,9 +8848,11 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
 
-    // Type-check defaultExpr, injecting `it` for Result's error value.
+    // Type-check defaultExpr, injecting `it` for Result's error value or
+    // Option's unwrapped value. Each `or else` opens its own `it` scope so an
+    // enclosing `and then` / `or else` binding never leaks in.
     let typedDefault: TypedExpressionNode
-    let underscoreSymbol: Symbol?  // non-nil only for Result
+    let underscoreSymbol: Symbol
 
     switch kind {
     case .result(_, let errType):
@@ -8850,24 +8866,30 @@ extension TypeChecker {
         )
       }
     case .option:
-      underscoreSymbol = nil
-      typedDefault = try normalizeBranchExpression(
-        try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .value),
-        expectedType: innerType
-      )
+      let sym = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
+      underscoreSymbol = sym
+      typedDefault = try withNewScope {
+        currentScope.define("it", defId: sym.defId)
+        return try normalizeBranchExpression(
+          try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .value),
+          expectedType: innerType
+        )
+      }
     }
 
     let resultType = innerType
     switch kind {
     case .option:
-      let valSym = makeLocalSymbol(name: "__val", type: innerType, kind: .variable(.Value))
+      // `it` is the unwrapped value: bound by the Some pattern so references in
+      // the default expression resolve to the same DefId.
+      let itSym = underscoreSymbol
       let somePattern = TypedPattern.enumCase(caseName: "Some", tagIndex: 1,
-                                                elements: [.variable(symbol: valSym)])
+                                                elements: [.variable(symbol: itSym)])
       let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
       return .whenExpression(
         subject: typedOperand,
         cases: [
-          TypedMatchCase(pattern: somePattern, body: .variable(identifier: valSym)),
+          TypedMatchCase(pattern: somePattern, body: .variable(identifier: itSym)),
           TypedMatchCase(pattern: nonePattern, body: typedDefault),
         ],
         type: resultType
@@ -8876,7 +8898,7 @@ extension TypeChecker {
     case .result(let okType, _):
       let valSym = makeLocalSymbol(name: "__val", type: okType, kind: .variable(.Value))
       // Reuse the DefId from the `_` injection so references in defaultExpr resolve correctly.
-      let errSym = underscoreSymbol!
+      let errSym = underscoreSymbol
       let okPattern = TypedPattern.enumCase(caseName: "Ok", tagIndex: 0,
                                              elements: [.variable(symbol: valSym)])
       let errPattern = TypedPattern.enumCase(caseName: "Error", tagIndex: 1,

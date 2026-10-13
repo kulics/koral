@@ -355,6 +355,10 @@ extension TypeChecker {
       let type: Type
       if let expectedType = expectedType {
         type = expectedType
+        // Point range-check errors at the value, not the `let` keyword.
+        let outerSpan = currentSpan
+        if value.span.isKnown { currentSpan = value.span }
+        defer { currentSpan = outerSpan }
         typedValue = try coerceLiteral(typedValue, to: type)
         if typedValue.type != .never && typedValue.type != .error && typedValue.type != type
           && !diagnosticCollector.hasError(in: value.span, fileName: currentFileName)

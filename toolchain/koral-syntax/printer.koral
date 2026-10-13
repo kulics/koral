@@ -622,7 +622,7 @@ given Printer {
         .For(kw, binding, eq, iterable, then_kw, body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_pattern(binding);
+            self.print_for_binding(binding);
             self.write_space();
             self.write_token(eq);
             self.write_space();
@@ -1177,16 +1177,44 @@ given Printer {
         .Continue(kw) then self.write_token(kw),
     };
 
-    file_private print_pair_binding(self, binding CstPairBinding) Void = {
-        if binding.mut_kw is .Some(mk) then {
-            self.write_token(mk);
-            self.write_space();
-        };
-        self.write_token(binding.name);
-        if binding.binding_type is .Some(bt) then {
-            self.write_space();
-            self.print_type(bt);
-        };
+    file_private print_pair_binding(self, binding CstPairBinding) Void = when binding in {
+        .Leaf(mut_kw, name, binding_type, _) then {
+            if mut_kw is .Some(mk) then {
+                self.write_token(mk);
+                self.write_space();
+            };
+            self.write_token(name);
+            if binding_type is .Some(bt) then {
+                self.write_space();
+                self.print_type(bt);
+            };
+        },
+        .Nested(lparen, items, rparen) then {
+            self.write_token(lparen);
+            for item in items then {
+                self.print_pair_binding(item.binding);
+                if item.comma is .Some(comma) then {
+                    self.write_token(comma);
+                    self.write_space();
+                };
+            };
+            self.write_token(rparen);
+        },
+    };
+
+    file_private print_for_binding(self, binding CstForBinding) Void = when binding in {
+        .Single(binding) then self.print_pair_binding(binding),
+        .Tuple(lparen, items, rparen) then {
+            self.write_token(lparen);
+            for item in items then {
+                self.print_pair_binding(item.binding);
+                if item.comma is .Some(comma) then {
+                    self.write_token(comma);
+                    self.write_space();
+                };
+            };
+            self.write_token(rparen);
+        },
     };
 
     // ========================================================================

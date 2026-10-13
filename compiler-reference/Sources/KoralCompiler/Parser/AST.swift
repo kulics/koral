@@ -370,16 +370,35 @@ public struct MethodDeclaration {
     self.defId = defId
   }
 }
-/// A single binding inside a pair destructuring: `[mutable] name [Type]` or `_`
+/// A single binding inside a pair destructuring: `[mutable] name [Type]`, `_`,
+/// or a nested tuple binding `(a, (b, c))`. Nested groups are expanded by the
+/// parser into a sequence of flat tuple lets, so after parsing every element
+/// the type checker sees has `nested == nil`.
 public struct PairBindingElement {
   public let name: String        // "_" for discard
   public let type: TypeNode?
   public let mutable: Bool
   public let isDiscard: Bool
   public let span: SourceSpan
+  public let nested: [PairBindingElement]?
+
+  public init(
+    name: String, type: TypeNode?, mutable: Bool, isDiscard: Bool, span: SourceSpan,
+    nested: [PairBindingElement]? = nil
+  ) {
+    self.name = name
+    self.type = type
+    self.mutable = mutable
+    self.isDiscard = isDiscard
+    self.span = span
+    self.nested = nested
+  }
 }
 
 private func bindingElementDescription(_ binding: PairBindingElement) -> String {
+  if let children = binding.nested {
+    return "(\(children.map(bindingElementDescription).joined(separator: ", ")))"
+  }
   if binding.isDiscard {
     return "_"
   }

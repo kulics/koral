@@ -145,8 +145,15 @@ given TypeChecker {
         tail_expression Option[Expr],
         expected Type,
         scope Scope,
+        block_span SourceSpan,
     ) TypedExpr = {
-        return self.check_block(statements, tail_expression, .Some(expected), scope);
+        return self.check_block(
+            statements,
+            tail_expression,
+            .Some(expected),
+            scope,
+            block_span,
+        );
     };
 
     module_private typed_cast_expr(
@@ -203,6 +210,13 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         if self.is_numeric_type(expected) then {
+            if self.is_integer_type(expected) then {
+                let _ = self.check_integer_literal_range(
+                    value,
+                    expected,
+                    expr_span(expr),
+                );
+            };
             return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected);
         };
         return self.bidi_synthesize_mode(expr, scope);
@@ -238,11 +252,12 @@ given TypeChecker {
                 let lambda_type = self.build_lambda_function_type(bidi_result);
                 make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
             },
-            .Block(statements, tail_expression, _) then self.typed_block_expr(
+            .Block(statements, tail_expression, block_span) then self.typed_block_expr(
                 statements,
                 tail_expression,
                 expected,
                 scope,
+                block_span,
             ),
             .CollectionLiteral(elements, span) then self.typed_collection_literal(
                 elements,
@@ -363,8 +378,15 @@ given TypeChecker {
             self.validate_lambda_return_type(ret_type, typed_body);
         };
         let actual_ret = if self.is_unresolved_expr_type(ret_type) then {
-            if infer_return_type_from_block_returns then inferred_return_type or else Type.VoidType(
-            ) else typed_body.expr_type
+            if infer_return_type_from_block_returns then {
+                when inferred_return_type in {
+                    .Some(inferred) then inferred,
+                    .None() then {
+                        if typed_body.expr_type is .NeverType() then Type.VoidType()
+                        else typed_body.expr_type
+                    },
+                }
+            } else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and body is .Block(_, _, _) then {
             inferred_return_type or else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(

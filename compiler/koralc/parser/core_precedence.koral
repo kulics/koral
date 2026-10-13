@@ -160,6 +160,52 @@ given Parser {
     };
 
     module_private parse_range(self) Result[Expr] = {
+        // Prefix ranges (`..b`, `..<b`, `..`) live at the range layer, ABOVE
+        // comparison -- the same layering the seed uses. A comparison's
+        // operand is parsed below this layer, so `a < ..b` (with a gap) cannot
+        // smuggle a range in as the right operand: the `..` reaches
+        // `parse_primary`, which rejects it. Without this, `a < ..b` parsed as
+        // `a < (..b)` and codegen emitted a comparison against a range.
+        when self.current().kind in {
+            .Range() then {
+                let start = self.current();
+                self.advance();
+                if self.can_start_range_bound(self.current().kind) then {
+                    let rhs = self.parse_comparison() or return;
+                    return .Ok(
+                        Expr.RangeExpr(
+                            RangeOperator.To(),
+                            Option[Expr].None(),
+                            Option[Expr].Some(rhs),
+                            self.span_from_start(start),
+                        ),
+                    );
+                };
+                return .Ok(
+                    Expr.RangeExpr(
+                        RangeOperator.Full(),
+                        Option[Expr].None(),
+                        Option[Expr].None(),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
+            .RangeLess() then {
+                let start = self.current();
+                self.advance();
+                let rhs = self.parse_comparison() or return;
+                return .Ok(
+                    Expr.RangeExpr(
+                        RangeOperator.ToOpen(),
+                        Option[Expr].None(),
+                        Option[Expr].Some(rhs),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
+            _ then {},
+        };
+
         let mutable expr = self.parse_comparison() or return;
 
         while true then {
@@ -443,6 +489,12 @@ given Parser {
     // `and` / `or` are another -- boolean logic. Precedence inside a layer is
     // unchanged: `and then` binds tighter than `or else` / `or return`, and
     // `and` binds tighter than `or`. The layers do not mix implicitly.
+    //
+    // Everything below the layers -- comparison, range, `is`, `not`, the
+    // arithmetic ladder -- binds TIGHTER than both of them: the operand parsed
+    // here already includes comparison, so `a == b or else c` is
+    // `(a == b) or else c`, never `a == (b or else c)`.
+    //
     // Crossing from one to the other takes parentheses, the way `??` refuses
     // to sit beside `||` in the languages that have it:
     //
@@ -680,7 +732,7 @@ given Parser {
         return .Ok(TraitMember(name, type_params, access, params, return_type));
     };
 
-    module_private parse_given_member(self, allow_body Bool) Result[GivenMember] = {
+    module_private parse_given_member(self, allow_body Bool, target_type_name String) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.ModulePrivate());
         let name_token = self.current();
         let name = self.expect_identifier("given member") or return;
@@ -702,7 +754,7 @@ given Parser {
             },
         };
 
-        let params = self.parse_param_list(name, false) or return;
+        let params = self.parse_param_list(target_type_name + "." + name, false) or return;
 
         when self.current().kind in {
             .RParen() then {
@@ -790,7 +842,7 @@ given Parser {
         return .Ok(members);
     };
 
-    module_private parse_given_members(self, allow_body Bool) Result[List[GivenMember]] = {
+    module_private parse_given_members(self, allow_body Bool, target_type_name String) Result[List[GivenMember]] = {
         let mutable members = List[GivenMember].new();
 
         while true then {
@@ -810,7 +862,7 @@ given Parser {
                 _ then {
                     // Propagate: the nested failure already has a span and a
                     // message of its own (see the note in parse_given_member).
-                    let member = self.parse_given_member(allow_body) or return;
+                    let member = self.parse_given_member(allow_body, target_type_name) or return;
                     let _ = self.require_semicolon() or return;
                     members.push(member);
                 },
@@ -1157,7 +1209,8 @@ given Parser {
             },
         };
 
-        let members = self.parse_given_members(not decl_is_intrinsic) or return;
+        let target_name = type_node_name(target_type);
+        let members = self.parse_given_members(not decl_is_intrinsic, target_name) or return;
         let base = if trait_type is .Some(t) then Decl.GivenTraitDecl(
             target_type,
             type_params,

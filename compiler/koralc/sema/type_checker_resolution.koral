@@ -201,7 +201,8 @@ given TypeChecker {
                 let resolved_inner = self.resolve_type(inner);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
                     resolved_inner,
-                ) else self.resolve_weak_reference_type(resolved_inner)
+                    span,
+                ) else self.resolve_weak_reference_type(resolved_inner, span)
             },
             .Generic(base, args, span) then {
                 let mutable resolved_args = List[Type].new();
@@ -347,7 +348,8 @@ given TypeChecker {
                 let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
                     resolved_inner,
-                ) else self.resolve_weak_reference_type(resolved_inner)
+                    span,
+                ) else self.resolve_weak_reference_type(resolved_inner, span)
             },
             .Generic(base, args, span) then {
                 let mutable resolved_args = List[Type].new();
@@ -536,7 +538,8 @@ given TypeChecker {
                 let resolved_inner = self.resolve_type_in_scope(inner, scope);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
                     resolved_inner,
-                ) else self.resolve_weak_reference_type(resolved_inner)
+                    span,
+                ) else self.resolve_weak_reference_type(resolved_inner, span)
             },
             .BorrowedReference(inner, is_mutable, _) then {
                 let resolved_inner = self.resolve_type_in_scope(inner, scope);
@@ -786,7 +789,53 @@ given TypeChecker {
         };
     };
 
+    /// A rune literal stands for exactly one Unicode code point. Anything
+    /// else -- an empty literal, or one holding several code points -- has no
+    /// value to carry, so say so here rather than let the first code point
+    /// silently win.
+    module_private validate_rune_literal_value(self, value String) Bool = {
+        let rune_count = value.to_runes().count();
+        if rune_count == UInt(0) then {
+            self.push_diagnostic("Rune literal cannot be empty", unknown_span());
+            return false;
+        };
+        if rune_count <> UInt(1) then {
+            self.push_diagnostic(
+                "Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(rune_count.to_string())",
+                unknown_span(),
+            );
+            return false;
+        };
+        return true;
+    };
+
+    module_private validate_rune_literal_ascii_for_uint8(self, value String) Bool = {
+        if value.to_runes().count() == UInt(1) then {
+            let bytes = value.to_bytes();
+            if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
+                return true;
+            };
+        };
+        self.push_diagnostic(
+            "Rune literal must be a single ASCII character when used as UInt8",
+            unknown_span(),
+        );
+        return false;
+    };
+
     module_private lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
+        when expected in {
+            .Some(target_type) then {
+                if target_type is .UInt8Type() then {
+                    let _ = self.validate_rune_literal_ascii_for_uint8(value);
+                } else {
+                    let _ = self.validate_rune_literal_value(value);
+                };
+            },
+            .None() then {
+                let _ = self.validate_rune_literal_value(value);
+            },
+        };
         let scalar_value = self.rune_literal_scalar_value(value);
         when expected in {
             .Some(target_type) then {
@@ -824,6 +873,9 @@ given TypeChecker {
         value String,
         target_type Type,
     ) TypedExpr = {
+        // A cast checks its operand as a value first: `UInt8('ab')` is a bad
+        // rune literal before it is a cast, and that is the complaint to make.
+        let _ = self.validate_rune_literal_value(value);
         let scalar_value = self.rune_literal_scalar_value(value);
         if self.is_numeric_type(target_type) or self.is_float_type(target_type) then {
             return make_typed_expr(

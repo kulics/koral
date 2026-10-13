@@ -36,8 +36,11 @@ given TypeChecker {
         // when an expected type is available, to improve type inference.
         if expected is .Some(et) then {
             when expr in {
-                .IntegerLiteral(value, _) then {
+                .IntegerLiteral(value, lit_span) then {
                     if self.is_numeric_type(et) then {
+                        if self.is_integer_type(et) then {
+                            let _ = self.check_integer_literal_range(value, et, lit_span);
+                        };
                         return make_typed_expr(TypedExprKind.IntegerLiteral(value), et);
                     };
                 },
@@ -46,9 +49,12 @@ given TypeChecker {
                         return make_typed_expr(TypedExprKind.FloatLiteral(value), et);
                     };
                 },
-                .RuneLiteral(value, _) then {
+                .RuneLiteral(value, rune_span) then {
                     if self.is_integer_type(et) or self.is_rune_type(et) then {
-                        return self.lower_rune_literal(value, .Some(et));
+                        let outer_span = self.enter_current_span(rune_span);
+                        let lowered = self.lower_rune_literal(value, .Some(et));
+                        self.leave_current_span(outer_span);
+                        return lowered;
                     };
                 },
                 .LambdaExpr(params, return_type, body, span) then {

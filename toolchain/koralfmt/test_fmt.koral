@@ -204,12 +204,11 @@ let main() Void = {
         "type E { C(a: Int=2) };\n",
         "type E {\n    C(a: Int = 2),\n};\n",
     );
-    // `-3` is not a literal default (the compiler rejects it the same way), and
-    // `1 + 2` never reaches the default at all -- both sides stop at the field
-    // name after the `+`.
+    // `-3` is a valid literal default (numeric defaults accept a leading '-').
+    // An identifier after '-' is not.
     t.test_error_contains(
         "default must be a literal",
-        "type P(x: Int=-3)\n",
+        "type P(x: Int=-a)\n",
         "literal default value",
     );
     t.test(
@@ -911,6 +910,106 @@ let main() Void = {
         "checked: multiline string",
         "let s = \"\"\"\n  a\n  b\n  \"\"\";\n",
         "let s = \"\"\"\n  a\n  b\n  \"\"\";\n",
+    );
+
+    // === for bindings (a binding, not a match pattern) ===
+    // `<for-binding-pattern> ::= <binding-element> | <tuple-binding>` -- the
+    // same shapes `let` accepts. `?v`, `.Case(x)`, `Name(a, b)` and the rest
+    // of the pattern grammar belong to `is`/`when` and are refused here.
+    t.test(
+        "for plain binding",
+        "let main() Void={\nfor x in xs then f(x);\n};\n",
+        "let main() Void = {\n    for x in xs then f(x);\n};\n",
+    );
+    t.test(
+        "for mutable binding",
+        "let main() Void={\nfor mutable x in xs then x+=1;\n};\n",
+        "let main() Void = {\n    for mutable x in xs then x += 1;\n};\n",
+    );
+    t.test(
+        "for typed binding",
+        "let main() Void={\nfor x Int in xs then f(x);\n};\n",
+        "let main() Void = {\n    for x Int in xs then f(x);\n};\n",
+    );
+    t.test(
+        "for tuple binding",
+        "let main() Void={\nfor (a,b) in pairs then f(a,b);\n};\n",
+        "let main() Void = {\n    for (a, b) in pairs then f(a, b);\n};\n",
+    );
+    t.test(
+        "for tuple binding with types and discard",
+        "let main() Void={\nfor (a Int,_,c) in xs then f(a,c);\n};\n",
+        "let main() Void = {\n    for (a Int, _, c) in xs then f(a, c);\n};\n",
+    );
+    t.test_error_contains(
+        "for weak binding rejected",
+        "let main() Void={\nfor ?v in ws then f(v);\n};\n",
+        "expected variable name",
+    );
+    t.test_error_contains(
+        "for enum-case pattern rejected",
+        "let main() Void={\nfor .Some(x) in xs then f(x);\n};\n",
+        "expected variable name",
+    );
+    t.test_error_contains(
+        "for struct pattern rejected",
+        "let main() Void={\nfor Point(a,b) in xs then f(a,b);\n};\n",
+        "must start with a lowercase letter",
+    );
+    t.test_error_contains(
+        "for or-pattern rejected",
+        "let main() Void={\nfor a or b in xs then f(a);\n};\n",
+        "expected type name",
+    );
+    t.test_error_contains(
+        "for single-slot parenthesized binding rejected",
+        "let main() Void={\nfor (x) in xs then f(x);\n};\n",
+        "expected ',' in tuple binding",
+    );
+
+    // === Nested tuple bindings ===
+    // A slot may itself be a tuple binding: `let (a, (b, c)) = ...` and
+    // `for (a, (b, c)) in ...` -- the same nesting a <tuple-pattern> allows
+    // in `when`/`is`.
+    t.test(
+        "nested let tuple binding",
+        "let main() Void={\nlet (a,(b,c))=Outer(1,Inner(2,3));\n};\n",
+        "let main() Void = {\n    let (a, (b, c)) = Outer(1, Inner(2, 3));\n};\n",
+    );
+    t.test(
+        "nested for tuple binding",
+        "let main() Void={\nfor (a,(b,c)) in xs then f(a,b,c);\n};\n",
+        "let main() Void = {\n    for (a, (b, c)) in xs then f(a, b, c);\n};\n",
+    );
+    t.test(
+        "nested let tuple binding with mutable and type",
+        "let main() Void={\nlet (mutable a,(b Int,_))=Outer(1,Inner(2,3));\n};\n",
+        "let main() Void = {\n    let (mutable a, (b Int, _)) = Outer(1, Inner(2, 3));\n};\n",
+    );
+    t.test(
+        "deeply nested tuple binding",
+        "let main() Void={\nlet ((a,b),(c,(d,e)))=make();\n};\n",
+        "let main() Void = {\n    let ((a, b), (c, (d, e))) = make();\n};\n",
+    );
+
+    // === `Self` is a type, not an expression ===
+    // The compilers' primary-expression parser has no case for `Self`, so
+    // `Self(1)` and `Self` are refused here too. `Self` stays legal in type
+    // position (`*unsafe Self(p)`, `let x Self`, ...).
+    t.test_error_contains(
+        "Self as expression rejected",
+        "let main() Void={\nlet p=Self(1,2);\n};\n",
+        "'Self' is a type and cannot be used as an expression",
+    );
+    t.test_error_contains(
+        "bare Self as expression rejected",
+        "let main() Void={\nlet p=Self;\n};\n",
+        "'Self' is a type and cannot be used as an expression",
+    );
+    t.test(
+        "Self as type annotation allowed",
+        "let main() Void={\nlet x Self=y;\n};\n",
+        "let main() Void = {\n    let x Self = y;\n};\n",
     );
 
     t.summary();

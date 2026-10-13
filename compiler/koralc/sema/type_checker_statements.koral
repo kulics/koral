@@ -36,11 +36,12 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         return when expr in {
-            .Block(statements, tail_expression, _) then self.check_block(
+            .Block(statements, tail_expression, block_span) then self.check_block(
                 statements,
                 tail_expression,
                 expected,
                 scope,
+                block_span,
             ),
             _ then self.check_expr_scoped_ref(expr, expected, scope),
         };
@@ -340,11 +341,12 @@ given TypeChecker {
                 );
                 typed_expr
             },
-            .Block(statements, tail_expression, _) then self.check_block(
+            .Block(statements, tail_expression, block_span) then self.check_block(
                 statements,
                 tail_expression,
                 .None(),
                 scope,
+                block_span,
             ),
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope);
@@ -615,12 +617,40 @@ given TypeChecker {
         };
     };
 
+    /// A function or method body is the declared return type's value. When the
+    /// body's type is not that type -- a block whose tail does not fit, a block
+    /// with no tail at all (`Void`), or a non-block body of the wrong type --
+    /// the declaration is wrong about what it returns. Blame the declaration:
+    /// it is the signature the reader has to fix.
+    module_private validate_body_return_type(
+        self,
+        typed_body TypedExpr,
+        return_type Type,
+    ) Void = {
+        if self.is_unresolved_expr_type(return_type) then {
+            return;
+        };
+        if typed_body.expr_type is .NeverType() or self.is_unresolved_expr_type(
+            typed_body.expr_type,
+        ) then {
+            return;
+        };
+        if self.same_expr_type(typed_body.expr_type, return_type) then {
+            return;
+        };
+        self.push_diagnostic(
+            "Type mismatch: expected \(self.display_type_name(return_type)), got \(self.display_type_name(typed_body.expr_type))",
+            unknown_span(),
+        );
+    };
+
     module_private check_block(
         self,
         statements List[Statement],
         tail_expression Option[Expr],
         expected Option[Type],
         scope Scope,
+        block_span SourceSpan,
     ) TypedExpr = {
         let mutable block_scope = Scope.new_child(scope);
         let typed_block = self.check_block_in_scope(
@@ -628,6 +658,7 @@ given TypeChecker {
             tail_expression,
             expected,
             block_scope,
+            block_span,
         );
         return typed_block;
     };
@@ -1163,6 +1194,7 @@ given TypeChecker {
         tail_expression Option[Expr],
         expected Option[Type],
         scope Scope,
+        block_span SourceSpan,
     ) TypedExpr = {
         let diagnostics_before = self.storage.diagnostics.count();
         let mutable typed_stmts = List[TypedStatement].new();
@@ -1198,6 +1230,25 @@ given TypeChecker {
                     );
                 };
                 let typed = self.check_expr_scoped_ref(tail, expected, scope);
+                // The tail is the block's value, so it has to fit whatever the
+                // block is being checked against. Blame the block, not just the
+                // tail: the shape `{ ... value }` as a whole is what does not
+                // fit its context.
+                when expected in {
+                    .Some(expected_t) then {
+                        if not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(
+                            expected_t,
+                        ) and typed.expr_type is not .NeverType() and not self.is_unresolved_expr_type(
+                            typed.expr_type,
+                        ) and not self.same_expr_type(typed.expr_type, expected_t) then {
+                            self.push_diagnostic_at_span(
+                                "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed.expr_type))",
+                                block_span,
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
                 typed_tail = Option[TypedExpr].Some(typed);
                 block_type = typed.expr_type;
             },
@@ -1285,6 +1336,7 @@ given TypeChecker {
                         sym_name,
                         sym_span,
                         scope,
+                        false,
                     ),
                     .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                         left,

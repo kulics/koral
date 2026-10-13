@@ -233,6 +233,24 @@ let million = 1_000_000;
 let pi = 3.141_592_653;
 ```
 
+A digit separator must sit **between two digits** of the same digit run — the integer part, the fractional part, or the exponent digits, in any base. It may not lead, not trail, not double, and not sit against `.`:
+
+```koral
+let ok1 = 1_000;        // fine: between digits
+let ok2 = 1.0_0_1;      // fine: between fraction digits
+let ok3 = 1_0e1_0;      // fine: separators in mantissa and exponent
+let ok4 = 0xFF_FF;      // fine: between hex digits
+
+// let bad1 = 1_;       // error: trailing separator
+// let bad2 = _1;       // not a literal at all — `_1` is an identifier
+// let bad3 = 1__0;     // error: doubled separator
+// let bad4 = 1_.0;     // error: separator against '.'
+// let bad5 = 1.0_;     // error: trailing separator
+// let bad6 = 0x_1;     // error: leading separator after the base prefix
+```
+
+Each invalid form is a lexical error: `Invalid digit separator '_' in numeric literal`. A numeric literal can never start with `_` (that would be an identifier), and `1._x` is member access on `1`, not a float — a fraction needs a digit right after `.`.
+
 Koral also supports binary, octal, and hexadecimal integer literals using the `0b`, `0o`, and `0x` prefixes respectively:
 
 ```koral
@@ -259,7 +277,7 @@ let c = 2.5e+2;   // 250.0
 let d = 1_000e2;  // 100000.0
 ```
 
-Note: Only lowercase `e` is supported for exponent notation, consistent with the `0b`/`0o`/`0x` prefix convention.
+Note: Only lowercase `e` is supported for exponent notation, consistent with the `0b`/`0o`/`0x` prefix convention. `e` opens an exponent only when a digit or [sign] digit follows it: `1e10` and `2.5e-3` are floats, but `1exp` is the integer `1` and the identifier `exp` (and `1e_1` is `1` and `e_1`).
 
 #### Duration Literals
 
@@ -670,6 +688,11 @@ above them is the ordinary ladder; these two sit at the same level as each other
 are entered one at a time. Precedence *inside* a layer is as listed, but **the two
 layers do not mix implicitly**. Crossing from one to the other takes parentheses:
 
+Everything in rows 1–12 — including **comparison** — binds tighter than both
+layers, the way comparison binds tighter than `??`/flow operators in Swift. So
+`a == b or else c` groups as `(a == b) or else c`, never `a == (b or else c)`,
+and `opt or else x == y` groups as `opt or else (x == y)`.
+
 - `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()` — flow with flow, fine.
 - `a or b and c` groups as `a or (b and c)` — logical with logical, fine.
 - `a and (b or else c)` — fine, and means that.
@@ -692,6 +715,31 @@ let good2 = ready and (opt and then it > 0 or else false);   // true
 ```
 
 This is the same rule `??` follows in languages that have it: a value-coalescing operator is a clear middle layer and does not chain onto boolean logic without a parenthesis. Note that `(ready and opt)` is not a fix for the mixed form: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
+
+#### Evaluation Order
+
+Koral evaluates expressions **strictly left-to-right**. Wherever operands are sequenced in the syntax, source order is evaluation order — there is no unspecified order anywhere:
+
+1. **Call arguments** (including qualified-call and constructor arguments) evaluate left-to-right: `f(trace(1), trace(2))` runs `trace(1)` before `trace(2)`.
+2. **Binary operands** (`+`, `*`, `==`, `&`, `<<`, …) evaluate left-to-right: in `trace(1) + trace(2)`, the left side runs first.
+3. **`and` / `or`** evaluate the left operand first and **short-circuit**: the right operand is skipped when the left decides the result.
+4. **`and then` / `or else` / `or return`** evaluate the left operand first and short-circuit: the transform / default is skipped when the left side is `None` / `Error` (for `and then`) or `Some` / `Ok` (for `or else`).
+5. **Collection and dict literals** evaluate elements in source order; for a dict entry the key is evaluated before its value.
+6. **Constructor fields** evaluate in source order, not in declaration order.
+
+```koral
+// Each trace prints its argument; the printed order is the evaluation order.
+let a = trace(1) + trace(2);          // [1][2]
+let b = sum(trace(3), trace(4));      // [3][4]
+let c = [trace(5), trace(6)];         // [5][6]
+let d = [trace(7): trace(8)];         // [7][8] -- key before value
+let p = Point(trace(9), trace(10));   // [9][10]
+
+// Short-circuit: the right side never runs when the left decides the result.
+let e = traceb(false) and traceb(true);   // [false side] only
+let f = opt_none and then trace(11);      // transform skipped
+let g = opt_some or else trace(12);       // default skipped
+```
 
 ### Functions
 

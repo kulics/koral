@@ -107,7 +107,12 @@ given TypeChecker {
     ) TypedExpr = {
 
         let initial_typed_left = when left in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                false,
+            ),
             .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
                 inner_left,
                 inner_op,
@@ -161,7 +166,12 @@ given TypeChecker {
             _ then self.check_expr_core_ref(left, expected, scope),
         };
         let initial_typed_right = when right in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                false,
+            ),
             .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
                 inner_left,
                 inner_op,
@@ -1197,6 +1207,111 @@ given TypeChecker {
                         reported_ids,
                     );
                 };
+            },
+            // A method call lowers to `Call(MethodReference(receiver, ...), args)`,
+            // and a subscript or an interpolation lowers further into helper
+            // method calls -- `xs[0]` becomes `xs.__index_get(0)`, `"\(x)"`
+            // becomes `x.to_string()`. The receiver is the `base` of a
+            // `MethodReference`, so failing to descend into it let a mutable
+            // binding escape the check exactly when it was used as a method
+            // receiver, a subscript base, or an interpolation part.
+            .MethodReference(base_ref, _, _, _, _, _) then {
+                self.validate_lambda_captures_in_expr(
+                    base_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+            },
+            .TraitMethodCall(receiver_ref, _, _, _, args) then {
+                self.validate_lambda_captures_in_expr(
+                    receiver_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
+                };
+            },
+            .TraitMethodPlaceholder(base_ref, _, _, _, _) then {
+                self.validate_lambda_captures_in_expr(
+                    base_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+            },
+            .TraitObjectConversion(inner_ref, _, _) then {
+                self.validate_lambda_captures_in_expr(
+                    inner_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+            },
+            .GenericCall(_, _, args) then {
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
+                };
+            },
+            .TypeConstruction(_, _, args) then {
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
+                };
+            },
+            .EnumConstruction(_, _, args) then {
+                for arg in args then {
+                    self.validate_lambda_captures_in_expr(
+                        arg,
+                        local_names,
+                        local_ids,
+                        reported_ids,
+                    );
+                };
+            },
+            .WrappingArithmeticExpr(left_ref, _, right_ref) then {
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+            },
+            .WrappingShiftExpr(left_ref, _, right_ref) then {
+                self.validate_lambda_captures_in_expr(
+                    left_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
+                self.validate_lambda_captures_in_expr(
+                    right_ref,
+                    local_names,
+                    local_ids,
+                    reported_ids,
+                );
             },
             _ then {},
         };

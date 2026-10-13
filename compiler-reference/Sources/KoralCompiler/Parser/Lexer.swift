@@ -665,16 +665,31 @@ public class Lexer {
 
   // Read an integer literal with a specific base (binary, octal, hexadecimal)
   // The prefix (0b, 0o, 0x) has already been consumed before calling this method.
+  //
+  // Digit separator rule (`_`): a separator may only sit between two digits of
+  // the literal. It may not lead (including right after the base prefix), not
+  // trail, not double, and not sit against `.`. `0x1_2` is 0x12; `0x_1`,
+  // `0x1_`, `0x1__2`, `0b1_` are lexical errors.
   private func readIntegerWithBase(_ base: Int, prefix: String, validDigits: String) throws -> NumberLiteral {
     let validSet = Set(validDigits)
     var digits = ""
-    
+    var lastWasDigit = false
+
     while let char = getNextChar() {
       if char == "_" {
-        continue  // Digit separator
+        // Digit separator: must be followed by another digit of this base and
+        // must have a digit in front of it.
+        guard lastWasDigit, let next = getNextChar(), validSet.contains(next) else {
+          throw LexerError.invalidInteger(span: tokenSpan,
+            "Invalid digit separator '_' in numeric literal")
+        }
+        digits.append(next)
+        lastWasDigit = true
+        continue
       }
       if validSet.contains(char) {
         digits.append(char)
+        lastWasDigit = true
       } else if char.isNumber {
         // Digit character but not valid for this base (e.g., '2' in binary)
         throw LexerError.invalidInteger(span: tokenSpan,
@@ -716,9 +731,19 @@ public class Lexer {
 
   // Read a number, handling both integers and floats
   // Returns the number as a string to support arbitrary precision
+  //
+  // Digit separator rule (`_`): a separator may only sit between two digits of
+  // the same digit run (integer part, fractional part, or exponent digits).
+  // It may not lead, not trail, not double, and not sit against `.`:
+  // `1_000`, `1.0_0`, `1_0e1_0` are fine; `1_`, `_1`, `1__0`, `1_.0`, `1.0_`
+  // are lexical errors. `_1` never reaches this method (`_` starts an
+  // identifier), and `1._x` is member access on `1`, not a float.
   private func readNumber() throws -> NumberLiteral {
     var numStr = ""
     var hasDot = false
+    // Whether the previous consumed character of the current digit run was a
+    // digit. A `_` is only legal when it sits between two digits.
+    var lastWasDigit = false
     while let char = getNextChar() {
       if char.isNumber {
         // Check for base prefix when first digit is '0'
@@ -737,9 +762,16 @@ public class Lexer {
           }
         }
         numStr.append(char)
+        lastWasDigit = true
       } else if char == "_" {
-        // Digit separator (e.g. 1_000_000)
-        continue
+        // Digit separator (e.g. 1_000_000): must sit between two digits of
+        // this digit run.
+        guard lastWasDigit, let next = getNextChar(), next.isNumber else {
+          throw LexerError.invalidInteger(span: tokenSpan,
+            "Invalid digit separator '_' in numeric literal")
+        }
+        numStr.append(next)
+        lastWasDigit = true
       } else if char == "." {
         // Check if this is a range operator (.., ..., etc.) rather than a decimal point
         if let nextChar = getNextChar() {
@@ -768,9 +800,12 @@ public class Lexer {
         }
         hasDot = true
         numStr.append(char)
+        lastWasDigit = false
       } else if char == "e" {
         // Exponent notation: e.g. 1e10, 2.5e-3, 1e+6
-        // Peek ahead to confirm this is actually an exponent
+        // Peek ahead to confirm this is actually an exponent: `e` only starts
+        // one when followed by a digit or [sign] digit. Otherwise it belongs to
+        // a following identifier (`1exp` is `1` then `exp`).
         if let nextChar = getNextChar() {
           let isSign = nextChar == "+" || nextChar == "-"
           if isSign {
@@ -781,6 +816,7 @@ public class Lexer {
                 numStr.append(nextChar) // +/-
                 numStr.append(digitChar)
                 hasDot = true // treat as float
+                lastWasDigit = true
               } else {
                 unreadChar(digitChar)
                 unreadChar(nextChar)
@@ -796,17 +832,24 @@ public class Lexer {
             numStr.append(char)    // e/E
             numStr.append(nextChar)
             hasDot = true // treat as float
+            lastWasDigit = true
           } else {
             unreadChar(nextChar)
             unreadChar(char)
             break
           }
-          // Consume remaining exponent digits (and _ separators)
+          // Consume remaining exponent digits ('_' only between digits)
           while let expChar = getNextChar() {
             if expChar.isNumber {
               numStr.append(expChar)
+              lastWasDigit = true
             } else if expChar == "_" {
-              continue
+              guard lastWasDigit, let nextExp = getNextChar(), nextExp.isNumber else {
+                throw LexerError.invalidInteger(span: tokenSpan,
+                  "Invalid digit separator '_' in numeric literal")
+              }
+              numStr.append(nextExp)
+              lastWasDigit = true
             } else {
               unreadChar(expChar)
               break
@@ -820,6 +863,15 @@ public class Lexer {
         unreadChar(char)
         break
       }
+    }
+
+    // Koral has no C-style octal literals: a decimal literal may not carry
+    // leading zeros (write `0o7` for octal). Otherwise `007` reaches the C
+    // backend as an octal constant and silently changes value.
+    let integerPart = numStr.prefix { $0.isNumber }
+    if integerPart.count > 1 && integerPart.hasPrefix("0") {
+      throw LexerError.invalidInteger(span: tokenSpan,
+        "Leading zeros are not allowed in integer literals")
     }
 
     if !hasDot, let unit = readDurationSuffixIfPresent() {

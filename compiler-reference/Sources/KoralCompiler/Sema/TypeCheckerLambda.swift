@@ -159,7 +159,18 @@ extension TypeChecker {
         }
       } else {
         if inferReturnTypeFromBlockReturns {
-          actualReturnType = inferredFunctionReturnType ?? .void
+          if let inferred = inferredFunctionReturnType {
+            let tailType = typedBody.type
+            if tailType != .never && tailType != .error && tailType != .void
+              && inferred != tailType
+              && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
+            {
+              try handleError(SemanticError(.typeMismatch(expected: inferred.description, got: tailType.description), span: currentSpan))
+            }
+            actualReturnType = inferred
+          } else {
+            actualReturnType = typedBody.type == .never ? .void : typedBody.type
+          }
         } else {
           // Infer return type from body
           actualReturnType = typedBody.type

@@ -52,6 +52,21 @@ public let type_node_span(node TypeNode) SourceSpan = {
     };
 };
 
+/// A short display name for a type node, used to key default-value storage
+/// so that same-name methods on different types do not overwrite each other.
+public let type_node_name(node TypeNode) String = {
+    return when node in {
+        .Identifier(name, _) then name,
+        .Generic(base, _, _) then base,
+        .Reference(inner, _, _) then type_node_name(inner),
+        .BorrowedReference(inner, _, _) then type_node_name(inner),
+        .Pointer(inner, _, _) then type_node_name(inner),
+        .WeakReference(inner, _, _) then type_node_name(inner),
+        .InferredSelf(_) then "self",
+        .FunctionType(_, _, _) then "fn",
+    };
+};
+
 // ── Bounds ──────────────────────────────────────────────────────────────────
 //
 // A generic parameter's bound, as a SEMANTIC kind rather than as type syntax.
@@ -429,12 +444,18 @@ public type PatternNode {
     WeakBinding(name String, target_type Option[TypeNode], span SourceSpan),
 };
 
+/// A single slot of a `let (a, (b, c)) = ...` / `for (a, (b, c)) in ...`
+/// binding. A leaf binds one field (`_`, `name`, `mutable name`, `name Type`);
+/// `nested` holds a nested tuple binding for that slot. Nested groups are
+/// expanded by the parser into a sequence of flat tuple lets, so after parsing
+/// every element the type checker sees has `nested == None`.
 public type mutable PairBindingElement(
     name String,
     is_mutable Bool,
     type_name Option[TypeNode],
     is_discard Bool,
     span SourceSpan,
+    nested Option[List[PairBindingElement]],
 );
 
 public type ForBindingPattern {

@@ -1,0 +1,59 @@
+// EXPECT: PASS
+// Design guard: a trait-object method call must forward every argument, not just self.
+//
+// Dynamic dispatch goes through the vtable wrapper, which takes the fat receiver
+// first and then the method's own parameters. If codegen drops the parameters and
+// passes only the receiver, the callee reads garbage (or the call is mis-typed) and
+// the arithmetic is wrong. This guards the ABI call emission on both compilers.
+
+trait Adder {
+    add(self, a Int, b Int) Int;
+    scale(self, factor Int, msg String) String;
+};
+
+type Num(value Int);
+
+given Num as Adder {
+    add(self, a Int, b Int) Int = self.value + a + b;
+    scale(self, factor Int, msg String) String = msg + ":" + (self.value * factor).to_string();
+};
+
+// Call through the trait object so the vtable path is taken.
+let call_add(x Adder, a Int, b Int) Int = x.add(a, b);
+let call_scale(x Adder, factor Int, msg String) String = x.scale(factor, msg);
+
+let check(label String, got Int, want Int) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got \(got) want \(want)");
+        return false;
+    };
+    return true;
+};
+
+let check_str(label String, got String, want String) Bool = {
+    if got <> want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main() Int = {
+    let mutable passed Bool = true;
+
+    let x Adder = Num(10);
+
+    // Two Int arguments through the trait object.
+    passed = check("add-1", call_add(x, 1, 2), 13) and passed;
+    passed = check("add-2", x.add(100, 200), 310) and passed;
+
+    // Mixed argument types through the trait object.
+    passed = check_str("scale-1", call_scale(x, 3, "n"), "n:30") and passed;
+    passed = check_str("scale-2", x.scale(4, "m"), "m:40") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

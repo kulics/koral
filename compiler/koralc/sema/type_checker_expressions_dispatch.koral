@@ -134,7 +134,36 @@ given TypeChecker {
                         def_scope,
                     )
                 } else {
-                    self.check_value_body_expr(default_expr, .Some(success_type), scope)
+                    let mutable def_scope = Scope.new_child(scope);
+                    let it_def_id = self.allocate_unindexed_def_id(
+                        "it",
+                        DefKind.Variable(),
+                    );
+                    let it_sym = Symbol(
+                        it_def_id,
+                        success_type,
+                        SymbolKind.Variable(VariableKind.Value()),
+                    );
+                    def_scope.define(self.context(), it_sym);
+                    it_symbol = Option[Symbol].Some(it_sym);
+                    self.check_value_body_expr(
+                        default_expr,
+                        .Some(success_type),
+                        def_scope,
+                    )
+                };
+                // The default stands in for the Option/Result payload, so it
+                // has to have the payload's type: `x or else "string"` against
+                // `Option[Int]` makes the two lowered `when` arms disagree.
+                if not self.is_unresolved_expr_type(success_type) and not self.contains_generic_parameter(
+                    success_type,
+                ) and not self.is_unresolved_expr_type(typed_def.expr_type) and not (
+                    typed_def.expr_type is .NeverType()
+                ) and not self.same_expr_type(typed_def.expr_type, success_type) then {
+                    self.push_diagnostic(
+                        "Type mismatch: expected \(self.display_type_name(success_type)), got \(self.display_type_name(typed_def.expr_type))",
+                        span,
+                    );
                 };
                 let result_type = when success_type in {
                     .Unknown() then typed_def.expr_type,
@@ -208,22 +237,27 @@ given TypeChecker {
                         ),
                     );
                 } else {
-                    let some_def_id = self.allocate_unindexed_def_id(
-                        "__val",
-                        DefKind.Variable(),
-                    );
-                    let some_sym = Symbol(
-                        some_def_id,
+                    // `it` is the unwrapped value: bound by the Some pattern so
+                    // references in the default expression resolve to the same
+                    // DefId. Reuse the `it` symbol created above.
+                    let mutable some_sym = Symbol(
+                        self.allocate_unindexed_def_id("it", DefKind.Variable()),
                         result_type,
                         SymbolKind.Variable(VariableKind.Value()),
                     );
+                    when it_symbol in {
+                        .Some(s) then {
+                            some_sym = s;
+                        },
+                        .None() then {},
+                    };
                     let mutable some_scope = Scope.new_child(scope);
                     some_scope.define(self.context(), some_sym);
                     let mutable some_elems = List[PatternElement].new();
                     some_elems.push(
                         PatternElement(
                             Option[String].None(),
-                            PatternNode.Variable("__val", false, result_span),
+                            PatternNode.Variable("it", false, result_span),
                         ),
                     );
                     let some_pattern = PatternNode.EnumCase(
@@ -832,8 +866,15 @@ given TypeChecker {
                         self.validate_lambda_return_type(ret, typed_body);
                     };
                     let actual_ret = if self.is_unresolved_expr_type(ret) then {
-                        if infer_return_type_from_block_returns then inferred_return_type or else Type.VoidType(
-                        ) else typed_body.expr_type
+                        if infer_return_type_from_block_returns then {
+                            when inferred_return_type in {
+                                .Some(inferred) then inferred,
+                                .None() then {
+                                    if typed_body.expr_type is .NeverType() then Type.VoidType()
+                                    else typed_body.expr_type
+                                },
+                            }
+                        } else typed_body.expr_type
                     } else if self.contains_generic_parameter(ret) and body is .Block(_, _, _) then {
                         inferred_return_type or else typed_body.expr_type
                     } else if self.contains_generic_parameter(ret) and not self.is_unresolved_expr_type(
@@ -1303,6 +1344,23 @@ given TypeChecker {
         };
     };
 
+    /// Can this branch's LITERAL be given the other branch's type? `if c then
+    /// count - 1 else 0` is `UInt` and an `Int` literal; the literal is what
+    /// gives way, and the two branches agree. A literal is flexible only
+    /// toward its own kind: an integer literal does not become a float or a
+    /// string here.
+    module_private branch_literal_absorbs_type(
+        self,
+        branch TypedExpr,
+        target Type,
+    ) Bool = {
+        return when branch.expr_kind in {
+            .IntegerLiteral(_) then self.is_integer_type(target),
+            .FloatLiteral(_) then self.is_float_type(target),
+            _ then false,
+        };
+    };
+
     module_private check_conditional_loop_expr_ref(
         self,
         expr Expr,
@@ -1483,6 +1541,95 @@ given TypeChecker {
                                             };
                                         };
                                     };
+                                    // The two branches are the conditional's
+                                    // two possible values. With no declared
+                                    // type in context, their disagreement IS
+                                    // the mistake -- `if c then 1 else "s"`
+                                    // has no single type, and saying so beats
+                                    // inventing one. With a declared type, the
+                                    // branch that does not fit it is the one
+                                    // to name.
+                                    let mutable reconciled_else_type = typed_else_ref.expr_type;
+                                    let mutable reconciled_else_expr = typed_else_ref;
+                                    when current_else in {
+                                        .Some(latest_else) then {
+                                            reconciled_else_type = latest_else.expr_type;
+                                            reconciled_else_expr = latest_else;
+                                        },
+                                        .None() then {},
+                                    };
+                                    let then_is_never_final = typed_then.expr_type is .NeverType();
+                                    let else_is_never_final = reconciled_else_type is .NeverType();
+                                    let branches_fit = self.same_expr_type(
+                                        typed_then.expr_type,
+                                        reconciled_else_type,
+                                    ) or self.is_unresolved_expr_type(
+                                        typed_then.expr_type,
+                                    ) or self.is_unresolved_expr_type(
+                                        reconciled_else_type,
+                                    ) or then_is_never_final or else_is_never_final or self.branch_literal_absorbs_type(
+                                        typed_then,
+                                        reconciled_else_type,
+                                    ) or self.branch_literal_absorbs_type(
+                                        reconciled_else_expr,
+                                        typed_then.expr_type,
+                                    );
+                                    when expected in {
+                                        .Some(expected_t) then {
+                                            // Only a conditional whose branches
+                                            // disagree has a branch to blame
+                                            // against the declared type. When
+                                            // the branches agree, any complaint
+                                            // about the declared type belongs
+                                            // to the whole expression -- the
+                                            // binding or the cast around it --
+                                            // not to one arm. (A cast operand
+                                            // is checked against the cast's
+                                            // target too, and the cast is the
+                                            // conversion; the arms fit each
+                                            // other and that is enough.)
+                                            if not branches_fit and not self.contains_generic_parameter(
+                                                expected_t,
+                                            ) and not self.is_unresolved_expr_type(expected_t) then {
+                                                if not then_is_never_final and not self.is_unresolved_expr_type(
+                                                    typed_then.expr_type,
+                                                ) and not self.same_expr_type(
+                                                    typed_then.expr_type,
+                                                    expected_t,
+                                                ) and not self.branch_literal_absorbs_type(
+                                                    typed_then,
+                                                    expected_t,
+                                                ) then {
+                                                    self.push_diagnostic_at_span(
+                                                        "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed_then.expr_type))",
+                                                        expr_span(expr),
+                                                    );
+                                                };
+                                                if not else_is_never_final and not self.is_unresolved_expr_type(
+                                                    reconciled_else_type,
+                                                ) and not self.same_expr_type(
+                                                    reconciled_else_type,
+                                                    expected_t,
+                                                ) and not self.branch_literal_absorbs_type(
+                                                    reconciled_else_expr,
+                                                    expected_t,
+                                                ) then {
+                                                    self.push_diagnostic_at_span(
+                                                        "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(reconciled_else_type))",
+                                                        expr_span(expr),
+                                                    );
+                                                };
+                                            };
+                                        },
+                                        .None() then {
+                                            if not branches_fit then {
+                                                self.push_diagnostic_at_span(
+                                                    "Type mismatch: expected \(self.display_type_name(typed_then.expr_type)), got \(self.display_type_name(reconciled_else_type))",
+                                                    expr_span(expr),
+                                                );
+                                            };
+                                        },
+                                    };
                                     // The message is about the CONDITIONAL's
                                     // type against what was expected, so it
                                     // belongs to the conditional -- pointing
@@ -1544,11 +1691,12 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
         return when expr in {
-            .Block(statements, tail_expression, _) then self.check_block(
+            .Block(statements, tail_expression, block_span) then self.check_block(
                 statements,
                 tail_expression,
                 expected,
                 scope,
+                block_span,
             ),
             .IfExpr(_, _, _, _) then self.check_conditional_loop_expr_ref(
                 expr,
@@ -1805,7 +1953,17 @@ given TypeChecker {
         };
         return when expr in {
             .MemberPath(base, path, _) then {
-                let typed_base = self.check_expr_scoped_ref(base, .None(), scope);
+                // `String.new` as a value takes the type as a namespace and
+                // yields a member value; the base is not a bare value use.
+                let typed_base = when base in {
+                    .Identifier(base_name, base_span) then self.check_identifier_expr_at(
+                        base_name,
+                        base_span,
+                        scope,
+                        true,
+                    ),
+                    _ then self.check_expr_scoped_ref(base, .None(), scope),
+                };
                 let mutable current_type = typed_base.expr_type;
                 let mutable inaccessible_method_member = false;
                 let mutable copied_path = List[String].new();
@@ -2922,14 +3080,14 @@ given TypeChecker {
     ) TypedExpr = {
         return when expr in {
             .Identifier(name, span) then {
-                let typed_ident = self.check_identifier_expr_at(name, span, scope);
+                let typed_ident = self.check_identifier_expr_at(name, span, scope, false);
                 self.adapt_expr_to_expected_type_at(
                     typed_ident,
                     expected,
                     Option[SourceSpan].Some(span),
                 )
             },
-            .IntegerLiteral(value, _) then {
+            .IntegerLiteral(value, lit_span) then {
                 let t = when expected in {
                     .Some(et) then when et in {
                         .Int8Type() then et,
@@ -2945,6 +3103,9 @@ given TypeChecker {
                         _ then Type.IntType(),
                     },
                     .None() then Type.IntType(),
+                };
+                if self.is_integer_type(t) then {
+                    let _ = self.check_integer_literal_range(value, t, lit_span);
                 };
                 make_typed_expr(TypedExprKind.IntegerLiteral(value), t)
             },
@@ -3002,10 +3163,12 @@ given TypeChecker {
                         TypedExprKind.FloatLiteral(value),
                         target,
                     ),
-                    .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(
-                        value,
-                        target,
-                    ),
+                    .RuneLiteral(value, rune_span) then {
+                        let outer_span = self.enter_current_span(rune_span);
+                        let lowered = self.lower_rune_literal_for_cast(value, target);
+                        self.leave_current_span(outer_span);
+                        lowered
+                    },
                     _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
                 };
                 let adapted_inner = self.adapt_expr_to_expected_type_at(

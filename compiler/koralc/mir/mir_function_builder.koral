@@ -5678,13 +5678,24 @@ given MIRFunctionBuilder {
                 };
                 when self.pattern_place_by_name.get(name) in {
                     .Some(place) then {
-                        return Option[MIRPlace].Some(
-                            self.variable_place_for_expr(
-                                place,
-                                symbol.symbol_type,
-                                expression.expr_type,
-                            ),
-                        );
+                        // The name table is a last resort: two DISTINCT symbols
+                        // can share a name (`and then`'s `it` and `or else`'s
+                        // `it`). Only take the name hit when its place has the
+                        // symbol's type; otherwise fall through and make a local.
+                        let place_type = when place in {
+                            .Local(local_id) then self.type_of_local(local_id),
+                            .EnumPayload(_, _, _, _, field_type) then field_type,
+                            _ then symbol.symbol_type,
+                        };
+                        if self.call_param_types_match(place_type, symbol.symbol_type) then {
+                            return Option[MIRPlace].Some(
+                                self.variable_place_for_expr(
+                                    place,
+                                    symbol.symbol_type,
+                                    expression.expr_type,
+                                ),
+                            );
+                        };
                     },
                     .None() then {},
                 };

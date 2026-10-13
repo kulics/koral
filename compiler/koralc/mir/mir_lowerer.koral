@@ -187,10 +187,10 @@ given MIRLowerer {
     };
 
     public metadata_program(self) MIRProgram = {
-        let mutable globals_reversed = List[MIRGlobal].new();
+        let mutable collected_globals = List[MIRGlobal].new();
 
         for request in self.unique_vtable_requests() then {
-            globals_reversed.push(
+            collected_globals.push(
                 MIRGlobal.TraitVTable(self.make_trait_vtable(request)),
             );
         };
@@ -198,28 +198,28 @@ given MIRLowerer {
         for node_ref in self.program.global_nodes then {
             when node_ref in {
                 .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.ForeignFunction(identifier, params, return_type),
                     );
                 },
                 .ForeignLetDecl(_, _, is_mutable, decl_type, _, identifier) then {
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type),
                     );
                 },
                 .ForeignTypeDecl(_, _, fields, _, identifier) then {
                     when fields in {
-                        .Some(f) then globals_reversed.push(
+                        .Some(f) then collected_globals.push(
                             MIRGlobal.ForeignStruct(identifier, f),
                         ),
-                        .None() then globals_reversed.push(
+                        .None() then collected_globals.push(
                             MIRGlobal.ForeignType(identifier),
                         ),
                     };
                 },
                 .LetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
                     let init_function = self.make_global_initializer_symbol(identifier);
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.GlobalVariable(
                             identifier,
                             init_function,
@@ -231,13 +231,13 @@ given MIRLowerer {
                 },
                 .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                     let kind = MIRFunctionKind.Global();
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.Function(identifier, params, return_type, kind),
                     );
                     let _ = body;
                 },
                 .IntrinsicFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.Function(
                             identifier,
                             params,
@@ -247,12 +247,12 @@ given MIRLowerer {
                     );
                 },
                 .TypeStructDecl(_, _, fields, _, identifier) then {
-                    globals_reversed.push(
+                    collected_globals.push(
                         MIRGlobal.StructDeclaration(identifier, fields),
                     );
                 },
                 .TypeEnumDecl(_, _, cases, _, identifier) then {
-                    globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases));
+                    collected_globals.push(MIRGlobal.EnumDeclaration(identifier, cases));
                 },
                 .GivenDecl(target_type, members, _) then {
                     let mutable method_symbols = List[Symbol].new();
@@ -265,7 +265,7 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(
+                        collected_globals.push(
                             MIRGlobal.Given(
                                 target_type,
                                 Option[String].None(),
@@ -287,7 +287,7 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals_reversed.push(
+                        collected_globals.push(
                             MIRGlobal.Given(
                                 target_type,
                                 Option[String].None(),
@@ -319,7 +319,7 @@ given MIRLowerer {
                         };
                     };
                     if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
-                        globals_reversed.push(
+                        collected_globals.push(
                             MIRGlobal.Given(
                                 target_type,
                                 Option[String].Some(trait_name),
@@ -330,13 +330,13 @@ given MIRLowerer {
                         );
                     };
                 },
-                .GenericFunctionDecl(_, name, _) then globals_reversed.push(
+                .GenericFunctionDecl(_, name, _) then collected_globals.push(
                     MIRGlobal.TemplatePlaceholder(name),
                 ),
-                .GenericTypeStructDecl(_, name, _) then globals_reversed.push(
+                .GenericTypeStructDecl(_, name, _) then collected_globals.push(
                     MIRGlobal.TemplatePlaceholder(name),
                 ),
-                .GenericTypeEnumDecl(_, name, _) then globals_reversed.push(
+                .GenericTypeEnumDecl(_, name, _) then collected_globals.push(
                     MIRGlobal.TemplatePlaceholder(name),
                 ),
                 .TraitDecl(_, _, _, _) then {},
@@ -346,13 +346,17 @@ given MIRLowerer {
             };
         };
 
-        let mutable globals = List[MIRGlobal].new();
-        while not globals_reversed.is_empty() then {
-            globals.push(globals_reversed.pop().unwrap());
-        };
+        // `program.global_nodes` is in DECLARATION order and the loop above
+        // walked it forward, so `collected_globals` is already in the order the
+        // seed emits: vtables first, then the nodes in declaration order.
+        // Global `let` initializers run in exactly this order (see
+        // `emit_mir_global_initializers`), so a later binding can read an
+        // earlier one -- `let a = 1; let b = a + 1` gives `b == 2`. The old
+        // pop-into-`globals` loop reversed the list and ran the initializers
+        // backwards.
 
         let program = MIRProgram(
-            globals,
+            collected_globals,
             List[MIRFunction].new(),
             self.context,
             self.program.static_method_by_key,

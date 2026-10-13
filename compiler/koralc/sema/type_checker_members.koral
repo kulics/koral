@@ -549,7 +549,8 @@ given TypeChecker {
                         Option[Type].Some(
                             if is_mutable then self.resolve_mutable_weak_reference_type(
                                 trait_ref_inner,
-                            ) else self.resolve_weak_reference_type(trait_ref_inner),
+                                span,
+                            ) else self.resolve_weak_reference_type(trait_ref_inner, span),
                         )
                     } else Option[Type].None(),
                     .Generic(base, args, span) then {
@@ -574,7 +575,8 @@ given TypeChecker {
                             Option[Type].Some(
                                 if is_mutable then self.resolve_mutable_weak_reference_type(
                                     trait_ref_inner,
-                                ) else self.resolve_weak_reference_type(trait_ref_inner),
+                                    span,
+                                ) else self.resolve_weak_reference_type(trait_ref_inner, span),
                             )
                         } else Option[Type].None()
                     },
@@ -590,7 +592,8 @@ given TypeChecker {
                         );
                         if is_mutable then self.resolve_mutable_weak_reference_type(
                             resolved_inner,
-                        ) else self.resolve_weak_reference_type(resolved_inner)
+                            span,
+                        ) else self.resolve_weak_reference_type(resolved_inner, span)
                     },
                 }
             },
@@ -725,7 +728,26 @@ given TypeChecker {
         return Type.MutableReferenceType(inner_type);
     };
 
-    module_private resolve_weak_reference_type(self, inner_type Type) Type = {
+    /// Checks that a ?T weak reference referent satisfies the mutable
+    /// constraint - i.e., T is declared 'type mutable'. The message names the
+    /// construct (?T), not the intrinsic that used to build it.
+    module_private check_weak_reference_referent(
+        self,
+        inner_type Type,
+        span SourceSpan,
+    ) Bool = {
+        let satisfied = self.satisfies_mutable_constraint(inner_type);
+        if not satisfied and not (inner_type is .Unknown()) then {
+            self.push_diagnostic_at_span(
+                "'?\(type_to_string(inner_type))' requires a 'type mutable' referent, but '\(type_to_string(inner_type))' is not declared as 'type mutable'",
+                span,
+            );
+            return false;
+        };
+        return true;
+    };
+
+    module_private resolve_weak_reference_type(self, inner_type Type, span SourceSpan) Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
             .TraitObject(trait_object_def_id, _) then {
@@ -746,10 +768,13 @@ given TypeChecker {
             },
             _ then {},
         };
+        if not self.check_weak_reference_referent(inner_type, span) then {
+            return Type.Unknown();
+        };
         return Type.WeakReferenceType(inner_type);
     };
 
-    module_private resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
+    module_private resolve_mutable_weak_reference_type(self, inner_type Type, span SourceSpan) Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
             .TraitObject(trait_object_def_id, _) then {
@@ -769,6 +794,9 @@ given TypeChecker {
                 };
             },
             _ then {},
+        };
+        if not self.check_weak_reference_referent(inner_type, span) then {
+            return Type.Unknown();
         };
         return Type.MutableWeakReferenceType(inner_type);
     };
@@ -1065,6 +1093,7 @@ given TypeChecker {
                         self.storage.current_scope = prev_scope;
                     };
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope);
+                    self.validate_body_return_type(result, ret);
                     if should_store_checked_body then Option[TypedExpr].Some(result)
                     else Option[TypedExpr].None()
                 },

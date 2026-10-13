@@ -1263,8 +1263,8 @@ given TypeChecker {
         };
     };
 
-    module_private call_defaults_prefix_for_expr(self, callee Expr) String = {
-        return when callee in {
+    module_private call_defaults_prefix_for_expr(self, callee Expr, typed_callee TypedExpr) String = {
+        let method_name = when callee in {
             .Identifier(name, _) then name,
             .MemberPath(_, path, _) then if path.is_empty() then ""
             else path[path.count() - UInt(1)],
@@ -1273,6 +1273,19 @@ given TypeChecker {
             .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
             _ then "",
         };
+        // For instance methods the default key is owner-qualified
+        // (`A.get.prefix`) so same-name methods on different types do not
+        // overwrite each other. Recover the owner name from the receiver.
+        when typed_callee.expr_kind in {
+            .MethodReference(base_ref, _, _, _, _, _) then {
+                let owner = self.display_type_name(base_ref.expr_type);
+                if not owner.is_empty() then {
+                    return "\(owner).\(method_name)";
+                };
+            },
+            _ then {},
+        };
+        return method_name;
     };
 
     module_private call_argument_expr(self, arg Expr) Expr = {

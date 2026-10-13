@@ -391,48 +391,11 @@ given Parser {
                 };
                 return .Ok(Expr.ImplicitMemberExpr(member_name, call_args, span));
             },
-            // Prefix/full range expressions used as standalone values (e.g. as arguments)
-            .Range() then {
-                self.advance();
-                if self.can_start_range_bound(self.current().kind) and true then {
-                    let rhs = self.parse_comparison() or return;
-                    return .Ok(
-                        Expr.RangeExpr(
-                            RangeOperator.To(),
-                            Option[Expr].None(),
-                            Option[Expr].Some(rhs),
-                            self.span_from_start(t),
-                        ),
-                    );
-                };
-                return .Ok(
-                    Expr.RangeExpr(
-                        RangeOperator.Full(),
-                        Option[Expr].None(),
-                        Option[Expr].None(),
-                        self.span_from_start(t),
-                    ),
-                );
-            },
-            .RangeLess() then {
-                self.advance();
-                if not true then {
-                    return .Error(
-                        self.parser_error(
-                            "Unexpected token: \(token_text(self.current()))",
-                        ),
-                    );
-                };
-                let rhs = self.parse_comparison() or return;
-                return .Ok(
-                    Expr.RangeExpr(
-                        RangeOperator.ToOpen(),
-                        Option[Expr].None(),
-                        Option[Expr].Some(rhs),
-                        self.span_from_start(t),
-                    ),
-                );
-            },
+            // Prefix ranges (`..b`, `..<b`, `..`) are parsed at the range
+            // layer in `parse_range`, not here: accepting them as a primary
+            // lets `a < ..b` parse the `..b` as a comparison operand, which
+            // then reaches codegen as a comparison against a range. Anything
+            // else that starts a primary is an error.
             _ then {
                 return .Error(
                     self.parser_error_at(
@@ -600,6 +563,9 @@ given Parser {
                             );
                         };
                         statements.push(parsed);
+                        while not self.pending_statements.is_empty() then {
+                            statements.push(self.pending_statements.take_at(0));
+                        };
                     } else {
                         let expr = self.parse_expression_checked("block expression") or return;
                         if self.is_assignment_operator() then {
@@ -1552,57 +1518,11 @@ given Parser {
         return .Ok(Expr.WhileExpr(condition, body, span));
     };
 
-    module_private parse_for_binding_element(self) Result[PairBindingElement] = {
-        let start = self.current();
-
-        if start.kind is .Identifier(name) and name == "_" then {
-            self.advance();
-            return .Ok(
-                PairBindingElement(
-                    "_",
-                    false,
-                    Option[TypeNode].None(),
-                    true,
-                    self.span_from_start(start),
-                ),
-            );
-        };
-
-        let mutable is_mut = false;
-        if self.current().kind is .KwMut() then {
-            is_mut = true;
-            self.advance();
-        };
-
-        let name_token = self.current();
-        let name = self.expect_identifier("for binding") or return;
-        if not self.is_valid_value_name(name) then {
-            return .Error(
-                self.parser_error_at(self.invalid_variable_name_error(name), name_token),
-            );
-        };
-
-        let mutable type_name = Option[TypeNode].None();
-        when self.current().kind in {
-            .KwIn() then {},
-            _ then {
-                let parsed_type = self.parse_type() or return;
-                type_name = .Some(parsed_type);
-            },
-        };
-
-        return .Ok(
-            PairBindingElement(name, is_mut, type_name, false, self.span_from_start(
-                start,
-            )),
-        );
-    };
-
     module_private parse_for_binding_pattern(self) Result[ForBindingPattern] = {
         let start = self.current();
 
         // `(a, b, c)` destructures a struct by position -- the same rule as a
-        // tuple pattern. At least two slots.
+        // tuple binding. At least two slots. Slots may nest: `(a, (b, c))`.
         if self.current().kind is .LParen() then {
             self.advance();
             let mutable bindings = List[PairBindingElement].new();
@@ -1621,14 +1541,14 @@ given Parser {
             return .Ok(ForBindingPattern.Tuple(bindings, self.span_from_start(start)));
         };
 
-        let binding = self.parse_for_binding_element() or return;
+        let binding = self.parse_pair_binding_element() or return;
         return .Ok(ForBindingPattern.Single(binding));
     };
 
     module_private parse_for_expression(self) Result[Expr] = {
         let start = self.current();
         self.advance();
-        let pattern = self.parse_for_binding_pattern() or return;
+        let raw_pattern = self.parse_for_binding_pattern() or return;
 
         let _ = self.expect_kw_in("for expression") or return;
 
@@ -1638,7 +1558,34 @@ given Parser {
 
         let body = self.parse_control_flow_body() or return;
 
-        return .Ok(Expr.ForExpr(pattern, iterable, body, self.span_from_start(start)));
+        // Nested slots expand into flat temps at the loop binding plus
+        // `let (..) = temp;` destructurings leading the body.
+        let span = self.span_from_start(start);
+        let mutable pattern = raw_pattern;
+        let mutable extras = List[Pair[List[PairBindingElement], String]].new();
+        when raw_pattern in {
+            .Single(binding) then {
+                let mut_one = List[PairBindingElement].new();
+                mut_one.push(binding);
+                let flattened = self.flatten_nested_bindings(mut_one);
+                pattern = ForBindingPattern.Single(flattened.first[UInt(0)]);
+                extras = flattened.second;
+            },
+            .Tuple(bindings, tuple_span) then {
+                let flattened = self.flatten_nested_bindings(bindings);
+                pattern = ForBindingPattern.Tuple(flattened.first, tuple_span);
+                extras = flattened.second;
+            },
+        };
+
+        let mut_body = if extras.is_empty() then body
+        else Expr.Block(
+            self.nested_binding_extra_lets(extras, span),
+            Option[Expr].Some(body),
+            span,
+        );
+
+        return .Ok(Expr.ForExpr(pattern, iterable, mut_body, span));
     };
 
     module_private parse_postfix_generic_application(self, base Expr) Result[Expr] = {
@@ -2065,6 +2012,40 @@ given Parser {
             );
         };
 
+        if has_lparen and static_receiver is .Some(receiver) and not method_type_args.is_empty() and not self.is_upper_first(member) then {
+            self.advance();
+            let args = self.parse_argument_list_until_rparen("static method call") or return;
+            when self.current().kind in {
+                .RParen() then {
+                    self.advance();
+                },
+                _ then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected ')' after static method call arguments",
+                        ),
+                    );
+                },
+            };
+            if not allows_constructor_args then {
+                when self.reject_non_constructor_call_args(args) in {
+                    .Ok(_) then {},
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+            };
+            return .Ok(
+                Expr.StaticMethodCall(
+                    receiver.type_name,
+                    method_type_args,
+                    member,
+                    args,
+                    self.span_from_expr_start(base),
+                ),
+            );
+        };
+
         if has_lparen and not method_type_args.is_empty() then {
             self.advance();
             let args = self.parse_argument_list_until_rparen("generic method call") or return;
@@ -2199,6 +2180,23 @@ given Parser {
         if self.current().kind is .Minus() then {
             let start = self.current();
             self.advance();
+            // Fold `-` + numeric literal into a negative literal so the value
+            // checker sees the signed text (matches the seed compiler).
+            when self.current().kind in {
+                .IntegerLiteral(v) then {
+                    self.advance();
+                    return .Ok(
+                        Expr.IntegerLiteral("-\(v)", self.span_from_start(start)),
+                    );
+                },
+                .FloatLiteral(v) then {
+                    self.advance();
+                    return .Ok(
+                        Expr.FloatLiteral("-\(v)", self.span_from_start(start)),
+                    );
+                },
+                _ then {},
+            };
             let operand = self.parse_unary() or return;
             return .Ok(
                 Expr.Unary(UnaryOperator.Negate(), operand, self.span_from_start(start)),

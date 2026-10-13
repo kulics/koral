@@ -83,7 +83,7 @@ public type CstExpr {
     IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
     While(kw Token, cond CstExpr, then_kw Token, body CstExpr),
     WhilePattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, body CstExpr),
-    For(kw Token, binding CstPattern, eq Token, iterable CstExpr, then_kw Token, body CstExpr),
+    For(kw Token, binding CstForBinding, eq Token, iterable CstExpr, then_kw Token, body CstExpr),
     When(kw Token, subject CstExpr, is_kw Token, lbrace Token, arms List[CstWhenArm], rbrace Token),
 
     // Chaining
@@ -227,16 +227,28 @@ public type CstStmt {
     Continue(kw Token),
 };
 
-public type CstPairBinding(
-    mut_kw Option[Token],
-    name Token,
-    binding_type Option[CstType],
-    is_discard Bool,
-);
+/// One slot of a `let`/`for` binding: a leaf (`_`, `name`, `mutable name`,
+/// `name Type`) or a nested tuple binding `(a, (b, c))`. The grammar is
+/// `<binding-element> ::= "_" | "mutable"? <identifier> <type-annotation>?
+/// | <tuple-binding>` -- the same shapes `let` and `for` both accept.
+public type CstPairBinding {
+    Leaf(mut_kw Option[Token], name Token, binding_type Option[CstType], is_discard Bool),
+    Nested(lparen Token, items List[CstTupleBindingItem], rparen Token),
+};
 
 // One slot of a `let (a, _, c) = ...` tuple binding: a binding and the comma
 // that follows it, if any.
 public type CstTupleBindingItem(binding CstPairBinding, comma Option[Token]);
+
+/// The `for` binding: a single binding element, or a tuple binding `(a, b, c)`.
+/// Matches `<for-binding-pattern> ::= <binding-element> | <tuple-binding>` --
+/// a binding, not a general match pattern. `?v`, `.Case(x)`, `a or b` and the
+/// rest of the pattern grammar are refused here the way the compilers refuse
+/// them.
+public type CstForBinding {
+    Single(binding CstPairBinding),
+    Tuple(lparen Token, items List[CstTupleBindingItem], rparen Token),
+};
 
 // ============================================================================
 // CST Type Body (for type declarations)

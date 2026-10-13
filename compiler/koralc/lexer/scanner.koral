@@ -93,6 +93,13 @@ given Lexer {
         return .None();
     };
 
+    file_private peek_at(self, offset UInt) Option[Rune] = {
+        if self.index + offset < self.source_runes.count() then {
+            return .Some(self.source_runes[self.index + offset]);
+        };
+        return .None();
+    };
+
     file_private advance(self) Option[Rune] = {
         if self.is_at_end() then {
             return .None();
@@ -144,6 +151,21 @@ given Lexer {
             self.file_path,
             message,
             SourceSpan(SourceLocation(line, column), SourceLocation(line, column)),
+        );
+    };
+
+    /// `_` is a digit separator only between two digits of the same digit run.
+    /// Leading (including right after the base prefix), trailing, doubled, or
+    /// against `.` are errors -- never a silent token split.
+    file_private invalid_digit_separator_error(
+        self,
+        start_line UInt,
+        start_col UInt,
+    ) DiagnosticError = {
+        return self.fail_at(
+            start_line,
+            start_col,
+            "Invalid digit separator '_' in numeric literal",
         );
     };
 
@@ -287,13 +309,17 @@ given Lexer {
                                 digit_count += 1;
                             } else if ch == '_' then {
                                 if self.peek_next() is .None() then {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                                 let next = self.peek_next().unwrap();
                                 if digit_count > 0 and (next == '0' or next == '1') then {
                                     text.push_rune(self.advance().unwrap());
                                 } else {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                             } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(
                                 ch,
@@ -335,13 +361,17 @@ given Lexer {
                                 digit_count += 1;
                             } else if ch == '_' then {
                                 if self.peek_next() is .None() then {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                                 let next = self.peek_next().unwrap();
                                 if digit_count > 0 and next >= '0' and next <= '7' then {
                                     text.push_rune(self.advance().unwrap());
                                 } else {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                             } else if ch.is_ascii_digit() or Lexer.is_identifier_continue(
                                 ch,
@@ -383,13 +413,17 @@ given Lexer {
                                 digit_count += 1;
                             } else if ch == '_' then {
                                 if self.peek_next() is .None() then {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                                 let next = self.peek_next().unwrap();
                                 if digit_count > 0 and Lexer.is_hex_digit(next) then {
                                     text.push_rune(self.advance().unwrap());
                                 } else {
-                                    break;
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
                                 };
                             } else if Lexer.is_identifier_continue(ch) then {
                                 return .Error(
@@ -425,23 +459,40 @@ given Lexer {
             };
         };
 
-        // 十进制整数部分
+        // 十进制整数部分。Koral has no C-style octal: a decimal literal may
+        // not carry leading zeros (write 0o7 for octal).
+        let mutable extra_int_digits = false;
         while self.peek() is .Some(ch) then {
             if Lexer.is_digit(ch) then {
                 text.push_rune(self.advance().unwrap());
+                extra_int_digits = true;
             } else if ch == '_' then {
                 if self.peek_next() is .None() then {
-                    break;
+                    return .Error(
+                        self.invalid_digit_separator_error(start_line, start_col),
+                    );
                 };
                 let next = self.peek_next().unwrap();
                 if Lexer.is_digit(next) then {
                     text.push_rune(self.advance().unwrap());
                 } else {
-                    break;
+                    return .Error(
+                        self.invalid_digit_separator_error(start_line, start_col),
+                    );
                 };
             } else {
                 break;
             };
+        };
+
+        if first == '0' and extra_int_digits then {
+            return .Error(
+                self.fail_at(
+                    start_line,
+                    start_col,
+                    "Leading zeros are not allowed in integer literals",
+                ),
+            );
         };
 
         // 检查是否有小数点（浮点数）
@@ -460,13 +511,23 @@ given Lexer {
                                         text.push_rune(self.advance().unwrap());
                                     } else if ch == '_' then {
                                         if self.peek_next() is .None() then {
-                                            break;
+                                            return .Error(
+                                                self.invalid_digit_separator_error(
+                                                    start_line,
+                                                    start_col,
+                                                ),
+                                            );
                                         };
                                         let next = self.peek_next().unwrap();
                                         if Lexer.is_digit(next) then {
                                             text.push_rune(self.advance().unwrap());
                                         } else {
-                                            break;
+                                            return .Error(
+                                                self.invalid_digit_separator_error(
+                                                    start_line,
+                                                    start_col,
+                                                ),
+                                            );
                                         };
                                     } else {
                                         break;
@@ -481,27 +542,58 @@ given Lexer {
             .None() then {},
         };
 
-        // 检查科学计数法，只支持小写 e
+        // 检查科学计数法，只支持小写 e。`e` 只有在后面跟着数字或 [+-] 数字时
+        // 才开启指数，否则留给标识符扫描（`1exp` 是 `1` 与 `exp` 两个记号）。
         when self.peek() in {
             .Some(e_ch) then {
                 if e_ch == 'e' then {
-                    is_float = true;
-                    text.push_rune(self.advance().unwrap()); // consume 'e'
-                    // 可选的 + / -
-                    when self.peek() in {
-                        .Some(sign) then {
-                            if sign == '+' or sign == '-' then {
-                                text.push_rune(self.advance().unwrap());
+                    let mutable starts_exponent Bool = false;
+                    when self.peek_at(1) in {
+                        .Some(after_e) then {
+                            if Lexer.is_digit(after_e) then {
+                                starts_exponent = true;
+                            } else if after_e == '+' or after_e == '-' then {
+                                if self.peek_at(2) is .Some(after_sign) and Lexer.is_digit(after_sign) then {
+                                    starts_exponent = true;
+                                };
                             };
                         },
                         .None() then {},
                     };
-                    // 指数数字
-                    while self.peek() is .Some(ch) then {
-                        if Lexer.is_digit(ch) then {
-                            text.push_rune(self.advance().unwrap());
-                        } else {
-                            break;
+                    if starts_exponent then {
+                        is_float = true;
+                        text.push_rune(self.advance().unwrap()); // consume 'e'
+                        // 可选的 + / -
+                        when self.peek() in {
+                            .Some(sign) then {
+                                if sign == '+' or sign == '-' then {
+                                    text.push_rune(self.advance().unwrap());
+                                };
+                            },
+                            .None() then {},
+                        };
+                        // 指数数字（`_` 只能夹在数字之间）
+                        let mutable exp_last_was_digit Bool = false;
+                        while self.peek() is .Some(ch) then {
+                            if Lexer.is_digit(ch) then {
+                                text.push_rune(self.advance().unwrap());
+                                exp_last_was_digit = true;
+                            } else if ch == '_' then {
+                                if not exp_last_was_digit then {
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
+                                };
+                                if self.peek_next() is .Some(next) and Lexer.is_digit(next) then {
+                                    text.push_rune(self.advance().unwrap());
+                                } else {
+                                    return .Error(
+                                        self.invalid_digit_separator_error(start_line, start_col),
+                                    );
+                                };
+                            } else {
+                                break;
+                            };
                         };
                     };
                 };
@@ -803,8 +895,47 @@ given Lexer {
         );
     };
 
+    /// Read a rune literal body. The opening quote has already been consumed.
+    ///
+    /// The first body character decides the shape: a letter or `_` starts a
+    /// name that must be closed by `'` immediately (so `'abc'` lexes as one
+    /// token whose text is `abc`, and `'a b'` is a missing closing quote);
+    /// anything else is raw content read up to the closing `'`. An empty
+    /// literal `''` therefore consumes the closing quote as CONTENT and runs
+    /// on looking for another one -- it reports "unterminated", matching the
+    /// seed lexer, rather than producing an empty value.
     file_private read_rune(self, start_line UInt, start_col UInt) Result[Void] = {
+        let first = self.peek() or else {
+            return .Error(self.fail_at(start_line, start_col, "unterminated rune literal"));
+        };
+
+        if Lexer.is_identifier_start(first) then {
+            let mutable name = StringBuilder.new();
+            name.push_rune(self.advance().unwrap());
+            while self.peek() is .Some(ch) and Lexer.is_identifier_continue(ch) then {
+                name.push_rune(self.advance().unwrap());
+            };
+            let close = self.peek() or else {
+                return .Error(self.fail_at(start_line, start_col, "unterminated rune literal"));
+            };
+            if close == '\'' then {
+                self.advance();
+                self.add(TokenKind.RuneLiteral(name.to_string()), start_line, start_col);
+                return .Ok({});
+            };
+            return .Error(
+                self.fail_at(start_line, start_col, "expected closing quote for rune literal"),
+            );
+        };
+
         let mutable text = StringBuilder.new();
+        let consumed = self.advance().unwrap();
+        if consumed == '\\' then {
+            let escaped = self.read_escape(start_line, start_col) or return;
+            text.push_string(escaped);
+        } else {
+            text.push_rune(consumed);
+        };
 
         while self.peek() is .Some(ch) then {
             if ch == '\'' then {
@@ -822,7 +953,7 @@ given Lexer {
             };
         };
 
-        return .Error(self.fail_at(start_line, start_col, "Unterminated rune literal"));
+        return .Error(self.fail_at(start_line, start_col, "unterminated rune literal"));
     };
 
     file_private consume_backslash_run(self) UInt = {

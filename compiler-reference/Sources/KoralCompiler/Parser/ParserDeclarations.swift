@@ -266,18 +266,16 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
-      var selfMutable = false
       if currentToken === .mutableKeyword {
         let nextToken = lexer.peekNextToken()
         if nextToken === .selfKeyword || nextToken === .multiply {
-          selfMutable = true
-          try match(.mutableKeyword)
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
       }
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -391,18 +389,16 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
-      var selfMutable = false
       if currentToken === .mutableKeyword {
         let nextToken = lexer.peekNextToken()
         if nextToken === .selfKeyword || nextToken === .multiply {
-          selfMutable = true
-          try match(.mutableKeyword)
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
       }
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -438,6 +434,7 @@ extension Parser {
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(type.description).\(name).\(pname)"] = defaultExpr
           parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
           implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }
@@ -506,18 +503,16 @@ extension Parser {
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
       var seenNamedParam = false
 
-      var selfMutable = false
       if currentToken === .mutableKeyword {
         let nextToken = lexer.peekNextToken()
         if nextToken === .selfKeyword || nextToken === .multiply {
-          selfMutable = true
-          try match(.mutableKeyword)
+          throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
         }
       }
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: selfMutable, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -553,6 +548,7 @@ extension Parser {
           }
           try match(.equal)
           let defaultExpr = try parseDefaultValueLiteral()
+          parsedParameterDefaults["\(type.description).\(name).\(pname)"] = defaultExpr
           parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
           implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }

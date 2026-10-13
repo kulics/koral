@@ -17,6 +17,7 @@ public type mutable Parser(
     file_path String,
     mutable index UInt,
     mutable parsed_defaults Dict[String, String],
+    mutable pending_statements List[Statement],
 );
 
 given Parser {
@@ -261,11 +262,17 @@ given Parser {
     };
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, "", 0, Dict[String, String].new());
+        return Parser(tokens, "", 0, Dict[String, String].new(), List[Statement].new());
     };
 
     public new_in_file(tokens List[Token], file_path String) Parser = {
-        return Parser(tokens, file_path, 0, Dict[String, String].new());
+        return Parser(
+            tokens,
+            file_path,
+            0,
+            Dict[String, String].new(),
+            List[Statement].new(),
+        );
     };
 
     module_private current(self) Token = {
@@ -1461,6 +1468,28 @@ given Parser {
                     self.advance();
                     let mutable default_val = StringBuilder.new();
                     when self.current().kind in {
+                        .Minus() then {
+                            self.advance();
+                            when self.current().kind in {
+                                .IntegerLiteral(v) then {
+                                    self.advance();
+                                    default_val = StringBuilder.new();
+                                    default_val.push_string("-\(v)");
+                                },
+                                .FloatLiteral(v) then {
+                                    self.advance();
+                                    default_val = StringBuilder.new();
+                                    default_val.push_string("-\(v)");
+                                },
+                                _ then {
+                                    return .Error(
+                                        self.parser_error_at_current(
+                                            "Expected literal default value after '='",
+                                        ),
+                                    );
+                                },
+                            };
+                        },
                         .IntegerLiteral(v) then {
                             self.advance();
                             default_val = StringBuilder.new();
@@ -1493,8 +1522,20 @@ given Parser {
                         },
                         .LBracket() then {
                             self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("[]");
+                            when self.current().kind in {
+                                .RBracket() then {
+                                    self.advance();
+                                    default_val = StringBuilder.new();
+                                    default_val.push_string("[]");
+                                },
+                                _ then {
+                                    return .Error(
+                                        self.parser_error_at_current(
+                                            "Expected ']' for empty collection default value",
+                                        ),
+                                    );
+                                },
+                            };
                         },
                         .Range() then {
                             self.advance();
@@ -1874,6 +1915,28 @@ given Parser {
                                 let mutable field_default_val = StringBuilder.new();
                                 field_default_val.push_string("");
                                 when self.current().kind in {
+                                    .Minus() then {
+                                        self.advance();
+                                        when self.current().kind in {
+                                            .IntegerLiteral(v) then {
+                                                self.advance();
+                                                field_default_val = StringBuilder.new();
+                                                field_default_val.push_string("-\(v)");
+                                            },
+                                            .FloatLiteral(v) then {
+                                                self.advance();
+                                                field_default_val = StringBuilder.new();
+                                                field_default_val.push_string("-\(v)");
+                                            },
+                                            _ then {
+                                                return .Error(
+                                                    self.parser_error_at_current(
+                                                        "Expected literal default value after '='",
+                                                    ),
+                                                );
+                                            },
+                                        };
+                                    },
                                     .IntegerLiteral(v) then {
                                         self.advance();
                                         field_default_val = StringBuilder.new();
@@ -2106,6 +2169,28 @@ given Parser {
                                             );
                                             field_default_val.push_string("");
                                             when self.current().kind in {
+                                                .Minus() then {
+                                                    self.advance();
+                                                    when self.current().kind in {
+                                                        .IntegerLiteral(v) then {
+                                                            self.advance();
+                                                            field_default_val = StringBuilder.new();
+                                                            field_default_val.push_string("-\(v)");
+                                                        },
+                                                        .FloatLiteral(v) then {
+                                                            self.advance();
+                                                            field_default_val = StringBuilder.new();
+                                                            field_default_val.push_string("-\(v)");
+                                                        },
+                                                        _ then {
+                                                            return .Error(
+                                                                self.parser_error_at_current(
+                                                                    "Expected literal default value after '='",
+                                                                ),
+                                                            );
+                                                        },
+                                                    };
+                                                },
                                                 .IntegerLiteral(v) then {
                                                     self.advance();
                                                     field_default_val = StringBuilder.new(
@@ -2361,11 +2446,56 @@ given Parser {
 
         let value = self.parse_expression_checked("tuple let statement value") or return;
         let _ = self.require_semicolon() or return;
-        return .Ok(Statement.TupleLetStmt(bindings, value, self.span_from_start(start)));
+        // Nested slots expand to extra flat tuple lets of synthetic temps,
+        // spliced into the enclosing statement list after this one.
+        let flattened = self.flatten_nested_bindings(bindings);
+        let extras = self.nested_binding_extra_lets(
+            flattened.second,
+            self.span_from_start(start),
+        );
+        for extra in extras then {
+            self.pending_statements.push(extra);
+        };
+        return .Ok(
+            Statement.TupleLetStmt(
+                flattened.first,
+                value,
+                self.span_from_start(start),
+            ),
+        );
     };
 
     module_private parse_pair_binding_element(self) Result[PairBindingElement] = {
         let start = self.current();
+
+        // Nested tuple binding: `(a, (b, c))`. A parenthesized run of two or
+        // more slots is a nested `<tuple-binding>`; `(x)` is not a binding.
+        if self.current().kind is .LParen() then {
+            self.advance();
+            let mutable children = List[PairBindingElement].new();
+            children.push(self.parse_pair_binding_element() or return);
+            if self.current().kind is not .Comma() then {
+                return .Error(self.parser_error("Expected ',' in tuple binding"));
+            };
+            while self.current().kind is .Comma() then {
+                self.advance();
+                children.push(self.parse_pair_binding_element() or return);
+            };
+            if self.current().kind is not .RParen() then {
+                return .Error(self.parser_error("Expected ')' in tuple binding"));
+            };
+            self.advance();
+            return .Ok(
+                PairBindingElement(
+                    "_",
+                    false,
+                    Option[TypeNode].None(),
+                    true,
+                    self.span_from_start(start),
+                    Option[List[PairBindingElement]].Some(children),
+                ),
+            );
+        };
 
         if start.kind is .Identifier(name) and name == "_" then {
             self.advance();
@@ -2376,6 +2506,7 @@ given Parser {
                     Option[TypeNode].None(),
                     true,
                     self.span_from_start(start),
+                    Option[List[PairBindingElement]].None(),
                 ),
             );
         };
@@ -2398,6 +2529,7 @@ given Parser {
         when self.current().kind in {
             .Comma() then {},
             .RParen() then {},
+            .KwIn() then {},
             _ then {
                 let parsed_type_name = self.parse_type() or return;
                 type_name = .Some(parsed_type_name);
@@ -2405,10 +2537,81 @@ given Parser {
         };
 
         return .Ok(
-            PairBindingElement(name, is_mut, type_name, false, self.span_from_start(
-                start,
-            )),
+            PairBindingElement(
+                name,
+                is_mut,
+                type_name,
+                false,
+                self.span_from_start(start),
+                Option[List[PairBindingElement]].None(),
+            ),
         );
+    };
+
+    /// Expand nested tuple-binding slots into a flat binding list plus the
+    /// extra `let (..) = temp;` destructurings they imply. A nested slot
+    /// `(b, c)` binds a synthetic temp at the outer level and is emitted as
+    /// its own flat tuple let of that temp; deep nesting nests the temps the
+    /// same way. The caller emits the outer statement first, then the extras.
+    module_private flatten_nested_bindings(
+        self,
+        bindings List[PairBindingElement],
+    ) Pair[List[PairBindingElement], List[Pair[List[PairBindingElement], String]]] = {
+        let mutable flat = List[PairBindingElement].new();
+        let mutable extras = List[Pair[List[PairBindingElement], String]].new();
+        for binding in bindings then {
+            when binding.nested in {
+                .Some(children) then {
+                    let temp_name = "__koral_nslot_\(binding.span.start.line.to_string())_\(binding.span.start.column.to_string())";
+                    flat.push(
+                        PairBindingElement(
+                            temp_name,
+                            false,
+                            Option[TypeNode].None(),
+                            false,
+                            binding.span,
+                            Option[List[PairBindingElement]].None(),
+                        ),
+                    );
+                    let child_flattened = self.flatten_nested_bindings(children);
+                    extras.push(
+                        Pair[List[PairBindingElement], String](
+                            child_flattened.first,
+                            temp_name,
+                        ),
+                    );
+                    for extra in child_flattened.second then {
+                        extras.push(extra);
+                    };
+                },
+                .None() then {
+                    flat.push(binding);
+                },
+            };
+        };
+        return Pair[List[PairBindingElement], List[Pair[List[PairBindingElement], String]]](
+            flat,
+            extras,
+        );
+    };
+
+    /// The `let (b, c) = temp;` statements an expanded nested binding implies.
+    module_private nested_binding_extra_lets(
+        self,
+        extras List[Pair[List[PairBindingElement], String]],
+        span SourceSpan,
+    ) List[Statement] = {
+        let mutable out = List[Statement].new();
+        for extra in extras then {
+            out.push(
+                Statement.TupleLetStmt(
+                    extra.first,
+                    Expr.Identifier(extra.second, span),
+                    span,
+                ),
+            );
+        };
+        return out;
     };
 
     module_private is_assignment_operator(self) Bool = {

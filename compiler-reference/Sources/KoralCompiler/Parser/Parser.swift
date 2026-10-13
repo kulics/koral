@@ -18,6 +18,15 @@ public class Parser {
   /// "methodName#paramName" keys whose default came from a `given` method
   /// implementation (including non-trait `given` blocks).
   public var implDeclaredParameterDefaults: Set<String> = []
+
+  /// Extra statements produced while parsing a `let` with nested tuple
+  /// destructuring. They are spliced into the enclosing statement list after
+  /// the statement that produced them.
+  var pendingStatements: [StatementNode] = []
+
+  /// Extra `let (..) = temp;` destructurings implied by a nested `for`
+  /// binding. Consumed by `forExpression` to lead the loop body.
+  var forBindingExtras: [([PairBindingElement], String)] = []
   nonisolated(unsafe) public static var allImplDeclaredParameterDefaults: Set<String> = []
 
   public init(lexer: Lexer) {
@@ -223,7 +232,9 @@ public class Parser {
   }
 
   /// Parse tuple destructuring: `let (binding1, binding2, ...) = expr`
-  /// Each binding is: `_` | `[mutable] name [Type]`. At least two slots.
+  /// Each binding is: `_` | `[mutable] name [Type]` | `( nested, ... )`.
+  /// At least two slots. Nested slots expand to extra flat tuple lets of
+  /// synthetic temps, spliced into the enclosing statement list.
   private func parseTupleVariableDeclaration(startSpan: SourceSpan) throws -> StatementNode {
     try match(.leftParen)
 
@@ -243,12 +254,68 @@ public class Parser {
 
     let value = try expression()
 
-    return .tupleVariableDeclaration(bindings: bindings, value: value, span: startSpan)
+    let (flat, extras) = flattenNestedBindings(bindings)
+    for (extraBindings, tempName) in extras {
+      pendingStatements.append(
+        .tupleVariableDeclaration(
+          bindings: extraBindings,
+          value: .identifier(tempName, span: startSpan),
+          span: startSpan
+        )
+      )
+    }
+    return .tupleVariableDeclaration(bindings: flat, value: value, span: startSpan)
   }
 
-  /// Parse a single binding element inside pair destructuring: `_` | `[mutable] name [Type]`
+  /// Expand nested tuple-binding slots into a flat binding list plus the extra
+  /// `let (..) = temp;` destructurings they imply.
+  func flattenNestedBindings(
+    _ bindings: [PairBindingElement]
+  ) -> (flat: [PairBindingElement], extras: [([PairBindingElement], String)]) {
+    var flat: [PairBindingElement] = []
+    var extras: [([PairBindingElement], String)] = []
+    for binding in bindings {
+      if let children = binding.nested {
+        let tempName =
+          "__koral_nslot_\(binding.span.start.line)_\(binding.span.start.column)"
+        flat.append(
+          PairBindingElement(
+            name: tempName, type: nil, mutable: false, isDiscard: false, span: binding.span)
+        )
+        let childFlattened = flattenNestedBindings(children)
+        extras.append((childFlattened.flat, tempName))
+        extras.append(contentsOf: childFlattened.extras)
+      } else {
+        flat.append(binding)
+      }
+    }
+    return (flat, extras)
+  }
+
+  /// Parse a single binding element inside pair destructuring:
+  /// `_` | `[mutable] name [Type]` | `( nested, ... )`
   private func parsePairBindingElement() throws -> PairBindingElement {
     let elemSpan = currentSpan
+
+    // Nested tuple binding: `(a, (b, c))`. A parenthesized run of two or more
+    // slots is a nested `<tuple-binding>`; `(x)` is not a binding.
+    if currentToken === .leftParen {
+      try match(.leftParen)
+      var children: [PairBindingElement] = [try parsePairBindingElement()]
+      try match(.comma)
+      while true {
+        children.append(try parsePairBindingElement())
+        if currentToken === .comma {
+          try match(.comma)
+        } else {
+          break
+        }
+      }
+      try match(.rightParen)
+      return PairBindingElement(
+        name: "_", type: nil, mutable: false, isDiscard: true, span: elemSpan,
+        nested: children)
+    }
 
     // Check for wildcard
     if case .identifier("_") = currentToken {
@@ -274,9 +341,9 @@ public class Parser {
 
     try match(.identifier(name))
 
-    // Optional type annotation (anything before ',' or ')')
+    // Optional type annotation (anything before ',' or ')' or 'in')
     var type: TypeNode? = nil
-    if currentToken !== .comma && currentToken !== .rightParen {
+    if currentToken !== .comma && currentToken !== .rightParen && currentToken !== .inKeyword {
       type = try parseType()
     }
 
@@ -287,7 +354,7 @@ public class Parser {
     let startSpan = currentSpan
 
     // `(a, b, c)` destructures a struct by position -- the same rule as a
-    // tuple pattern. At least two slots.
+    // tuple binding. At least two slots. Slots may nest: `(a, (b, c))`.
     if currentToken === .leftParen {
       try match(.leftParen)
       var bindings: [PairBindingElement] = [try parsePairBindingElement()]
@@ -301,10 +368,23 @@ public class Parser {
         }
       }
       try match(.rightParen)
-      return .tuple(bindings: bindings, span: startSpan)
+      let (flat, extras) = flattenNestedBindings(bindings)
+      forBindingExtras = extras
+      return .tuple(bindings: flat, span: startSpan)
     }
 
-    let binding = try parseForBindingElement()
+    let binding = try parsePairBindingElement()
+    if let children = binding.nested {
+      let tempName = "__koral_nslot_\(binding.span.start.line)_\(binding.span.start.column)"
+      let (flat, extras) = flattenNestedBindings(children)
+      forBindingExtras = [(flat, tempName)]
+      forBindingExtras.append(contentsOf: extras)
+      return .binding(
+        PairBindingElement(
+          name: tempName, type: nil, mutable: false, isDiscard: false, span: binding.span)
+      )
+    }
+    forBindingExtras = []
     return .binding(binding)
   }
 
@@ -345,10 +425,28 @@ public class Parser {
 
   /// Parse a default value literal for a named parameter.
   /// Supported literals: integer, float, bool, string, rune, empty collection ([]), full-range (..)
+  /// A leading `-` is accepted for numeric literals (`x: Int = -1`).
   func parseDefaultValueLiteral() throws -> ExpressionNode {
     // The literal's own span: `match` advances past it, so `currentSpan` after
     // the match is the NEXT token.
     let startSpan = currentSpan
+    // Negative numeric defaults: `= -1`, `= -2.5`.
+    if currentToken === .minus {
+      try match(.minus)
+      switch currentToken {
+      case .integer(let value):
+        try match(.integer(value))
+        return .integerLiteral("-\(value)", span: startSpan)
+      case .float(let value):
+        try match(.float(value))
+        return .floatLiteral("-\(value)", span: startSpan)
+      default:
+        throw ParserError.unexpectedToken(
+          span: startSpan,
+          got: "-",
+          expected: "a literal default value (number, bool, string, rune, [], or range)")
+      }
+    }
     switch currentToken {
     case .integer(let value):
       try match(.integer(value))

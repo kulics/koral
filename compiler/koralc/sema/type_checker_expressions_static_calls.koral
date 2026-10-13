@@ -1389,6 +1389,7 @@ given TypeChecker {
                     name,
                     span,
                     scope,
+                    false,
                 ),
                 .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                     left,
@@ -1431,18 +1432,30 @@ given TypeChecker {
                         )
                     } else {
                     let raw_typed_inner = when inner in {
-                        .IntegerLiteral(value, _) then make_typed_expr(
-                            TypedExprKind.IntegerLiteral(value),
-                            target,
-                        ),
+                        .IntegerLiteral(value, lit_span) then {
+                            let _ = self.check_integer_literal_range(
+                                value,
+                                target,
+                                lit_span,
+                            );
+                            make_typed_expr(
+                                TypedExprKind.IntegerLiteral(value),
+                                target,
+                            )
+                        },
                         .FloatLiteral(value, _) then make_typed_expr(
                             TypedExprKind.FloatLiteral(value),
                             target,
                         ),
-                        .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(
-                            value,
-                            target,
-                        ),
+                        .RuneLiteral(value, rune_span) then {
+                            let outer_span = self.enter_current_span(rune_span);
+                            let lowered = self.lower_rune_literal_for_cast(
+                                value,
+                                target,
+                            );
+                            self.leave_current_span(outer_span);
+                            lowered
+                        },
                         _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
                     };
                     let adapted_inner = self.adapt_expr_to_expected_type_at(
@@ -1920,6 +1933,93 @@ given TypeChecker {
         };
     };
 
+    // MARK: - Integer literal range checking
+
+    module_private parse_integer_literal_text(self, text String) Pair[Bool, Pair[UInt64, Bool]] = {
+        let _ = text;
+        return Pair[Bool, Pair[UInt64, Bool]](false, Pair[UInt64, Bool](0, true));
+    };
+
+    module_private check_integer_literal_range(
+        self,
+        value String,
+        target_type Type,
+        span SourceSpan,
+    ) Bool = {
+        let i64max = UInt64(9223372036854775807);
+        let u64max = i64max * UInt64(2) + UInt64(1);
+        let bounds = when target_type in {
+            .IntType() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
+            .Int64Type() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
+            .Int8Type() then Pair[UInt64, UInt64](UInt64(128), UInt64(127)),
+            .Int16Type() then Pair[UInt64, UInt64](UInt64(32768), UInt64(32767)),
+            .Int32Type() then Pair[UInt64, UInt64](UInt64(2147483648), UInt64(2147483647)),
+            .UIntType() then Pair[UInt64, UInt64](UInt64(0), u64max),
+            .UInt64Type() then Pair[UInt64, UInt64](UInt64(0), u64max),
+            .UInt8Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(255)),
+            .UInt16Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(65535)),
+            .UInt32Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(4294967295)),
+            _ then Pair[UInt64, UInt64](UInt64(0), UInt64(0)),
+        };
+        if bounds.first == UInt64(0) and bounds.second == UInt64(0) and not self.is_integer_type(target_type) then {
+            return true;
+        };
+        let s = value.replace_all("_", with: "");
+        let mutable is_negative = false;
+        let mutable rest = s;
+        if s.starts_with("-") then {
+            is_negative = true;
+            rest = s.substring(1..);
+        };
+        let mutable radix UInt64 = 10;
+        let mutable digits = rest;
+        if rest.starts_with("0x") or rest.starts_with("0X") then {
+            radix = 16; digits = rest.substring(2..);
+        } else if rest.starts_with("0b") or rest.starts_with("0B") then {
+            radix = 2; digits = rest.substring(2..);
+        } else if rest.starts_with("0o") or rest.starts_with("0O") then {
+            radix = 8; digits = rest.substring(2..);
+        };
+        let mutable magnitude UInt64 = UInt64(0);
+        let mutable overflow = digits.is_empty();
+        for ch in digits.to_runes() then {
+            let mutable digit UInt64 = UInt64(0);
+            let mutable valid = true;
+            if ch >= '0' and ch <= '9' then {
+                digit = UInt64(ch.to_uint32() - '0'.to_uint32());
+            } else if ch >= 'a' and ch <= 'f' then {
+                digit = UInt64(ch.to_uint32() - 'a'.to_uint32() + 10);
+            } else if ch >= 'A' and ch <= 'F' then {
+                digit = UInt64(ch.to_uint32() - 'A'.to_uint32() + 10);
+            } else {
+                valid = false;
+            };
+            if not valid or digit >= radix then {
+                overflow = true;
+            } else {
+                if magnitude > (u64max - digit) / radix then {
+                    overflow = true;
+                } else {
+                    magnitude = magnitude * radix + digit;
+                };
+            };
+        };
+        let fits = if overflow then false
+        else if is_negative then magnitude <= bounds.first
+        else magnitude <= bounds.second;
+        if not fits then {
+            let sign = if is_negative then "-" else "";
+            let display = if overflow then s
+            else sign + magnitude.to_string();
+            self.push_diagnostic_at_span(
+                "Integer literal \(display) is out of range for \(type_to_string(target_type))",
+                span,
+            );
+            return false;
+        };
+        return true;
+    };
+
     module_private is_valid_explicit_cast(self, from Type, to Type) Bool = {
         if self.same_expr_type(from, to) then {
             return true;
@@ -2009,18 +2109,27 @@ given TypeChecker {
         };
         // Literal optimization: fold integer/float literals to the target type.
         let raw_typed_inner = when arg in {
-            .IntegerLiteral(value, _) then make_typed_expr(
-                TypedExprKind.IntegerLiteral(value),
-                target_type,
-            ),
+            .IntegerLiteral(value, lit_span) then {
+                let _ = self.check_integer_literal_range(
+                    value,
+                    target_type,
+                    lit_span,
+                );
+                make_typed_expr(
+                    TypedExprKind.IntegerLiteral(value),
+                    target_type,
+                )
+            },
             .FloatLiteral(value, _) then make_typed_expr(
                 TypedExprKind.FloatLiteral(value),
                 target_type,
             ),
-            .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(
-                value,
-                target_type,
-            ),
+            .RuneLiteral(value, rune_span) then {
+                let outer_span = self.enter_current_span(rune_span);
+                let lowered = self.lower_rune_literal_for_cast(value, target_type);
+                self.leave_current_span(outer_span);
+                lowered
+            },
             _ then self.check_expr_scoped_ref(arg, .Some(target_type), scope),
         };
         // Peel references from the inner when the target is not a ref-like type.
@@ -2593,7 +2702,7 @@ given TypeChecker {
                 call_args,
                 callee_param_specs,
                 self.call_description_for_expr(callee),
-                self.call_defaults_prefix_for_expr(callee),
+                self.call_defaults_prefix_for_expr(callee, typed_callee),
             ) or else {
                 return make_typed_expr(
                     TypedExprKind.Call(typed_callee_ref, List[TypedExpr].new()),
@@ -2851,6 +2960,7 @@ given TypeChecker {
                     name,
                     span,
                     scope,
+                    false,
                 ),
                 .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                     left,
@@ -3003,55 +3113,6 @@ given TypeChecker {
                     );
                 };
             };
-            when typed_callee.expr_kind in {
-                .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
-                    when self.trait_object_dispatch_type(base.expr_type) in {
-                        .Some(dispatch_trait_type) then {
-                            let method_name = self.semantic_method_name_for_symbol(
-                                method,
-                            );
-                            when self.trait_vtable_method_index_for_type(
-                                dispatch_trait_type,
-                                method_name,
-                            ) in {
-                                .Some(method_index) then {
-                                    let return_type = when typed_callee.expr_type in {
-                                        .FunctionType(_, return_type_ref) then return_type_ref,
-                                        _ then Type.Unknown(),
-                                    };
-                                    let trait_receiver = when base.expr_kind in {
-                                        .DerefExpr(inner) then when inner.expr_type in {
-                                            .ReferenceType(inner_ref) then when inner_ref in {
-                                                .TraitObject(_, _) then inner,
-                                                _ then base,
-                                            },
-                                            .MutableReferenceType(inner_ref) then when inner_ref in {
-                                                .TraitObject(_, _) then inner,
-                                                _ then base,
-                                            },
-                                            _ then base,
-                                        },
-                                        _ then base,
-                                    };
-                                    return make_typed_expr(
-                                        TypedExprKind.TraitMethodCall(
-                                            trait_receiver,
-                                            dispatch_trait_type,
-                                            method_name,
-                                            method_index,
-                                            typed_args,
-                                        ),
-                                        return_type,
-                                    );
-                                },
-                                .None() then {},
-                            };
-                        },
-                        .None() then {},
-                    };
-                },
-                _ then {},
-            };
             if has_generic_function_bindings then {
                 when generic_function_template_opt in {
                     .Some(template) then {
@@ -3082,6 +3143,60 @@ given TypeChecker {
             };
             typed_args.push(adjusted_arg);
             arg_idx += 1;
+        };
+
+        // Build the trait-object dispatch call AFTER all arguments are collected.
+        // This used to run inside the per-argument loop, so `typed_args` was still
+        // empty when the call was built and every argument except the implicit
+        // receiver was dropped from the generated C.
+        when typed_callee.expr_kind in {
+            .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+                when self.trait_object_dispatch_type(base.expr_type) in {
+                    .Some(dispatch_trait_type) then {
+                        let method_name = self.semantic_method_name_for_symbol(
+                            method,
+                        );
+                        when self.trait_vtable_method_index_for_type(
+                            dispatch_trait_type,
+                            method_name,
+                        ) in {
+                            .Some(method_index) then {
+                                let return_type = when typed_callee.expr_type in {
+                                    .FunctionType(_, return_type_ref) then return_type_ref,
+                                    _ then Type.Unknown(),
+                                };
+                                let trait_receiver = when base.expr_kind in {
+                                    .DerefExpr(inner) then when inner.expr_type in {
+                                        .ReferenceType(inner_ref) then when inner_ref in {
+                                            .TraitObject(_, _) then inner,
+                                            _ then base,
+                                        },
+                                        .MutableReferenceType(inner_ref) then when inner_ref in {
+                                            .TraitObject(_, _) then inner,
+                                            _ then base,
+                                        },
+                                        _ then base,
+                                    },
+                                    _ then base,
+                                };
+                                return make_typed_expr(
+                                    TypedExprKind.TraitMethodCall(
+                                        trait_receiver,
+                                        dispatch_trait_type,
+                                        method_name,
+                                        method_index,
+                                        typed_args,
+                                    ),
+                                    return_type,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
         };
 
         if typed_callee.expr_type is .Unknown() then {

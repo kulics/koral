@@ -403,8 +403,14 @@ extension Parser {
   // `and` / `or` are another -- boolean logic. Precedence inside a layer is
   // unchanged: `and then` binds tighter than `or else` / `or return`, and
   // `and` binds tighter than `or`. The layers do not mix implicitly.
-  // Crossing from one to the other takes parentheses, the way `??` refuses to
-  // sit beside `||` in the languages that have it:
+  //
+  // Everything below the layers -- comparison, range, `is`, `not`, the
+  // arithmetic ladder -- binds TIGHTER than both of them: the operand parsed
+  // here already includes comparison, so `a == b or else c` is
+  // `(a == b) or else c`, never `a == (b or else c)`.
+  //
+  // Crossing from one layer to the other takes parentheses, the way `??`
+  // refuses to sit beside `||` in the languages that have it:
   //
   //   `a and (b or else c)`            -- fine, and means that
   //   `(a and b) or else c`            -- fine, and means something else
@@ -1581,6 +1587,9 @@ extension Parser {
       switch currentToken {
       case .letKeyword, .returnKeyword, .breakKeyword, .continueKeyword, .deferKeyword:
         statements.append(try statement())
+        while !pendingStatements.isEmpty {
+          statements.append(pendingStatements.removeFirst())
+        }
         continue
       default:
         break
@@ -1649,11 +1658,32 @@ extension Parser {
     let startSpan = currentSpan
     try match(.forKeyword)
     let pattern = try parseForBindingPattern()
+    let extras = forBindingExtras
+    forBindingExtras = []
     try match(.inKeyword)
     let iterable = try expression()
     try match(.thenKeyword)
     let body = try expression()
-    return .forExpression(pattern: pattern, iterable: iterable, body: body, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
+    var loopBody = body
+    if !extras.isEmpty {
+      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+      var lets: [StatementNode] = []
+      for (extraBindings, tempName) in extras {
+        lets.append(
+          .tupleVariableDeclaration(
+            bindings: extraBindings,
+            value: .identifier(tempName, span: span),
+            span: span
+          )
+        )
+      }
+      loopBody = .blockExpression(
+        statements: lets, tailExpression: body,
+        span: span)
+    }
+    return .forExpression(
+      pattern: pattern, iterable: iterable, body: loopBody,
+      span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
   

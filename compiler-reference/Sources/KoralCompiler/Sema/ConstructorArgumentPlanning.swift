@@ -61,7 +61,8 @@ extension TypeChecker {
     paramNames: [String],
     paramIsNamed: [Bool],
     callDescription: String,
-    defaultsKeyPrefix: String
+    defaultsKeyPrefix: String,
+    paramTypeKeys: [String] = []
   ) throws -> ConstructorArgumentPlan {
     // Reject spread syntax
     if callArgs.contains(where: { $0.isDefaultFill }) {
@@ -113,7 +114,8 @@ extension TypeChecker {
     for (index, param) in paramNames.enumerated() {
       if orderedCallArgs[index] == nil {
         let key = "\(defaultsKeyPrefix).\(param)"
-        if self.parsedParameterDefaults[key] != nil {
+        let bareKey = defaultsKeyPrefix.contains(".") ? String(defaultsKeyPrefix.split(separator: ".").last!) + "." + param : key
+        if self.parsedParameterDefaults[key] != nil || self.parsedParameterDefaults[bareKey] != nil {
           usesDefaults = true
         } else if paramIsNamed[index] {
           throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
@@ -137,7 +139,8 @@ extension TypeChecker {
     paramNames: [String],
     paramIsNamed: [Bool],
     callDescription: String,
-    defaultsKeyPrefix: String
+    defaultsKeyPrefix: String,
+    paramTypeKeys: [String] = []
   ) throws -> [ExpressionNode] {
     let plan = try planCallArguments(
       callArgs,
@@ -154,7 +157,8 @@ extension TypeChecker {
         continue
       }
       let key = "\(defaultsKeyPrefix).\(param)"
-      guard let defaultExpr = self.parsedParameterDefaults[key] else {
+      let bareKey = defaultsKeyPrefix.contains(".") ? String(defaultsKeyPrefix.split(separator: ".").last!) + "." + param : key
+      guard let defaultExpr = self.parsedParameterDefaults[key] ?? self.parsedParameterDefaults[bareKey] else {
         if paramIsNamed[index] {
           throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
         } else {
@@ -172,6 +176,7 @@ extension TypeChecker {
     fieldNames: [String],
     fieldIsNamed: [Bool],
     constructorDescription: String,
+    paramTypeKeys: [String] = [],
     parentName: String = ""
   ) throws -> ConstructorArgumentPlan {
     return try planCallArguments(
@@ -179,7 +184,8 @@ extension TypeChecker {
       paramNames: fieldNames,
       paramIsNamed: fieldIsNamed,
       callDescription: constructorDescription,
-      defaultsKeyPrefix: parentName
+      defaultsKeyPrefix: parentName,
+      paramTypeKeys: paramTypeKeys
     )
   }
 
@@ -412,6 +418,7 @@ extension TypeChecker {
     plan: ConstructorArgumentPlan,
     members: [(name: String, type: Type, named: Bool)],
     constructorDescription: String,
+    paramTypeKeys: [String] = [],
     parentName: String = ""
   ) throws -> [TypedExpressionNode] {
     var typedArguments: [TypedExpressionNode] = []
@@ -433,7 +440,6 @@ extension TypeChecker {
 
       // Try to use parsed default value
       let key = "\(parentName).\(member.name)"
-
       if let defaultExpr = self.parsedParameterDefaults[key] {
         var typedArg = try inferTypedExpression(defaultExpr, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)

@@ -396,6 +396,24 @@ given CstParser {
         _ then false,
     };
 
+    /// Whether `name` is a value name: lowercase-first after underscores, or
+    /// underscore-only. Mirrors the compilers' `is_valid_value_name`.
+    file_private is_value_name(self, name String) Bool = {
+        let runes = name.to_runes();
+        if runes.count() == 0 then {
+            return false;
+        };
+        let mutable idx UInt = 0;
+        while idx < runes.count() and runes[idx].to_uint32() == 95 then {
+            idx += 1;
+        };
+        if idx >= runes.count() then {
+            return true;
+        };
+        let first = runes[idx].to_uint32();
+        first >= 97 and first <= 122
+    };
+
     file_private eat(self) Token = {
         self.skip_newlines();
         return self.advance();
@@ -730,7 +748,8 @@ given CstParser {
     // ========================================================================
 
     /// `<default-value-literal>`: number, bool, string, rune, `[]`, or a bare
-    /// range. Never an expression -- `1 + 2` and `-3` are not defaults.
+    /// range. A leading `-` is accepted for numeric literals (`x: Int = -1`).
+    /// Never an expression -- `1 + 2` is not a default.
     ///
     /// Rune literals scan as `IntLit` tokens carrying their quoted spelling
     /// (see `scan_char_literal`), so the literal case already covers them.
@@ -748,6 +767,18 @@ given CstParser {
                 return .Error(
                     "Parse error: default value must be an empty collection '[]'",
                 );
+            };
+        } else if self.check(.Minus()) then {
+            value_tokens.push(self.eat());
+            when self.peek() in {
+                .IntLit(_) or .FloatLit(_) then {
+                    value_tokens.push(self.eat());
+                },
+                _ then {
+                    return .Error(
+                        "Parse error: expected a literal default value (number, bool, string, rune, [], or range)",
+                    );
+                },
             };
         } else {
             when self.peek() in {
@@ -1721,6 +1752,27 @@ given CstParser {
                 // -- so `s[UInt(0)]` is a subscript whose index is a cast, not
                 // a generic application with a stray `(`.
                 if self.scan_type_list_at(self.pos) is .Some(_) then {
+                    // `.member[T]` alone is not a generic instantiation: the
+                    // compilers require the call parens that follow the type
+                    // arguments (`'(' after generic method name`).
+                    when expr in {
+                        .FieldAccess(_, _, _) then {
+                            when self.scan_type_list_at(self.pos) in {
+                                .Some(next_idx) then {
+                                    let after = self.sig_index_at(next_idx);
+                                    if after >= self.tokens.count() or self.tokens[
+                                        after
+                                    ] is not .LParen() then {
+                                        return .Error(
+                                            "Parse error: Unexpected token: [, expected: '(' after generic method name",
+                                        );
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        },
+                        _ then {},
+                    };
                     let lb = self.eat();
                     let mutable type_args = List[CstTypeArg].new();
                     while not self.check(.RBracket()) and not self.is_eof() then {
@@ -1937,9 +1989,14 @@ given CstParser {
             );
         };
 
-        // Self type used as expression
+        // `Self` is a TYPE, not an expression. The compilers' primary
+        // expression parser has no case for it -- `Self(1)`, `Self`, and
+        // `f(Self)` are all refused there -- so this refuses it too. `Self`
+        // stays legal in type position (`*unsafe Self(p)`, `let x Self`, ...).
         if self.check(.KwSelfType()) then {
-            return .Ok(.Ident(self.eat()));
+            return .Error(
+                "Parse error: 'Self' is a type and cannot be used as an expression",
+            );
         };
 
         // `it` is reserved (not a valid declaration name) but legal in
@@ -2376,7 +2433,7 @@ given CstParser {
                 return .Error(e);
             },
         };
-        let binding = when self.parse_pattern_node() in {
+        let binding = when self.parse_for_binding() in {
             .Ok(p) then p,
             .Error(e) then {
                 return .Error(e);
@@ -3047,6 +3104,13 @@ given CstParser {
     };
 
     file_private parse_pair_binding(self) Result[CstPairBinding] = {
+        // Nested tuple binding: `(a, (b, c))`. A nested slot is a full
+        // `<tuple-binding>`, so nesting is allowed wherever a binding element
+        // is -- `let (a, (b, c)) = ...` and `for (a, (b, c)) in ...` alike.
+        if self.check(.LParen()) and self.peek_at_skip_nl(1) is not .RParen() then {
+            return self.parse_nested_tuple_binding();
+        };
+
         let mutable mut_kw = Option[Token].None();
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
@@ -3054,7 +3118,7 @@ given CstParser {
 
         if self.check(.Underscore()) then {
             let name = self.eat();
-            return .Ok(CstPairBinding(mut_kw, name, .None(), true));
+            return .Ok(.Leaf(mut_kw, name, .None(), true));
         };
 
         let name = when self.expect_ident("variable name") in {
@@ -3064,8 +3128,32 @@ given CstParser {
             },
         };
 
+        // `_` is spelled as an identifier by the tokenizer; it is still the
+        // discard slot. The compilers recognise the name the same way.
+        let name_is_discard = when name in {
+            .Ident(n) then n == "_",
+            _ then false,
+        };
+
+        // A binding name is a VALUE name: lowercase-first (after underscores),
+        // or underscore-only. `for Point(a, b)` is a struct pattern, which
+        // this parser does not accept -- the compilers refuse the uppercase
+        // name with "must start with a lowercase letter".
+        when name in {
+            .Ident(n) then {
+                if not name_is_discard and not self.is_value_name(n) then {
+                    return .Error(
+                        "Parse error: Variable name '\(n)' must start with a lowercase letter",
+                    );
+                };
+            },
+            _ then {},
+        };
+
         let mutable binding_type = Option[CstType].None();
-        if not self.check(.Comma()) and not self.check(.RParen()) then {
+        if not self.check(.Comma()) and not self.check(.RParen()) and not self.check(
+            .KwIn(),
+        ) then {
             let t = when self.parse_type_node() in {
                 .Ok(parsed_type) then parsed_type,
                 .Error(e) then {
@@ -3075,7 +3163,95 @@ given CstParser {
             binding_type = .Some(t);
         };
 
-        return .Ok(CstPairBinding(mut_kw, name, binding_type, false));
+        return .Ok(.Leaf(mut_kw, name, binding_type, name_is_discard));
+    };
+
+    /// `( a, b, ... )` as a binding element: at least two slots, each a
+    /// binding element (so the slots nest). Mirrors the compilers'
+    /// `parse_pair_binding_element`, which refuses a parenthesized run of
+    /// fewer than two slots.
+    file_private parse_nested_tuple_binding(self) Result[CstPairBinding] = {
+        let lp = self.eat();
+        let first = when self.parse_pair_binding() in {
+            .Ok(binding) then binding,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        if not self.check(.Comma()) then {
+            return .Error(
+                "Parse error: expected ',' in tuple binding: a parenthesized binding needs at least two slots",
+            );
+        };
+        let mutable items = List[CstTupleBindingItem].new();
+        let mutable current = first;
+        while self.check(.Comma()) then {
+            let comma = self.eat();
+            let next = when self.parse_pair_binding() in {
+                .Ok(binding) then binding,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            items.push(CstTupleBindingItem(current, .Some(comma)));
+            current = next;
+        };
+        items.push(CstTupleBindingItem(current, .None()));
+        let rp = when self.expect(.RParen(), "')'") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Nested(lp, items, rp));
+    };
+
+    /// A `for` binding: `<binding-element> | <tuple-binding>`. This is a
+    /// BINDING, not a match pattern -- `?v`, `.Case(x)`, `a or b` and friends
+    /// belong to `is`/`when` and are refused here, the way the compilers'
+    /// `parse_for_binding_pattern` refuses them.
+    file_private parse_for_binding(self) Result[CstForBinding] = {
+        if self.check(.LParen()) then {
+            let lp = self.eat();
+            let first = when self.parse_pair_binding() in {
+                .Ok(binding) then binding,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            // At least two slots: `for (x) in ...` is not a tuple binding.
+            if not self.check(.Comma()) then {
+                return .Error("Parse error: expected ',' in tuple binding");
+            };
+            let mutable items = List[CstTupleBindingItem].new();
+            let mutable current = first;
+            while self.check(.Comma()) then {
+                let comma = self.eat();
+                let next = when self.parse_pair_binding() in {
+                    .Ok(binding) then binding,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                items.push(CstTupleBindingItem(current, .Some(comma)));
+                current = next;
+            };
+            items.push(CstTupleBindingItem(current, .None()));
+            let rp = when self.expect(.RParen(), "')'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            return .Ok(.Tuple(lp, items, rp));
+        };
+        let binding = when self.parse_pair_binding() in {
+            .Ok(binding) then binding,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Single(binding));
     };
 
     // ========================================================================
