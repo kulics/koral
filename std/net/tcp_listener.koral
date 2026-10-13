@@ -24,7 +24,7 @@ given TcpListener as Drop {
 given TcpListener {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self) Int = self.fd_raw(Int);
+    public fd(self) Int = Int(self.fd_raw);
 
     /// Bind to a socket address and start listening.
     /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
@@ -48,20 +48,20 @@ given TcpListener {
             return Result[TcpListener].Error(last_error_message());
         };
 
-        // Set SO_REUSEADDR: level=1 (SOL_SOCKET), optname=2 (SO_REUSEADDR)
+        // Set SO_REUSEADDR: level=SOL_SOCKET(1 ), optname=SO_REUSEADDR(2 )
         // Value is a 4-byte integer with value 1
         let opt_buf = alloc_memory[UInt8](4);
         defer dealloc_memory(opt_buf);
-        init_memory(opt_buf + 0, 1(UInt8));
-        init_memory(opt_buf + 1, 0(UInt8));
-        init_memory(opt_buf + 2, 0(UInt8));
-        init_memory(opt_buf + 3, 0(UInt8));
+        init_memory(opt_buf + 0, UInt8(1));
+        init_memory(opt_buf + 1, UInt8(0));
+        init_memory(opt_buf + 2, UInt8(0));
+        init_memory(opt_buf + 3, UInt8(0));
         let setsock_result = __koral_socket_setsockopt(
             fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_REUSEADDR(),
             opt_buf,
-            4(UInt32),
+            UInt32(4),
         );
         if setsock_result <> 0 then {
             __koral_socket_close(fd);
@@ -70,7 +70,7 @@ given TcpListener {
 
         // Bind to address
         let addr_bytes = addr.to_sockaddr_bytes();
-        let addr_len = addr_bytes.count()(UInt32);
+        let addr_len = UInt32(addr_bytes.count());
         let bind_result = __koral_socket_bind(fd, addr_bytes.borrow_ptr(), addr_len);
         if bind_result <> 0 then {
             __koral_socket_close(fd);
@@ -78,7 +78,7 @@ given TcpListener {
         };
 
         // Listen with backlog=128
-        let listen_result = __koral_socket_listen(fd, 128(Int32));
+        let listen_result = __koral_socket_listen(fd, Int32(128));
         if listen_result <> 0 then {
             __koral_socket_close(fd);
             return Result[TcpListener].Error(last_error_message());
@@ -93,10 +93,10 @@ given TcpListener {
         // Allocate a 128-byte buffer for the peer address
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
-        for i in 0(UInt)..<128(UInt) then {
-            init_memory(addr_buf + i, 0(UInt8));
+        for i in UInt(0)..<UInt(128) then {
+            init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = 128(UInt32);
+        let mutable addr_len UInt32 = UInt32(128);
 
         let new_fd = __koral_socket_accept(self.fd_raw, addr_buf, &unsafe addr_len);
         if new_fd < 0 then {
@@ -104,7 +104,7 @@ given TcpListener {
         };
 
         // Parse the sockaddr bytes into a SocketAddr
-        let actual_len = addr_len(UInt);
+        let actual_len = UInt(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
             addr_list.push(addr_buf[j]);
@@ -129,10 +129,10 @@ given TcpListener {
     public local_addr(self) Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
-        for i in 0(UInt)..<128(UInt) then {
-            init_memory(addr_buf + i, 0(UInt8));
+        for i in UInt(0)..<UInt(128) then {
+            init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = 128(UInt32);
+        let mutable addr_len UInt32 = UInt32(128);
 
         let result = __koral_socket_getsockname(self.fd_raw, addr_buf, &unsafe addr_len);
         if result <> 0 then {
@@ -140,7 +140,7 @@ given TcpListener {
         };
 
         // Parse the sockaddr bytes into a SocketAddr
-        let actual_len = addr_len(UInt);
+        let actual_len = UInt(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
             addr_list.push(addr_buf[j]);

@@ -224,8 +224,8 @@ given CstParser {
     };
 
     /// Whether `expr` is written as a TYPE NAME: a bare upper-first identifier
-    /// or a generic instantiation of one. That is what makes `(Trait)` after it
-    /// a Rust-style qualified path rather than a cast.
+    /// or a generic instantiation of one. That is what lets `Type(expr)` be a
+    /// cast rather than an ordinary call.
     file_private expr_is_type_name(self, expr CstExpr) Bool = {
         return when expr in {
             .Ident(tok) then when tok in {
@@ -235,6 +235,39 @@ given CstParser {
             .GenericInst(base, _, _, _) then self.expr_is_type_name(base),
             _ then false,
         };
+    };
+
+    /// The target type of a `Type(expr)` cast, read off the callee when that
+    /// callee is written as a type name. `Int(x)` gives `Int`, `Box[T](x)` gives
+    /// `Box[T]`. `None` when the expression is not a type name.
+    file_private expr_as_cast_type(self, expr CstExpr) Option[CstType] = {
+        when expr in {
+            .Ident(tok) then {
+                when tok in {
+                    .Ident(_) then {
+                        if self.is_type_start(tok) then {
+                            return .Some(CstType.Named(tok));
+                        };
+                    },
+                    _ then {},
+                };
+            },
+            .GenericInst(base, lb, args, rb) then {
+                when self.expr_as_cast_type(base) in {
+                    .Some(base_type) then {
+                        when base_type in {
+                            .Named(name_tok) then {
+                                return .Some(CstType.Generic(lb, args, rb, name_tok));
+                            },
+                            _ then {},
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+        return .None();
     };
 
     /// Whether `(params) [Type] ->` starts at `start_index`.
@@ -320,7 +353,9 @@ given CstParser {
     };
 
     /// The index just past a `( <type> )` suffix starting at `start_index`, or
-    /// `None`. This is the SHAPE of a postfix cast `expr(Type)`.
+    /// `None`. This is the SHAPE of the qualification prefix `base(Trait)` of a
+    /// composite qualified call -- the prefix is only legal as part of
+    /// `base(Trait).method(...)`.
     file_private scan_paren_type_suffix_at(self, raw_start UInt) Option[UInt] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
@@ -1420,8 +1455,15 @@ given CstParser {
             return .Ok(.BitwiseNot(op, operand));
         };
 
-        // Dereference
+        // Dereference, or a raw-pointer type application `*unsafe T(expr)`.
+        // Bare `*` is deref; `*unsafe` at expression start can only be a type
+        // (`unsafe` is a keyword, so there is no deref of a variable named
+        // `unsafe`), and a prefixed type in expression position must be applied.
         if self.check(.Star()) then {
+            if self.peek_at_skip_nl(1) is .KwUnsafe() then {
+                let cast = self.parse_type_application() or return;
+                return self.parse_postfix_suffixes(cast);
+            };
             let op = self.eat();
             let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
@@ -1430,6 +1472,13 @@ given CstParser {
                 },
             };
             return .Ok(.Deref(op, operand));
+        };
+
+        // `?T(expr)` -- weak reference construction. `?` is not an expression
+        // operator, so at expression start it can only begin a type.
+        if self.check(.KwWeakref()) then {
+            let cast = self.parse_type_application() or return;
+            return self.parse_postfix_suffixes(cast);
         };
 
         // Address-of: &, &mutable, &unsafe, &unsafe mutable
@@ -1459,13 +1508,126 @@ given CstParser {
     // Postfix expressions
     // ========================================================================
 
-    file_private parse_postfix(self) Result[CstExpr] = {
-        let mutable expr = when self.parse_primary() in {
+    /// `*unsafe [mutable] T(expr)` / `?T(expr)` -- a cast or weak construction
+    /// whose target type is written with a prefix, at expression start. The
+    /// spelling matches the type annotation: `*unsafe Int(p)`,
+    /// `*unsafe mutable T(q)`, `?T(r)`. The prefixed type is the target, and
+    /// the parenthesized operand is a single expression -- a prefixed type is
+    /// a cast target, not a constructor argument list.
+    file_private parse_type_application(self) Result[CstExpr] = {
+        let cast_type = self.parse_type_node() or return;
+        if not self.check(.LParen()) then {
+            return .Error(
+                "Parse error: expected '(': a prefixed type in expression position must be a cast or weak construction, e.g. '*unsafe Int(p)' or '?T(p)'",
+            );
+        };
+        let lp = self.eat();
+        let value = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then {
                 return .Error(e);
             },
         };
+        if not self.check(.RParen()) then {
+            return .Error(
+                "Parse error: expected ')': a prefixed type is a cast target, not a constructor",
+            );
+        };
+        let rp = self.eat();
+        return .Ok(.TypeCast(lp, cast_type, rp, value));
+    };
+
+    /// The composite `base(Trait).method(...)` /
+    /// `base(Trait).method[TypeArgs](...)` qualified call. The `(Trait)` SHAPE
+    /// has already been decided by `scan_paren_type_suffix_at`; this consumes
+    /// the qualification AND the method call, so the prefix never exists on its
+    /// own. `base` is a type name for the type-qualified form
+    /// `Type(Trait).method`, and any other expression for the receiver-qualified
+    /// form `expr(Trait).method`. The result is the full
+    /// `Call(FieldAccess(QualifiedTrait(...), method), args)`.
+    file_private parse_qualified_call_suffix(self, base CstExpr) Result[CstExpr] = {
+        let lp = self.eat();
+        let trait_type = self.parse_type_node() or return;
+        let rp = when self.expect(.RParen(), "')'") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        if not self.check(.Dot()) then {
+            return .Error(
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+            );
+        };
+        let dot = self.eat();
+        let method = when self.expect_ident("qualified method name") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        let mutable field = CstExpr.FieldAccess(
+            .QualifiedTrait(lp, trait_type, rp, base),
+            dot,
+            method,
+        );
+        // Generic method call: `base(Trait).method[TypeArgs](...)`.
+        if self.check(.LBracket()) and self.scan_type_list_at(self.pos) is .Some(_) then {
+            let lb = self.eat();
+            let mutable type_args = List[CstTypeArg].new();
+            while not self.check(.RBracket()) and not self.is_eof() then {
+                let t = when self.parse_type_node() in {
+                    .Ok(parsed_type) then parsed_type,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                let comma = self.eat_comma();
+                type_args.push(CstTypeArg(t, comma));
+            };
+            let rb = when self.expect(.RBracket(), "']'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            field = .GenericInst(field, lb, type_args, rb);
+        };
+        if not self.check(.LParen()) then {
+            return .Error(
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+            );
+        };
+        let call_lp = self.eat();
+        let args = when self.parse_call_args() in {
+            .Ok(a) then a,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        let call_rp = when self.expect(.RParen(), "')'") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Call(field, call_lp, args, call_rp));
+    };
+
+    file_private parse_postfix(self) Result[CstExpr] = {
+        let expr = when self.parse_primary() in {
+            .Ok(e) then e,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return self.parse_postfix_suffixes(expr);
+    };
+
+    /// Postfix suffixes (calls, subscripts, member access, qualified calls)
+    /// applied to an already-parsed expression.
+    file_private parse_postfix_suffixes(self, start CstExpr) Result[CstExpr] = {
+        let mutable expr = start;
         while true then {
             // Field access: expr.field
             if self.check(.Dot()) then {
@@ -1500,30 +1662,19 @@ given CstParser {
                 continue;
             };
 
-            // Postfix cast: expr(Type)
+            // One bounded shape scan decides what `(` opens.
             //
-            // One bounded shape scan decides: `( <type> )` is a cast or a
-            // Rust-style qualified path, anything else is a call. Nothing is
-            // parsed speculatively and rolled back. Which of the two it is
-            // depends on the BASE, not on these tokens: a TYPE NAME followed by
-            // `(Trait)` names the trait for disambiguation (`Num(Tag)`), any
-            // other base is being cast (`x(Int)`).
+            // `( <type> )` is the qualification prefix of a composite qualified
+            // call `base(Trait).method(...)` -- the method call is parsed here
+            // too, so the prefix never stands alone. Anything else is a call,
+            // which includes the type application `Type(expr)` / `Type(args)`:
+            // a TYPE NAME callee with a single positional operand is the cast
+            // spelling `Type(expr)`, and every other argument shape is a
+            // construction or ordinary call. Nothing is parsed speculatively
+            // and rolled back.
             if self.check(.LParen()) then {
                 if self.scan_paren_type_suffix_at(self.pos) is .Some(_) then {
-                    let lp = self.eat();
-                    let inner_type = self.parse_type_node() or return;
-                    let rp = when self.expect(.RParen(), "')'") in {
-                        .Ok(t) then t,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    expr = if self.expr_is_type_name(expr) then .QualifiedTrait(
-                        lp,
-                        inner_type,
-                        rp,
-                        expr,
-                    ) else .TypeCast(lp, inner_type, rp, expr);
+                    expr = self.parse_qualified_call_suffix(expr) or return;
                     continue;
                 };
                 let call_lp = self.eat();
@@ -1539,13 +1690,37 @@ given CstParser {
                         return .Error(e);
                     },
                 };
+                // `Type(expr)` -- one positional operand -- is the cast
+                // spelling. `Type(a, b)`, `Type(x: 1)`, `Type()` are
+                // constructions and keep the call shape.
+                if self.expr_is_type_name(expr) and args.count() == 1 then {
+                    let mutable is_cast = false;
+                    let mutable operand = expr;
+                    when args[0] in {
+                        .Value(label, colon, value, _) then {
+                            if label is .None() and colon is .None() then {
+                                is_cast = true;
+                                operand = value;
+                            };
+                        },
+                        _ then {},
+                    };
+                    if is_cast and self.expr_as_cast_type(expr) is .Some(cast_type) then {
+                        expr = .TypeCast(call_lp, cast_type, rp, operand);
+                        continue;
+                    };
+                };
                 expr = .Call(expr, call_lp, args, rp);
                 continue;
             };
 
             // Generic instantiation suffix: expr[T]
             if self.check(.LBracket()) then {
-                if self.is_type_start(self.peek_at_skip_nl(1)) then {
+                // `[` `<type-list>` `]` is a generic application; anything else
+                // is a subscript. One bounded scan of the bracketed run decides
+                // -- so `s[UInt(0)]` is a subscript whose index is a cast, not
+                // a generic application with a stray `(`.
+                if self.scan_type_list_at(self.pos) is .Some(_) then {
                     let lb = self.eat();
                     let mutable type_args = List[CstTypeArg].new();
                     while not self.check(.RBracket()) and not self.is_eof() then {
@@ -2500,6 +2675,51 @@ given CstParser {
             return .Ok(.MutVariable(mut_kw, name));
         };
 
+        // Weak-reference unpacking: `?name` / `?TypeName(name)`.
+        // Lowercase after `?` is a bare binding; a type name is a typed binding
+        // whose target type is checked.
+        if self.check(.KwWeakref()) then {
+            let question = self.eat();
+            let name = when self.expect_ident("weak binding name") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            if self.is_type_start(name) then {
+                // `?TypeName(name)` -- typed binding with a target type check.
+                let lp = when self.expect(.LParen(), "'('") in {
+                    .Ok(t) then t,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                let bind = when self.expect_ident("weak binding name") in {
+                    .Ok(t) then t,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                let rp = when self.expect(.RParen(), "')'") in {
+                    .Ok(t) then t,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                return .Ok(
+                    .WeakBinding(
+                        question,
+                        bind,
+                        .Some(lp),
+                        .Some(CstType.Named(name)),
+                        .Some(rp),
+                    ),
+                );
+            };
+            // `?name` -- bare binding.
+            return .Ok(.WeakBinding(question, name, .None(), .None(), .None()));
+        };
+
         // Enum case: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat();
@@ -3043,10 +3263,10 @@ given CstParser {
             .StrLit(t) then t,
             _ then "",
         };
-        if raw.count() < 2(UInt) then {
+        if raw.count() < UInt(2) then {
             return "";
         };
-        return raw.substring(1(UInt)..<(raw.count() - 1(UInt)));
+        return raw.substring(UInt(1)..<(raw.count() - UInt(1)));
     };
 
     /// module-design §3.1: a specifier beginning `./` or `../` merges a file,

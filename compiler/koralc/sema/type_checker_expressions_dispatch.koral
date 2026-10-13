@@ -521,7 +521,36 @@ given TypeChecker {
     ) TypedExpr = {
         return when expr in {
             .WhenExpr(subject, arms, span) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                // `is ?v` / `when ... in { ?v -> ... }` unpacks a weak handle.
+                // Lower it to the upgrade intrinsic plus an `Option.Some(v)`
+                // match so the rest of the pattern machinery is unchanged.
+                let mutable has_weak_binding = false;
+                for arm in arms then {
+                    if self.pattern_is_weak_binding(arm.pattern) then {
+                        has_weak_binding = true;
+                    };
+                };
+                let mutable typed_subj = raw_typed_subj;
+                if has_weak_binding and self.is_weak_reference_type(raw_typed_subj.expr_type) then {
+                    let strong_type = when raw_typed_subj.expr_type in {
+                        .WeakReferenceType(inner) then inner,
+                        .MutableWeakReferenceType(inner) then inner,
+                        _ then raw_typed_subj.expr_type,
+                    };
+                    let mutable opt_args = List[Type].new();
+                    opt_args.push(strong_type);
+                    let upgrade_type = Type.GenericEnum(
+                        self.context().std_type_def_id("Option") or else def_id_invalid(),
+                        opt_args,
+                    );
+                    typed_subj = make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.UpgradeRef(raw_typed_subj, upgrade_type),
+                        ),
+                        upgrade_type,
+                    );
+                };
                 let mutable needs_raw_subject = false;
                 for arm in arms then {
                     if self.pattern_requires_raw_subject(arm.pattern) then {
@@ -1301,7 +1330,7 @@ given TypeChecker {
                                     .WhenExpr(_, arms) then {
                                         if not arms.is_empty() then {
                                             let single_branch_then_type = self.concretize_default_literal_type(
-                                                arms[0(UInt)].body.expr_type,
+                                                arms[UInt(0)].body.expr_type,
                                             );
                                             let then_is_valid_single_branch = when single_branch_then_type in {
                                                 .VoidType() then true,
@@ -1366,11 +1395,11 @@ given TypeChecker {
                             .Some(eb) then if expected is .None() and self.branch_needs_expected_type_for_implicit_member(
                                 eb,
                             ) and not typed_arms.is_empty() and typed_arms[
-                                typed_arms.count() - 1(UInt)
+                                typed_arms.count() - UInt(1)
                             ].second.expr_type is not .NeverType() and self.is_implicit_member_context_type(
-                                typed_arms[typed_arms.count() - 1(UInt)].second.expr_type,
+                                typed_arms[typed_arms.count() - UInt(1)].second.expr_type,
                             ) then Option[Type].Some(
-                                typed_arms[typed_arms.count() - 1(UInt)].second.expr_type,
+                                typed_arms[typed_arms.count() - UInt(1)].second.expr_type,
                             ) else expected,
                             .None() then expected,
                         };
@@ -1783,12 +1812,12 @@ given TypeChecker {
                 for seg in path then {
                     copied_path.push(seg);
                 };
-                if copied_path.count() == 1(UInt) then {
+                if copied_path.count() == UInt(1) then {
                     when typed_base.expr_kind in {
                         .Variable(sym) then when sym.kind in {
                             .TypeSymbol() then when self.try_make_type_member_value_lambda(
                                 typed_base.expr_type,
-                                copied_path[0(UInt)],
+                                copied_path[UInt(0)],
                             ) in {
                                 .Some(lambda_value) then {
                                     return self.adapt_expr_to_expected_type_at(
@@ -1803,7 +1832,7 @@ given TypeChecker {
                         },
                         .GenericInstantiation(_, _) then when self.try_make_type_member_value_lambda(
                             typed_base.expr_type,
-                            copied_path[0(UInt)],
+                            copied_path[UInt(0)],
                         ) in {
                             .Some(lambda_value) then {
                                 return self.adapt_expr_to_expected_type_at(
@@ -2014,9 +2043,9 @@ given TypeChecker {
                 if inaccessible_method_member then {
                     return self.empty_typed_block(Type.Unknown());
                 };
-                let member_expr = if typed_path.count() == 1(UInt) then self.make_typed_member_path_expr(
+                let member_expr = if typed_path.count() == UInt(1) then self.make_typed_member_path_expr(
                     typed_base,
-                    typed_path[0(UInt)],
+                    typed_path[UInt(0)],
                     current_type,
                 )
                 else make_typed_expr(
@@ -2374,7 +2403,7 @@ given TypeChecker {
                     .None() then {},
                 };
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope);
-                // For QualifiedMethodCall (base.as(Trait).method()), always dispatch
+                // For QualifiedMethodCall (Trait(base.as).method()), always dispatch
                 // through trait even for concrete types -- the user explicitly asked
                 // for trait-qualified dispatch.
                 let trait_dispatch_requires_object = self.dispatches_via_trait_object(
@@ -2945,6 +2974,25 @@ given TypeChecker {
             },
             .CastExpr(type_node, inner, _) then {
                 let target = self.resolve_type_in_scope(type_node, scope);
+                // `?T(expr)` is weak-reference construction (a handle wrap, not
+                // a bit reinterpretation). It lowers to the downgrade intrinsic.
+                if target is .WeakReferenceType(_) or target is .MutableWeakReferenceType(_) then {
+                    let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                    let mutable result_type = target;
+                    if not self.enforce_mutable_constraint_for_call(
+                        typed_inner.expr_type,
+                        "downgrade",
+                        expr_span(inner),
+                    ) then {
+                        result_type = Type.Unknown();
+                    };
+                    return make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.DowngradeRef(typed_inner, result_type),
+                        ),
+                        result_type,
+                    );
+                };
                 let raw_typed_inner = when inner in {
                     .IntegerLiteral(value, _) then make_typed_expr(
                         TypedExprKind.IntegerLiteral(value),
@@ -3048,8 +3096,34 @@ given TypeChecker {
                 }
             },
             .IsExpr(subject, pattern, span) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
                 let ast_pattern_ref = pattern;
+                // `?name` unpacks a weak handle: wrap the subject in the upgrade
+                // intrinsic so `Option[T]` gets instantiated and the pattern
+                // matches on the upgraded value.
+                let typed_subj = if self.pattern_is_weak_binding(ast_pattern_ref) and self.is_weak_reference_type(
+                    raw_typed_subj.expr_type,
+                ) then {
+                    let inner_type = when raw_typed_subj.expr_type in {
+                        .WeakReferenceType(inner) then inner,
+                        .MutableWeakReferenceType(inner) then inner,
+                        _ then raw_typed_subj.expr_type,
+                    };
+                    let mutable opt_args = List[Type].new();
+                    opt_args.push(inner_type);
+                    let upgrade_type = Type.GenericEnum(
+                        self.context().std_type_def_id("Option") or else def_id_invalid(),
+                        opt_args,
+                    );
+                    make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.UpgradeRef(raw_typed_subj, upgrade_type),
+                        ),
+                        upgrade_type,
+                    )
+                } else {
+                    raw_typed_subj
+                };
                 if self.pattern_contains_bindings(ast_pattern_ref) then {
                     self.push_diagnostic(
                         "Variable bindings in 'is' expression are only allowed in if/while conditions",
@@ -3068,13 +3142,40 @@ given TypeChecker {
                 )
             },
             .IsNotExpr(subject, pattern, span) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
                 let ast_pattern_ref = pattern;
-                if self.pattern_contains_bindings(ast_pattern_ref) then {
+                // `is not ?name` is allowed: the binding is unused (the pattern
+                // only tests whether the object is dead).
+                if self.pattern_contains_bindings(ast_pattern_ref) and not self.pattern_is_weak_binding(
+                    ast_pattern_ref,
+                ) then {
                     self.push_diagnostic(
                         "Variable bindings are not allowed in 'is not' expression",
                         span,
                     );
+                };
+                let typed_subj = if self.pattern_is_weak_binding(ast_pattern_ref) and self.is_weak_reference_type(
+                    raw_typed_subj.expr_type,
+                ) then {
+                    let inner_type = when raw_typed_subj.expr_type in {
+                        .WeakReferenceType(inner) then inner,
+                        .MutableWeakReferenceType(inner) then inner,
+                        _ then raw_typed_subj.expr_type,
+                    };
+                    let mutable opt_args = List[Type].new();
+                    opt_args.push(inner_type);
+                    let upgrade_type = Type.GenericEnum(
+                        self.context().std_type_def_id("Option") or else def_id_invalid(),
+                        opt_args,
+                    );
+                    make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.UpgradeRef(raw_typed_subj, upgrade_type),
+                        ),
+                        upgrade_type,
+                    )
+                } else {
+                    raw_typed_subj
                 };
                 let _ = span;
                 let typed_pattern = self.lower_typed_pattern(

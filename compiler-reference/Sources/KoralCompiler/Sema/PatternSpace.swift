@@ -142,6 +142,10 @@ extension PatternSpace {
         case .wildcard, .variable:
             // Wildcard and variable patterns cover everything
             return .empty
+        case .weakBinding:
+            // `?name` is refutable: it covers the alive case but not the dead
+            // case. Subtracting it leaves the dead case uncovered.
+            return self
         case .traitObjectType, .traitObjectTypeBinding:
             return self
             
@@ -358,6 +362,9 @@ extension PatternSpace {
         switch pattern {
         case .wildcard, .variable:
             return true
+        case .weakBinding:
+            // Refutable: does not cover the dead case.
+            return false
         case .traitObjectType, .traitObjectTypeBinding:
             return false
         case .booleanLiteral(let value):

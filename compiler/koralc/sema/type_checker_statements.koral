@@ -382,7 +382,7 @@ given TypeChecker {
                         .Some(lowered) then {
                             // Keep condition-lowering iterative to avoid recursive stack/memory blowups.
                             lower_steps += 1;
-                            if lower_steps > 1024(UInt) then {
+                            if lower_steps > UInt(1024) then {
                                 self.push_diagnostic_at_span(
                                     "Condition lowering exceeded maximum rewrite steps",
                                     current_span,
@@ -448,7 +448,36 @@ given TypeChecker {
     ) TypedStatement = {
         return when expr in {
             .WhenExpr(subject, arms, _) then {
-                let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
+                // `is ?v` / `when ... in { ?v -> ... }` unpacks a weak handle.
+                // Lower it to the upgrade intrinsic plus an `Option.Some(v)`
+                // match so the rest of the pattern machinery is unchanged.
+                let mutable has_weak_binding = false;
+                for arm in arms then {
+                    if self.pattern_is_weak_binding(arm.pattern) then {
+                        has_weak_binding = true;
+                    };
+                };
+                let mutable typed_subj = raw_typed_subj;
+                if has_weak_binding and self.is_weak_reference_type(raw_typed_subj.expr_type) then {
+                    let strong_type = when raw_typed_subj.expr_type in {
+                        .WeakReferenceType(inner) then inner,
+                        .MutableWeakReferenceType(inner) then inner,
+                        _ then raw_typed_subj.expr_type,
+                    };
+                    let mutable opt_args = List[Type].new();
+                    opt_args.push(strong_type);
+                    let upgrade_type = Type.GenericEnum(
+                        self.context().std_type_def_id("Option") or else def_id_invalid(),
+                        opt_args,
+                    );
+                    typed_subj = make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.UpgradeRef(raw_typed_subj, upgrade_type),
+                        ),
+                        upgrade_type,
+                    );
+                };
                 let mutable needs_raw_subject = false;
                 for arm in arms then {
                     if self.pattern_requires_raw_subject(arm.pattern) then {
@@ -914,8 +943,8 @@ given TypeChecker {
             typed_base.expr_type,
             "__index_set",
         );
-        let expected_index_count = if set_param_types.is_empty() then 0(UInt)
-        else set_param_types.count() - 1(UInt);
+        let expected_index_count = if set_param_types.is_empty() then UInt(0)
+        else set_param_types.count() - UInt(1);
 
         let mutable typed_args = List[TypedExpr].new();
         let mutable arg_idx UInt = 0;
@@ -2295,7 +2324,7 @@ given TypeChecker {
                 let mutable idx UInt = 0;
                 while idx < path.count() then {
                     let segment = path[idx];
-                    let is_last = idx + 1(UInt) == path.count();
+                    let is_last = idx + UInt(1) == path.count();
                     let segment_type = segment.symbol_type;
                     let mutable can_traverse_immutable_segment = false;
                     if not is_last then {

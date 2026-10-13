@@ -393,6 +393,9 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case variable(symbol: Symbol)
   case traitObjectType(targetType: Type)
   case traitObjectTypeBinding(symbol: Symbol, targetType: Type)
+  /// Weak-reference unpacking `?name` / `?TypeName(name)`: matches when the
+  /// handle is still alive and binds the strong reference.
+  case weakBinding(symbol: Symbol)
   case enumCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
   
   // Comparison pattern - matches values based on comparison operators
@@ -427,6 +430,9 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .traitObjectTypeBinding(let symbol, let targetType):
       _ = symbol
       return targetType.description
+    case .weakBinding(let symbol):
+      let name = SemanticErrorContext.currentCompilerContext?.getName(symbol.defId) ?? "<binding>"
+      return "?\(name)"
     case .enumCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"

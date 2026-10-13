@@ -13,12 +13,12 @@
 // have raw (uninitialized) key/value memory; only the tag is valid.
 module_private type DictBucket[K Hash, V Any](tag UInt, key K, value V);
 
-// Bucket tag constants (inlined as 0(UInt), 1(UInt), 2(UInt))
+// Bucket tag constants (inlined as UInt(0), UInt(1), UInt(2))
 
 file_private let bucket_tag_ptr[K Hash, V Any](
     bucket_ptr *unsafe mutable DictBucket[K, V],
 ) *unsafe mutable UInt =
-    bucket_ptr(UInt)(*unsafe mutable UInt);
+    *unsafe mutable UInt(UInt(bucket_ptr));
 
 file_private let bucket_set_tag[K Hash, V Any](
     bucket_ptr *unsafe mutable DictBucket[K, V],
@@ -38,7 +38,7 @@ given[K Hash, V Any] Dict[K, V] as Drop {
 
     drop(self) Void = {
         for i in 0..<self.capacity then {
-            if (self.buckets + i).tag == 1(UInt) then {
+            if (self.buckets + i).tag == UInt(1) then {
                 deinit_memory(self.buckets + i);
             };
         };
@@ -66,14 +66,14 @@ given[K Hash, V Any] Dict[K, V] {
     public with_capacity(capacity UInt) Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
-        let requested UInt = if capacity < 4(UInt) then 4(UInt) else capacity * 2(UInt);
-        let mutable cap UInt = 4(UInt);
+        let requested UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
+        let mutable cap UInt = UInt(4);
         while cap < requested then {
-            cap = cap * 2(UInt);
+            cap = cap * UInt(2);
         };
         let buckets = alloc_memory[DictBucket[K, V]](cap);
         for i in 0..<cap then {
-            bucket_set_tag(buckets + i, 0(UInt));
+            bucket_set_tag(buckets + i, UInt(0));
         };
         return Dict[K, V](buckets, 0, cap);
     };
@@ -84,7 +84,7 @@ given[K Hash, V Any] Dict[K, V] {
     // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
     file_private find_slot(self, key K) Option[UInt] = {
         // 尚未分配桶数组（空表）：没有可命中的槽位。
-        if self.capacity == 0(UInt) then {
+        if self.capacity == UInt(0) then {
             return Option[UInt].None();
         };
         let mask = self.capacity - 1;
@@ -94,7 +94,7 @@ given[K Hash, V Any] Dict[K, V] {
         let mutable probes UInt = 0;
         while probes < self.capacity then {
             let bucket_tag = (self.buckets + idx).tag;
-            if bucket_tag == 0(UInt) then {
+            if bucket_tag == UInt(0) then {
                 when first_deleted in {
                     .Some(_) then {
                         return first_deleted;
@@ -103,7 +103,7 @@ given[K Hash, V Any] Dict[K, V] {
                         return Option[UInt].Some(idx);
                     },
                 };
-            } else if bucket_tag == 2(UInt) then {
+            } else if bucket_tag == UInt(2) then {
                 when first_deleted in {
                     .None() then {
                         first_deleted = Option[UInt].Some(idx);
@@ -126,20 +126,20 @@ given[K Hash, V Any] Dict[K, V] {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 空表首次分配；已有桶数组时翻倍。
-        let new_cap = if old_cap == 0(UInt) then 16(UInt) else old_cap * 2(UInt);
+        let new_cap = if old_cap == UInt(0) then UInt(16) else old_cap * UInt(2);
         let new_buckets = alloc_memory[DictBucket[K, V]](new_cap);
         for i in 0..<new_cap then {
-            bucket_set_tag(new_buckets + i, 0(UInt));
+            bucket_set_tag(new_buckets + i, UInt(0));
         };
         self.buckets = new_buckets;
         self.capacity = new_cap;
         self.size = 0;
         for i in 0..<old_cap then {
             let old_tag = (old_buckets + i).tag;
-            if old_tag == 1(UInt) then {
+            if old_tag == UInt(1) then {
                 let moved = take_memory(old_buckets + i);
                 self.insert_internal(moved.key, moved.value);
-            } else if old_tag == 2(UInt) then {
+            } else if old_tag == UInt(2) then {
                 // Drop the key/value that were stored in this deleted bucket
                 deinit_memory(old_buckets + i);
             };
@@ -155,11 +155,11 @@ given[K Hash, V Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                let was_occupied = bucket_ptr.tag == 1(UInt);
+                let was_occupied = bucket_ptr.tag == UInt(1);
                 if was_occupied then {
                     deinit_memory(bucket_ptr);
                 };
-                init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value));
+                init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
                 if not was_occupied then {
                     self.size = self.size + 1;
                 };
@@ -177,11 +177,11 @@ given[K Hash, V Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                let was_occupied = bucket_ptr.tag == 1(UInt);
+                let was_occupied = bucket_ptr.tag == UInt(1);
                 if was_occupied then {
                     deinit_memory(bucket_ptr);
                 };
-                init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value));
+                init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
                 if not was_occupied then {
                     self.size = self.size + 1;
                 };
@@ -199,10 +199,10 @@ given[K Hash, V Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                if bucket_ptr.tag == 1(UInt) then {
+                if bucket_ptr.tag == UInt(1) then {
                     return false;
                 } else {
-                    init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value));
+                    init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
                     self.size = self.size + 1;
                     return true;
                 };
@@ -223,7 +223,7 @@ given[K Hash, V Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                if bucket_ptr.tag == 1(UInt) then {
+                if bucket_ptr.tag == UInt(1) then {
                     return Option[V].Some(bucket_ptr.value);
                 } else {
                     return Option[V].None();
@@ -265,10 +265,10 @@ given[K Hash, V Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                if bucket_ptr.tag == 1(UInt) then {
+                if bucket_ptr.tag == UInt(1) then {
                     let v = bucket_ptr.value;
                     deinit_memory(bucket_ptr);
-                    bucket_set_tag(bucket_ptr, 2(UInt));
+                    bucket_set_tag(bucket_ptr, UInt(2));
                     self.size = self.size - 1;
                     return Option[V].Some(v);
                 } else {
@@ -283,10 +283,10 @@ given[K Hash, V Any] Dict[K, V] {
     public clear(self) Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 deinit_memory(bucket_ptr);
             };
-            bucket_set_tag(bucket_ptr, 0(UInt));
+            bucket_set_tag(bucket_ptr, UInt(0));
         };
         self.size = 0;
     };
@@ -295,10 +295,10 @@ given[K Hash, V Any] Dict[K, V] {
     public retain(self, predicate Func(K, V) Bool) Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 if not predicate(bucket_ptr.key, bucket_ptr.value) then {
                     deinit_memory(bucket_ptr);
-                    bucket_set_tag(bucket_ptr, 2(UInt));
+                    bucket_set_tag(bucket_ptr, UInt(2));
                     self.size = self.size - 1;
                 };
             };
@@ -332,7 +332,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
         let bucket_ptr = self.buckets + final_idx;
         deinit_memory(bucket_ptr);
-        init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value));
+        init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
     };
 };
 
@@ -343,7 +343,7 @@ given[K Hash, V Any] Dict[K, V] as Clone {
         let mutable result = Dict[K, V].with_capacity(self.size);
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 result.insert(bucket_ptr.key, bucket_ptr.value);
             };
         };
@@ -365,7 +365,7 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 return Option[Pair[K, V]].Some(
                     Pair[K, V](bucket_ptr.key, bucket_ptr.value),
                 );
@@ -391,7 +391,7 @@ given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 return Option[K].Some(bucket_ptr.key);
             };
         };
@@ -411,7 +411,7 @@ given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
-            if bucket_ptr.tag == 1(UInt) then {
+            if bucket_ptr.tag == UInt(1) then {
                 return Option[V].Some(bucket_ptr.value);
             };
         };

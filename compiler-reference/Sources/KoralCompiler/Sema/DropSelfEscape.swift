@@ -58,11 +58,18 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     return dropSelfEscapeInArgs(arguments, inLambda: inLambda)
 
   // `Type(Trait).method(recv, ...)` -- the base is the TYPE name and the
-  // receiver travels in the argument list.
-  case .qualifiedMethodCall(_, _, _, let arguments, _):
+  // receiver travels in the argument list. `expr(Trait).method(...)` -- the
+  // base IS the receiver and must be scanned too.
+  case .qualifiedMethodCall(let base, _, _, let arguments, _):
+    if let span = dropSelfEscapeSpanIn(base, inLambda: inLambda) {
+      return span
+    }
     return dropSelfEscapeInArgs(arguments, inLambda: inLambda)
 
-  case .qualifiedGenericMethodCall(_, _, _, _, let arguments, _):
+  case .qualifiedGenericMethodCall(let base, _, _, _, let arguments, _):
+    if let span = dropSelfEscapeSpanIn(base, inLambda: inLambda) {
+      return span
+    }
     return dropSelfEscapeInArgs(arguments, inLambda: inLambda)
 
   // A closure captures whatever it mentions; `self` may not be captured.
@@ -85,9 +92,6 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
   case .isExpression(let subject, _, _),
        .isNotExpression(let subject, _, _):
     return dropSelfEscapeSpanIn(subject, inLambda: inLambda)
-
-  case .traitQualificationExpression:
-    return nil
 
   case .staticMethodCall(_, _, _, let arguments, _),
        .implicitMemberExpression(_, let arguments, _):

@@ -276,14 +276,18 @@ Supported suffixes are `s`, `ms`, `us`, `ns`. A duration literal is sugar for a 
 
 #### Numeric Casting
 
-Different numeric types require explicit conversion using `expr(Type)` syntax:
+Different numeric types require explicit conversion using `Type(expr)` syntax:
 
 ```koral
 let a Int = 42;
-let b Float64 = a(Float64);    // Int -> Float64
-let c Int32 = a(Int32);        // Int -> Int32
-let d UInt8 = 255(UInt8);      // Int -> UInt8
+let b Float64 = Float64(a);    // Int -> Float64
+let c Int32 = Int32(a);        // Int -> Int32
+let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
+
+Pointer types use the same spelling as type annotations: `*unsafe Int(p)`,
+`*unsafe mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
+and `String(x)` are errors (`Type does not support cast`).
 
 #### Strings
 
@@ -1418,7 +1422,7 @@ declaration can implement it, and the compiler decides whether a type satisfies
 it from the type's own declaration.
 
 - `T mutable` — the subject must have been declared `type mutable`. This is what
-  weak references require (`downgrade` / `upgrade` spell it).
+  weak references require (`?T(x)` / `is ?v` spell it).
 - `T foreign` — the subject's representation is fixed outside Koral's layout
   freedom and may cross the FFI boundary: a built-in scalar, a `*unsafe` /
   `*unsafe mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
@@ -1577,17 +1581,53 @@ b.push(3);
 
 Weak references do not keep the referent alive. They are written as `?T` and are only valid for types that satisfy the `mutable` constraint.
 
-Use `downgrade(T)` to create `?T`, and `upgrade(?T)` to attempt upgrading back to `Option[T]`.
+Use `?T(x)` to construct a weak reference (a handle wrap, not a bit reinterpretation). Use `is ?v` to unpack: the pattern matches when the object is still alive and binds `v` to the strong reference.
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = downgrade(node);      // ?Node
-let upgraded = upgrade(weak);    // Option[Node]
+let weak = ?Node(node);              // ?Node
+if weak is ?v then println(v.value); // v is Node, only when alive
 ```
 
-**A weak reference is a handle, not a value.** Until it is upgraded it carries
+`w is not ?v` matches when the object is dead. `while w is ?v` loops while alive.
+
+```koral
+if weak is not ?v then println("dead");
+while weak is ?v then {
+    println(v.value);
+    break;
+};
+```
+
+`?v` also works as a `when` arm pattern. It is refutable — it covers the alive
+case but not the dead case — so keep a `_` arm for the fallback:
+
+```koral
+let value = when weak in {
+    ?v then v.value,
+    _ then 0,
+};
+```
+
+For a value with a fallback, an if-expression works the same way:
+
+```koral
+let value = if weak is ?v then v.value else 0;
+```
+
+`?v` is a bare binding (lowercase). `?Node(v)` is a typed binding that also checks the target type:
+
+```koral
+if weak is ?Node(n) then println(n.value);
+when weak in {
+    ?Node(n) then n.value,
+    _ then 0,
+};
+```
+
+**A weak reference is a handle, not a value.** Until it is unpacked it carries
 no fields, no cases and no payload of the referent, so anything that tests or
 exploits the referent's *shape* is refused against a `?T`:
 
@@ -1600,13 +1640,14 @@ exploits the referent's *shape* is refused against a `?T`:
 Binding the handle *whole* is fine and keeps the `?T`:
 
 ```koral
-let w = downgrade(node);
+let w = ?Node(node);
 let w2 ?Node = w;              // ok: the handle is copied
 let xs = List[?Node].new();
 xs.push(w);
 for h in xs then {             // ok: `h` is `?Node`
-    let v = upgrade(h);        // the only way to reach the referent
-    // ...
+    if h is ?v then {          // the only way to reach the referent
+        // ...
+    };
 };
 ```
 
@@ -1626,6 +1667,7 @@ Supported patterns include:
 - Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
+- Weak binding patterns: `?v` (unpacks a weak reference if alive), `?Node(v)` (typed)
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
 Destructuring follows exactly the call rules: a field declared named must be
@@ -2130,17 +2172,20 @@ Boundary anchoring rules:
 
 ### Fully Qualified Calls
 
-When multiple candidates conflict, use a fully qualified call. The form is conceptually Rust's qualified path `<Type as Trait>::method`:
+When multiple candidates conflict, use a fully qualified call. There are two spellings:
 
-- `Type(TraitName).method(...)` selects `TraitName`'s method on `Type`
+- `Type(TraitName).method(...)` — type-qualified. The receiver of an instance method is the first call argument; a static trait method takes no receiver.
+- `expr(TraitName).method(...)` — receiver-qualified. The receiver is the base expression and is not repeated in the arguments. Instance methods only.
+
+Both are composite: the `expr(TraitName)` / `Type(TraitName)` prefix must carry a method call.
+
 - Generic traits carry their arguments in the qualification: `Type(TraitName[Args...]).method(...)`
 - Generic method type args still appear on the method: `Type(TraitName).method[TypeArgs...](...)`
 
-There is a single written form. The receiver of an instance method is simply the first call argument, so instance and static trait methods are spelled the same way:
-
 ```
-Type(TraitName).method(receiver, ...)   // instance method
+Type(TraitName).method(receiver, ...)   // instance method (type-qualified)
 Type(TraitName).static_method(...)      // static trait method
+expr(TraitName).method(...)             // instance method (receiver-qualified)
 ```
 
 ```koral

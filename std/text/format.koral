@@ -23,14 +23,14 @@ let foreign __koral_format_float64(
 // ---------------------------------------------------------------------------
 
 // Convert a digit value (0..35) to its ASCII character.
-file_private let digit_to_char(d UInt, uppercase Bool) UInt8 = if d < 10 then d(UInt8) + '0'
-else if uppercase then (d - 10)(UInt8) + 'A' else (d - 10)(UInt8) + 'a';
+file_private let digit_to_char(d UInt, uppercase Bool) UInt8 = if d < 10 then UInt8(d) + '0'
+else if uppercase then UInt8((d - 10)) + 'A' else UInt8((d - 10)) + 'a';
 
 // Map a type character to its radix.
-file_private let type_char_to_radix(tc UInt8) UInt = if tc == 'b' then 2(UInt)
-else if tc == 'o' then 8(UInt)
-else if tc == 'd' or tc == 0 then 10(UInt)
-else if tc == 'x' or tc == 'X' then 16(UInt)
+file_private let type_char_to_radix(tc UInt8) UInt = if tc == 'b' then UInt(2)
+else if tc == 'o' then UInt(8)
+else if tc == 'd' or tc == 0 then UInt(10)
+else if tc == 'x' or tc == 'X' then UInt(16)
 else panic("unsupported type char for integer");
 
 // Return the radix prefix string for a type character.
@@ -266,7 +266,7 @@ file_private let format_float_c_body(
     precision UInt,
     alt_form Bool,
 ) String = {
-    let cstr = __koral_format_float64(value, type_char, precision(Int), alt_form);
+    let cstr = __koral_format_float64(value, type_char, Int(precision), alt_form);
     return String.from_cstring_unchecked(cstr);
 };
 
@@ -302,9 +302,9 @@ given Int as Formattable {
             digits.push_byte('0');
         } else {
             while n > 0 then {
-                let d = (n % radix(Int))(UInt);
+                let d = UInt((n % Int(radix)));
                 digits.push_byte(digit_to_char(d, uppercase));
-                n = n / radix(Int);
+                n = n / Int(radix);
             };
         };
 
@@ -339,7 +339,7 @@ given Int as Formattable {
 
 given Int8 as Formattable {
 
-    public format(self, spec String) String = self(Int).format(spec);
+    public format(self, spec String) String = Int(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -348,7 +348,7 @@ given Int8 as Formattable {
 
 given Int16 as Formattable {
 
-    public format(self, spec String) String = self(Int).format(spec);
+    public format(self, spec String) String = Int(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -357,7 +357,7 @@ given Int16 as Formattable {
 
 given Int32 as Formattable {
 
-    public format(self, spec String) String = self(Int).format(spec);
+    public format(self, spec String) String = Int(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -366,7 +366,7 @@ given Int32 as Formattable {
 
 given Int64 as Formattable {
 
-    public format(self, spec String) String = self(Int).format(spec);
+    public format(self, spec String) String = Int(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ given UInt as Formattable {
 
 given UInt8 as Formattable {
 
-    public format(self, spec String) String = self(UInt).format(spec);
+    public format(self, spec String) String = UInt(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -442,7 +442,7 @@ given UInt8 as Formattable {
 
 given UInt16 as Formattable {
 
-    public format(self, spec String) String = self(UInt).format(spec);
+    public format(self, spec String) String = UInt(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -451,7 +451,7 @@ given UInt16 as Formattable {
 
 given UInt32 as Formattable {
 
-    public format(self, spec String) String = self(UInt).format(spec);
+    public format(self, spec String) String = UInt(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -460,7 +460,7 @@ given UInt32 as Formattable {
 
 given UInt64 as Formattable {
 
-    public format(self, spec String) String = self(UInt).format(spec);
+    public format(self, spec String) String = UInt(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -498,7 +498,7 @@ file_private let format_auto_body(
     grouping UInt8,
 ) String = {
     let tc UInt8 = if uppercase then 'G' else 'g';
-    let p = if precision == 0 then 1(UInt) else precision;
+    let p = if precision == 0 then UInt(1) else precision;
     let body = format_float_c_body(f, tc, p, alt_form);
     return apply_grouping_to_float_body(body, grouping);
 };
@@ -526,7 +526,7 @@ given Float64 as Formattable {
             return apply_numeric_padding(prefix, body, fmt);
         };
         let bits = self.to_bits();
-        let is_negative = (bits >> 63) == 1(UInt64);
+        let is_negative = (bits >> 63) == UInt64(1);
         if self.is_inf() then {
             let upper = tc == 'F' or tc == 'E' or tc == 'G';
             let body = if tc == '%' then (if upper then "INF" else "inf") + "%"
@@ -536,7 +536,7 @@ given Float64 as Formattable {
         };
 
         let f = if is_negative then 0.0 - self else self;
-        let precision = if fmt.precision >= 0 then fmt.precision(UInt) else 6(UInt);
+        let precision = if fmt.precision >= 0 then UInt(fmt.precision) else UInt(6);
 
         // Percentage mode: multiply by 100
         let value = if tc == '%' then f * 100.0 else f;
@@ -567,7 +567,7 @@ given Float64 as Formattable {
 
 given Float32 as Formattable {
 
-    public format(self, spec String) String = self(Float64).format(spec);
+    public format(self, spec String) String = Float64(self).format(spec);
 };
 
 // ---------------------------------------------------------------------------
@@ -600,8 +600,8 @@ given String as Formattable {
             fmt.align = '<';
         };
 
-        let out = if fmt.precision >= 0 and fmt.precision(UInt) < self.count() then self.substring(
-            0..<fmt.precision(UInt),
+        let out = if fmt.precision >= 0 and UInt(fmt.precision) < self.count() then self.substring(
+            0..<UInt(fmt.precision),
         ) else self;
 
         return apply_padding(out, fmt);

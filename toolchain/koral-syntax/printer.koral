@@ -401,6 +401,22 @@ given Printer {
             self.write_space();
             self.print_type(bound_type);
         },
+        .WeakBinding(question, name, lparen, target_type, rparen) then {
+            // `?name`, or `?TypeName(name)` when a target type is checked.
+            self.write_token(question);
+            if target_type is .Some(tt) then {
+                self.print_type(tt);
+                if lparen is .Some(lp) then {
+                    self.write_token(lp);
+                };
+                self.write_token(name);
+                if rparen is .Some(rp) then {
+                    self.write_token(rp);
+                };
+            } else {
+                self.write_token(name);
+            };
+        },
     };
 
     // ========================================================================
@@ -483,13 +499,20 @@ given Printer {
             self.print_expr(operand);
         },
         .TypeCast(lp, cast_type, rp, operand) then {
-            self.print_expr(operand);
-            self.write_token(lp);
+            // `cast_type(operand)` -- the target type leads, the value is the
+            // parenthesized operand. Same width rule as a call: inline when it
+            // fits, one operand per line when it does not.
             self.print_type(cast_type);
+            self.write_token(lp);
+            let args = List[CstCallArg].new();
+            args.push(.Value(.None(), .None(), operand, .None()));
+            self.print_call_args(args, true);
             self.write_token(rp);
         },
         .QualifiedTrait(lp, trait_type, rp, operand) then {
-            // Same surface as a cast: `Type(Trait)`.
+            // The `base(trait)` prefix of the composite `base(trait).method(...)`
+            // -- printed as its prefix here; the enclosing FieldAccess + Call
+            // write the rest.
             self.print_expr(operand);
             self.write_token(lp);
             self.print_type(trait_type);
@@ -1778,7 +1801,7 @@ given Printer {
                 };
                 len
             },
-            .None() then 0(UInt),
+            .None() then UInt(0),
         };
     };
 

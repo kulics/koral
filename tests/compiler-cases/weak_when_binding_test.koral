@@ -1,0 +1,51 @@
+// EXPECT: PASS
+// `?v` works as a `when` arm pattern. It is refutable: it covers the alive
+// case but not the dead case, so a `_` arm is the fallback. Also covers the
+// typed spelling `?T(v)` and `is not ?v`.
+
+type mutable Box(mutable value Int);
+
+let main() Int = {
+    let b = Box(42);
+    let w ?Box = ?Box(b);
+
+    // when + bare binding
+    let r = when w in {
+        ?v then v.value,
+        _ then -1,
+    };
+    if r <> 42 then {
+        eprintln("FAIL: when ?v expected 42, got \(r)");
+        return 1;
+    };
+
+    // when + typed binding
+    let r2 = when w in {
+        ?Box(v) then v.value + 1,
+        _ then -2,
+    };
+    if r2 <> 43 then {
+        eprintln("FAIL: when ?Box(v) expected 43, got \(r2)");
+        return 2;
+    };
+
+    // is not ?v on a live handle
+    if w is not ?v then {
+        eprintln("FAIL: live handle reported dead");
+        return 3;
+    };
+
+    // while + ?v
+    let mutable count = 0;
+    while w is ?v then {
+        count = count + 1;
+        break;
+    };
+    if count <> 1 then {
+        eprintln("FAIL: while ?v expected 1 iteration, got \(count)");
+        return 4;
+    };
+
+    println("PASS");
+    return 0;
+};

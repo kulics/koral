@@ -134,7 +134,7 @@ file_private let mir_nearest_active_common_scope(
     while scope_opt is .Some(_) then {
         let scope = when scope_opt in {
             .Some(existing) then existing,
-            .None() then MIRScopeID(0(UInt)),
+            .None() then MIRScopeID(UInt(0)),
         };
         if mir_active_scope_contains(active_scopes, scope) then {
             return Option[MIRScopeID].Some(scope);
@@ -176,7 +176,7 @@ file_private let mir_record_local_use(
                     if not active_scopes.is_empty() then {
                         shared_use_scope_by_local.insert(
                             local.raw_value,
-                            active_scopes[active_scopes.count() - 1(UInt)],
+                            active_scopes[active_scopes.count() - UInt(1)],
                         );
                     };
                 },
@@ -799,7 +799,7 @@ given MIRFunctionCodeEmitter {
             plan.non_owning_local_ids,
             plan.tracked_init_locals,
             plan.lifetime_plan,
-            0(UInt),
+            UInt(0),
             StringBuilder.new(),
             when codegen.current_function_owner_type in {
                 .Some(owner_type) then Option[String].Some(
@@ -1715,18 +1715,18 @@ given MIRFunctionCodeEmitter {
                 };
                 if call.arguments.count() == 1 then {
                     let ownership = if has_ownerships then call.argument_ownerships[
-                        0(UInt)
+                        UInt(0)
                     ] else MIROwnershipUse.Move();
                     let emission = self.emit_direct_call_argument(
-                        call.arguments[0(UInt)],
+                        call.arguments[UInt(0)],
                         ownership,
                     );
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
-                    let mutable arg_type = self.type_of_value(call.arguments[0(UInt)]);
+                    let mutable arg_type = self.type_of_value(call.arguments[UInt(0)]);
                     let mutable expected_param_type = self.codegen.function_type_param_type(
                         function_type,
-                        0(UInt),
+                        UInt(0),
                     ) or else Type.Unknown();
                     let needs_wrap = is_borrowed_reference_like_type(
                         expected_param_type,
@@ -1747,11 +1747,11 @@ given MIRFunctionCodeEmitter {
                         call.result_type,
                     );
                     if ownership is .Move() or ownership is .Take() then {
-                        self.consume_moved_source(call.arguments[0(UInt)]);
+                        self.consume_moved_source(call.arguments[UInt(0)]);
                     };
                     self.emit_residual_cleanups(
                         final_emission,
-                        self.call_arg_consumed(ownership, call.arguments[0(UInt)]),
+                        self.call_arg_consumed(ownership, call.arguments[UInt(0)]),
                     );
                     return MIRValueEmission(
                         expression,
@@ -1760,31 +1760,31 @@ given MIRFunctionCodeEmitter {
                 };
                 if call.arguments.count() == 2 then {
                     let first_ownership = if has_ownerships then call.argument_ownerships[
-                        0(UInt)
+                        UInt(0)
                     ] else MIROwnershipUse.Move();
                     let second_ownership = if has_ownerships then call.argument_ownerships[
-                        1(UInt)
+                        UInt(1)
                     ] else MIROwnershipUse.Move();
                     let first_emission = self.emit_direct_call_argument(
-                        call.arguments[0(UInt)],
+                        call.arguments[UInt(0)],
                         first_ownership,
                     );
                     let second_emission = self.emit_direct_call_argument(
-                        call.arguments[1(UInt)],
+                        call.arguments[UInt(1)],
                         second_ownership,
                     );
                     // Auto-wrap borrowed reference parameters.
-                    let mutable first_type = self.type_of_value(call.arguments[0(UInt)]);
+                    let mutable first_type = self.type_of_value(call.arguments[UInt(0)]);
                     let mutable second_type = self.type_of_value(
-                        call.arguments[1(UInt)],
+                        call.arguments[UInt(1)],
                     );
                     let first_expected = self.codegen.function_type_param_type(
                         function_type,
-                        0(UInt),
+                        UInt(0),
                     ) or else Type.Unknown();
                     let second_expected = self.codegen.function_type_param_type(
                         function_type,
-                        1(UInt),
+                        UInt(1),
                     ) or else Type.Unknown();
                     let first = if is_borrowed_reference_like_type(first_expected) and not is_reference_like_type(
                         first_type,
@@ -1817,18 +1817,18 @@ given MIRFunctionCodeEmitter {
                         call.result_type,
                     );
                     if first_ownership is .Move() or first_ownership is .Take() then {
-                        self.consume_moved_source(call.arguments[0(UInt)]);
+                        self.consume_moved_source(call.arguments[UInt(0)]);
                     };
                     if second_ownership is .Move() or second_ownership is .Take() then {
-                        self.consume_moved_source(call.arguments[1(UInt)]);
+                        self.consume_moved_source(call.arguments[UInt(1)]);
                     };
                     self.emit_residual_cleanups(
                         first,
-                        self.call_arg_consumed(first_ownership, call.arguments[0(UInt)]),
+                        self.call_arg_consumed(first_ownership, call.arguments[UInt(0)]),
                     );
                     self.emit_residual_cleanups(
                         second,
-                        self.call_arg_consumed(second_ownership, call.arguments[1(UInt)]),
+                        self.call_arg_consumed(second_ownership, call.arguments[UInt(1)]),
                     );
                     return MIRValueEmission(
                         expression,
@@ -2776,8 +2776,8 @@ given MIRFunctionCodeEmitter {
         let mutable dispatch_method_name = method_name;
         let mutable signature_return_type = result_type;
         let mutable signature_param_types = List[Type].new();
-        if method_index >= 0 and method_index(UInt) < members.count() then {
-            let member = members[method_index(UInt)];
+        if method_index >= 0 and UInt(method_index) < members.count() then {
+            let member = members[UInt(method_index)];
             dispatch_method_name = member.name;
             signature_return_type = member.return_type or else signature_return_type;
             for p in member.parameters then {
@@ -4065,8 +4065,8 @@ given MIRFunctionCodeEmitter {
             .EnumType(id) then id,
             .GenericEnum(_, _) then self.codegen.find_type_def_id_by_layout_or_template(
                 enum_type,
-            ) or else DefId(0(UInt)),
-            _ then DefId(0(UInt)),
+            ) or else DefId(UInt(0)),
+            _ then DefId(UInt(0)),
         };
         when self.codegen.context.get_enum_cases(def_id) in {
             .Some(cases) then {
@@ -4080,7 +4080,7 @@ given MIRFunctionCodeEmitter {
             },
             .None() then {},
         };
-        return Pair[UInt, List[EnumCaseParam]](0(UInt), List[EnumCaseParam].new());
+        return Pair[UInt, List[EnumCaseParam]](UInt(0), List[EnumCaseParam].new());
     };
 
     module_private type_list_to_ref_list(self, args List[Type]) List[Type] = {
@@ -4552,7 +4552,7 @@ file_private let build_mir_lifetime_plan(
                     if not active_scopes.is_empty() then {
                         parent_scope_by_scope.insert(
                             scope.raw_value,
-                            active_scopes[active_scopes.count() - 1(UInt)],
+                            active_scopes[active_scopes.count() - UInt(1)],
                         );
                     };
                     active_scopes.push(scope);
@@ -4574,7 +4574,7 @@ file_private let build_mir_lifetime_plan(
                     if not active_scopes.is_empty() then {
                         declared_scope_by_local.insert(
                             local_id.raw_value,
-                            active_scopes[active_scopes.count() - 1(UInt)],
+                            active_scopes[active_scopes.count() - UInt(1)],
                         );
                     };
                     mir_record_local_use(
@@ -4725,7 +4725,7 @@ file_private let build_mir_lifetime_plan(
                 while scope is .Some(_) then {
                     let scope_id = when scope in {
                         .Some(existing) then existing,
-                        .None() then MIRScopeID(0(UInt)),
+                        .None() then MIRScopeID(UInt(0)),
                     };
                     let retained_scope = when shared_use_scope_opt in {
                         .Some(shared_use_scope) then shared_use_scope.raw_value == scope_id.raw_value,
@@ -4806,7 +4806,7 @@ given CodeGen {
         if params.is_empty() then {
             return Option[Type].None();
         };
-        let first_param = params[0(UInt)];
+        let first_param = params[UInt(0)];
         if not (first_param.name == "self" or first_param.name == "source") then {
             return Option[Type].None();
         };

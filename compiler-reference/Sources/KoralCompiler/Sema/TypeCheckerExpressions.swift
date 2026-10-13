@@ -1090,13 +1090,58 @@ extension TypeChecker {
     expectedType: Type?,
     usage: ExpressionUsage
   ) throws -> TypedExpressionNode {
-    let typedSubject = try inferTypedExpression(subject)
+    var typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
-    try rejectWeakPatternSubject(subjectType, span: pattern.span)
+    try rejectWeakPatternSubject(subjectType, pattern: pattern, span: pattern.span)
     if !untypedPatternRequiresRawSubject(pattern),
        let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
+    }
+
+    // `?name` / `?TypeName(name)` unpacks a weak handle. The typed subject is
+    // the upgrade intrinsic (so `Option[T]` gets instantiated); the pattern
+    // stays `weakBinding` so MIR can extract the Some payload.
+    if case .weakBinding(let bindName, _, let span) = pattern {
+      guard let strongType = weakReferenceInnerType(typedSubject.type) else {
+        throw SemanticError(.generic(
+          "Weak binding pattern '?\(bindName)' requires a weak reference subject"
+        ), span: span)
+      }
+      let upgradeType = genericEnumType(template: "Option", args: [strongType])
+      let upgradeCall = TypedExpressionNode.intrinsicCall(
+        .upgradeRef(val: typedSubject, resultType: upgradeType))
+      let symbol = makeLocalSymbol(name: bindName, type: strongType, kind: .variable(.Value))
+      let typedPattern = TypedPattern.weakBinding(symbol: symbol)
+      typedSubject = upgradeCall
+      let branchUsage: ExpressionUsage = usage == .statement ? .statement : .value
+      let typedThen = try withNewScope {
+        if let name = context.getName(symbol.defId) {
+          try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
+        }
+        return try normalizeBranchExpression(try thenBuilder(branchUsage), expectedType: expectedType)
+      }
+      let typedElse: TypedExpressionNode?
+      if let elseBranch {
+        let elseUsage: ExpressionUsage = usage == .statement ? .statement : .value
+        let rawElse: TypedExpressionNode
+        if elseUsage == .statement {
+          rawElse = try inferCheckedStatementBodyExpression(elseBranch)
+        } else {
+          rawElse = try inferTypedExpression(elseBranch, expectedType: expectedType)
+        }
+        typedElse = try normalizeBranchExpression(rawElse, expectedType: expectedType)
+      } else {
+        typedElse = nil
+      }
+      return .ifPatternExpression(
+        subject: typedSubject,
+        pattern: typedPattern,
+        bindings: [(bindName, false, strongType)],
+        thenBranch: typedThen,
+        elseBranch: typedElse,
+        type: typedThen.type
+      )
     }
 
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
@@ -1195,6 +1240,7 @@ extension TypeChecker {
   private func untypedPatternContainsBindings(_ pattern: PatternNode) -> Bool {
     switch pattern {
     case .variable,
+         .weakBinding,
          .traitObjectTypeBinding:
       return true
     case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
@@ -1228,6 +1274,7 @@ extension TypeChecker {
     case .notPattern(let inner, _):
       return untypedPatternRequiresRawSubject(inner)
     case .variable,
+         .weakBinding,
          .wildcard,
          .booleanLiteral,
          .integerLiteral,
@@ -1474,6 +1521,19 @@ extension TypeChecker {
     case .castExpression(let typeNode, let innerExpr, _):
       let targetType = try resolveTypeNode(typeNode)
 
+      // `?T(expr)` is weak-reference construction (a handle wrap, not a bit
+      // reinterpretation). It lowers to the same intrinsic `downgrade` used.
+      if case .weakReference(let innerType) = targetType {
+        let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+        try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+        return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
+      }
+      if case .mutableWeakReference(let innerType) = targetType {
+        let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+        try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+        return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
+      }
+
       if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
         return optimized
       }
@@ -1481,11 +1541,9 @@ extension TypeChecker {
       let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
 
       if !isValidExplicitCast(from: typedInner.type, to: targetType) {
-        throw SemanticError.invalidOperation(
-          op: "cast",
-          type1: typedInner.type.description,
-          type2: targetType.description
-        )
+        throw SemanticError(.generic(
+          "Type '\(targetType.description)' does not support cast"
+        ), span: currentSpan)
       }
 
       // Cast always produces an rvalue.
@@ -1533,12 +1591,13 @@ extension TypeChecker {
         return .blockExpression(statements: [stmt], tailExpression: nil, type: blockType)
       }
 
-      let typedSubject = try inferTypedExpression(subject)
+      var typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
+      // `?name` patterns on a weak reference: wrap the subject in the upgrade
+      // intrinsic so `Option[T]` gets instantiated. The `weakBinding` typed
+      // pattern then reads the Some payload from the upgrade result.
       if !cases.contains(where: { untypedPatternRequiresRawSubject($0.pattern) }) {
-        // A weak reference is NOT peeled here: it is opaque until `upgrade`d,
-        // and `checkPattern` rejects it as a shape-testing subject.
         switch subjectType {
         case .reference(let inner),
              .mutableReference(let inner),
@@ -1548,6 +1607,16 @@ extension TypeChecker {
         default:
           break
         }
+      }
+      let hasWeakBinding = cases.contains { c in
+        if case .weakBinding = c.pattern { return true }
+        return false
+      }
+      if hasWeakBinding, let strongType = weakReferenceInnerType(typedSubject.type) {
+        let upgradeType = genericEnumType(template: "Option", args: [strongType])
+        typedSubject = TypedExpressionNode.intrinsicCall(
+          .upgradeRef(val: typedSubject, resultType: upgradeType))
+        subjectType = typedSubject.type
       }
 
       var typedCases: [TypedMatchCase] = []
@@ -1636,7 +1705,13 @@ extension TypeChecker {
         // the body in view: the statements after this one, and the mistakes in
         // the statement this one sits in. A speculative query never gets here --
         // it re-throws instead of reporting.
-        try handleError(SemanticError.undefinedVariable(name))
+        if currentScope.resolveType(name, sourceFile: currentSourceFile) != nil {
+          try handleError(SemanticError(.generic(
+            "Type '\(name)' cannot be used as an expression: types have no value"
+          ), span: nameSpan))
+        } else {
+          try handleError(SemanticError.undefinedVariable(name))
+        }
         return failedExpression()
       }
 
@@ -2024,29 +2099,24 @@ extension TypeChecker {
         callArgs: arguments
       )
 
-    case .traitQualificationExpression:
-      throw SemanticError(.generic(
-        "Trait qualification must be followed by a method call"
-      ), span: currentSpan)
-
-    case .qualifiedMethodCall(let typeNode, let traitType, let methodName, let arguments, _):
+    case .qualifiedMethodCall(let base, let traitType, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
       return try inferQualifiedMethodCallExpression(
-        typeNode: typeNode,
+        base: base,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: nil,
         callArgs: arguments
       )
 
-    case .qualifiedGenericMethodCall(let typeNode, let traitType, let methodTypeArgs, let methodName, let arguments, _):
+    case .qualifiedGenericMethodCall(let base, let traitType, let methodTypeArgs, let methodName, let arguments, _):
       if arguments.contains(where: { $0.expression == nil }) {
         throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
       }
       return try inferQualifiedMethodCallExpression(
-        typeNode: typeNode,
+        base: base,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
@@ -2108,8 +2178,7 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      try rejectWeakPatternSubject(subjectType, span: pattern.span)
-    try rejectWeakPatternSubject(subjectType, span: pattern.span)
+      try rejectWeakPatternSubject(subjectType, pattern: pattern, span: pattern.span)
       if !untypedPatternRequiresRawSubject(pattern),
          let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
@@ -2130,12 +2199,27 @@ extension TypeChecker {
 
     case .isNotExpression(let subject, let pattern, _):
       // Type check the subject expression
-      let typedSubject = try inferTypedExpression(subject)
+      var typedSubject = try inferTypedExpression(subject)
+
+      // `w is not ?v` means the object is dead. Keep `weakBinding` with the
+      // negation so MIR tests liveness directly (no Option enum resolution).
+      if case .weakBinding(let bindName, _, let span) = pattern {
+        guard let strongType = weakReferenceInnerType(typedSubject.type) else {
+          throw SemanticError(.generic(
+            "Weak binding pattern '?\(bindName)' requires a weak reference subject"
+          ), span: span)
+        }
+        let upgradeType = genericEnumType(template: "Option", args: [strongType])
+        let upgradeCall = TypedExpressionNode.intrinsicCall(
+          .upgradeRef(val: typedSubject, resultType: upgradeType))
+        let symbol = makeLocalSymbol(name: bindName, type: strongType, kind: .variable(.Value))
+        let weakPattern = TypedPattern.weakBinding(symbol: symbol)
+        return .isNotExpression(subject: upgradeCall, pattern: weakPattern, type: .bool)
+      }
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      try rejectWeakPatternSubject(subjectType, span: pattern.span)
-    try rejectWeakPatternSubject(subjectType, span: pattern.span)
+      try rejectWeakPatternSubject(subjectType, pattern: pattern, span: pattern.span)
       if !untypedPatternRequiresRawSubject(pattern),
          let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
@@ -3237,19 +3321,80 @@ extension TypeChecker {
 
   /// Fully qualified call `Type(Trait).method(args...)`, conceptually Rust's
   /// `<Type as Trait>::method(args...)`.
+  /// The type node a qualified-call base names, or nil when the base is an
+  /// ordinary expression (the receiver-qualified form `expr(Trait).method`).
+  private func qualifiedBaseTypeNode(_ expr: ExpressionNode) -> TypeNode? {
+    switch expr {
+    case .identifier(let name, let span):
+      return isASCIITypeStyleIdentifier(name) ? .identifier(name, span: span) : nil
+    case .genericInstantiation(let name, let typeArgs, let span):
+      return .generic(base: name, args: typeArgs, span: span)
+    default:
+      return nil
+    }
+  }
+
+  /// `Type(expr)` -- the explicit cast form of a type application. The parser
+  /// leaves `Type(...)` as a call; the type checker routes builtin scalar
+  /// targets here and structural targets to the constructor path.
+  private func inferTypeApplicationCast(
+    targetType: Type,
+    callArgs: [CallArg],
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard callArgs.count == 1,
+          let arg = callArgs.first,
+          arg.label == nil,
+          let innerExpr = arg.expression else {
+      throw SemanticError(.generic(
+        "A cast takes exactly one positional argument: write 'Type(expr)'"
+      ), span: span)
+    }
+    if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
+      return optimized
+    }
+    let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+    if !isValidExplicitCast(from: typedInner.type, to: targetType) {
+      throw SemanticError.invalidOperation(
+        op: "cast",
+        type1: typedInner.type.description,
+        type2: targetType.description
+      )
+    }
+    // Cast always produces an rvalue.
+    return .castExpression(expression: typedInner, type: targetType)
+  }
+
   ///
-  /// The written form is the same for instance and static trait methods: the
-  /// receiver of an instance method is simply the first call argument, so no
-  /// separate static/instance spelling exists.
+  /// Two spellings share this composite node:
+  ///   Type(Trait).method(args)  -- base names the self type; an instance
+  ///     method's receiver is the first call argument, a static trait method
+  ///     takes no receiver.
+  ///   expr(Trait).method(args)  -- base IS the receiver; its type gives the
+  ///     self type and it is not repeated in the arguments.
   func inferQualifiedMethodCallExpression(
-    typeNode: TypeNode,
+    base: ExpressionNode,
     traitType: TypeNode,
     methodName: String,
     methodTypeArgs: [TypeNode]?,
     callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     let (traitName, resolvedTraitDefId, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
-    let selfType = try resolveTypeNode(typeNode)
+
+    // `Type(Trait).method(...)` names the self type on the left;
+    // `expr(Trait).method(...)` IS the receiver, so its type is the self type
+    // and it becomes the first argument.
+    var preTypedReceiver: TypedExpressionNode? = nil
+    let selfType: Type
+    var effectiveArgs = callArgs
+    if let typeNode = qualifiedBaseTypeNode(base) {
+      selfType = try resolveTypeNode(typeNode)
+    } else {
+      let typedReceiver = try inferTypedExpression(base)
+      preTypedReceiver = typedReceiver
+      selfType = typedReceiver.type
+      effectiveArgs.insert(CallArg(expression: base, span: base.span), at: 0)
+    }
     let resolvedMethodTypeArgs = try methodTypeArgs.map { try $0.map { try resolveTypeNode($0) } }
 
     let declared = try qualifiedTraitMethodType(
@@ -3270,7 +3415,7 @@ extension TypeChecker {
     // method's first parameter.
     let paramMeta = callParamMeta(from: declared.parameters, argumentCount: params.count)
     let arguments = try planCallArgumentExpressions(
-      callArgs,
+      effectiveArgs,
       paramNames: paramMeta.names,
       paramIsNamed: paramMeta.isNamed,
       callDescription: methodName,
@@ -3285,8 +3430,15 @@ extension TypeChecker {
     }
 
     var typedArguments: [TypedExpressionNode] = []
-    for (arg, param) in zip(arguments, params) {
-      var typedArg = try inferTypedExpression(arg)
+    for (index, (arg, param)) in zip(arguments, params).enumerated() {
+      // The receiver-qualified form already type-checked its receiver to learn
+      // the self type; do not check it a second time (it may move).
+      var typedArg: TypedExpressionNode
+      if index == 0, let receiver = preTypedReceiver {
+        typedArg = receiver
+      } else {
+        typedArg = try inferTypedExpression(arg)
+      }
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
         throw SemanticError.typeMismatch(
@@ -3880,12 +4032,19 @@ extension TypeChecker {
       }
 
       if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+        // `Type(expr)` on a builtin scalar is the explicit cast form. Cast and
+        // construction share `Type(...)`; the type's kind decides which it is.
+        if let resolvedType = currentScope.resolveType(name, sourceFile: currentSourceFile),
+           isIntegerScalarType(resolvedType) || isFloatScalarType(resolvedType) {
+          return try inferTypeApplicationCast(targetType: resolvedType, callArgs: callArgs, span: callee.span)
+        }
         if case .opaque = type {
           throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: type.description), span: currentSpan)
         }
         guard case .structure(let defId) = type else {
-          throw SemanticError.invalidOperation(
-            op: "construct", type1: type.description, type2: "")
+          throw SemanticError(.generic(
+            "Type '\(name)' does not support cast: only numeric and pointer types can be cast"
+          ), span: callee.span)
         }
         let parameters = context.getStructMembers(defId) ?? []
 
@@ -8514,6 +8673,9 @@ extension TypeChecker {
   /// Converts an AST pattern to a typed pattern.
   func convertPatternToTypedPattern(_ pattern: PatternNode, expectedType: Type) throws -> TypedPattern {
     switch pattern {
+    case .weakBinding(let name, _, _):
+      let symbol = makeLocalSymbol(name: name, type: expectedType, kind: .variable(.Value))
+      return .weakBinding(symbol: symbol)
     case .variable(let name, let mutable, _):
       let varKind: VariableKind = mutable ? .MutableValue : .Value
       let symbol = makeLocalSymbol(name: name, type: expectedType, kind: .variable(varKind))
@@ -8583,6 +8745,9 @@ extension TypeChecker {
   /// Binds pattern variables in the current scope.
   func bindPatternVariables(pattern: PatternNode, type: Type) throws {
     switch pattern {
+    case .weakBinding(let name, _, _):
+      let symbol = makeLocalSymbol(name: name, type: type, kind: .variable(.Value))
+      try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
     case .variable(let name, let mutable, _):
       let symbol = makeLocalSymbol(
         name: name,

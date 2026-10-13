@@ -45,10 +45,10 @@ given ClockTime {
         if nanosecond < 0 or nanosecond > 999_999_999 then {
             return Result[ClockTime].Error("invalid time: nanoseconds out of range");
         };
-        let mutable total = hour(Int64) * 3_600_000_000_000(Int64);
-        total = total + minute(Int64) * 60_000_000_000(Int64);
-        total = total + second(Int64) * 1_000_000_000(Int64);
-        total = total + nanosecond(Int64);
+        let mutable total = Int64(hour) * Int64(3_600_000_000_000);
+        total = total + Int64(minute) * Int64(60_000_000_000);
+        total = total + Int64(second) * Int64(1_000_000_000);
+        total = total + Int64(nanosecond);
         return Result[ClockTime].Ok(ClockTime(total));
     };
 
@@ -63,16 +63,16 @@ given ClockTime {
 given ClockTime {
 
     /// Returns the hour (0-23).
-    public hour(self) Int = (self.nanos_since_midnight / (3_600(Int64) * 1_000_000_000(Int64)))(Int);
+    public hour(self) Int = Int((self.nanos_since_midnight / (Int64(3_600) * Int64(1_000_000_000))));
 
     /// Returns the minute (0-59).
-    public minute(self) Int = ((self.nanos_since_midnight % (3_600(Int64) * 1_000_000_000(Int64))) / (60(Int64) * 1_000_000_000(Int64)))(Int);
+    public minute(self) Int = Int(((self.nanos_since_midnight % (Int64(3_600) * Int64(1_000_000_000))) / (Int64(60) * Int64(1_000_000_000))));
 
     /// Returns the second (0-59).
-    public second(self) Int = ((self.nanos_since_midnight % (60(Int64) * 1_000_000_000(Int64))) / 1_000_000_000(Int64))(Int);
+    public second(self) Int = Int(((self.nanos_since_midnight % (Int64(60) * Int64(1_000_000_000))) / Int64(1_000_000_000)));
 
     /// Returns the nanosecond (0-999_999_999).
-    public nanosecond(self) Int = (self.nanos_since_midnight % 1_000_000_000(Int64))(Int);
+    public nanosecond(self) Int = Int((self.nanos_since_midnight % Int64(1_000_000_000)));
 };
 
 // ============================================================================
@@ -80,7 +80,7 @@ given ClockTime {
 // ============================================================================
 
 let wrap_time_nanos(n Int64) Int64 = {
-    let day Int64 = 86_400(Int64) * 1_000_000_000(Int64);
+    let day Int64 = Int64(86_400) * Int64(1_000_000_000);
     let r = n % day;
     return if r < 0 then r + day else r;
 };
@@ -89,7 +89,7 @@ given ClockTime as Add[Duration] {
 
     /// [Duration]Add: add — ClockTime + Duration. Wraps around at midnight.
     public add(self, v Duration) ClockTime = {
-        let delta = v.secs * 1_000_000_000(Int64) + v.nanos;
+        let delta = v.secs * Int64(1_000_000_000) + v.nanos;
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight + delta));
     };
 };
@@ -98,7 +98,7 @@ given ClockTime as Sub[Duration] {
 
     /// [Duration]Sub: sub — ClockTime - Duration. Wraps around at midnight.
     public sub(self, v Duration) ClockTime = {
-        let delta = v.secs * 1_000_000_000(Int64) + v.nanos;
+        let delta = v.secs * Int64(1_000_000_000) + v.nanos;
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight - delta));
     };
 };
@@ -110,8 +110,8 @@ given ClockTime {
         let diff = wrap_time_nanos(
             other.nanos_since_midnight - self.nanos_since_midnight,
         );
-        let secs = diff / 1_000_000_000(Int64);
-        let nanos = diff % 1_000_000_000(Int64);
+        let secs = diff / Int64(1_000_000_000);
+        let nanos = diff % Int64(1_000_000_000);
         return Duration(secs, nanos);
     };
 };
@@ -185,7 +185,7 @@ given ClockTime as Parseable {
 
     /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
     public parse(s String) Result[ClockTime] = {
-        let len = s.count()(Int);
+        let len = Int(s.count());
         if len < 8 then {
             return Result[ClockTime].Error("invalid time: expected HH:MM:SS");
         };
@@ -193,14 +193,14 @@ given ClockTime as Parseable {
         if hr.value < 0 then {
             return Result[ClockTime].Error("invalid time: expected 2-digit hour");
         };
-        if s[2] <> 58(UInt8) then {
+        if s[2] <> UInt8(58) then {
             return Result[ClockTime].Error("invalid time: expected ':' after hour");
         };
         let mi = parse_digits(s, 3, 2);
         if mi.value < 0 then {
             return Result[ClockTime].Error("invalid time: expected 2-digit minute");
         };
-        if s[5] <> 58(UInt8) then {
+        if s[5] <> UInt8(58) then {
             return Result[ClockTime].Error("invalid time: expected ':' after minute");
         };
         let se = parse_digits(s, 6, 2);
@@ -210,7 +210,7 @@ given ClockTime as Parseable {
 
         let mutable pos = 8;
         let mutable nanos = 0;
-        if pos < len and s[pos(UInt)] == 46(UInt8) then {
+        if pos < len and s[UInt(pos)] == UInt8(46) then {
             pos = pos + 1;
             let frac = parse_frac_digits(s, pos);
             if frac.value < 0 then {

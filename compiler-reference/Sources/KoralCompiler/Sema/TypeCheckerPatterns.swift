@@ -97,6 +97,10 @@ extension TypeChecker {
     switch pattern {
     case .variable, .wildcard:
       return false
+    case .weakBinding:
+      // `?name` is the one pattern allowed to test a weak handle; it probes
+      // liveness, not the shape hiding behind the handle.
+      return false
     default:
       return true
     }
@@ -111,11 +115,23 @@ extension TypeChecker {
     }
   }
 
+  /// The strong type a weak reference wraps, or nil if `type` is not weak.
+  func weakReferenceInnerType(_ type: Type) -> Type? {
+    switch type {
+    case .weakReference(let inner), .mutableWeakReference(let inner):
+      return inner
+    default:
+      return nil
+    }
+  }
+
 
   /// A weak reference is opaque until `upgrade`d. Reject it as a pattern
   /// subject before anything peels it, so the diagnostic names the weak
-  /// reference the user wrote and not the type hiding behind it.
-  func rejectWeakPatternSubject(_ type: Type, span: SourceSpan) throws {
+  /// reference the user wrote and not the type hiding behind it. The `?name`
+  /// unpacking pattern is the one pattern that legitimately tests a weak handle.
+  func rejectWeakPatternSubject(_ type: Type, pattern: PatternNode? = nil, span: SourceSpan) throws {
+    if case .weakBinding = pattern { return }
     if isWeakReferenceType(type) {
       throw SemanticError(
         .generic("Cannot match a pattern against a weak reference: upgrade it first"),
@@ -129,6 +145,37 @@ extension TypeChecker {
   ) {
     var bindings: [(String, Bool, Type)] = []
 
+    // `?name` / `?TypeName(name)` unpacks a weak reference. It is the only
+    // pattern that tests a weak handle; everything else that probes shape is
+    // rejected below. The subject may be the weak handle `?T` or the already
+    // upgraded `Option[T]` (the `when` desugaring wraps it).
+    if case .weakBinding(let name, let targetType, let span) = pattern {
+      let strongType: Type
+      if let inner = weakReferenceInnerType(subjectType) {
+        strongType = inner
+      } else if case .genericEnum(let tplDefId, let args) = subjectType, args.count == 1,
+                tplDefId == currentScope.lookupGenericEnumTemplate("Option")?.defId {
+        strongType = args[0]
+      } else {
+        throw SemanticError(.generic(
+          "Weak binding pattern '?\(name)' requires a weak reference subject"
+        ), span: span)
+      }
+      var bindingType = strongType
+      if let targetType {
+        let resolvedTarget = try resolveTypeNode(targetType)
+        guard resolvedTarget == strongType else {
+          throw SemanticError.typeMismatch(
+            expected: resolvedTarget.description,
+            got: strongType.description
+          )
+        }
+        bindingType = resolvedTarget
+      }
+      let symbol = makeLocalSymbol(name: name, type: bindingType, kind: .variable(.Value))
+      return (.weakBinding(symbol: symbol), [(name, false, bindingType)])
+    }
+
     // A weak reference is opaque until `upgrade`d -- it carries no fields, no
     // cases and no payload -- so testing one's shape is not meaningful. Binding
     // the handle whole is fine.
@@ -140,6 +187,10 @@ extension TypeChecker {
     }
 
     switch pattern {
+    case .weakBinding(let name, _, let span):
+      // Handled above; unreachable here.
+      throw SemanticError(.generic("Weak binding '?\(name)' is not valid here"), span: span)
+
     case .traitObjectType(let targetType, let span):
       let resolvedTarget = try resolveTraitObjectPatternTargetType(targetType, subjectType: subjectType, span: span)
       return (.traitObjectType(targetType: resolvedTarget), [])
@@ -659,6 +710,7 @@ extension TypeChecker {
   func patternContainsBindings(_ pattern: TypedPattern) -> Bool {
     switch pattern {
     case .variable,
+         .weakBinding,
          .traitObjectTypeBinding:
       return true
     case .enumCase(_, _, let elements):
@@ -688,6 +740,10 @@ extension TypeChecker {
   ) {
     switch pattern {
     case .variable(let symbol):
+      if seenDefIds.insert(symbol.defId.id).inserted {
+        symbols.append(symbol)
+      }
+    case .weakBinding(let symbol):
       if seenDefIds.insert(symbol.defId.id).inserted {
         symbols.append(symbol)
       }
@@ -733,6 +789,12 @@ extension TypeChecker {
         return pattern
       }
       return .variable(symbol: canonical)
+    case .weakBinding(let symbol):
+      guard let name = context.getName(symbol.defId),
+            let canonical = canonicalSymbolsByName[name] else {
+        return pattern
+      }
+      return .weakBinding(symbol: canonical)
     case .traitObjectTypeBinding(let symbol, let targetType):
       guard let name = context.getName(symbol.defId),
             let canonical = canonicalSymbolsByName[name] else {

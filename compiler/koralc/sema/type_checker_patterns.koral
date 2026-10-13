@@ -32,7 +32,7 @@ file_private let join_binding_names(names List[String]) String = {
     let mutable out = StringBuilder.new();
     let mutable i UInt = 0;
     while i < names.count() then {
-        if i > 0(UInt) then {
+        if i > UInt(0) then {
             out.push_string(", ");
         };
         out.push_string(names[i]);
@@ -86,7 +86,7 @@ given TypeChecker {
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id(
-                def_id(UInt),
+                UInt(def_id),
                 case_name,
             ),
             // Identity: the template's DECLARATION, not its spelling.
@@ -264,11 +264,11 @@ given TypeChecker {
     ) TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         let rune_count = value.to_runes().count();
-        if rune_count == 0(UInt) then {
+        if rune_count == UInt(0) then {
             self.push_diagnostic_at_span("Rune literal cannot be empty", span);
             return TypedPattern.IntegerLiteral("0");
         };
-        if rune_count <> 1(UInt) then {
+        if rune_count <> UInt(1) then {
             self.push_diagnostic_at_span(
                 "Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(rune_count.to_string())'",
                 span,
@@ -282,7 +282,7 @@ given TypeChecker {
         };
         if matched_type is .UInt8Type() then {
             let bytes = value.to_bytes();
-            if bytes.count() == 1(UInt) and bytes[0(UInt)] <= 127(UInt8) then {
+            if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
                 return TypedPattern.IntegerLiteral(scalar_value);
             };
             self.push_diagnostic_at_span(
@@ -308,6 +308,7 @@ given TypeChecker {
         return when pattern in {
             .Variable(_, _, _) then false,
             .Wildcard(_) then false,
+            .WeakBinding(_, _, _) then false,
             _ then true,
         };
     };
@@ -324,12 +325,66 @@ given TypeChecker {
         };
     };
 
+    /// Whether `pattern` is a weak binding (`?name` / `?TypeName(name)`).
+    module_private pattern_is_weak_binding(self, pattern PatternNode) Bool = {
+        let _ = self;
+        return when pattern in {
+            .WeakBinding(_, _, _) then true,
+            _ then false,
+        };
+    };
+
     module_private lower_typed_pattern(
         self,
         pattern PatternNode,
         subject_type Type,
         scope Scope,
     ) TypedPattern = {
+        // `?name` / `?TypeName(name)` unpacks a weak reference. When the
+        // subject has already been upgraded to `Option[T]`, lower to
+        // `Option.Some(name)`; when it is still a weak handle, extract the
+        // inner type and lower the same way (the upgrade is done by the
+        // if/when expression before pattern matching).
+        when pattern in {
+            .WeakBinding(name, target_type_opt, span) then {
+                // The subject may be `Option[T]` (already upgraded) or `?T`.
+                let strong_type = when subject_type in {
+                    .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
+                    else Type.Unknown(),
+                    .WeakReferenceType(inner) then inner,
+                    .MutableWeakReferenceType(inner) then inner,
+                    _ then Type.Unknown(),
+                };
+                if strong_type is .Unknown() then {
+                    self.push_diagnostic_at_span(
+                        "Weak binding pattern '?\(name)' requires a weak reference subject",
+                        span,
+                    );
+                };
+                let mutable binding_type = strong_type;
+                when target_type_opt in {
+                    .Some(target_type) then {
+                        let resolved_target = self.resolve_type_in_scope(target_type, scope);
+                        if not self.same_expr_type(resolved_target, strong_type) then {
+                            self.push_diagnostic_at_span(
+                                "Type mismatch: expected \(self.display_type_name(resolved_target)), got \(self.display_type_name(strong_type))",
+                                span,
+                            );
+                        };
+                        binding_type = resolved_target;
+                    },
+                    .None() then {},
+                };
+                let symbol = self.pattern_binding_symbol(name, false, binding_type, scope, span);
+                // Lower to `Option.Some(name)` so the when-expression matches
+                // the upgraded Option value. Option.None() is tag 0 and
+                // Option.Some(v) is tag 1 in std/option.koral.
+                let mutable elements = List[TypedPatternElement].new();
+                elements.push(TypedPatternElement(Option[String].None(), TypedPattern.Variable(symbol)));
+                return TypedPattern.EnumCase("Some", 1, elements);
+            },
+            _ then {},
+        };
         if self.pattern_tests_subject_shape(pattern) and self.is_weak_reference_type(subject_type) then {
             self.push_diagnostic_at_span(
                 "Cannot match a pattern against a weak reference: upgrade it first",
@@ -626,6 +681,10 @@ given TypeChecker {
                     typed_elements,
                 )
             },
+            .WeakBinding(name, _, span) then {
+                // Handled above with early return; unreachable here.
+                TypedPattern.WeakBinding(self.pattern_binding_symbol(name, false, Type.Unknown(), scope, span))
+            },
         };
     };
 
@@ -670,6 +729,31 @@ given TypeChecker {
                     );
                     scope.define(self.context(), Symbol(def_id, bound_type, kind));
                     bound.push(Pair[String, Type](name, bound_type));
+                };
+            },
+            .WeakBinding(name, target_type_opt, span) then {
+                if not (name == "_") then {
+                    // Subject may be `Option[T]` (upgraded) or `?T`.
+                    let strong_type = when subject_type in {
+                        .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
+                        else Type.Unknown(),
+                        .WeakReferenceType(inner) then inner,
+                        .MutableWeakReferenceType(inner) then inner,
+                        _ then subject_type,
+                    };
+                    let mutable binding_type = strong_type;
+                    when target_type_opt in {
+                        .Some(target_type) then {
+                            binding_type = self.resolve_type_in_scope(target_type, scope);
+                        },
+                        .None() then {},
+                    };
+                    let kind = SymbolKind.Variable(VariableKind.Value());
+                    let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable());
+                    let mutable context = self.context();
+                    context.set_span(def_id, span);
+                    scope.define(self.context(), Symbol(def_id, binding_type, kind));
+                    bound.push(Pair[String, Type](name, binding_type));
                 };
             },
             .EnumCase(case_name, elements, span) then {
@@ -948,6 +1032,34 @@ given TypeChecker {
                     };
                 };
             },
+            .WeakBinding(name, target_type_opt, span) then {
+                if not (name == "_") then {
+                    if scope.lookup_local(name) is .None() then {
+                        let strong_type = when subject_type in {
+                            .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
+                            else Type.Unknown(),
+                            .WeakReferenceType(inner) then inner,
+                            .MutableWeakReferenceType(inner) then inner,
+                            _ then subject_type,
+                        };
+                        let mutable binding_type = strong_type;
+                        when target_type_opt in {
+                            .Some(target_type) then {
+                                binding_type = self.resolve_type_in_scope(target_type, scope);
+                            },
+                            .None() then {},
+                        };
+                        let kind = SymbolKind.Variable(VariableKind.Value());
+                        let def_id = self.allocate_unindexed_def_id(
+                            name,
+                            DefKind.Variable(),
+                        );
+                        let mutable context = self.context();
+                        context.set_span(def_id, span);
+                        scope.define(self.context(), Symbol(def_id, binding_type, kind));
+                    };
+                };
+            },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
                 when self.order_pattern_arguments(
@@ -1205,7 +1317,7 @@ given TypeChecker {
         };
         let raw_case_params = when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id(
-                def_id(UInt),
+                UInt(def_id),
                 case_name,
             ),
             // Identity: the template's DECLARATION, not its spelling.
@@ -1264,7 +1376,7 @@ given TypeChecker {
         };
         return when inner_type in {
             .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(
-                def_id(UInt),
+                UInt(def_id),
                 case_name,
             ),
             // Identity: the template's DECLARATION, not its spelling.

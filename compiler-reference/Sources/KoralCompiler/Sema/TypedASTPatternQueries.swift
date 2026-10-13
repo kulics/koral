@@ -11,7 +11,8 @@ extension TypedPattern {
   var introducesBinding: Bool {
     switch self {
     case .variable,
-         .traitObjectTypeBinding:
+         .traitObjectTypeBinding,
+         .weakBinding:
       return true
     case .traitObjectType:
       return false
@@ -45,6 +46,7 @@ extension TypedPattern {
          .variable,
           .traitObjectType,
           .traitObjectTypeBinding,
+          .weakBinding,
          .comparisonPattern,
          .andPattern,
          .orPattern,
@@ -70,7 +72,8 @@ extension TypedPattern {
 
   private func collectBindingSymbols(into symbols: inout [Symbol], seenDefIds: inout Set<UInt64>) {
     switch self {
-    case .variable(let symbol):
+    case .variable(let symbol),
+         .weakBinding(let symbol):
       if seenDefIds.insert(symbol.defId.id).inserted {
         symbols.append(symbol)
       }

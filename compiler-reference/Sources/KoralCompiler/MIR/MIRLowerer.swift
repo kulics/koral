@@ -1331,12 +1331,53 @@ private final class MIRFunctionBuilder {
     negated: Bool,
     type: Type
   ) -> MIRExprResult? {
+    // `?name` / `is not ?name`: test liveness of the upgrade result.
+    if case .weakBinding = pattern {
+      guard let operand = lowerWeakBindingLivenessTest(subject: subject, negated: negated) else {
+        return nil
+      }
+      return MIRExprResult(type: type, category: .rvalue, operand: operand, place: nil)
+    }
     if !context.containsGenericParameter(subject.type),
        canLowerSimplePattern(pattern, subjectType: subject.type),
        let operand = lowerSimplePatternTest(subject: subject, pattern: pattern, negated: negated) {
       return MIRExprResult(type: type, category: .rvalue, operand: operand, place: nil)
     }
     fatalError("Unsupported pattern test reached MIR lowering")
+  }
+
+  /// Liveness test for `?name`: the subject is the upgrade intrinsic
+  /// (`Option[T]`). Returns an operand for "alive" (or "dead" when negated).
+  private func lowerWeakBindingLivenessTest(
+    subject: TypedExpressionNode,
+    negated: Bool
+  ) -> MIROperand? {
+    guard let prepared = preparePatternSubject(subject, nameHint: "weak_liveness") else {
+      return nil
+    }
+    let optionType = subject.type
+    let tagOperand = materialize(
+      .enumTag(MIREnumTag(
+        subject: .placeRead(prepared.place, ownership: .borrow),
+        enumType: optionType)),
+      type: .int)
+    // Niche layout: 0 = None, 1 = Some. Alive = tag != 0.
+    let isAlive = MIRValue.binary(MIRBinaryOperation(
+      left: tagOperand,
+      operatorKind: .comparison(.notEqual),
+      right: .constant(.integer("0", .int)),
+      type: .bool))
+    let aliveOperand = materialize(isAlive, type: .bool)
+    if negated {
+      return materialize(
+        .binary(MIRBinaryOperation(
+          left: aliveOperand,
+          operatorKind: .comparison(.equal),
+          right: .constant(.boolean(false)),
+          type: .bool)),
+        type: .bool)
+    }
+    return aliveOperand
   }
 
   private func lowerSimplePatternTest(
@@ -1376,6 +1417,46 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .wildcard, .variable:
       return .constant(.boolean(!negated))
+    case .weakBinding:
+      // `?name` in `when` / `is`: test liveness. If the subject is still the
+      // weak handle, upgrade first; if it is already `Option[T]` (the `when`
+      // desugaring wrapped it), just read the tag.
+      let optionType: Type
+      let subjectForTag: MIRValue
+      switch subjectType {
+      case .weakReference(let inner), .mutableWeakReference(let inner):
+        optionType = Type.genericEnum(
+          templateDefId: context.defIdMap.lookupGenericEnumTemplateDefId("Option") ?? .invalid,
+          args: [inner])
+        let upgradeLocal = makeTemporary(type: optionType, nameHint: "weak_cond_up")
+        append(.declare(upgradeLocal.id))
+        append(.assign(.local(upgradeLocal.id), .intrinsic(.upgradeRef(
+          value: subjectValue, resultType: optionType))))
+        subjectForTag = .placeRead(.local(upgradeLocal.id), ownership: .borrow)
+      default:
+        // Already an Option[T] (the subject was wrapped during type checking).
+        optionType = subjectType
+        subjectForTag = subjectValue
+      }
+      // The niche-layout `enumTag` returns 0 for None, 1 for Some.
+      let tagOperand = materialize(
+        .enumTag(MIREnumTag(
+          subject: subjectForTag,
+          enumType: optionType)),
+        type: .int)
+      let isAlive = MIRValue.binary(MIRBinaryOperation(
+        left: tagOperand,
+        operatorKind: .comparison(.notEqual),
+        right: .constant(.integer("0", .int)),
+        type: .bool))
+      let aliveOperand = materialize(isAlive, type: .bool)
+      return negated ? materialize(
+        .binary(MIRBinaryOperation(
+          left: aliveOperand,
+          operatorKind: .comparison(.equal),
+          right: .constant(.boolean(false)),
+          type: .bool)),
+        type: .bool) : aliveOperand
     case .traitObjectType(let targetType):
       return lowerTraitObjectTypePatternCondition(
         subjectValue: matchedValue,
@@ -2156,7 +2237,7 @@ private final class MIRFunctionBuilder {
     let matchedType = patternMatchType(subjectType)
     guard !context.containsGenericParameter(matchedType) else { return false }
     switch pattern {
-    case .variable:
+    case .variable, .weakBinding:
       return true
     case .traitObjectTypeBinding(_, let targetType):
       return traitObjectPatternInfo(subjectType: matchedType, targetType: targetType) != nil
@@ -2201,6 +2282,37 @@ private final class MIRFunctionBuilder {
     let matchedType = resolveConcretePatternNominalType(matchedSubject.type)
 
     switch pattern {
+    case .weakBinding(let symbol):
+      if symbol.type != .void {
+        // If the subject is already `Option[T]` (the `when` desugaring wrapped
+        // it), extract the Some payload directly. Otherwise upgrade first.
+        let payloadBase: MIRPlace
+        switch subjectType {
+        case .weakReference, .mutableWeakReference:
+          let innerType = symbol.type
+          let optionType = Type.genericEnum(
+            templateDefId: context.defIdMap.lookupGenericEnumTemplateDefId("Option") ?? .invalid,
+            args: [innerType])
+          let upgradeLocal = makeTemporary(type: optionType, nameHint: "weak_bind_up")
+          append(.declare(upgradeLocal.id))
+          append(.assign(.local(upgradeLocal.id), .intrinsic(.upgradeRef(
+            value: .placeRead(subjectPlace, ownership: .borrow),
+            resultType: optionType))))
+          payloadBase = .local(upgradeLocal.id)
+        default:
+          payloadBase = subjectPlace
+        }
+        let payloadPlace = MIRPlace.enumPayload(
+          base: payloadBase,
+          caseName: "Some",
+          fieldName: "value",
+          fieldIndex: 0,
+          fieldType: symbol.type)
+        let bindLocal = makeTemporary(type: symbol.type, nameHint: "weak_bind")
+        append(.declare(bindLocal.id))
+        append(.assign(.local(bindLocal.id), .placeRead(payloadPlace, ownership: .copy)))
+        patternPlaceByDefId[symbol.defId.id] = .local(bindLocal.id)
+      }
     case .variable(let symbol):
       if symbol.type != .void {
         if symbol.type == subjectType {
@@ -2323,6 +2435,20 @@ private final class MIRFunctionBuilder {
     let matchedType = matchedSubject.type
 
     switch pattern {
+    case .weakBinding(let symbol):
+      guard symbol.type != .void,
+            let destination = patternPlaceByDefId[symbol.defId.id] else {
+        return
+      }
+      // The subject is the upgrade result (`Option[T]`). Extract the Some payload.
+      let payloadPlace = MIRPlace.enumPayload(
+        base: matchedPlace,
+        caseName: "Some",
+        fieldName: "value",
+        fieldIndex: 0,
+        fieldType: symbol.type
+      )
+      append(.assign(destination, .placeRead(payloadPlace, ownership: .copy)))
     case .variable(let symbol):
       guard symbol.type != .void,
             let destination = patternPlaceByDefId[symbol.defId.id] else {
@@ -2508,6 +2634,112 @@ private final class MIRFunctionBuilder {
     fatalError("Unsupported if-pattern expression reached MIR lowering")
   }
 
+  /// `if w is ?name then A else B` -- the subject is already the upgrade
+  /// intrinsic (`Option[T]`). Branch on Some/None, bind the Some payload.
+  private func lowerWeakBindingIfExpression(
+    subject: TypedExpressionNode,
+    symbol: Symbol,
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?,
+    type: Type
+  ) -> MIRExprResult? {
+    let resultLocal: MIRLocal? = (type != .void && type != .never)
+      ? makeTemporary(type: type, nameHint: "if_pattern_result")
+      : nil
+    if let resultLocal {
+      append(.declare(resultLocal.id))
+    }
+
+    guard let preparedSubject = preparePatternSubject(subject, nameHint: "weak_up") else {
+      return nil
+    }
+    let subjectPlace = preparedSubject.place
+    let subjectScope = preparedSubject.scope
+
+    let innerType = symbol.type
+    let optionType = subject.type
+
+    // The niche-layout `enumTag` returns 0 for None (NULL niche) and 1 for
+    // Some (non-NULL niche). Alive = tag != 0.
+    let tagOperand = materialize(
+      .enumTag(MIREnumTag(
+        subject: .placeRead(subjectPlace, ownership: .borrow),
+        enumType: optionType)),
+      type: .int)
+    let zeroOperand = MIROperand.constant(.integer("0", .int))
+    let isSomeValue = MIRValue.binary(MIRBinaryOperation(
+      left: tagOperand,
+      operatorKind: .comparison(.notEqual),
+      right: zeroOperand,
+      type: .bool))
+    let isSomeLocal = materialize(isSomeValue, type: .bool)
+
+    let branchBlock = currentBlockID
+    let thenBlock = makeBlock()
+    let elseBlock = makeBlock()
+    let joinBlock = makeBlock()
+
+    setCurrentBlock(branchBlock)
+    terminate(.branch(
+      condition: isSomeLocal,
+      thenBlock: thenBlock,
+      elseBlock: elseBlock))
+
+    setCurrentBlock(thenBlock)
+    let payloadPlace = MIRPlace.enumPayload(
+      base: subjectPlace,
+      caseName: "Some",
+      fieldName: "value",
+      fieldIndex: 0,
+      fieldType: innerType)
+    if let dest = patternPlaceByDefId[symbol.defId.id] {
+      append(.assign(dest, .placeRead(payloadPlace, ownership: .copy)))
+    } else {
+      let bindLocal = makeTemporary(type: symbol.type, nameHint: "weak_bind")
+      append(.declare(bindLocal.id))
+      append(.assign(.local(bindLocal.id), .placeRead(payloadPlace, ownership: .copy)))
+      patternPlaceByDefId[symbol.defId.id] = .local(bindLocal.id)
+    }
+    let thenResult = lowerExpression(thenBranch)
+    if let resultLocal, let thenResult {
+      if let thenOperand = thenResult.operand {
+        append(.assign(.local(resultLocal.id), .operand(thenOperand)))
+      } else if let thenPlace = thenResult.place {
+        append(.assign(.local(resultLocal.id), .placeRead(thenPlace, ownership: .copy)))
+      }
+    }
+    if !currentBlockIsTerminated {
+      terminate(.goto(joinBlock))
+    }
+
+    setCurrentBlock(elseBlock)
+    if let elseBranch {
+      let elseResult = lowerExpression(elseBranch)
+      if let resultLocal, let elseResult {
+        if let elseOperand = elseResult.operand {
+          append(.assign(.local(resultLocal.id), .operand(elseOperand)))
+        } else if let elsePlace = elseResult.place {
+          append(.assign(.local(resultLocal.id), .placeRead(elsePlace, ownership: .copy)))
+        }
+      }
+    }
+    if !currentBlockIsTerminated {
+      terminate(.goto(joinBlock))
+    }
+
+    setCurrentBlock(joinBlock)
+    if let subjectScope {
+      append(.scopeExit(subjectScope))
+      scopeStack.removeAll { $0 == subjectScope }
+    }
+    if let resultLocal {
+      return MIRExprResult(
+        type: type, category: .rvalue,
+        operand: .local(resultLocal.id), place: nil)
+    }
+    return MIRExprResult(type: type, category: .rvalue, operand: .constant(.void), place: nil)
+  }
+
   private func lowerSimpleIfPatternExpression(
     subject: TypedExpressionNode,
     pattern: TypedPattern,
@@ -2516,6 +2748,14 @@ private final class MIRFunctionBuilder {
     type: Type
   ) -> MIRExprResult? {
     guard !currentBlockIsTerminated else { return nil }
+
+    // `?name` unpacks a weak handle: upgrade, branch on Some/None, bind the
+    // Some payload to `name` in the then-branch.
+    if case .weakBinding(let symbol) = pattern {
+      return lowerWeakBindingIfExpression(
+        subject: subject, symbol: symbol,
+        thenBranch: thenBranch, elseBranch: elseBranch, type: type)
+    }
 
     let resultLocal: MIRLocal? = (type != .void && type != .never)
       ? makeTemporary(type: type, nameHint: "if_pattern_result")

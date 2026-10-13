@@ -102,8 +102,14 @@ extension ExhaustivenessChecker {
             }
 
             if let finiteSpace = remainingFiniteSpace {
+                // `?name` is refutable (alive/dead); it always contributes the
+                // alive case, so it is never "already covered" by earlier
+                // patterns. It does not cover the dead case, so `_` after it
+                // is reachable.
                 let reduced = finiteSpace.subtract(pattern, type: subjectType, context: context)
-                if reduced.structurallyEquals(finiteSpace) {
+                if case .weakBinding = pattern {
+                    remainingFiniteSpace = reduced
+                } else if reduced.structurallyEquals(finiteSpace) {
                     throw SemanticError(
                         .unreachablePattern(
                             pattern: pattern.description,
@@ -111,8 +117,9 @@ extension ExhaustivenessChecker {
                         ),
                         span: currentSpan
                     )
+                } else {
+                    remainingFiniteSpace = reduced
                 }
-                remainingFiniteSpace = reduced
             }
             
             // Check if this is a catchall pattern

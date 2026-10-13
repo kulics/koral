@@ -220,10 +220,9 @@ extension Parser {
     }
   }
 
-  /// Whether `( <type> )` starts at the cursor -- the shape of both a postfix
-  /// cast `expr(Type)` and a Rust-style qualified path `Type(Trait)`. Which of
-  /// the two it is depends on the base, not on these tokens. Restores the
-  /// stream.
+  /// Whether `( <type> )` starts at the cursor -- the shape of the qualification
+  /// prefix of a qualified call `base(Trait)`. The prefix is only legal as part
+  /// of the composite `base(Trait).method(...)`. Restores the stream.
   private func scanParenTypeSuffix() -> Bool {
     guard currentToken === .leftParen else { return false }
     let savedLexer = lexer.saveState()
@@ -317,20 +316,7 @@ extension Parser {
     return currentToken === .leftParen
   }
 
-  /// The left-hand type of a Rust-style qualified path `Type(Trait)`, or nil
-  /// when `expr` is not a (possibly generic) type name.
-  private func qualifiedPathBaseType(of expr: ExpressionNode) -> TypeNode? {
-    switch expr {
-    case .identifier(let name, let span):
-      return isValidTypeName(name) ? .identifier(name, span: span) : nil
-    case .genericInstantiation(let name, let typeArgs, let span):
-      return .generic(base: name, args: typeArgs, span: span)
-    default:
-      return nil
-    }
-  }
-
-  /// Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
+  /// Parses the `(Trait[Args])` qualification of a qualified call.
   /// The SHAPE has already been decided by `scanParenTypeSuffix` -- this only
   /// builds the node, so there is nothing to roll back.
   private func parseQualifiedTraitRef() throws -> TypeNode {
@@ -343,16 +329,57 @@ extension Parser {
     return trait
   }
 
-  /// A postfix cast `expr(Type)`. The SHAPE has already been decided by
-  /// `scanParenTypeSuffix` -- this only builds the node.
-  private func parsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode {
-    try match(.leftParen)
-    let targetType = try parseType()
-    guard currentToken === .rightParen else {
-      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+  /// Parses the composite `base(Trait).method(...)` /
+  /// `base(Trait).method[TypeArgs](...)` qualified call. The `(Trait)` SHAPE
+  /// has already been decided by `scanParenTypeSuffix`; this consumes the
+  /// qualification AND the method call, so the prefix never exists on its own.
+  ///
+  /// `base` is a type name for the type-qualified form `Type(Trait).method`,
+  /// and any other expression for the receiver-qualified form
+  /// `expr(Trait).method`.
+  private func parseQualifiedCallSuffix(base: ExpressionNode) throws -> ExpressionNode {
+    let traitRef = try parseQualifiedTraitRef()
+    guard currentToken === .dot else {
+      throw ParserError.rejectedConstruct(
+        span: SourceSpan(start: base.span.start, end: currentSpan.end),
+        message: "A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'"
+      )
     }
-    try match(.rightParen)
-    return .castExpression(type: targetType, expression: base, span: SourceSpan(start: base.span.start, end: currentSpan.end))
+    try match(.dot)
+    guard case .identifier(let member) = currentToken else {
+      throw ParserError.expectedIdentifier(
+        span: currentSpan, got: currentToken.description, context: "qualified method call")
+    }
+    try match(.identifier(member))
+    let typeArgsShape = methodTypeArgumentsShape()
+    let bareMethodTypeArgs = typeArgsShape == false
+    let methodTypeArgs: [TypeNode] = typeArgsShape == true ? try parseBracketedTypeArguments() : []
+    guard currentToken === .leftParen else {
+      if bareMethodTypeArgs {
+        throw ParserError.unexpectedToken(
+          span: currentSpan, got: currentToken.description, expected: "'(' after generic method name")
+      }
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "(")
+    }
+    let arguments = try parseCallArgumentsList()
+    try rejectNonConstructorCallSyntax(arguments: arguments, span: base.span)
+    if methodTypeArgs.isEmpty {
+      return .qualifiedMethodCall(
+        base: base,
+        trait: traitRef,
+        methodName: member,
+        arguments: arguments,
+        span: SourceSpan(start: base.span.start, end: currentSpan.end)
+      )
+    }
+    return .qualifiedGenericMethodCall(
+      base: base,
+      trait: traitRef,
+      methodTypeArgs: methodTypeArgs,
+      methodName: member,
+      arguments: arguments,
+      span: SourceSpan(start: base.span.start, end: currentSpan.end)
+    )
   }
 
   /// A postfix generic application `Name[Types]`. The SHAPE has already been
@@ -872,18 +899,67 @@ extension Parser {
       return .ptrExpression(expr, mutable: mutable, span: ampersandSpan)
     }
     if currentToken === .multiply {
+      // `*unsafe T(args)` is a pointer type application; bare `*` is deref.
+      // `*unsafe` at expression start can only be a type -- `unsafe` is a
+      // keyword, so there is no deref of a variable named `unsafe`.
+      if lexer.peekNextToken() === .unsafeKeyword {
+        let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
+        return try parsePostfixSuffixes(from: cast)
+      }
       let startSpan = currentSpan
       try match(.multiply)
       let expr = try parsePrefixExpression()
       return .derefExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
+    if currentToken === .questionMark {
+      // `?T(args)` is a nullable type application. `?` is not an expression
+      // operator, so it can only start a type.
+      let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
+      return try parsePostfixSuffixes(from: cast)
+    }
     return try parsePostfixExpression()
+  }
+
+  /// `*unsafe [mutable] T(args)` / `?T(args)` -- a cast whose target type is
+  /// written with a prefix, at expression start. The spelling matches the type
+  /// annotation: `*unsafe Int(p)`, `*unsafe mutable T(q)`, `?Int(r)`.
+  private func parsePrefixedTypeApplication(startSpan: SourceSpan) throws -> ExpressionNode {
+    let targetType = try parseType()
+    guard currentToken === .leftParen else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "(" // a prefixed type in expression position must be a cast
+      )
+    }
+    try match(.leftParen)
+    let value = try expression()
+    guard currentToken === .rightParen else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "a single expression; a prefixed type is a cast target, not a constructor"
+      )
+    }
+    try match(.rightParen)
+    return .castExpression(
+      type: targetType,
+      expression: value,
+      span: SourceSpan(start: startSpan.start, end: currentSpan.end)
+    )
   }
 
   // MARK: - Postfix Expressions
   
   private func parsePostfixExpression() throws -> ExpressionNode {
-    var expr = try term()
+    let expr = try term()
+    return try parsePostfixSuffixes(from: expr)
+  }
+
+  /// Postfix suffixes (calls, subscripts, member access, qualified calls)
+  /// applied to an already-parsed expression.
+  private func parsePostfixSuffixes(from startExpr: ExpressionNode) throws -> ExpressionNode {
+    var expr = startExpr
     while true {
       if currentToken === .dot {
         try match(.dot)
@@ -901,37 +977,6 @@ extension Parser {
         let bareMethodTypeArgs = typeArgsShape == false
         let methodTypeArgs: [TypeNode] = typeArgsShape == true ? try parseBracketedTypeArguments() : []
 
-        if case .traitQualificationExpression(let qualifiedType, let traitType, _) = expr {
-          guard currentToken === .leftParen else {
-            throw ParserError.unexpectedToken(
-              span: currentSpan,
-              got: currentToken.description,
-              expected: "("
-            )
-          }
-          let arguments = try parseCallArgumentsList()
-          try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
-          if methodTypeArgs.isEmpty {
-            expr = .qualifiedMethodCall(
-              type: qualifiedType,
-              trait: traitType,
-              methodName: member,
-              arguments: arguments,
-              span: SourceSpan(start: expr.span.start, end: currentSpan.end)
-            )
-          } else {
-            expr = .qualifiedGenericMethodCall(
-              type: qualifiedType,
-              trait: traitType,
-              methodTypeArgs: methodTypeArgs,
-              methodName: member,
-              arguments: arguments,
-              span: SourceSpan(start: expr.span.start, end: currentSpan.end)
-            )
-          }
-          continue
-        }
-        
         // Check if this is a static method call: TypeName.methodName(...)
         // TypeName starts with uppercase, methodName starts with lowercase
         if isValidTypeName(member) == false {
@@ -1010,17 +1055,15 @@ extension Parser {
           expr = .memberPath(base: expr, path: [member], span: SourceSpan(start: expr.span.start, end: currentSpan.end))
         }
       } else if currentToken === .leftParen {
-        // One bounded shape scan decides what `(` opens. `( <type> )` is a
-        // Rust-style qualified path `Type(Trait)` when the base is a type name,
-        // and a postfix cast `expr(Type)` otherwise; anything else is an
-        // ordinary call. Trying each in turn and rolling back is what made a
+        // One bounded shape scan decides what `(` opens. `( <type> )` is the
+        // qualification of a composite qualified call `base(Trait).method(...)`
+        // -- the method call is parsed here too, so the prefix never stands
+        // alone. Anything else is a call, which includes the type application
+        // `Type(expr)` / `Type(args)` (the type checker decides cast vs
+        // construction). Trying each in turn and rolling back is what made a
         // failed branch swallow the diagnostic the real parse would give.
-        let isTypeSuffix = scanParenTypeSuffix()
-        if isTypeSuffix, let qualifiedType = qualifiedPathBaseType(of: expr) {
-          let traitRef = try parseQualifiedTraitRef()
-          expr = .traitQualificationExpression(type: qualifiedType, trait: traitRef, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
-        } else if isTypeSuffix {
-          expr = try parsePostfixCastSuffix(base: expr)
+        if scanParenTypeSuffix() {
+          expr = try parseQualifiedCallSuffix(base: expr)
         } else {
           expr = try parseCall(expr)
         }

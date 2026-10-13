@@ -1036,6 +1036,12 @@ extension Monomorphizer {
         switch pattern {
         case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
             return pattern
+        case .weakBinding(let symbol):
+            let newSymbol = copySymbolPreservingDefId(
+                symbol,
+                newType: substituteType(symbol.type, substitution: substitution)
+            )
+            return .weakBinding(symbol: newSymbol)
         case .traitObjectType(let targetType):
             return .traitObjectType(targetType: substituteType(targetType, substitution: substitution))
         case .traitObjectTypeBinding(let symbol, let targetType):

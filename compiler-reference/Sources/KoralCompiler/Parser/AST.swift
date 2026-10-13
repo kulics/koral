@@ -560,6 +560,9 @@ public indirect enum ExpressionNode {
   case runeLiteral(String, span: SourceSpan)     // Rune/byte literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool, span: SourceSpan)
+  /// Explicit cast `Type(expr)`. The parser also builds this for a
+  /// parenthesized target type `(*unsafe Int)(p)`. A bare `Type(args)` call is
+  /// left as `.call`; the type checker turns it into a cast or a construction.
   case castExpression(type: TypeNode, expression: ExpressionNode, span: SourceSpan)
   case arithmeticExpression(
     left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode, span: SourceSpan)
@@ -586,21 +589,23 @@ public indirect enum ExpressionNode {
   case whileExpression(condition: ExpressionNode, body: ExpressionNode, span: SourceSpan)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String], span: SourceSpan)
-  /// Rust-style fully qualified path `Type(Trait[Args])`, used only as an
-  /// intermediate parser node. It must be followed by `.method(...)` or
-  /// `.method[TypeArgs](...)`. The receiver of an instance method is passed as
-  /// the first call argument.
-  case traitQualificationExpression(type: TypeNode, trait: TypeNode, span: SourceSpan)
   /// Generic method call with explicit type arguments: obj.[Type]method(args)
   /// - base: The object expression
   /// - methodTypeArgs: The explicit type arguments for the method
   /// - methodName: The method name
   /// - arguments: The method arguments
   case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
-  /// Fully qualified method call: Type(Trait[Args]).method(args)
-  case qualifiedMethodCall(type: TypeNode, trait: TypeNode, methodName: String, arguments: [CallArg], span: SourceSpan)
-  /// Fully qualified generic method call: Type(Trait[Args]).method[TypeArgs](args)
-  case qualifiedGenericMethodCall(type: TypeNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
+  /// Qualified method call -- a composite node. Two spellings, both of which
+  /// MUST carry the method call; the `expr(Trait)` / `Type(Trait)` prefix is
+  /// not a standalone expression:
+  ///   Type(Trait[Args]).method(args)      -- type-qualified; an instance
+  ///     method's receiver is the first argument, a static trait method takes
+  ///     no receiver.
+  ///   expr(Trait[Args]).method(args)      -- receiver-qualified; the receiver
+  ///     is the base expression and is not written again in the arguments.
+  case qualifiedMethodCall(base: ExpressionNode, trait: TypeNode, methodName: String, arguments: [CallArg], span: SourceSpan)
+  /// Qualified generic method call: base(Trait[Args]).method[TypeArgs](args)
+  case qualifiedGenericMethodCall(base: ExpressionNode, trait: TypeNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
   case genericInstantiation(base: String, args: [TypeNode], span: SourceSpan)
   /// Collection literal: [e1, e2, ...]
   case collectionLiteral(elements: [ExpressionNode], span: SourceSpan)
@@ -713,6 +718,10 @@ public indirect enum PatternNode: CustomStringConvertible {
   case traitObjectType(targetType: TypeNode, span: SourceSpan)
   /// Binding exact implementation-type pattern for trait objects: `name *Concrete`
   case traitObjectTypeBinding(name: String, mutable: Bool, targetType: TypeNode, span: SourceSpan)
+  /// Weak-reference unpacking pattern: `?name` binds the strong reference if
+  /// the handle is still alive; `?TypeName(name)` additionally checks the
+  /// target type. `subject is not ?name` matches when the object is dead.
+  case weakBinding(name: String, targetType: TypeNode?, span: SourceSpan)
   /// Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
   case structPattern(typeName: String, elements: [PatternArg], span: SourceSpan)
   /// Positional destructuring pattern: `(a, b, c)` against a STRUCT with
@@ -760,6 +769,11 @@ public indirect enum PatternNode: CustomStringConvertible {
       return targetType.description
     case .traitObjectTypeBinding(let name, let mutable, let targetType, _):
       return mutable ? "mutable \(name) \(targetType.description)" : "\(name) \(targetType.description)"
+    case .weakBinding(let name, let targetType, _):
+      if let targetType {
+        return "?\(targetType.description)(\(name))"
+      }
+      return "?\(name)"
     case .structPattern(let typeName, let elements, _):
       let args = elements.map { arg in
         if let label = arg.label {
@@ -792,6 +806,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .notPattern(_, let span): return span
     case .traitObjectType(_, let span): return span
     case .traitObjectTypeBinding(_, _, _, let span): return span
+    case .weakBinding(_, _, let span): return span
     case .structPattern(_, _, let span): return span
     case .tuplePattern(_, let span): return span
     }
@@ -879,8 +894,6 @@ extension ExpressionNode {
     case .ifExpression(_, _, _, let span):
       return span
     case .whileExpression(_, _, let span):
-      return span
-    case .traitQualificationExpression(_, _, let span):
       return span
     case .genericMethodCall(_, _, _, _, let span):
       return span

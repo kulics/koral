@@ -13,9 +13,9 @@ using "std";
 // ============================================================================
 
 let mul128(a UInt64, b UInt64) Pair[UInt64, UInt64] = {
-    let a_lo = a & 4294967295(UInt64);
+    let a_lo = a & UInt64(4294967295);
     let a_hi = a >> 32;
-    let b_lo = b & 4294967295(UInt64);
+    let b_lo = b & UInt64(4294967295);
     let b_hi = b >> 32;
 
     let lo_lo = a_lo.wrapping_mul(b_lo);
@@ -23,11 +23,11 @@ let mul128(a UInt64, b UInt64) Pair[UInt64, UInt64] = {
     let lo_hi = a_lo.wrapping_mul(b_hi);
     let hi_hi = a_hi.wrapping_mul(b_hi);
 
-    let cross = (lo_lo >> 32).wrapping_add(hi_lo & 4294967295(UInt64)).wrapping_add(
+    let cross = (lo_lo >> 32).wrapping_add(hi_lo & UInt64(4294967295)).wrapping_add(
         lo_hi,
     );
     let high = hi_hi.wrapping_add(hi_lo >> 32).wrapping_add(cross >> 32);
-    let low = (cross << 32) | (lo_lo & 4294967295(UInt64));
+    let low = (cross << 32) | (lo_lo & UInt64(4294967295));
     return Pair[UInt64, UInt64](high, low);
 };
 
@@ -38,7 +38,7 @@ let lemire_bounded[R RandomSource](source R, range UInt64) UInt64 = {
     let mutable hi = m.first;
     let mutable lo = m.second;
     if lo < range then {
-        let threshold = 0(UInt64).wrapping_sub(range) % range;
+        let threshold = UInt64(0).wrapping_sub(range) % range;
         while lo < threshold then {
             let x2 = source.generate();
             let m2 = mul128(x2, range);
@@ -126,14 +126,14 @@ given[R RandomSource] Random[R] {
             return low;
         };
         if low == Int.min_value() and high == Int.max_value() then {
-            return self.rng.generate()(Int);
+            return Int(self.rng.generate());
         };
         // Map signed [low, high] to unsigned [0, range_size) via XOR with min
-        let u_low = low(UInt64) ^ Int.min_value()(UInt64);
-        let u_high = high(UInt64) ^ Int.min_value()(UInt64);
+        let u_low = UInt64(low) ^ UInt64(Int.min_value());
+        let u_high = UInt64(high) ^ UInt64(Int.min_value());
         let range_size = u_high - u_low + 1;
         let u_result = u_low + lemire_bounded(self.rng, range_size);
-        return (u_result ^ Int.min_value()(UInt64))(Int);
+        return Int((u_result ^ UInt64(Int.min_value())));
     };
 
     // Generate a random UInt within the given range (Lemire algorithm).
@@ -200,10 +200,10 @@ given[R RandomSource] Random[R] {
             return low;
         };
         if low == 0 and high == UInt.max_value() then {
-            return self.rng.generate()(UInt);
+            return UInt(self.rng.generate());
         };
-        let range_size = (high - low + 1)(UInt64);
-        return (low + lemire_bounded(self.rng, range_size)(UInt))(UInt);
+        let range_size = UInt64((high - low + 1));
+        return UInt((low + UInt(lemire_bounded(self.rng, range_size))));
     };
 
     // Randomly shuffle a list in-place using Fisher-Yates algorithm.
@@ -215,7 +215,7 @@ given[R RandomSource] Random[R] {
         let mutable i = len - 1;
         while i > 0 then {
             // Pick a random index in [0, i]
-            let j = lemire_bounded(self.rng, (i + 1)(UInt64))(UInt);
+            let j = UInt(lemire_bounded(self.rng, UInt64((i + 1))));
             if i <> j then {
                 let tmp = list[i];
                 list[i] = list[j];
@@ -231,7 +231,7 @@ given[R RandomSource] Random[R] {
         if len == 0 then {
             return Option[T].None();
         };
-        let idx = lemire_bounded(self.rng, len(UInt64))(UInt);
+        let idx = UInt(lemire_bounded(self.rng, UInt64(len)));
         return Option[T].Some(list[idx]);
     };
 };

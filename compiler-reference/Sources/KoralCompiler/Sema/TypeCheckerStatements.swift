@@ -61,10 +61,6 @@ extension TypeChecker {
       return true
     case .memberPath(let base, _, _):
       return sourceExpressionIsObviouslyPureStatement(base)
-    case .traitQualificationExpression:
-      // The left side is a type — a bare qualification is pure (though it is a
-      // semantic error not to follow it with a method call).
-      return true
     case .subscriptExpression(let base, let arguments, _):
       return sourceExpressionIsObviouslyPureStatement(base)
         && arguments.allSatisfy(sourceExpressionIsObviouslyPureStatement)

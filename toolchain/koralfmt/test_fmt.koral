@@ -281,6 +281,49 @@ let main() Void = {
     // === Method calls ===
     t.test("method call", "let r=a.add(b);\n", "let r = a.add(b);\n");
 
+    // === Casts and type applications ===
+    // Casts spell the target type FIRST: `Type(expr)` (`Int(x)`, `Int64(42)`).
+    // A prefixed target type keeps its prefix: `*unsafe Int(p)`, `?T(q)`. The
+    // old postfix spelling `expr(Type)` is gone.
+    t.test(
+        "cast target type leads",
+        "let main() Void={\nlet y=Int64(42);\nlet z=Int(y);\n};\n",
+        "let main() Void = {\n    let y = Int64(42);\n    let z = Int(y);\n};\n",
+    );
+    t.test(
+        "raw pointer cast",
+        "let main() Void={\nlet p=*unsafe Int(q);\n};\n",
+        "let main() Void = {\n    let p = *unsafe Int(q);\n};\n",
+    );
+    t.test(
+        "mutable raw pointer cast",
+        "let main() Void={\nlet p=*unsafe mutable Int(q);\n};\n",
+        "let main() Void = {\n    let p = *unsafe mutable Int(q);\n};\n",
+    );
+    t.test(
+        "weak reference construction",
+        "let main() Void={\nlet w=?T(x);\n};\n",
+        "let main() Void = {\n    let w = ?T(x);\n};\n",
+    );
+    t.test(
+        "generic cast target",
+        "let main() Void={\nlet v=Option[Int](x);\n};\n",
+        "let main() Void = {\n    let v = Option[Int](x);\n};\n",
+    );
+    // A single operand is the cast spelling; a structural `Type(args)`
+    // construction keeps its argument list either way.
+    t.test(
+        "constructor call keeps its arguments",
+        "let main() Void={\nlet p=Pair(1,2);\nlet q=Point(x);\n};\n",
+        "let main() Void = {\n    let p = Pair(1, 2);\n    let q = Point(x);\n};\n",
+    );
+    // Bare `*` still dereferences -- only `*unsafe` starts a type.
+    t.test(
+        "deref of a star argument is not a cast",
+        "let main() Void={\nlet v=f(*p);\n};\n",
+        "let main() Void = {\n    let v = f(*p);\n};\n",
+    );
+
     // === Mutable and destructuring ===
     // A pair is built with its constructor; `(a, b, c)` destructures a struct
     // by position at any field count.
@@ -317,6 +360,33 @@ let main() Void = {
         "qualified trait call",
         "let main() Void={\nlet r=Num(Tag).plus_ten(n,);\n};\n",
         "let main() Void = {\n    let r = Num(Tag).plus_ten(n);\n};\n",
+    );
+    // The prefix `base(Trait)` is never standalone: the written form is always
+    // the composite `base(Trait).method(...)`, for a type name or any receiver.
+    t.test(
+        "receiver-qualified trait call",
+        "let main() Void={\nlet r=value(Tag).plus_ten(1);\n};\n",
+        "let main() Void = {\n    let r = value(Tag).plus_ten(1);\n};\n",
+    );
+    t.test(
+        "qualified generic method call",
+        "let main() Void={\nlet r=Num(Tag).plus_ten[Int](n);\n};\n",
+        "let main() Void = {\n    let r = Num(Tag).plus_ten[Int](n);\n};\n",
+    );
+    t.test_error_contains(
+        "old postfix cast rejected",
+        "let main() Void={\nlet y=x(Int);\n};\n",
+        "A qualified call must include its method call",
+    );
+    t.test_error_contains(
+        "bare qualified trait prefix rejected",
+        "let main() Void={\nlet r=Num(Tag);\n};\n",
+        "A qualified call must include its method call",
+    );
+    t.test_error_contains(
+        "qualified trait without method call rejected",
+        "let main() Void={\nlet r=Num(Tag).plus_ten;\n};\n",
+        "A qualified call must include its method call",
     );
     // Exploded argument lists end in a comma so the next edit is one line.
     t.test(
@@ -752,6 +822,30 @@ let main() Void = {
         "mutable trait object type binding pattern",
         "let f(t T) Int = when t in {\nmutable io ProbeError then 1,\n_ then 0,\n};\n",
         "let f(t T) Int = when t in {\n    mutable io ProbeError then 1,\n    _ then 0,\n};\n",
+    );
+
+    // Weak-reference unpacking: `?name` binds the strong reference when the
+    // handle is alive, `?TypeName(name)` additionally checks the target type
+    // (grammar.bnf <weak-binding-pattern>).
+    t.test(
+        "weak binding pattern in if",
+        "let main() Void = {\nif w is ?v then {\nuse(v);\n};\n};\n",
+        "let main() Void = {\n    if w is ?v then {\n        use(v);\n    };\n};\n",
+    );
+    t.test(
+        "weak binding pattern in when",
+        "let f(w ?Port) Int = when w in {\n?p then p,\n_ then 0,\n};\n",
+        "let f(w ?Port) Int = when w in {\n    ?p then p,\n    _ then 0,\n};\n",
+    );
+    t.test(
+        "typed weak binding pattern",
+        "let main() Void = {\nif w is ?Port(p) then {\nuse(p);\n};\n};\n",
+        "let main() Void = {\n    if w is ?Port(p) then {\n        use(p);\n    };\n};\n",
+    );
+    t.test(
+        "weak binding is-not pattern",
+        "let main() Bool = w is not ?v;\n",
+        "let main() Bool = w is not ?v;\n",
     );
 
     // An import list may span lines; the line breaks are kept, because `using`

@@ -913,25 +913,6 @@ given Parser {
         return .Ok(arms);
     };
 
-    /// A postfix cast `expr(Type)`. The SHAPE has already been decided by
-    /// `scan_paren_type_suffix_at` -- this only builds the node, so there is
-    /// nothing to roll back and no second branch to fall into.
-    module_private parse_postfix_cast_suffix(self, base Expr) Result[Expr] = {
-        self.advance();
-        let cast_type = self.parse_type() or return;
-        when self.current().kind in {
-            .RParen() then {
-                self.advance();
-            },
-            _ then {
-                return .Error(self.parser_error("Expected ')' after cast type"));
-            },
-        };
-        return .Ok(
-            Expr.CastExpr(cast_type, base, self.span_from_expr_start(base)),
-        );
-    };
-
     module_private parse_pattern_primary(self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current();
 
@@ -954,6 +935,51 @@ given Parser {
 
         let mutable node = PatternNode.Wildcard(self.span_from_start(start));
         when self.current().kind in {
+            .QuestionMark() then {
+                // `?name` / `?TypeName(name)` -- weak-reference unpacking.
+                // Lowercase after `?` is a bare binding; uppercase is a typed binding.
+                self.advance();
+                let name = self.expect_identifier("weak binding pattern") or return;
+                if self.is_upper_first(name) then {
+                    // `?TypeName(name)` -- typed binding with a target type check.
+                    when self.current().kind in {
+                        .LParen() then {
+                            self.advance();
+                        },
+                        _ then {
+                            return .Error(
+                                self.parser_error("Expected '(' after weak binding type name"),
+                            );
+                        },
+                    };
+                    let bind_name = self.expect_identifier("weak binding name") or return;
+                    when self.current().kind in {
+                        .RParen() then {
+                            self.advance();
+                        },
+                        _ then {
+                            return .Error(
+                                self.parser_error("Expected ')' after weak binding name"),
+                            );
+                        },
+                    };
+                    return .Ok(
+                        PatternNode.WeakBinding(
+                            bind_name,
+                            Option[TypeNode].Some(TypeNode.Identifier(name, unknown_span())),
+                            self.span_from_start(start),
+                        ),
+                    );
+                };
+                // `?name` -- bare binding.
+                return .Ok(
+                    PatternNode.WeakBinding(
+                        name,
+                        Option[TypeNode].None(),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
             .KwMut() then {
                 self.advance();
                 let name = self.expect_identifier("mutable pattern variable") or return;
@@ -1667,10 +1693,9 @@ given Parser {
         };
     };
 
-    /// Parses the `(Trait[Args])` qualification of `Type(Trait).method(...)`.
-    /// The SHAPE has already been decided by `scan_paren_type_suffix_at` -- the
-    /// base being a type name is what makes this a qualified path rather than a
-    /// cast. This only builds the node.
+    /// Parses the `(Trait[Args])` qualification of a qualified call.
+    /// The SHAPE has already been decided by `scan_paren_type_suffix_at` -- this
+    /// only builds the node.
     module_private parse_qualified_trait_ref(self) Result[TypeNode] = {
         self.advance();
         let trait_type = self.parse_type() or return;
@@ -1683,6 +1708,118 @@ given Parser {
             },
         };
         return .Ok(trait_type);
+    };
+
+    /// `*unsafe [mutable] T(args)` / `?T(args)` -- a cast whose target type is
+    /// written with a prefix, at expression start. The spelling matches the type
+    /// annotation: `*unsafe Int(p)`, `*unsafe mutable T(q)`, `?Int(r)`.
+    module_private parse_prefixed_type_application(
+        self,
+        start Token,
+    ) Result[Expr] = {
+        let cast_type = self.parse_type() or return;
+        when self.current().kind in {
+            .LParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error(
+                        "Expected '(' after cast type; a prefixed type in expression position must be a cast",
+                    ),
+                );
+            },
+        };
+        let value = self.parse_expression() or return;
+        when self.current().kind in {
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error(
+                        "Expected ')' after cast expression; a prefixed type is a cast target, not a constructor",
+                    ),
+                );
+            },
+        };
+        let cast = Expr.CastExpr(cast_type, value, self.span_from_start(start));
+        return self.parse_postfix_suffixes(cast);
+    };
+
+    /// Parses the composite `base(Trait).method(...)` /
+    /// `base(Trait).method[TypeArgs](...)` qualified call. The `(Trait)` SHAPE
+    /// has already been decided by `scan_paren_type_suffix_at`; this consumes
+    /// the qualification AND the method call, so the prefix never exists on its
+    /// own. `base` is a type name for `Type(Trait).method` and any other
+    /// expression for `expr(Trait).method`.
+    module_private parse_qualified_call_suffix(self, base Expr) Result[Expr] = {
+        let trait_type = self.parse_qualified_trait_ref() or return;
+        when self.current().kind in {
+            .Dot() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error(
+                        "A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+                    ),
+                );
+            },
+        };
+        let member = self.expect_identifier("qualified method call") or return;
+        let type_args_shape = self.method_type_args_shape();
+        let method_type_args = when type_args_shape in {
+            .Some(has_call) then if has_call then self.parse_type_arg_list() or return
+            else List[TypeNode].new(),
+            .None() then List[TypeNode].new(),
+        };
+        when self.current().kind in {
+            .LParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error("Expected '(' after qualified method name"),
+                );
+            },
+        };
+        let args = self.parse_argument_list_until_rparen("qualified method call") or return;
+        when self.current().kind in {
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error("Expected ')' after qualified method call arguments"),
+                );
+            },
+        };
+        when self.reject_non_constructor_call_args(args) in {
+            .Ok(_) then {},
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return if method_type_args.is_empty() then .Ok(
+            Expr.QualifiedMethodCall(
+                base,
+                trait_type,
+                member,
+                args,
+                self.span_from_expr_start(base),
+            ),
+        )
+        else .Ok(
+            Expr.QualifiedGenericMethodCall(
+                base,
+                trait_type,
+                method_type_args,
+                member,
+                args,
+                self.span_from_expr_start(base),
+            ),
+        );
     };
 
     module_private parse_call_suffix(self, base Expr) Result[Expr] = {
@@ -1880,65 +2017,6 @@ given Parser {
             .None() then List[TypeNode].new(),
         };
 
-        when base in {
-            .TraitQualificationExpr(qualified_base, trait_type, _) then {
-                when self.current().kind in {
-                    .LParen() then {
-                        self.advance();
-                    },
-                    _ then {
-                        return .Error(
-                            self.parser_error(
-                                "Expected '(' after qualified method name",
-                            ),
-                        );
-                    },
-                };
-                let args = self.parse_argument_list_until_rparen(
-                    "qualified method call",
-                ) or return;
-                when self.current().kind in {
-                    .RParen() then {
-                        self.advance();
-                    },
-                    _ then {
-                        return .Error(
-                            self.parser_error(
-                                "Expected ')' after qualified method call arguments",
-                            ),
-                        );
-                    },
-                };
-                when self.reject_non_constructor_call_args(args) in {
-                    .Ok(_) then {},
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-
-                return if method_type_args.is_empty() then .Ok(
-                    Expr.QualifiedMethodCall(
-                        qualified_base,
-                        trait_type,
-                        member,
-                        args,
-                        self.span_from_expr_start(base),
-                    ),
-                )
-                else .Ok(
-                    Expr.QualifiedGenericMethodCall(
-                        qualified_base,
-                        trait_type,
-                        method_type_args,
-                        member,
-                        args,
-                        self.span_from_expr_start(base),
-                    ),
-                );
-            },
-            _ then {},
-        };
-
         let has_lparen = when self.current().kind in {
             .LParen() then true,
             _ then false,
@@ -2054,24 +2132,19 @@ given Parser {
                         break;
                     };
                     // One bounded shape scan decides what `(` opens. `( <type> )`
-                    // is a Rust-style qualified path `Type(Trait)` when the base
-                    // is a type name, and a postfix cast `expr(Type)` otherwise;
-                    // anything else is an ordinary call. Trying each in turn and
-                    // rolling back is what used to make `Num(Tag)` a cast of
-                    // `Num` to `Tag` and made a failed branch eat the better
-                    // diagnostic.
+                    // is the qualification of a composite qualified call
+                    // `base(Trait).method(...)` -- the method call is parsed here
+                    // too, so the prefix never stands alone. Anything else is a
+                    // call, which includes the type application `Type(expr)` /
+                    // `Type(args)` (the type checker decides cast vs
+                    // construction). Trying each in turn and rolling back is what
+                    // used to make `Num(Tag)` a cast of `Num` to `Tag` and made a
+                    // failed branch eat the better diagnostic.
                     let is_type_suffix = self.scan_paren_type_suffix_at(
                         self.index,
                     ) is .Some(_);
-                    if is_type_suffix and self.qualified_path_base_is_type_name(expr) then {
-                        let trait_type = self.parse_qualified_trait_ref() or return;
-                        expr = Expr.TraitQualificationExpr(
-                            expr,
-                            trait_type,
-                            self.span_from_expr_start(expr),
-                        );
-                    } else if is_type_suffix then {
-                        expr = self.parse_postfix_cast_suffix(expr) or return;
+                    if is_type_suffix then {
+                        expr = self.parse_qualified_call_suffix(expr) or return;
                     } else {
                         expr = self.parse_call_suffix(expr) or return;
                     };
@@ -2147,9 +2220,22 @@ given Parser {
 
         if self.current().kind is .Star() then {
             let start = self.current();
+            // `*unsafe T(args)` is a pointer type application; bare `*` is deref.
+            // `*unsafe` at expression start can only be a type -- `unsafe` is a
+            // keyword, so there is no deref of a variable named `unsafe`.
+            if self.peek_kind() is .Some(.KwUnsafe()) then {
+                return self.parse_prefixed_type_application(start);
+            };
             self.advance();
             let operand = self.parse_unary() or return;
             return .Ok(Expr.DerefExpr(operand, self.span_from_start(start)));
+        };
+
+        if self.current().kind is .QuestionMark() then {
+            // `?T(args)` is a nullable type application. `?` is not an
+            // expression operator, so it can only start a type.
+            let start = self.current();
+            return self.parse_prefixed_type_application(start);
         };
 
         if self.current().kind is .Ampersand() then {

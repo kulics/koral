@@ -1251,7 +1251,7 @@ public class TypeChecker {
     }
   }
 
-  private func isFloatScalarType(_ type: Type) -> Bool {
+  func isFloatScalarType(_ type: Type) -> Bool {
     switch type {
     case .float32, .float64:
       return true

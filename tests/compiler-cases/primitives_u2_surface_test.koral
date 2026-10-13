@@ -4,39 +4,33 @@ type mutable Counter(mutable count Int);
 
 let make_weak() ?Counter = {
     let c = Counter(99);
-    return downgrade(c);
+    return ?Counter(c);
 };
 
 let main() Int = {
-    // Test downgrade + upgrade roundtrip
+    // Test weak construction + unwrap roundtrip
     let c = Counter(42);
-    let weak ?Counter = downgrade(c);
+    let weak ?Counter = ?Counter(c);
 
-    // Upgrade should succeed while object is alive
-    when upgrade(weak) in {
-        .Some(r) then {
-            if r.count <> 42 then {
-                eprintln("FAIL: expected 42, got \(r.count)");
-                return 1;
-            };
-        },
-        .None() then {
-            eprintln("FAIL: upgrade returned None while object is alive");
+    // Unwrap should succeed while object is alive
+    if weak is ?r then {
+        if r.count <> 42 then {
+            eprintln("FAIL: expected 42, got \(r.count)");
             return 1;
-        },
+        };
+    } else {
+        eprintln("FAIL: unwrap returned None while object is alive");
+        return 1;
     };
 
     // Test that weak reference survives across scope via function
     let weak2 ?Counter = make_weak();
     // c is still alive here (held by 'weak' variable indirectly), weak2's source is dropped
-    when upgrade(weak2) in {
-        .Some(r) then {
-            // May or may not succeed depending on ARC timing — just verify no crash
-            let _ = r.count;
-        },
-        .None() then {
-            // Expected: object was deallocated
-        },
+    if weak2 is ?r then {
+        // May or may not succeed depending on ARC timing — just verify no crash
+        let _ = r.count;
+    } else {
+        // Expected: object was deallocated
     };
 
     println("PASS");

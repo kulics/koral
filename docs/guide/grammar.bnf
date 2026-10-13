@@ -388,10 +388,9 @@
 <postfix-suffix> ::= <call-suffix>
                    | <subscript-suffix>
                    | <member-suffix>
-                   | <cast-suffix>
-                   | <qualified-path-suffix>
+                   | <qualified-call-suffix>
 
-// `(` 是三个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
+// `(` 是两个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
 // 但解析时是**形状归类 + 有界前看**，不是「试解析、失败就回退」：先用一次
 // 有界扫描判断括号里的记号串是不是**类型形状**（只读 token 缓冲，不建树、
 // 不发诊断），再按判断结果走对应产生式。与实现一一对应
@@ -402,15 +401,18 @@
 //     类型前缀：`?`、`*unsafe` [`mutable`]（可嵌套，如 `?*unsafe T`）
 //     类型头  ：`Self`、首字母大写的标识符、`Func(...)` + 返回类型
 //     类型头后可跟 `[` <type-list> `]`
-//     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参，不是转型；只有 `*unsafe` 才是类型。
+//     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*unsafe` 才是类型。
 //
 //   `(` 的归类：
 //     括号内是**单个类型**且后面紧跟 `)`：
-//        base 是类型名 -> <qualified-path-suffix>
-//        其它 base     -> <cast-suffix>
-//     其余一律是 <call-suffix>；调用失败即报错，不回退。
-//   例：Num(Tag) 是限定路径；x(Int) 是把 x 转型到 Int；f(1, 2) 是调用；
-//       f(*p) 是调用（`*p` 是解引用）。
+//        后面紧跟 `.method(` / `.method[` <type-list> `]` `(` ->
+//           <qualified-call-suffix>（组合节点，见下）
+//        否则 -> 错误：限定调用必须带方法调用；类型没有值，不能单独出现在括号里
+//     其余：
+//        base 是类型名 -> <type-application>（转型 / 构造）
+//        其它 base     -> <call-suffix>
+//   例：Num(Tag).m(n) 是限定调用；Int(x) 是把 x 转型到 Int；Point(1, 2) 是构造；
+//       f(1, 2) 是调用；f(*p) 是调用（`*p` 是解引用）。
 //
 //   `[` 的归类：
 //     括号内是 <type-list> -> <generic-application>
@@ -433,18 +435,30 @@
 // Exactly ONE index. `[]` and `[a, b]` are errors, not empty or multi-index
 // subscripts: there is no collection in the language that indexes by a tuple.
 <member-suffix> ::= "." <identifier>
-<cast-suffix> ::= "(" <type> ")"
-// A postfix cast is `expr(Type)` -- NEVER `expr as T`. `as` has exactly two
-// uses: import aliases (`using "..." { X as Y }`) and `given Type as Trait`.
 <generic-application> ::= "[" <type-list> "]"
 
-// 完全限定调用（Rust 式限定路径，等价于 <Type as Trait>::method）：消歧义，指定 trait。
-// 写法只有一种：左侧固定是类型名，实例方法的 receiver 作为第一个实参传入，
-// 静态 trait 方法不传 receiver。方法级泛型参数仍写在方法名后。
-// 例: Num(Tag).plus_ten(n)  /  Num(Tag).kind(n)  /  Box(Transform[Int]).apply[Out](b, f)
-// 语法上 `(` 的三种含义按首字符大小写区分：
-//   lower(...) -> 调用 / 转型，upper(..., upper) -> 限定路径。
-<qualified-path-suffix> ::= "(" <trait-ref> ")"
+// 类型应用：`Type(expr)` 把 expr 转换到 Type，或 `Type(args)` 构造 Type 的值。
+// 两者的区分是语义的（类型检查器按 Type 的种类决定），文法上同形：
+//   基础类型（数值 / 指针）+ 单个位置实参 -> 显式转型（cast）
+//   结构 / 枚举 + 实参列表                -> 构造（constructor）
+// 带前缀的类型（*unsafe T、*unsafe mutable T、?T）在表达式开头直接写，
+// 与类型标注同拼写：`*unsafe Int(p)`、`*unsafe mutable T(q)`、`?Int(r)`。
+// `*unsafe` 只会是类型起始；裸 `*` 是解引用，不会歧义。
+// NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 仍然只有两个用途：
+// import 别名（`using "..." { X as Y }`）和 `given Type as Trait`。
+<type-application> ::= <type> "(" <argument-list> ")"
+
+// 限定调用（组合节点）：消歧义，指定 trait。两套写法，都必须**带着方法调用**，
+// 前部 `expr(Trait)` / `Type(Trait)` 不能单独存在：
+//   1. Type(Trait).method(...)      -- 类型限定。实例方法的 receiver 作为第一个
+//      实参传入，静态 trait 方法不传 receiver。方法级泛型参数仍写在方法名后。
+//      例: Num(Tag).plus_ten(n)  /  Num(Tag).kind(n)  /  Box(Transform[Int]).apply[Out](b, f)
+//   2. expr(Trait).method(...)      -- receiver 限定。receiver 就是左侧表达式，
+//      方法实参里不再写 receiver。仅用于实例方法。
+//      例: n(Tag).plus_ten()  /  n(Tag).kind()
+// 语法上 `(` 的归类见上文：括号内是单个类型且后面紧跟 `.method(` 才是限定调用。
+<qualified-call-suffix> ::= "(" <trait-ref> ")" "." <identifier> <qualified-method-tail>
+<qualified-method-tail> ::= ("[" <type-list> "]")? "(" <argument-list>? ")"
 <trait-ref>             ::= <type-identifier> ("[" <type-list> "]")?
 
 <argument> ::= <identifier> ":" <expression>
@@ -467,22 +481,35 @@
 
 <primary-expression> ::= <literal>
                        | <identifier>
-                       | <type-identifier>
                        | "self"
                        | "it"
+                       | <type-application>
                        | <implicit-member-expression>
                        | <collection-literal>
                        | <block-expression>
                        | <lambda-expression>
                        | "(" <expression> ")"
+// <type-application> 的类型可以带前缀，直接写在表达式开头：
+//   *unsafe Int(p)  /  *unsafe mutable T(q)  /  ?Int(r)
+// 裸 `*` 是解引用；`*unsafe` 开头只可能是类型应用。
 // There is NO tuple/pair literal. A `Pair` is constructed with its own
 // constructor (`Pair[Int, String](1, "a")`) like any other type.
+
+// 语义规则：**类型不能单独作为表达式**。Type 本身没有可行的值，因此
+// `let x = Point;`、`foo(Point)`、`Point;` 都是错误。类型名只允许出现在
+// 这些位置：
+//   Type(...)            -- 类型应用（转型 / 构造）
+//   Type.method(...)     -- 静态方法调用
+//   Type[T]              -- 泛型实例化（其后可继续 .method / (...)）
+//   Type(Trait).method(...)  -- 类型限定调用
+//   以及所有类型位置（标注、实参、泛型实参等）。
 
 // Generic instantiation is handled by postfix composition:
 //   TypeName[T]  → <identifier> <subscript-suffix>  (GenericInstantiation)
 //   TypeName[T].method(args)  → <identifier> <subscript-suffix> <member-suffix> <call-suffix>  (StaticMethodCall)
 //   TypeName.method(args)  → <identifier> <member-suffix> <call-suffix>  (StaticMethodCall)
 //   make[T](1)  → <identifier> <subscript-suffix> <call-suffix>  (GenericInstantiation + Call)
+//   TypeName[T](args)  → 类型应用（构造）；TypeName(expr) → 类型应用（转型 / 构造）
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"
@@ -537,11 +564,24 @@
                     | <trait-object-type-binding-pattern>     // exact trait-object implementation type binding
                     | <trait-object-type-pattern>             // exact trait-object implementation type test
                     | "mutable"? <identifier>                     // variable binding
+                    | <weak-binding-pattern>                  // weak-reference unpacking
                     | <struct-pattern>                        // struct destructuring pattern
                     | <tuple-pattern>                         // positional destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
                     | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
+
+<weak-binding-pattern> ::= "?" <identifier>
+                         | "?" <type-identifier> "(" <identifier> ")"
+// 弱引用拆包模式。`?v` 是裸绑定：对象存活时匹配成功并把 v 绑定到强引用。
+// `?T(v)` 是带目标类型检查的绑定。subject 必须是弱引用 `?T`。
+// 在 `is` / `is not` / `when` / `while` 中都能用：
+//   if w is ?v then use(v)
+//   if w is not ?v then ...        // 对象已死
+//   while w is ?v then ...         // 存活期间循环
+//   when w in { ?v then use(v), _ then 0 }
+// 模式是可反驳的：不覆盖"已死"分支，因此 `when` 里 `?v` 之后仍需 `_` 兜底。
+// 语义上 lower 到 upgrade intrinsic（返回 Option），`?v` 等价于 `Option.Some(v)`。
 
 <trait-object-type-binding-pattern> ::= "mutable"? <identifier> <concrete-type-pattern>
 // Binding exact trait-object implementation type pattern.

@@ -33,10 +33,6 @@ public let intrinsic null_ptr[T Any]() *unsafe mutable T;
 
 public let intrinsic spawn_thread(out_handle *unsafe mutable *unsafe mutable UInt8, out_tid *unsafe mutable UInt64, f Func() Void, stack_size UInt64) Int32;
 
-public let intrinsic downgrade[T mutable](val T) ?T;
-
-public let intrinsic upgrade[T mutable](val ?T) Option[T];
-
 public let max[T Ord](a T, b T) T;
 
 public let min[T Ord](a T, b T) T;

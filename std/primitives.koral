@@ -67,15 +67,16 @@ public let intrinsic spawn_thread(
 // SECTION 5b: Weak References
 // ============================================================================
 
-/// Create a weak reference from a managed object.
-/// The weak reference does not prevent the object from being deallocated.
-/// T must be declared as 'type mutable'.
-public let intrinsic downgrade[T mutable](val T) ?T;
-
-/// Attempt to upgrade a weak reference back to a strong reference.
-/// Returns .Some(value) if the object is still alive, .None() otherwise.
-/// T must be declared as 'type mutable'.
-public let intrinsic upgrade[T mutable](val ?T) Option[T];
+// Weak references are created with the `?T(x)` construction, where `T` is the
+// strong type and `x` is the managed object. The weak reference does not
+// prevent the object from being deallocated. `T` must be declared as
+// 'type mutable'.
+//
+// A weak reference is tested and unwrapped with the `is ?v` pattern:
+//   if w is ?v then use(v)        // binds the strong reference to v
+//   w is not ?v                   // true when the object is dead
+//   while w is ?v then process(v) // loop while the object is alive
+//   let port = if w is ?v then v else 8080;
 
 // ============================================================================
 // SECTION 6: Float Bit Manipulation (runtime)
@@ -123,9 +124,9 @@ given Float32 {
 };
 
 given Float64 {
-    public inf() Float64 = Float64.from_bits(2047(UInt64) << 52);
-    public nan() Float64 = Float64.from_bits((2047(UInt64) << 52) | (1(UInt64) << 51));
-    public min_normal() Float64 = Float64.from_bits(1(UInt64) << 52);
+    public inf() Float64 = Float64.from_bits(UInt64(2047) << 52);
+    public nan() Float64 = Float64.from_bits((UInt64(2047) << 52) | (UInt64(1) << 51));
+    public min_normal() Float64 = Float64.from_bits(UInt64(1) << 52);
     public min_denormal() Float64 = Float64.from_bits(1);
 
     public is_nan(self) Bool = {
@@ -210,7 +211,7 @@ given UInt {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask UInt = 1(UInt) << 63;
+        let mutable mask UInt = UInt(1) << 63;
         while (n & mask) == 0 then {
             count = count + 1;
             mask = mask >> 1;
@@ -297,7 +298,7 @@ given UInt64 {
         let mutable n = self;
         let mutable count UInt = 0;
         while n <> 0 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
         };
         return count;
@@ -309,7 +310,7 @@ given UInt64 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask UInt64 = 1(UInt64) << 63;
+        let mutable mask UInt64 = UInt64(1) << 63;
         while (n & mask) == 0 then {
             count = count + 1;
             mask = mask >> 1;
@@ -332,12 +333,12 @@ given UInt64 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt64 = (n % 64)(UInt64);
+        let shift UInt64 = UInt64((n % 64));
         return (self << shift) | (self >> (64 - shift));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt64 = (n % 64)(UInt64);
+        let shift UInt64 = UInt64((n % 64));
         return (self >> shift) | (self << (64 - shift));
     };
 
@@ -394,7 +395,7 @@ given UInt32 {
         let mutable n = self;
         let mutable count UInt = 0;
         while n <> 0 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
         };
         return count;
@@ -406,7 +407,7 @@ given UInt32 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask UInt32 = 1(UInt32) << 31;
+        let mutable mask UInt32 = UInt32(1) << 31;
         while (n & mask) == 0 then {
             count = count + 1;
             mask = mask >> 1;
@@ -429,12 +430,12 @@ given UInt32 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt32 = (n % 32)(UInt32);
+        let shift UInt32 = UInt32((n % 32));
         return (self << shift) | (self >> (32 - shift));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt32 = (n % 32)(UInt32);
+        let shift UInt32 = UInt32((n % 32));
         return (self >> shift) | (self << (32 - shift));
     };
 
@@ -482,7 +483,7 @@ given UInt16 {
         let mutable n = self;
         let mutable count UInt = 0;
         while n <> 0 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
         };
         return count;
@@ -494,7 +495,7 @@ given UInt16 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask UInt16 = 1(UInt16) << 15;
+        let mutable mask UInt16 = UInt16(1) << 15;
         while (n & mask) == 0 then {
             count = count + 1;
             mask = mask >> 1;
@@ -517,12 +518,12 @@ given UInt16 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt16 = (n % 16)(UInt16);
+        let shift UInt16 = UInt16((n % 16));
         return (self << shift) | (self >> (16 - shift));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt16 = (n % 16)(UInt16);
+        let shift UInt16 = UInt16((n % 16));
         return (self >> shift) | (self << (16 - shift));
     };
 
@@ -593,7 +594,7 @@ given UInt8 {
         let mutable n = self;
         let mutable count UInt = 0;
         while n <> 0 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
         };
         return count;
@@ -605,7 +606,7 @@ given UInt8 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask UInt8 = 1(UInt8) << 7;
+        let mutable mask UInt8 = UInt8(1) << 7;
         while (n & mask) == 0 then {
             count = count + 1;
             mask = mask >> 1;
@@ -628,12 +629,12 @@ given UInt8 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt8 = (n % 8)(UInt8);
+        let shift UInt8 = UInt8((n % 8));
         return (self << shift) | (self >> (8 - shift));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt8 = (n % 8)(UInt8);
+        let shift UInt8 = UInt8((n % 8));
         return (self >> shift) | (self << (8 - shift));
     };
 
@@ -671,7 +672,7 @@ given Int {
         let mutable count UInt = 0;
         let mutable i UInt = 0;
         while i < 64 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
             i = i + 1;
         };
@@ -684,10 +685,10 @@ given Int {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask Int = (1(UInt) << 63)(Int);
+        let mutable mask Int = Int((UInt(1) << 63));
         while (n & mask) == 0 then {
             count = count + 1;
-            mask = (mask(UInt) >> 1)(Int);
+            mask = Int((UInt(mask) >> 1));
         };
         count
     };
@@ -709,19 +710,19 @@ given Int {
     public rotate_left(self, n UInt) Self = {
         let bits UInt = 64;
         let shift = n % bits;
-        let u = self(UInt);
-        return ((u << shift) | (u >> (bits - shift)))(Int);
+        let u = UInt(self);
+        return Int(((u << shift) | (u >> (bits - shift))));
     };
 
     public rotate_right(self, n UInt) Self = {
         let bits UInt = 64;
         let shift = n % bits;
-        let u = self(UInt);
-        return ((u >> shift) | (u << (bits - shift)))(Int);
+        let u = UInt(self);
+        return Int(((u >> shift) | (u << (bits - shift))));
     };
 
     public reverse_bits(self) Self = {
-        let mutable n = self(UInt);
+        let mutable n = UInt(self);
         let mutable result UInt = 0;
         let mutable i UInt = 0;
         while i < 64 then {
@@ -729,11 +730,11 @@ given Int {
             n = n >> 1;
             i = i + 1;
         };
-        return result(Int);
+        return Int(result);
     };
 
     public swap_bytes(self) Self = {
-        let u = self(UInt);
+        let u = UInt(self);
         let b0 = (u & 255) << 56;
         let b1 = ((u >> 8) & 255) << 48;
         let b2 = ((u >> 16) & 255) << 40;
@@ -749,7 +750,7 @@ given Int {
         result = result | b5;
         result = result | b6;
         result = result | b7;
-        return result(Int);
+        return Int(result);
     };
 };
 
@@ -760,7 +761,7 @@ given Int64 {
         let mutable count UInt = 0;
         let mutable i UInt = 0;
         while i < 64 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
             i = i + 1;
         };
@@ -773,10 +774,10 @@ given Int64 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask Int64 = (1(UInt64) << 63)(Int64);
+        let mutable mask Int64 = Int64((UInt64(1) << 63));
         while (n & mask) == 0 then {
             count = count + 1;
-            mask = (mask(UInt64) >> 1)(Int64);
+            mask = Int64((UInt64(mask) >> 1));
         };
         count
     };
@@ -796,19 +797,19 @@ given Int64 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt64 = (n % 64)(UInt64);
-        let u = self(UInt64);
-        return ((u << shift) | (u >> (64 - shift)))(Int64);
+        let shift UInt64 = UInt64((n % 64));
+        let u = UInt64(self);
+        return Int64(((u << shift) | (u >> (64 - shift))));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt64 = (n % 64)(UInt64);
-        let u = self(UInt64);
-        return ((u >> shift) | (u << (64 - shift)))(Int64);
+        let shift UInt64 = UInt64((n % 64));
+        let u = UInt64(self);
+        return Int64(((u >> shift) | (u << (64 - shift))));
     };
 
     public reverse_bits(self) Self = {
-        let mutable n = self(UInt64);
+        let mutable n = UInt64(self);
         let mutable result UInt64 = 0;
         let mutable i UInt = 0;
         while i < 64 then {
@@ -816,11 +817,11 @@ given Int64 {
             n = n >> 1;
             i = i + 1;
         };
-        return result(Int64);
+        return Int64(result);
     };
 
     public swap_bytes(self) Self = {
-        let u = self(UInt64);
+        let u = UInt64(self);
         let b0 = (u & 255) << 56;
         let b1 = ((u >> 8) & 255) << 48;
         let b2 = ((u >> 16) & 255) << 40;
@@ -836,7 +837,7 @@ given Int64 {
         result = result | b5;
         result = result | b6;
         result = result | b7;
-        return result(Int64);
+        return Int64(result);
     };
 };
 
@@ -847,7 +848,7 @@ given Int32 {
         let mutable count UInt = 0;
         let mutable i UInt = 0;
         while i < 32 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
             i = i + 1;
         };
@@ -860,10 +861,10 @@ given Int32 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask Int32 = (1(UInt32) << 31)(Int32);
+        let mutable mask Int32 = Int32((UInt32(1) << 31));
         while (n & mask) == 0 then {
             count = count + 1;
-            mask = (mask(UInt32) >> 1)(Int32);
+            mask = Int32((UInt32(mask) >> 1));
         };
         count
     };
@@ -883,19 +884,19 @@ given Int32 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt32 = (n % 32)(UInt32);
-        let u = self(UInt32);
-        return ((u << shift) | (u >> (32 - shift)))(Int32);
+        let shift UInt32 = UInt32((n % 32));
+        let u = UInt32(self);
+        return Int32(((u << shift) | (u >> (32 - shift))));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt32 = (n % 32)(UInt32);
-        let u = self(UInt32);
-        return ((u >> shift) | (u << (32 - shift)))(Int32);
+        let shift UInt32 = UInt32((n % 32));
+        let u = UInt32(self);
+        return Int32(((u >> shift) | (u << (32 - shift))));
     };
 
     public reverse_bits(self) Self = {
-        let mutable n = self(UInt32);
+        let mutable n = UInt32(self);
         let mutable result UInt32 = 0;
         let mutable i UInt = 0;
         while i < 32 then {
@@ -903,11 +904,11 @@ given Int32 {
             n = n >> 1;
             i = i + 1;
         };
-        return result(Int32);
+        return Int32(result);
     };
 
     public swap_bytes(self) Self = {
-        let u = self(UInt32);
+        let u = UInt32(self);
         let b0 = (u & 255) << 24;
         let b1 = ((u >> 8) & 255) << 16;
         let b2 = ((u >> 16) & 255) << 8;
@@ -915,7 +916,7 @@ given Int32 {
         let mutable result = b0 | b1;
         result = result | b2;
         result = result | b3;
-        return result(Int32);
+        return Int32(result);
     };
 };
 
@@ -926,7 +927,7 @@ given Int16 {
         let mutable count UInt = 0;
         let mutable i UInt = 0;
         while i < 16 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
             i = i + 1;
         };
@@ -939,10 +940,10 @@ given Int16 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask Int16 = (1(UInt16) << 15)(Int16);
+        let mutable mask Int16 = Int16((UInt16(1) << 15));
         while (n & mask) == 0 then {
             count = count + 1;
-            mask = (mask(UInt16) >> 1)(Int16);
+            mask = Int16((UInt16(mask) >> 1));
         };
         count
     };
@@ -962,19 +963,19 @@ given Int16 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt16 = (n % 16)(UInt16);
-        let u = self(UInt16);
-        return ((u << shift) | (u >> (16 - shift)))(Int16);
+        let shift UInt16 = UInt16((n % 16));
+        let u = UInt16(self);
+        return Int16(((u << shift) | (u >> (16 - shift))));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt16 = (n % 16)(UInt16);
-        let u = self(UInt16);
-        return ((u >> shift) | (u << (16 - shift)))(Int16);
+        let shift UInt16 = UInt16((n % 16));
+        let u = UInt16(self);
+        return Int16(((u >> shift) | (u << (16 - shift))));
     };
 
     public reverse_bits(self) Self = {
-        let mutable n = self(UInt16);
+        let mutable n = UInt16(self);
         let mutable result UInt16 = 0;
         let mutable i UInt = 0;
         while i < 16 then {
@@ -982,14 +983,14 @@ given Int16 {
             n = n >> 1;
             i = i + 1;
         };
-        return result(Int16);
+        return Int16(result);
     };
 
     public swap_bytes(self) Self = {
-        let u = self(UInt16);
+        let u = UInt16(self);
         let b0 = (u & 255) << 8;
         let b1 = (u >> 8) & 255;
-        return (b0 | b1)(Int16);
+        return Int16((b0 | b1));
     };
 };
 
@@ -1000,7 +1001,7 @@ given Int8 {
         let mutable count UInt = 0;
         let mutable i UInt = 0;
         while i < 8 then {
-            count = count + (n & 1)(UInt);
+            count = count + UInt((n & 1));
             n = n >> 1;
             i = i + 1;
         };
@@ -1013,10 +1014,10 @@ given Int8 {
     else {
         let mutable n = self;
         let mutable count UInt = 0;
-        let mutable mask Int8 = (1(UInt8) << 7)(Int8);
+        let mutable mask Int8 = Int8((UInt8(1) << 7));
         while (n & mask) == 0 then {
             count = count + 1;
-            mask = (mask(UInt8) >> 1)(Int8);
+            mask = Int8((UInt8(mask) >> 1));
         };
         count
     };
@@ -1036,19 +1037,19 @@ given Int8 {
     public trailing_ones(self) UInt = (~self).trailing_zeros();
 
     public rotate_left(self, n UInt) Self = {
-        let shift UInt8 = (n % 8)(UInt8);
-        let u = self(UInt8);
-        return ((u << shift) | (u >> (8 - shift)))(Int8);
+        let shift UInt8 = UInt8((n % 8));
+        let u = UInt8(self);
+        return Int8(((u << shift) | (u >> (8 - shift))));
     };
 
     public rotate_right(self, n UInt) Self = {
-        let shift UInt8 = (n % 8)(UInt8);
-        let u = self(UInt8);
-        return ((u >> shift) | (u << (8 - shift)))(Int8);
+        let shift UInt8 = UInt8((n % 8));
+        let u = UInt8(self);
+        return Int8(((u >> shift) | (u << (8 - shift))));
     };
 
     public reverse_bits(self) Self = {
-        let mutable n = self(UInt8);
+        let mutable n = UInt8(self);
         let mutable result UInt8 = 0;
         let mutable i UInt = 0;
         while i < 8 then {
@@ -1056,7 +1057,7 @@ given Int8 {
             n = n >> 1;
             i = i + 1;
         };
-        return result(Int8);
+        return Int8(result);
     };
 
     public swap_bytes(self) Self = self;

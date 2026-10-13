@@ -276,14 +276,17 @@ let f = 42ns;
 
 #### 数值转换
 
-不同数值类型之间需要显式转换，使用 `expr(Type)` 语法：
+不同数值类型之间需要显式转换，使用 `Type(expr)` 语法：
 
 ```koral
 let a Int = 42;
-let b Float64 = a(Float64);    // Int -> Float64
-let c Int32 = a(Int32);        // Int -> Int32
-let d UInt8 = 255(UInt8);      // Int -> UInt8
+let b Float64 = Float64(a);    // Int -> Float64
+let c Int32 = Int32(a);        // Int -> Int32
+let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
+
+指针类型与类型标注同拼写：`*unsafe Int(p)`、`*unsafe mutable T(q)`。
+只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
 #### 字符串
 
@@ -1400,7 +1403,7 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 
 约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
-- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`downgrade` / `upgrade` 亦然）。
+- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`?T(x)` / `is ?v` 亦然）。
 - `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` / `*unsafe mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
@@ -1545,17 +1548,54 @@ b.push(3);
 
 弱引用不维持被引用对象的存活。写作 `?T`，只对满足 `mutable` 约束的类型有效。
 
-用 `downgrade(T)` 生成 `?T`，用 `upgrade(?T)` 尝试升级回 `Option[T]`。
+用 `?T(x)` 构造弱引用（句柄包装，不是位级重解释）。用 `is ?v` 拆包：对象仍存活时
+模式匹配成功，`v` 绑定到强引用。
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = downgrade(node);      // ?Node
-let upgraded = upgrade(weak);    // Option[Node]
+let weak = ?Node(node);              // ?Node
+if weak is ?v then println(v.value); // v 是 Node，仅在存活时
 ```
 
-**弱引用是句柄，不是值。** 在 `upgrade` 之前它不携带被引用对象的任何字段、
+`w is not ?v` 表示对象已死。`while w is ?v` 在存活期间循环。
+
+```koral
+if weak is not ?v then println("dead");
+while weak is ?v then {
+    println(v.value);
+    break;
+};
+```
+
+`?v` 也可用作 `when` 的分支模式。它是可反驳的——覆盖存活分支但不覆盖已死分支——
+因此 `when` 里保留 `_` 兜底：
+
+```koral
+let value = when weak in {
+    ?v then v.value,
+    _ then 0,
+};
+```
+
+带回退的取值，if-expression 同样可用：
+
+```koral
+let value = if weak is ?v then v.value else 0;
+```
+
+`?v` 是裸绑定（小写）。`?Node(v)` 是带目标类型检查的绑定：
+
+```koral
+if weak is ?Node(n) then println(n.value);
+when weak in {
+    ?Node(n) then n.value,
+    _ then 0,
+};
+```
+
+**弱引用是句柄，不是值。** 在拆包之前它不携带被引用对象的任何字段、
 分支或载荷，因此一切试探或利用被引用对象**形状**的操作，对 `?T` 一律拒绝：
 
 - 成员访问，读或写 —— `w.value`、`w.value = 1`
@@ -1567,13 +1607,14 @@ let upgraded = upgrade(weak);    // Option[Node]
 把句柄**整体**绑定是允许的，并且保留 `?T`：
 
 ```koral
-let w = downgrade(node);
+let w = ?Node(node);
 let w2 ?Node = w;              // 可以：复制的是句柄
 let xs = List[?Node].new();
 xs.push(w);
 for h in xs then {             // 可以：`h` 是 `?Node`
-    let v = upgrade(h);        // 唯一能到达被引用对象的途径
-    // ...
+    if h is ?v then {          // 唯一能到达被引用对象的途径
+        // ...
+    };
 };
 ```
 
@@ -2091,17 +2132,20 @@ given[T Ord] Cursor[T] {
 
 ### 完全限定调用
 
-当出现同名候选冲突时，可使用完全限定调用。写法等价于 Rust 的限定路径 `<Type as Trait>::method`：
+当出现同名候选冲突时，可使用完全限定调用。两套写法：
 
-- `Type(TraitName).method(...)` 选取 `Type` 上 `TraitName` 的方法
+- `Type(TraitName).method(...)` —— 类型限定。实例方法的 receiver 作为第一个实参传入；静态 trait 方法不传 receiver。
+- `expr(TraitName).method(...)` —— receiver 限定。receiver 就是左侧表达式，方法实参里不再写 receiver。仅用于实例方法。
+
+两者都是组合节点：`expr(TraitName)` / `Type(TraitName)` 前缀必须带方法调用。
+
 - 泛型 trait 的实参写在限定里：`Type(TraitName[Args...]).method(...)`
 - 泛型方法的类型参数仍写在方法名后：`Type(TraitName).method[TypeArgs...](...)`
 
-写法只有一种：实例方法的 receiver 就是第一个实参，因此实例方法与静态 trait 方法的写法完全一致：
-
 ```
-Type(TraitName).method(receiver, ...)   // 实例方法
+Type(TraitName).method(receiver, ...)   // 实例方法（类型限定）
 Type(TraitName).static_method(...)      // 静态 trait 方法
+expr(TraitName).method(...)             // 实例方法（receiver 限定）
 ```
 
 ```koral

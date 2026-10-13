@@ -56,7 +56,7 @@ file_private let timeout_case_result(
 };
 
 file_private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
-    return "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)";
+    return "case exceeded memory limit (peak \(peak_bytes / UInt(1024) / UInt(1024)) MB, limit \(config.memory_limit_mb) MB)";
 };
 
 file_private let memory_exceeded_case_result(
@@ -412,12 +412,12 @@ file_private let execute_command_with_timeout(
     let stderr_content = read_text_file_or_empty(stderr_path);
 
     // Peak RSS comes from the kernel (wait4 ru_maxrss) captured at process exit.
-    let peak_memory = proc.peak_rss_bytes()(UInt);
-    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt);
+    let peak_memory = UInt(proc.peak_rss_bytes());
+    let memory_limit_bytes = config.memory_limit_mb * UInt(1024) * UInt(1024);
 
     when exit_status in {
         .Some(status) then {
-            if memory_limit_bytes > 0(UInt) and peak_memory > memory_limit_bytes then {
+            if memory_limit_bytes > UInt(0) and peak_memory > memory_limit_bytes then {
                 return CommandExecution.MemoryExceeded(
                     infer_exit_code(status),
                     peak_memory,
@@ -456,7 +456,7 @@ file_private let execute_built_executable_with_retry(
     timeout_secs Int64,
     stop_requested AtomicInt,
 ) CommandExecution = {
-    let first_program = prepared_run_executable_path(info, output_dir, 0(UInt)) or else {
+    let first_program = prepared_run_executable_path(info, output_dir, UInt(0)) or else {
         return CommandExecution.InfrastructureError(
             "failed to prepare built executable: " + it.message(),
         );
@@ -474,7 +474,7 @@ file_private let execute_built_executable_with_retry(
     return when first in {
         .InfrastructureError(_) then {
             sleep(100ms);
-            let second_program = prepared_run_executable_path(info, output_dir, 1(UInt)) or else {
+            let second_program = prepared_run_executable_path(info, output_dir, UInt(1)) or else {
                 return .InfrastructureError(
                     "failed to prepare built executable: " + it.message(),
                 );
@@ -495,7 +495,7 @@ file_private let execute_built_executable_with_retry(
                     let third_program = prepared_run_executable_path(
                         info,
                         output_dir,
-                        2(UInt),
+                        UInt(2),
                     ) or else {
                         return .InfrastructureError(
                             "failed to prepare built executable: " + it.message(),
@@ -652,7 +652,7 @@ file_private let observe_case(
     output_dir Path,
     stop_requested AtomicInt,
 ) CaseObservation = {
-    let timeout_secs = config.timeout_secs(Int64);
+    let timeout_secs = Int64(config.timeout_secs);
     let expectations = parse_expectations(info.absolute_path) or else {
         return .Infra(label + " side: failed to parse expectations: " + it.message());
     };
@@ -1000,7 +1000,7 @@ public let run_single_case(
         return run_single_case_differential(config, info, stop_requested);
     };
     let start = MonoTime.now();
-    let timeout_secs = config.timeout_secs(Int64);
+    let timeout_secs = Int64(config.timeout_secs);
 
     let expectations = parse_expectations(info.absolute_path) or else {
         let duration_ms = start.elapsed().as_milliseconds();

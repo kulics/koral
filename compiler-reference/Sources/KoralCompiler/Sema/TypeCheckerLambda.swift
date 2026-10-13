@@ -325,10 +325,6 @@ extension TypeChecker {
     case .memberPath(let base, _, _):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
 
-    case .traitQualificationExpression:
-      // The left side is a type, not an expression — nothing to capture.
-      return
-      
     case .subscriptExpression(let base, let arguments, _):
       try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
       for arg in arguments {
@@ -407,15 +403,17 @@ extension TypeChecker {
         }
       }
 
-    case .qualifiedMethodCall(_, _, _, let arguments, _):
-      // The receiver (if any) is an ordinary argument below.
+    case .qualifiedMethodCall(let base, _, _, let arguments, _):
+      // The base may be the receiver expression of `expr(Trait).method(...)`.
+      try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)
         }
       }
 
-    case .qualifiedGenericMethodCall(_, _, _, _, let arguments, _):
+    case .qualifiedGenericMethodCall(let base, _, _, _, let arguments, _):
+      try collectCapturedVariables(expr: base, localNames: localNames, captures: &captures)
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)
@@ -463,6 +461,9 @@ extension TypeChecker {
   private func collectPatternBindingNames(_ pattern: PatternNode, into names: inout Set<String>) {
     switch pattern {
     case .variable(let name, _, _):
+      guard name != "_" else { return }
+      names.insert(name)
+    case .weakBinding(let name, _, _):
       guard name != "_" else { return }
       names.insert(name)
     case .traitObjectTypeBinding(let name, _, _, _):
