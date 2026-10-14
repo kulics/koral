@@ -189,7 +189,7 @@
 // 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）——
 //    主体必须声明为 `type mutable`
 // 2) 类型种类约束关键字 `foreign`（同样不是 trait 名）——主体的表示由
-//    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` 指针、
+//    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` 指针、
 //    `type foreign` 声明，以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
 //    用户声明不能认领（`type` 的布局由编译器选，不在其中）
 // 3) 简单 trait 名（如 Eq）
@@ -208,10 +208,10 @@
               | <function-type>
               | "Self"
 
-<type-prefix> ::= "*" "unsafe" "mutable"?
+<type-prefix> ::= "*" "mutable"?
                | "?"
-// *unsafe T         — read-only pointer
-// *unsafe mutable T     — mutable pointer
+// * T         — read-only pointer
+// *mutable T     — mutable pointer
 // ?T            — weak reference
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
@@ -412,12 +412,14 @@
                       | <when-expression>
                       | "-" <prefix-expression>
                       | "~" <prefix-expression>
+                      | "?" <prefix-expression>
                       | "*" <prefix-expression>
-                      | "&" "unsafe" "mutable"? <prefix-expression>
+                      | "&" "mutable"? <prefix-expression>
                       | <postfix-expression>
-// Prefix pointer operators:
+// Prefix operators:
+// - ?expr upgrades a weak reference to Option[T]
 // - *expr dereferences raw pointers
-// - &unsafe expr / &unsafe mutable expr form raw pointers
+// - & expr / &mutable expr form raw pointers
 // Mutability/addressability checks are semantic, not grammar-level.
 
 // ============================================================================
@@ -438,10 +440,10 @@
 //  parser/core_expressions.koral:parse_postfix_suffixes）。
 //
 //   **类型形状**（与 <type> 的文法逐条对齐）：
-//     类型前缀：`?`、`*unsafe` [`mutable`]（可嵌套，如 `?*unsafe T`）
+//     类型前缀：`?`、`*` [`mutable`]（可嵌套，如 `?* T`）
 //     类型头  ：`Self`、首字母大写的标识符、`Func(...)` + 返回类型
 //     类型头后可跟 `[` <type-list> `]`
-//     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*unsafe` 才是类型。
+//     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*` 才是类型。
 //
 //   `(` 的归类：
 //     括号内是**单个类型**且后面紧跟 `)`：
@@ -480,9 +482,9 @@
 // 两者的区分是语义的（类型检查器按 Type 的种类决定），文法上同形：
 //   基础类型（数值 / 指针）+ 单个位置实参 -> 显式转型（cast）
 //   结构 / 枚举 + 实参列表                -> 构造（constructor）
-// 带前缀的类型（*unsafe T、*unsafe mutable T、?T）在表达式开头直接写，
-// 与类型标注同拼写：`*unsafe Int(p)`、`*unsafe mutable T(q)`、`?Int(r)`。
-// `*unsafe` 只会是类型起始；裸 `*` 是解引用，不会歧义。
+// 带前缀的类型（* T、*mutable T、?T）在表达式开头直接写，
+// 与类型标注同拼写：`* Int(p)`、`*mutable T(q)`、`?Int(r)`。
+// `*` 只会是类型起始；裸 `*` 是解引用，不会歧义。
 // NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 仍然只有两个用途：
 // import 别名（`using "..." { X as Y }`）和 `given Type as Trait`。
 <type-application> ::= <type> "(" <argument-list> ")"
@@ -529,8 +531,8 @@
                        | <lambda-expression>
                        | "(" <expression> ")"
 // <type-application> 的类型可以带前缀，直接写在表达式开头：
-//   *unsafe Int(p)  /  *unsafe mutable T(q)  /  ?Int(r)
-// 裸 `*` 是解引用；`*unsafe` 开头只可能是类型应用。
+//   * Int(p)  /  *mutable T(q)  /  ?Int(r)
+// 裸 `*` 是解引用；`*` 开头只可能是类型应用。
 // There is NO tuple/pair literal. A `Pair` is constructed with its own
 // constructor (`Pair[Int, String](1, "a")`) like any other type.
 
@@ -604,24 +606,11 @@
                     | <trait-object-type-binding-pattern>     // exact trait-object implementation type binding
                     | <trait-object-type-pattern>             // exact trait-object implementation type test
                     | "mutable"? <identifier>                     // variable binding
-                    | <weak-binding-pattern>                  // weak-reference unpacking
                     | <struct-pattern>                        // struct destructuring pattern
                     | <tuple-pattern>                         // positional destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
                     | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
-
-<weak-binding-pattern> ::= "?" <identifier>
-                         | "?" <type-identifier> "(" <identifier> ")"
-// 弱引用拆包模式。`?v` 是裸绑定：对象存活时匹配成功并把 v 绑定到强引用。
-// `?T(v)` 是带目标类型检查的绑定。subject 必须是弱引用 `?T`。
-// 在 `is` / `is not` / `when` / `while` 中都能用：
-//   if w is ?v then use(v)
-//   if w is not ?v then ...        // 对象已死
-//   while w is ?v then ...         // 存活期间循环
-//   when w in { ?v then use(v), _ then 0 }
-// 模式是可反驳的：不覆盖"已死"分支，因此 `when` 里 `?v` 之后仍需 `_` 兜底。
-// 语义上 lower 到 upgrade intrinsic（返回 Option），`?v` 等价于 `Option.Some(v)`。
 
 <trait-object-type-binding-pattern> ::= "mutable"? <identifier> <concrete-type-pattern>
 // Binding exact trait-object implementation type pattern.
@@ -788,7 +777,7 @@
 
 // Reserved keywords:
 //   let, mutable, type, trait, given, intrinsic, foreign
-//   using, self, Self, as, unsafe
+//   using, self, Self, as
 //   if, then, else, while, for, when, is, in, it
 //   and, or, not
 //   return, break, continue, defer
@@ -844,7 +833,7 @@
 
 // No implicit ref promotion for function/method arguments.
 // No auto-deref for function/method arguments.
-// Use explicit &unsafe, &unsafe mutable, and * at call sites.
+// Use explicit &, &mutable, and * at call sites.
 // Method receiver is always `self` (unified receiver), no auto-ref or auto-deref.
 
 // Closures are copy-only.

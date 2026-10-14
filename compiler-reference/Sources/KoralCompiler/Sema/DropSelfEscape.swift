@@ -199,6 +199,9 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     }
     return nil
 
+  case .upgradeExpr(let inner, _):
+    return dropSelfEscapeSpanIn(inner, inLambda: inLambda)
+
   // Literals, the empty literal and generic instantiations carry no
   // expression that could name `self`.
   case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral,

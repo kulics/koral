@@ -1406,7 +1406,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = ptr.type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*unsafe mutable")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*mutable")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1419,10 +1419,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be *unsafe mutable *unsafe UInt8"), span: arguments[0].span)
+        throw SemanticError(.generic("spawn_thread: first argument must be *mutable *UInt8"), span: arguments[0].span)
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be *unsafe mutable UInt64"), span: arguments[1].span)
+        throw SemanticError(.generic("spawn_thread: second argument must be *mutable UInt64"), span: arguments[1].span)
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

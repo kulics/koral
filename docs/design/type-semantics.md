@@ -39,7 +39,7 @@ Koral 选第三类。managed reference 语法（`*T` / `*mutable T` / `?*T` / `?
 The active model is the simplified, declaration-site mutability design:
 
 - managed refs are removed: no `*T`, `*mutable T`, `?*T`, `?*mutable T`, no `&`, no `&mutable`, and no `box()`
-- raw pointers remain: `*unsafe T`, `*unsafe mutable T`, `&unsafe`, `&unsafe mutable`
+- raw pointers remain: `* T`, `*mutable T`, `&`, `&mutable`
 - `type mutable` controls nominal shared-object semantics, not field-by-field mutability for ordinary types
 - non-`type mutable` nominal types must keep all fields immutable; only `type mutable` types may declare `mutable` fields
 - `Clone` is explicitly shallow-copy semantics: duplicate the object handle or backing storage, not a recursive deep copy
@@ -120,7 +120,7 @@ clang 直接拒绝。
 它满足的是一个**封闭集合**，由编译器判定：
 
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
-- 裸指针：`*unsafe T`、`*unsafe mutable T`
+- 裸指针：`* T`、`*mutable T`
 - `type foreign` 声明（布局就是 C 的那个）
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 

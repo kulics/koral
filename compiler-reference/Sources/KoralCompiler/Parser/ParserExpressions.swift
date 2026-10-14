@@ -77,11 +77,11 @@ extension Parser {
   // stream is restored either way -- that is how a streaming lexer gets
   // lookahead -- and the caller then parses the alternative for real.
   //
-  // The shapes mirror `parseType` exactly: type prefixes (`?`, `*unsafe`
+  // The shapes mirror `parseType` exactly: type prefixes (`?`, `*`
   // [`mutable`]) plus a type head (`Self`, an upper-first identifier, or
   // `Func(...)` followed by its return type), with an optional
-  // `[` `<type-list>` `]` after the head. Bare `*` is NOT a type start: `f(*p)`
-  // dereferences, it does not cast.
+  // `[` `<type-list>` `]` after the head. `*` + type-head starts a type; `*` +
+  // anything else dereferences: `f(*p)` dereferences, it does not cast.
 
   /// Non-throwing advance, for the shape scanner only: classification must not
   /// fail on a lexer error, it just runs out of tokens and says "no".
@@ -99,7 +99,20 @@ extension Parser {
     case .questionMark, .selfTypeKeyword:
       return true
     case .multiply:
-      return lexer.peekNextToken() === .unsafeKeyword
+      return isTypeHeadToken(lexer.peekNextToken())
+    case .identifier(let name):
+      return isValidTypeName(name)
+    default:
+      return false
+    }
+  }
+
+  /// Whether a token can start a type head (after `*` or at expression start).
+  /// Type heads are `mutable`, uppercase identifiers, and `Self`.
+  private func isTypeHeadToken(_ token: Token) -> Bool {
+    switch token {
+    case .mutableKeyword, .selfTypeKeyword:
+      return true
     case .identifier(let name):
       return isValidTypeName(name)
     default:
@@ -123,14 +136,13 @@ extension Parser {
   /// false (without promising anything about the cursor) when the run is not
   /// a type -- the caller only reaches this after `scanTypeShape` said yes.
   private func scanTypeShapeConsuming() -> Bool {
-    // Prefixes: `?T`, `*unsafe T`, `*unsafe mutable T`. They nest.
+    // Prefixes: `?T`, `*T`, `*mutable T`. They nest.
     var morePrefixes = true
     while morePrefixes {
       switch currentToken {
       case .questionMark:
         advanceShape()
-      case .multiply where lexer.peekNextToken() === .unsafeKeyword:
-        advanceShape()
+      case .multiply where isTypeHeadToken(lexer.peekNextToken()):
         advanceShape()
         if currentToken === .mutableKeyword { advanceShape() }
       default:
@@ -885,18 +897,10 @@ extension Parser {
       return .bitwiseNotExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     if currentToken === .ampersand {
-      // Anchored at the `&`, which is where the unsafe reference starts -- the
-      // construct a `cannot take &unsafe of ...` diagnostic is about.
+      // Anchored at the `&`, which is where the reference starts -- the
+      // construct a `cannot take & of ...` diagnostic is about.
       let ampersandSpan = currentSpan
       try match(.ampersand)
-      guard currentToken === .unsafeKeyword else {
-        throw ParserError.unexpectedToken(
-          span: currentSpan,
-          got: currentToken.description,
-          expected: "managed '&' and '&mutable' are removed; use '&unsafe' or '&unsafe mutable'"
-        )
-      }
-      try match(.unsafeKeyword)
       let mutable = currentToken === .mutableKeyword
       if mutable {
         try match(.mutableKeyword)
@@ -905,10 +909,10 @@ extension Parser {
       return .ptrExpression(expr, mutable: mutable, span: ampersandSpan)
     }
     if currentToken === .multiply {
-      // `*unsafe T(args)` is a pointer type application; bare `*` is deref.
-      // `*unsafe` at expression start can only be a type -- `unsafe` is a
-      // keyword, so there is no deref of a variable named `unsafe`.
-      if lexer.peekNextToken() === .unsafeKeyword {
+      // `*T(args)` is a pointer type application; bare `*` is deref.
+      // `*` + type-head (mutable, uppercase ident, Self) at expression start
+      // can only be a type; `*` + anything else is deref.
+      if isTypeHeadToken(lexer.peekNextToken()) {
         let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
         return try parsePostfixSuffixes(from: cast)
       }
@@ -918,17 +922,25 @@ extension Parser {
       return .derefExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     if currentToken === .questionMark {
-      // `?T(args)` is a nullable type application. `?` is not an expression
-      // operator, so it can only start a type.
-      let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
-      return try parsePostfixSuffixes(from: cast)
+      // `?T(args)` is a weak-reference type application (construction);
+      // `?expr` upgrades a weak reference to `Option[T]`.
+      // Disambiguation: `?` + type-start tries type application; `?` + anything
+      // else is the upgrade operator.
+      if isTypeHeadToken(lexer.peekNextToken()) {
+        let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
+        return try parsePostfixSuffixes(from: cast)
+      }
+      let startSpan = currentSpan
+      try match(.questionMark)
+      let operand = try parsePrefixExpression()
+      return .upgradeExpr(operand, span: SourceSpan(start: startSpan.start, end: operand.span.end))
     }
     return try parsePostfixExpression()
   }
 
-  /// `*unsafe [mutable] T(args)` / `?T(args)` -- a cast whose target type is
+  /// `*T(args)` / `*mutable T(args)` / `?T(args)` -- a cast whose target type is
   /// written with a prefix, at expression start. The spelling matches the type
-  /// annotation: `*unsafe Int(p)`, `*unsafe mutable T(q)`, `?Int(r)`.
+  /// annotation: `*Int(p)`, `*mutable T(q)`, `?Int(r)`.
   private func parsePrefixedTypeApplication(startSpan: SourceSpan) throws -> ExpressionNode {
     let targetType = try parseType()
     guard currentToken === .leftParen else {

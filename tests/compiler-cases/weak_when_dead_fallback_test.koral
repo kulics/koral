@@ -1,6 +1,6 @@
 // EXPECT: PASS
-// `?v` in `when` is refutable: the dead case must be caught by the `_` arm.
-// Also verifies `is not ?v` reports the dead case.
+// `?w` upgrades a weak reference to `Option[T]`. A dead handle upgrades to
+// `.None()` and falls through to the None arm.
 
 type mutable Box(mutable value Int);
 
@@ -12,28 +12,23 @@ let make_dead() ?Box = {
 let main() Int = {
     let w = make_dead();
 
-    // when + ?v falls through to `_` when the object is dead
-    let r = when w in {
-        ?v then v.value,
-        _ then -1,
+    // when on a dead handle falls to .None()
+    let r = when ?w in {
+        .Some(v) then v.value,
+        .None() then -1,
     };
     if r <> -1 then {
-        eprintln("FAIL: dead when ?v expected -1, got \(r)");
+        eprintln("FAIL: dead when ?w expected -1, got \(r)");
         return 1;
     };
 
-    // is not ?v reports dead
-    if w is not ?v then {
-        // expected
-    } else {
-        eprintln("FAIL: dead handle reported alive");
-        return 2;
-    };
-
     // if-expression fallback on dead handle
-    let value = if w is ?v then v.value else 0;
+    let value = when ?w in {
+        .Some(v) then v.value,
+        .None() then 0,
+    };
     if value <> 0 then {
-        eprintln("FAIL: dead if ?v expected 0, got \(value)");
+        eprintln("FAIL: dead when ?w expected 0, got \(value)");
         return 3;
     };
 

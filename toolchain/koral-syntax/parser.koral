@@ -95,7 +95,7 @@ given CstParser {
 
     /// Whether `i` is in range and the token there can begin a type.
     /// Mirrors `is_type_start`, except that bare `*` is excluded: `f(*p)`
-    /// dereferences, it does not cast. Only `*unsafe` is a type.
+    /// dereferences, it does not cast. Only `*` is a type.
     /// The index of the first token at or after `i` that is not a newline.
     /// The parser's `peek()` skips newlines; the scanner must too, or a
     /// multi-line call argument makes it see `Newline` where the parser sees `(`.
@@ -108,9 +108,9 @@ given CstParser {
     };
 
     /// Whether `i` (after skipping newlines) is in range and the token there
-    /// can begin a type. Mirrors `is_type_start`, except that bare `*` is
-    /// excluded: `f(*p)` dereferences, it does not cast. Only `*unsafe` is a
-    /// type.
+    /// can begin a type. Mirrors `is_type_start`, except that `*` only starts
+    /// a type when followed by a type head: `f(*p)` dereferences, it does not
+    /// cast.
     file_private token_starts_type_at(self, raw_i UInt) Bool = {
         let i = self.sig_index_at(raw_i);
         if i >= self.tokens.count() then {
@@ -120,11 +120,28 @@ given CstParser {
             .KwWeakref() or .KwSelfType() then true,
             .Star() then {
                 let n = self.sig_index_at(i + 1);
-                n < self.tokens.count() and self.tokens[n] is .KwUnsafe()
+                n < self.tokens.count() and self.token_is_type_head(self.tokens[n])
             },
             .Ident(name) then self.is_type_start(.Ident(name)),
             _ then false,
         };
+    };
+
+    /// Whether a token can start a type head (after `*`).
+    /// Type heads are `mutable`, `Self`, and uppercase identifiers.
+    file_private token_is_type_head(self, token Token) Bool = {
+        return when token in {
+            .KwMut() or .KwSelfType() then true,
+            .Ident(name) then self.is_type_start(.Ident(name)),
+            _ then false,
+        };
+    };
+
+    /// Whether the token at `raw_offset` (after skipping newlines from `self.pos`)
+    /// is a type head.
+    file_private peek_is_type_head_at(self, raw_offset UInt) Bool = {
+        let tok = self.peek_at_skip_nl(raw_offset);
+        return self.token_is_type_head(tok);
     };
 
     /// The index just past one type starting at `start_index`, or `None`.
@@ -140,10 +157,10 @@ given CstParser {
                 i += 1;
             } else if self.tokens[i] is .Star() then {
                 let n = self.sig_index_at(i + 1);
-                if n >= self.tokens.count() or self.tokens[n] is not .KwUnsafe() then {
+                if n >= self.tokens.count() or not self.token_is_type_head(self.tokens[n]) then {
                     more_prefixes = false;
                 } else {
-                    i = self.sig_index_at(n + 1);
+                    i = n;
                     if i < self.tokens.count() and self.tokens[i] is .KwMut() then {
                         i += 1;
                     };
@@ -585,32 +602,22 @@ given CstParser {
     file_private parse_type_node(self) Result[CstType] = {
         if self.check(.Star()) then {
             let kw = self.eat();
-            if self.check(.KwUnsafe()) then {
-                let unsafe_kw = self.eat();
-                let mutable mut_kw = Option[Token].None();
-                if self.check(.KwMut()) then {
-                    mut_kw = .Some(self.eat());
-                };
-                let inner = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let ptr_kw = Token.KwPtr();
-                let _ = kw;
-                let _ = unsafe_kw;
-                if mut_kw is .Some(mk) then {
-                    return .Ok(.Mutable(CstType.Ptr(inner, ptr_kw), mk));
-                };
-                return .Ok(.Ptr(inner, ptr_kw));
+            let mutable mut_kw = Option[Token].None();
+            if self.check(.KwMut()) then {
+                mut_kw = .Some(self.eat());
             };
-            // `*` is a raw pointer and nothing else. Managed references are
-            // gone from the language model, so `*T` is not a spelling of
-            // anything. Matches the compiler's rejection.
-            return .Error(
-                "Parse error: Unexpected token: *, expected: managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'",
-            );
+            let inner = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let ptr_kw = Token.KwPtr();
+            let _ = kw;
+            if mut_kw is .Some(mk) then {
+                return .Ok(.Mutable(CstType.Ptr(inner, ptr_kw), mk));
+            };
+            return .Ok(.Ptr(inner, ptr_kw));
         };
         if self.check(.KwWeakref()) then {
             let kw = self.eat();
@@ -1486,12 +1493,11 @@ given CstParser {
             return .Ok(.BitwiseNot(op, operand));
         };
 
-        // Dereference, or a raw-pointer type application `*unsafe T(expr)`.
-        // Bare `*` is deref; `*unsafe` at expression start can only be a type
-        // (`unsafe` is a keyword, so there is no deref of a variable named
-        // `unsafe`), and a prefixed type in expression position must be applied.
+        // Dereference, or a raw-pointer type application `* T(expr)`.
+        // `*` + type-head starts a pointer type application; `*` + anything
+        // else is deref. A prefixed type in expression position must be applied.
         if self.check(.Star()) then {
-            if self.peek_at_skip_nl(1) is .KwUnsafe() then {
+            if self.peek_is_type_head_at(1) then {
                 let cast = self.parse_type_application() or return;
                 return self.parse_postfix_suffixes(cast);
             };
@@ -1512,13 +1518,9 @@ given CstParser {
             return self.parse_postfix_suffixes(cast);
         };
 
-        // Address-of: &, &mutable, &unsafe, &unsafe mutable
+        // Address-of: &expr, &mutable expr
         if self.check(.Amp()) then {
             let op = self.eat();
-            let mutable raw_kw = Option[Token].None();
-            if self.check(.KwUnsafe()) then {
-                raw_kw = .Some(self.eat());
-            };
             let mutable mut_kw = Option[Token].None();
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat());
@@ -1529,7 +1531,7 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            return .Ok(.AddressOf(op, raw_kw, mut_kw, operand));
+            return .Ok(.AddressOf(op, mut_kw, operand));
         };
 
         return self.parse_postfix();
@@ -1539,17 +1541,17 @@ given CstParser {
     // Postfix expressions
     // ========================================================================
 
-    /// `*unsafe [mutable] T(expr)` / `?T(expr)` -- a cast or weak construction
+    /// `* [mutable] T(expr)` / `?T(expr)` -- a cast or weak construction
     /// whose target type is written with a prefix, at expression start. The
-    /// spelling matches the type annotation: `*unsafe Int(p)`,
-    /// `*unsafe mutable T(q)`, `?T(r)`. The prefixed type is the target, and
+    /// spelling matches the type annotation: `* Int(p)`,
+    /// `*mutable T(q)`, `?T(r)`. The prefixed type is the target, and
     /// the parenthesized operand is a single expression -- a prefixed type is
     /// a cast target, not a constructor argument list.
     file_private parse_type_application(self) Result[CstExpr] = {
         let cast_type = self.parse_type_node() or return;
         if not self.check(.LParen()) then {
             return .Error(
-                "Parse error: expected '(': a prefixed type in expression position must be a cast or weak construction, e.g. '*unsafe Int(p)' or '?T(p)'",
+                "Parse error: expected '(': a prefixed type in expression position must be a cast or weak construction, e.g. '* Int(p)' or '?T(p)'",
             );
         };
         let lp = self.eat();
@@ -1992,7 +1994,7 @@ given CstParser {
         // `Self` is a TYPE, not an expression. The compilers' primary
         // expression parser has no case for it -- `Self(1)`, `Self`, and
         // `f(Self)` are all refused there -- so this refuses it too. `Self`
-        // stays legal in type position (`*unsafe Self(p)`, `let x Self`, ...).
+        // stays legal in type position (`* Self(p)`, `let x Self`, ...).
         if self.check(.KwSelfType()) then {
             return .Error(
                 "Parse error: 'Self' is a type and cannot be used as an expression",

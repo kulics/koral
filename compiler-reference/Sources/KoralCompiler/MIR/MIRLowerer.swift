@@ -62,9 +62,9 @@ final class MIRLowerer {
         globals.append(.given(type: type, trait: trait, methods: methods.map(\.identifier)))
         guard !context.containsGenericParameter(type) else { continue }
         for method in methods where shouldLowerFunction(identifier: method.identifier) {
-          // For Drop trait's drop(self): wrap self parameter type as *unsafe mutable Self
+          // For Drop trait's drop(self): wrap self parameter type as *mutable Self
           // so the generated C function matches __koral_TypeName_drop(struct TypeName* self).
-          // If the parameter is already *unsafe mutable Self (old syntax), keep as-is.
+          // If the parameter is already *mutable Self (old syntax), keep as-is.
           // We preserve the original defId so body references to 'self' still resolve.
           let params: [Symbol]
           let isDropMethod = isStdDropTraitConformance(trait)
@@ -73,10 +73,10 @@ final class MIRLowerer {
              context.getName(first.defId) == "self" {
             switch first.type {
             case .mutablePointer:
-              // Already *unsafe mutable Self (old syntax) — keep as-is
+              // Already *mutable Self (old syntax) — keep as-is
               params = method.parameters
             default:
-              // drop(self) — wrap self type as *unsafe mutable Self for C calling convention
+              // drop(self) — wrap self type as *mutable Self for C calling convention
               // Keep the same defId so body field access still resolves 'self'
               let pointerSelf = Symbol(
                 defId: first.defId,

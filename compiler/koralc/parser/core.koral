@@ -859,10 +859,9 @@ given Parser {
     // 更好的诊断吃掉。形状归类只读 token 缓冲、不建树、不改状态，回答一个
     // 有界问题：从某个下标起的 token 串是不是一个类型的形状，到哪里结束。
     //
-    // 形状必须与 `parse_type` 接受的语法逐条对齐：类型前缀（`?`、`*unsafe`
+    // 形状必须与 `parse_type` 接受的语法逐条对齐：类型前缀（`?`、`*`
     // [`mutable`]）+ 类型头（`Self`、大写标识符、`Func(...)` + 返回类型），
-    // 类型头后可跟 `[` 类型实参表 `]`。裸 `*` 不算类型起始——`f(*p)` 是解引用
-    // 实参，不是转型；只有 `*unsafe` 才是类型。
+    // 类型头后可跟 `[` 类型实参表 `]`。`*` + 类型头是类型；`*` + 其他是解引用。
 
     /// Whether `kind` at `index` can begin a type.
     module_private token_kind_starts_type_at(self, index UInt) Bool = {
@@ -872,16 +871,24 @@ given Parser {
         return when self.tokens[index].kind in {
             .QuestionMark() then true,
             .KwSelfType() then true,
-            .Star() then self.index_followed_by_unsafe_at(index),
+            .Star() then self.index_followed_by_type_head_at(index),
             .Identifier(name) then self.is_upper_first(name),
             _ then false,
         };
     };
 
-    /// `*unsafe` — the only spelling of a raw-pointer type. Bare `*` is the
-    /// dereference operator and must not read as a type start.
-    module_private index_followed_by_unsafe_at(self, index UInt) Bool = {
-        return index + 1 < self.tokens.count() and self.tokens[index + 1].kind is .KwUnsafe();
+    /// `*` + type-head (mutable, uppercase ident, Self) starts a pointer type.
+    /// `*` + anything else is the dereference operator.
+    module_private index_followed_by_type_head_at(self, index UInt) Bool = {
+        if index + 1 >= self.tokens.count() then {
+            return false;
+        };
+        return when self.tokens[index + 1].kind in {
+            .KwMut() then true,
+            .KwSelfType() then true,
+            .Identifier(name) then self.is_upper_first(name),
+            _ then false,
+        };
     };
 
     /// The index just past a `[` ... `]` type argument list that starts at
@@ -985,7 +992,7 @@ given Parser {
     /// the run there is not a type.
     module_private scan_type_shape_at(self, start_index UInt) Option[UInt] = {
         let mutable i = start_index;
-        // Prefixes: `?T`, `*unsafe T`, `*unsafe mutable T`. They nest: `?*unsafe T`.
+        // Prefixes: `?T`, `*T`, `*mutable T`. They nest: `?*T`.
         let mutable more_prefixes = true;
         while more_prefixes then {
             if i >= self.tokens.count() then {
@@ -993,8 +1000,8 @@ given Parser {
             };
             if self.tokens[i].kind is .QuestionMark() then {
                 i += 1;
-            } else if self.tokens[i].kind is .Star() and self.index_followed_by_unsafe_at(i) then {
-                i += 2;
+            } else if self.tokens[i].kind is .Star() and self.index_followed_by_type_head_at(i) then {
+                i += 1;
                 if i < self.tokens.count() and self.tokens[i].kind is .KwMut() then {
                     i += 1;
                 };
@@ -1159,7 +1166,7 @@ given Parser {
 
     module_private parse_type(self) Result[TypeNode] = {
         // The type's span starts at its first token -- `?T` starts at the `?`,
-        // `*unsafe T` at the `*`, `List[Int]` at the name. A diagnostic that
+        // `*T` at the `*`, `List[Int]` at the name. A diagnostic that
         // names the type points here.
         let start = self.current();
         when self.current().kind in {
@@ -1179,29 +1186,14 @@ given Parser {
             },
             .Star() then {
                 self.advance();
-                if self.current().kind is .KwUnsafe() then {
+                let mutable is_mutable = false;
+                if self.current().kind is .KwMut() then {
                     self.advance();
-                    let mutable is_mutable = false;
-                    if self.current().kind is .KwMut() then {
-                        self.advance();
-                        is_mutable = true;
-                    };
-                    let inner = self.parse_type() or return;
-                    return .Ok(
-                        TypeNode.Pointer(inner, is_mutable, self.span_from_start(start)),
-                    );
+                    is_mutable = true;
                 };
-                // `*` is a raw pointer and nothing else. Managed references
-                // are gone from the language model, so `*T` is not a spelling
-                // of anything -- the reader is told what is left. The
-                // complaint is about the `*`, which is the token that no
-                // longer means what it used to.
-                return .Error(
-                    self.unexpected_token_error_at(
-                        "*",
-                        "managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'",
-                        start,
-                    ),
+                let inner = self.parse_type() or return;
+                return .Ok(
+                    TypeNode.Pointer(inner, is_mutable, self.span_from_start(start)),
                 );
             },
             .KwSelfType() then {

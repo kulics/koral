@@ -160,12 +160,12 @@ let main() Void = {
     // === Type declarations ===
     // `type` / `type mutable` are the two nominal forms the language has
     // (grammar.bnf <type-decl>). `mutable` used to be a parse error here.
-    // Raw pointers are `*unsafe T` / `*unsafe mutable T` (grammar.bnf
+    // Raw pointers are `* T` / `*mutable T` (grammar.bnf
     // <type-prefix>). The managed `* T` / `*! T` spellings are gone.
     t.test(
         "raw pointer types",
-        "let f(p *unsafe mutable Int, q *unsafe Int) Void={};\n",
-        "let f(p *unsafe mutable Int, q *unsafe Int) Void = {};\n",
+        "let f(p *mutable Int, q * Int) Void={};\n",
+        "let f(p *mutable Int, q * Int) Void = {};\n",
     );
     t.test(
         "type mutable",
@@ -282,7 +282,7 @@ let main() Void = {
 
     // === Casts and type applications ===
     // Casts spell the target type FIRST: `Type(expr)` (`Int(x)`, `Int64(42)`).
-    // A prefixed target type keeps its prefix: `*unsafe Int(p)`, `?T(q)`. The
+    // A prefixed target type keeps its prefix: `* Int(p)`, `?T(q)`. The
     // old postfix spelling `expr(Type)` is gone.
     t.test(
         "cast target type leads",
@@ -291,13 +291,13 @@ let main() Void = {
     );
     t.test(
         "raw pointer cast",
-        "let main() Void={\nlet p=*unsafe Int(q);\n};\n",
-        "let main() Void = {\n    let p = *unsafe Int(q);\n};\n",
+        "let main() Void={\nlet p=* Int(q);\n};\n",
+        "let main() Void = {\n    let p = * Int(q);\n};\n",
     );
     t.test(
         "mutable raw pointer cast",
-        "let main() Void={\nlet p=*unsafe mutable Int(q);\n};\n",
-        "let main() Void = {\n    let p = *unsafe mutable Int(q);\n};\n",
+        "let main() Void={\nlet p=*mutable Int(q);\n};\n",
+        "let main() Void = {\n    let p = *mutable Int(q);\n};\n",
     );
     t.test(
         "weak reference construction",
@@ -316,7 +316,7 @@ let main() Void = {
         "let main() Void={\nlet p=Pair(1,2);\nlet q=Point(x);\n};\n",
         "let main() Void = {\n    let p = Pair(1, 2);\n    let q = Point(x);\n};\n",
     );
-    // Bare `*` still dereferences -- only `*unsafe` starts a type.
+    // Bare `*` still dereferences -- only `*` starts a type.
     t.test(
         "deref of a star argument is not a cast",
         "let main() Void={\nlet v=f(*p);\n};\n",
@@ -501,15 +501,15 @@ let main() Void = {
     // case below was verified to be rejected by the compiler; the message text
     // is the compiler's own where it has one. If one of these goes green
     // again, koral-syntax has drifted behind the compiler.
-    t.test_error_contains(
-        "managed ref `*T` rejected",
+    t.test(
+        "raw pointer type `*T`",
         "type T(a Int);\nlet f(x *T) Int = 0;\n",
-        "managed refs are removed",
+        "type T(a Int);\nlet f(x *T) Int = 0;\n",
     );
-    t.test_error_contains(
-        "managed ref `*mutable T` rejected",
+    t.test(
+        "raw pointer type `*mutable T`",
         "type T(a Int);\nlet f(x *mutable T) Int = 0;\n",
-        "managed refs are removed",
+        "type T(a Int);\nlet f(x *mutable T) Int = 0;\n",
     );
     t.test_error_contains(
         "legacy `?*T` rejected",
@@ -823,28 +823,16 @@ let main() Void = {
         "let f(t T) Int = when t in {\n    mutable io ProbeError then 1,\n    _ then 0,\n};\n",
     );
 
-    // Weak-reference unpacking: `?name` binds the strong reference when the
-    // handle is alive, `?TypeName(name)` additionally checks the target type
-    // (grammar.bnf <weak-binding-pattern>).
+    // Weak-reference upgrade: `?expr` upgrades a weak reference to `Option[T]`.
     t.test(
-        "weak binding pattern in if",
-        "let main() Void = {\nif w is ?v then {\nuse(v);\n};\n};\n",
-        "let main() Void = {\n    if w is ?v then {\n        use(v);\n    };\n};\n",
+        "weak upgrade expression",
+        "let main() Void = {\nlet v = ?w;\n};\n",
+        "let main() Void = {\n    let v = ?w;\n};\n",
     );
     t.test(
-        "weak binding pattern in when",
-        "let f(w ?Port) Int = when w in {\n?p then p,\n_ then 0,\n};\n",
-        "let f(w ?Port) Int = when w in {\n    ?p then p,\n    _ then 0,\n};\n",
-    );
-    t.test(
-        "typed weak binding pattern",
-        "let main() Void = {\nif w is ?Port(p) then {\nuse(p);\n};\n};\n",
-        "let main() Void = {\n    if w is ?Port(p) then {\n        use(p);\n    };\n};\n",
-    );
-    t.test(
-        "weak binding is-not pattern",
-        "let main() Bool = w is not ?v;\n",
-        "let main() Bool = w is not ?v;\n",
+        "weak upgrade in when",
+        "let f(w ?Port) Int = when ?w in {\n.Some(p) then p,\n.None() then 0,\n};\n",
+        "let f(w ?Port) Int = when ?w in {\n    .Some(p) then p,\n    .None() then 0,\n};\n",
     );
 
     // An import list may span lines; the line breaks are kept, because `using`
@@ -995,7 +983,7 @@ let main() Void = {
     // === `Self` is a type, not an expression ===
     // The compilers' primary-expression parser has no case for `Self`, so
     // `Self(1)` and `Self` are refused here too. `Self` stays legal in type
-    // position (`*unsafe Self(p)`, `let x Self`, ...).
+    // position (`* Self(p)`, `let x Self`, ...).
     t.test_error_contains(
         "Self as expression rejected",
         "let main() Void={\nlet p=Self(1,2);\n};\n",

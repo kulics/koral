@@ -541,6 +541,12 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
+    case .upgradeExpr(let expr, _):
+      print("\(indent)UpgradeExpr:")
+      withIndent {
+        printExpression(expr)
+      }
+
     case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments, _):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
       print("\(indent)GenericMethodCall: .[\(typeArgsStr)]\(methodName)")

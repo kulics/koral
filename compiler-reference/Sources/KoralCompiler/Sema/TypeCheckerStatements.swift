@@ -41,6 +41,7 @@ extension TypeChecker {
          .orReturnExpression:
       return false
     case .castExpression(_, let inner, _),
+         .upgradeExpr(let inner, _),
          .addressOfExpression(let inner, _, _),
          .derefExpression(let inner, _),
           .unsafeDerefExpression(let inner, _),

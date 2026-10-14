@@ -15,23 +15,23 @@ public let make_bytes(count UInt) List[UInt8];
 
 public let make_uninitialized_bytes(count UInt) List[UInt8];
 
-public let intrinsic alloc_memory[T Any](capacity UInt) *unsafe mutable T;
+public let intrinsic alloc_memory[T Any](capacity UInt) *mutable T;
 
-public let intrinsic dealloc_memory[T Any](p *unsafe T) Void;
+public let intrinsic dealloc_memory[T Any](p * T) Void;
 
-public let intrinsic copy_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
+public let intrinsic copy_memory[T Any](dest *mutable T, source * T, count UInt) Void;
 
-public let intrinsic move_memory[T Any](dest *unsafe mutable T, source *unsafe T, count UInt) Void;
+public let intrinsic move_memory[T Any](dest *mutable T, source * T, count UInt) Void;
 
-public let intrinsic init_memory[T Any](p *unsafe mutable T, value T) Void;
+public let intrinsic init_memory[T Any](p *mutable T, value T) Void;
 
-public let intrinsic deinit_memory[T Any](p *unsafe mutable T) Void;
+public let intrinsic deinit_memory[T Any](p *mutable T) Void;
 
-public let intrinsic take_memory[T Any](p *unsafe mutable T) T;
+public let intrinsic take_memory[T Any](p *mutable T) T;
 
-public let intrinsic null_ptr[T Any]() *unsafe mutable T;
+public let intrinsic null_ptr[T Any]() *mutable T;
 
-public let intrinsic spawn_thread(out_handle *unsafe mutable *unsafe mutable UInt8, out_tid *unsafe mutable UInt64, f Func() Void, stack_size UInt64) Int32;
+public let intrinsic spawn_thread(out_handle *mutable *mutable UInt8, out_tid *mutable UInt64, f Func() Void, stack_size UInt64) Int32;
 
 public let max[T Ord](a T, b T) T;
 
@@ -1202,8 +1202,8 @@ given[T Any] List[T] {
 };
 
 given[T foreign] List[T] {
-    public borrow_ptr(self) *unsafe T;
-    public borrow_mut_ptr(self) *unsafe mutable T;
+    public borrow_ptr(self) * T;
+    public borrow_mut_ptr(self) *mutable T;
 };
 
 given[T Any] List[T] as Clone {
@@ -1632,16 +1632,16 @@ given StringBuilder {
 };
 
 given String {
-    public from_utf8_ptr_unchecked(bytes *unsafe UInt8, len UInt) String;
-    public from_utf8_ptr(bytes *unsafe UInt8, len UInt) Result[String];
+    public from_utf8_ptr_unchecked(bytes * UInt8, len UInt) String;
+    public from_utf8_ptr(bytes * UInt8, len UInt) Result[String];
     public from_bytes(bytes List[UInt8]) Result[String];
     public from_bytes_unchecked(bytes List[UInt8]) String;
-    public from_cstring(cstr *unsafe UInt8) Result[String];
-    public from_cstring_unchecked(cstr *unsafe UInt8) String;
+    public from_cstring(cstr * UInt8) Result[String];
+    public from_cstring_unchecked(cstr * UInt8) String;
     public new() String;
     public count(self) UInt;
     public is_empty(self) Bool;
-    public borrow_ptr(self) *unsafe UInt8;
+    public borrow_ptr(self) * UInt8;
     public to_bytes(self) List[UInt8];
     public get(self, index UInt) Option[UInt8];
     public starts_with(self, prefix String) Bool;
@@ -1898,19 +1898,19 @@ given Int64 as Default {
     public default() Self;
 };
 
-given[T Any] *unsafe T as Eq {
-    public equals(self, other *unsafe T) Bool;
+given[T Any] * T as Eq {
+    public equals(self, other * T) Bool;
 };
 
-given[T Any] *unsafe T as Hash {
+given[T Any] * T as Hash {
     public hash(self) UInt;
 };
 
-given[T Any] *unsafe mutable T as Eq {
-    public equals(self, other *unsafe mutable T) Bool;
+given[T Any] *mutable T as Eq {
+    public equals(self, other *mutable T) Bool;
 };
 
-given[T Any] *unsafe mutable T as Hash {
+given[T Any] *mutable T as Hash {
     public hash(self) UInt;
 };
 

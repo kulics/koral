@@ -9,11 +9,11 @@
 // ============================================================================
 
 // String is immutable value data with fixed storage length.
-public type String(package_private data *unsafe mutable UInt8, package_private len UInt);
+public type String(package_private data *mutable UInt8, package_private len UInt);
 
 // Mutable builder for incremental string construction without relying on String alias mutation.
 public type mutable StringBuilder(
-    module_private mutable data *unsafe mutable UInt8,
+    module_private mutable data *mutable UInt8,
     module_private mutable len UInt,
     module_private mutable cap UInt,
 );
@@ -154,7 +154,7 @@ given StringBuilder {
 given String {
 
     // Unsafe constructor: does not validate UTF-8
-    public from_utf8_ptr_unchecked(bytes *unsafe UInt8, len UInt) String = {
+    public from_utf8_ptr_unchecked(bytes *UInt8, len UInt) String = {
         let data = alloc_memory[UInt8](len + 1);
         copy_memory(data, bytes, len);
         init_memory(data + len, 0);
@@ -163,14 +163,14 @@ given String {
 
     // Unsafe constructor for low-level builders: takes ownership of an allocated UTF-8 buffer.
     package_private from_owned_utf8_ptr_unchecked(
-        bytes *unsafe mutable UInt8,
+        bytes *mutable UInt8,
         len UInt,
     ) String = {
         return String(bytes, len);
     };
 
     // Validate UTF-8 byte sequence (strict)
-    file_private validate_utf8(bytes *unsafe UInt8, len UInt) Bool = {
+    file_private validate_utf8(bytes *UInt8, len UInt) Bool = {
         let mutable i UInt = 0;
         while i < len then {
             let b0 = bytes[i];
@@ -244,7 +244,7 @@ given String {
     };
 
     // Checked constructor: validates UTF-8
-    public from_utf8_ptr(bytes *unsafe UInt8, len UInt) Result[String] = {
+    public from_utf8_ptr(bytes *UInt8, len UInt) Result[String] = {
         if not String.validate_utf8(bytes, len) then {
             return Result[String].Error("Invalid UTF-8");
         };
@@ -258,7 +258,7 @@ given String {
         String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count());
 
     // Checked constructor from C string (null-terminated, validates UTF-8)
-    public from_cstring(cstr *unsafe UInt8) Result[String] = {
+    public from_cstring(cstr *UInt8) Result[String] = {
         let mutable len UInt = 0;
         while cstr[len] <> UInt8(0) then {
             len += 1;
@@ -266,7 +266,7 @@ given String {
         return String.from_utf8_ptr(cstr, len);
     };
 
-    public from_cstring_unchecked(cstr *unsafe UInt8) String = {
+    public from_cstring_unchecked(cstr *UInt8) String = {
         let mutable len UInt = 0;
         while cstr[len] <> UInt8(0) then {
             len += 1;
@@ -311,7 +311,7 @@ given String {
 
     public count(self) UInt = self.len;
     public is_empty(self) Bool = self.len == 0;
-    public borrow_ptr(self) *unsafe UInt8 = self.data;
+    public borrow_ptr(self) *UInt8 = self.data;
 
     public to_bytes(self) List[UInt8] = {
         let len = self.len;

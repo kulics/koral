@@ -314,7 +314,7 @@ When checking for drift, what most often goes wrong:
 
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
 - Type aliases must start with an uppercase letter.
-- `[]` is builtin syntax only for `String`, `List`, `Deque`, `Dict`, `*unsafe`, and `*unsafe mutable`; custom traits do not define subscript behavior.
+- `[]` is builtin syntax only for `String`, `List`, `Deque`, `Dict`, `*`, and `*mutable`; custom traits do not define subscript behavior.
 - `docs/guide/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/guide/grammar.bnf`, parser code, and tests as authoritative.
 
 The trait / trait-object / weak rules that used to live here are design rulings; their canonical text

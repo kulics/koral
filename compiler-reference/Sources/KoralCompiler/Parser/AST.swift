@@ -99,7 +99,7 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .reference(let inner, let mutable, _):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable, _):
-      return mutable ? "*unsafe mutable \(inner)" : "*unsafe \(inner)"
+      return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .weakReference(let inner, let mutable, _):
       return mutable ? "?*mutable \(inner)" : "?*\(inner)"
     case .generic(let base, let args, _):
@@ -580,7 +580,7 @@ public indirect enum ExpressionNode {
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool, span: SourceSpan)
   /// Explicit cast `Type(expr)`. The parser also builds this for a
-  /// parenthesized target type `(*unsafe Int)(p)`. A bare `Type(args)` call is
+  /// parenthesized target type `(*Int)(p)`. A bare `Type(args)` call is
   /// left as `.call`; the type checker turns it into a cast or a construction.
   case castExpression(type: TypeNode, expression: ExpressionNode, span: SourceSpan)
   case arithmeticExpression(
@@ -600,6 +600,8 @@ public indirect enum ExpressionNode {
   case derefExpression(ExpressionNode, span: SourceSpan)
   case unsafeDerefExpression(ExpressionNode, span: SourceSpan)
   case ptrExpression(ExpressionNode, mutable: Bool, span: SourceSpan)
+  /// Weak-reference upgrade `?expr` — evaluates to `Option[T]`.
+  case upgradeExpr(ExpressionNode, span: SourceSpan)
   case identifier(String, span: SourceSpan)
   case blockExpression(statements: [StatementNode], tailExpression: ExpressionNode?, span: SourceSpan)
   case ifExpression(
@@ -877,6 +879,8 @@ extension ExpressionNode {
     case .comparisonChainExpression(_, _, let span):
       return span
     case .ptrExpression(_, _, let span):
+      return span
+    case .upgradeExpr(_, let span):
       return span
     case .collectionLiteral(_, let span):
       return span

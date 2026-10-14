@@ -3495,7 +3495,7 @@ extension TypeChecker {
 
         let (functionType, params, returnType) = try buildImplMethodInfo(method)
 
-        // For Drop trait's drop(self): wrap self parameter type as *unsafe mutable Self
+        // For Drop trait's drop(self): wrap self parameter type as *mutable Self
         // in the params used for MIR/codegen (checkedParameters), while keeping the
         // functionType (used for conformance checking) unchanged.
         let mirParams: [Symbol]
@@ -3527,11 +3527,11 @@ extension TypeChecker {
           substitution: substitution
         )
         if functionType != expectedType {
-          // For Drop trait: accept both drop(self) and drop(*unsafe mutable Self) signatures.
+          // For Drop trait: accept both drop(self) and drop(*mutable Self) signatures.
           // The trait defines drop(self), but implementations may use either form.
           var typeMatches = false
           if isStdDropTrait(traitDefId) && method.name == "drop" {
-            // Try building the expected type with self wrapped as *unsafe mutable Self
+            // Try building the expected type with self wrapped as *mutable Self
             let pointerExpectedType = try expectedFunctionTypeForGenericTraitMethod(
               requirement,
               selfType: selfType,

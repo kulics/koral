@@ -303,8 +303,8 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-Pointer types use the same spelling as type annotations: `*unsafe Int(p)`,
-`*unsafe mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
+Pointer types use the same spelling as type annotations: `* Int(p)`,
+`*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
 and `String(x)` are errors (`Type does not support cast`).
 
 #### Strings
@@ -669,7 +669,7 @@ y >>= 2;     // y = y >> 2
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified paths `Type(Trait)`, generic method suffixes
-2. Prefix / Control flow: unary `-`, `~`, dereference `*`, raw address-of `&unsafe`, `&unsafe mutable`; `if`, `while`, `for`, `when`
+2. Prefix / Control flow: unary `-`, `~`, dereference `*`, raw address-of `&`, `&mutable`; `if`, `while`, `for`, `when`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
@@ -1470,16 +1470,16 @@ declaration can implement it, and the compiler decides whether a type satisfies
 it from the type's own declaration.
 
 - `T mutable` — the subject must have been declared `type mutable`. This is what
-  weak references require (`?T(x)` / `is ?v` spell it).
+  weak references require (`?T(x)` / `?expr` spell it).
 - `T foreign` — the subject's representation is fixed outside Koral's layout
-  freedom and may cross the FFI boundary: a built-in scalar, a `*unsafe` /
-  `*unsafe mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
+  freedom and may cross the FFI boundary: a built-in scalar, a `*` /
+  `*mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
   a **closed set**; a Koral `type` is not in it, because the compiler chooses its
   layout. This is what `List.borrow_ptr` / `borrow_mut_ptr` require.
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
-let read_bytes[T foreign](buf List[T]) *unsafe T = buf.borrow_ptr();
+let read_bytes[T foreign](buf List[T]) * T = buf.borrow_ptr();
 ```
 
 A generic parameter carries its own bounds into a call: inside `f[T Any]`, a call
@@ -1550,7 +1550,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 - **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. **A type that implements `Drop` is the exception**: its destructor runs once per object, so the sharing is observable and such a type is treated like `type mutable` here.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
-- **Raw pointers**: the pointer types are `*unsafe T` / `*unsafe mutable T`; `&unsafe` / `&unsafe mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
+- **Raw pointers**: the pointer types are `* T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
 - **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
 
 #### `Drop`
@@ -1629,53 +1629,29 @@ b.push(3);
 
 Weak references do not keep the referent alive. They are written as `?T` and are only valid for types that satisfy the `mutable` constraint.
 
-Use `?T(x)` to construct a weak reference (a handle wrap, not a bit reinterpretation). Use `is ?v` to unpack: the pattern matches when the object is still alive and binds `v` to the strong reference.
+Use `?T(x)` to construct a weak reference (a handle wrap, not a bit reinterpretation). Use `?expr` to upgrade: the result is `Option[T]` — `.Some(v)` when the object is still alive, `.None()` when it is dead.
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = ?Node(node);              // ?Node
-if weak is ?v then println(v.value); // v is Node, only when alive
-```
-
-`w is not ?v` matches when the object is dead. `while w is ?v` loops while alive.
-
-```koral
-if weak is not ?v then println("dead");
-while weak is ?v then {
-    println(v.value);
-    break;
+let weak = ?Node(node);                 // ?Node
+let value = when ?weak in {
+    .Some(v) then v.value,              // v is Node, only when alive
+    .None() then 0,
 };
 ```
 
-`?v` also works as a `when` arm pattern. It is refutable — it covers the alive
-case but not the dead case — so keep a `_` arm for the fallback:
+Match on the upgrade result with `when`:
 
 ```koral
-let value = when weak in {
-    ?v then v.value,
-    _ then 0,
+let value = when ?weak in {
+    .Some(v) then v.value,
+    .None() then 0,
 };
 ```
 
-For a value with a fallback, an if-expression works the same way:
-
-```koral
-let value = if weak is ?v then v.value else 0;
-```
-
-`?v` is a bare binding (lowercase). `?Node(v)` is a typed binding that also checks the target type:
-
-```koral
-if weak is ?Node(n) then println(n.value);
-when weak in {
-    ?Node(n) then n.value,
-    _ then 0,
-};
-```
-
-**A weak reference is a handle, not a value.** Until it is unpacked it carries
+**A weak reference is a handle, not a value.** Until it is upgraded it carries
 no fields, no cases and no payload of the referent, so anything that tests or
 exploits the referent's *shape* is refused against a `?T`:
 
@@ -1693,8 +1669,9 @@ let w2 ?Node = w;              // ok: the handle is copied
 let xs = List[?Node].new();
 xs.push(w);
 for h in xs then {             // ok: `h` is `?Node`
-    if h is ?v then {          // the only way to reach the referent
-        // ...
+    when ?h in {               // the only way to reach the referent
+        .Some(v) then { /* ... */ },
+        .None() then {},
     };
 };
 ```
@@ -1715,7 +1692,7 @@ Supported patterns include:
 - Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
-- Weak binding patterns: `?v` (unpacks a weak reference if alive), `?Node(v)` (typed)
+- (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`)
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
 Destructuring follows exactly the call rules: a field declared named must be
@@ -2361,10 +2338,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### Builtin Subscript Rules
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `*unsafe T`, and `*unsafe mutable T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `* T`, and `*mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
-- `*unsafe T` supports `*expr` reads only. `*unsafe mutable T` supports both `*expr` reads and writes.
+- `* T` supports `*expr` reads only. `*mutable T` supports both `*expr` reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
@@ -2375,7 +2352,7 @@ list[1] = 99;
 let text = "abc";
 let b UInt8 = text[1];
 
-let p *unsafe mutable Int = alloc_memory[Int](2);
+let p *mutable Int = alloc_memory[Int](2);
 p[0] = list[0];
 let first = p[0];
 dealloc_memory(p);
@@ -2619,35 +2596,35 @@ public let main() Void = {
 
 ## 6. External Interop
 
-This chapter collects the low-level surface: raw pointers, unsafe address-taking, and the C foreign function interface.
+This chapter collects the low-level surface: raw pointers, address-taking, and the C foreign function interface.
 
 ### Raw Pointer Types
 
 Raw pointers are low-level memory access for FFI and system programming:
 
-- `*unsafe T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
-- `*unsafe mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
-- `*unsafe mutable T` implicitly converts to `*unsafe T`. The reverse is not allowed.
+- `* T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
+- `*mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `*mutable T` implicitly converts to `* T`. The reverse is not allowed.
 
 ### Unsafe Address-Of and Dereference
 
-`&unsafe` / `&unsafe mutable` are raw address-of operators. They require addressable storage; literals and temporaries are rejected.
+`&` / `&mutable` are raw address-of operators. They require addressable storage; literals and temporaries are rejected.
 
 ```koral
-let p *unsafe Int = &unsafe value;
-let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+let p * Int = & value;
+let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw deref read
 *mp = 42;         // raw deref write
 
-// let bad = &unsafe 42  // error: raw address-of needs addressable storage
+// let bad = & 42  // error: raw address-of needs addressable storage
 ```
 
 Rules:
 
-- `&unsafe` produces `*unsafe T`; `&unsafe mutable` produces `*unsafe mutable T`.
+- `&` produces `* T`; `&mutable` produces `*mutable T`.
 - `*expr` reads and `*expr = value` writes are the raw dereference forms.
-- Raw pointers are not a general "any type to `*unsafe T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
+- Raw pointers are not a general "any type to `* T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
 
 ### Foreign Function Interface
 

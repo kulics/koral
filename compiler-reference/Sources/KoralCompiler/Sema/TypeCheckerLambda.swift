@@ -364,7 +364,8 @@ extension TypeChecker {
         try collectCapturedVariables(expr: c.body, localNames: caseLocalNames, captures: &captures)
       }
       
-    case .castExpression(_, let inner, _):
+    case .castExpression(_, let inner, _),
+         .upgradeExpr(let inner, _):
       try collectCapturedVariables(expr: inner, localNames: localNames, captures: &captures)
       
     case .staticMethodCall(_, _, _, let arguments, _):

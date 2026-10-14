@@ -3533,7 +3533,7 @@ given TypeChecker {
                 ) then {
                     let value_name = self.ref_target_expr_name(inner);
                     self.push_diagnostic(
-                        "Cannot take 'mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or unsafe links) can use 'mutable'.",
+                        "Cannot take 'mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * links) can use 'mutable'.",
                         self.ast_expr_span(inner),
                     );
                     return self.empty_typed_block(Type.Unknown());
@@ -3605,11 +3605,11 @@ given TypeChecker {
                 ) or inner is .DerefExpr(_, _) or inner is .UnsafeDerefExpr(_, _);
                 if not is_addressable then {
                     if self.is_literal_expr(inner) then {
-                        self.push_expr_diagnostic(expr, "cannot take &unsafe of literal");
+                        self.push_expr_diagnostic(expr, "cannot take & of literal");
                     } else {
                         self.push_expr_diagnostic(
                             expr,
-                            "cannot take &unsafe of temporary value",
+                            "cannot take & of temporary value",
                         );
                     };
                 };
@@ -3621,7 +3621,7 @@ given TypeChecker {
                 ) then {
                     let value_name = self.ref_target_expr_name(inner);
                     self.push_diagnostic(
-                        "Cannot take 'unsafe mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or unsafe links) can use 'unsafe mutable'.",
+                        "Cannot take 'mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * links) can use 'mutable'.",
                         self.ast_expr_span(inner),
                     );
                     return self.empty_typed_block(Type.Unknown());
@@ -3632,6 +3632,37 @@ given TypeChecker {
                     Type.PointerType(typed_inner.expr_type)
                 };
                 make_typed_expr(TypedExprKind.PtrExpr(typed_inner_ref), ptr_type)
+            },
+            .UpgradeExpr(inner, _) then {
+                // `?expr` upgrades a weak reference to `Option[T]`.
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                let strong_type_opt = when typed_inner.expr_type in {
+                    .WeakReferenceType(t) then Option[Type].Some(t),
+                    .MutableWeakReferenceType(t) then Option[Type].Some(t),
+                    _ then Option[Type].None(),
+                };
+                let strong_type = when strong_type_opt in {
+                    .Some(t) then t,
+                    .None() then {
+                        self.push_expr_diagnostic(
+                            expr,
+                            "'?' expects a weak reference (?T), got \(type_to_string(typed_inner.expr_type))",
+                        );
+                        return self.empty_typed_block(Type.Unknown());
+                    },
+                };
+                let mut_args = List[Type].new();
+                mut_args.push(strong_type);
+                let opt_type = Type.GenericEnum(
+                    self.context().std_type_def_id("Option") or else def_id_invalid(),
+                    mut_args,
+                );
+                make_typed_expr(
+                    TypedExprKind.IntrinsicCall(
+                        TypedIntrinsic.UpgradeRef(typed_inner, opt_type),
+                    ),
+                    opt_type,
+                )
             },
             _ then self.empty_typed_block(Type.Unknown()),
         };
@@ -3726,7 +3757,7 @@ given TypeChecker {
                             .OpaqueType(_) then {
                                 self.push_expr_diagnostic(
                                     expr,
-                                    "Cannot use * on an opaque type unsafe: type layout is unknown at compile time",
+                                    "Cannot use * on an opaque type * type layout is unknown at compile time",
                                 );
                                 Type.Unknown()
                             },
@@ -3738,7 +3769,7 @@ given TypeChecker {
                             .OpaqueType(_) then {
                                 self.push_expr_diagnostic(
                                     expr,
-                                    "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time",
+                                    "Cannot use * on an opaque type *: type layout is unknown at compile time",
                                 );
                                 Type.Unknown()
                             },
@@ -3783,7 +3814,7 @@ given TypeChecker {
                             .OpaqueType(_) then {
                                 self.push_expr_diagnostic(
                                     expr,
-                                    "Cannot use * on an opaque type *unsafe mutable: type layout is unknown at compile time",
+                                    "Cannot use * on an opaque type *mutable: type layout is unknown at compile time",
                                 );
                                 Type.Unknown()
                             },
@@ -3795,7 +3826,7 @@ given TypeChecker {
                             .OpaqueType(_) then {
                                 self.push_expr_diagnostic(
                                     expr,
-                                    "Cannot use * on an opaque type unsafe: type layout is unknown at compile time",
+                                    "Cannot use * on an opaque type * type layout is unknown at compile time",
                                 );
                                 Type.Unknown()
                             },
@@ -3836,6 +3867,7 @@ given TypeChecker {
             .RefExpr(_, _, _) then self.check_ref_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_weakref_expr_ref(expr, expected, scope),
             .PtrExpr(_, _, _) then self.check_ptr_expr_ref(expr, expected, scope),
+            .UpgradeExpr(_, _) then self.check_ptr_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_deref_expr_ref(expr, expected, scope),
             .UnsafeDerefExpr(_, _) then self.check_deref_expr_ref(expr, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),
@@ -3954,6 +3986,7 @@ given TypeChecker {
             .PtrExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .UnsafeDerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
+            .UpgradeExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                 left,
                 op,

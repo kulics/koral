@@ -37,18 +37,7 @@ extension Parser {
         continue
       }
       if currentToken === .multiply {
-        // The complaint is about the `*`, which is the token that no longer
-        // means what it used to -- not about whatever follows it.
-        let multiplySpan = currentSpan
         try match(.multiply)
-        guard currentToken === .unsafeKeyword else {
-          throw ParserError.unexpectedToken(
-            span: multiplySpan,
-            got: "*",
-            expected: "managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'"
-          )
-        }
-        try match(.unsafeKeyword)
         let mutable = currentToken === .mutableKeyword
         if mutable {
           try match(.mutableKeyword)
@@ -156,11 +145,11 @@ extension Parser {
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
   /// - Function types: Func(ParamType1, ParamType2) ReturnType
-  /// - Raw pointer types: *unsafe T, *unsafe mutable T
+  /// - Raw pointer types: *T, *mutable T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {
-    // A prefixed type (`*unsafe T`, `?T`) starts at the prefix, not at `T`.
+    // A prefixed type (`*T`, `?T`) starts at the prefix, not at `T`.
     let startSpan = currentSpan
     let prefixes = try parseTypePrefixModifiers()
     var type = try parseTypeAtom()

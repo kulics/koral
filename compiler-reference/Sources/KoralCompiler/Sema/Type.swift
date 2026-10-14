@@ -381,9 +381,9 @@ public indirect enum Type: CustomStringConvertible {
     case .mutableBorrowedReference(let inner):
       return "ref mutable \(inner.description)"
     case .pointer(let element):
-      return "*unsafe \(element.description)"
+      return "*\(element.description)"
     case .mutablePointer(let element):
-      return "*unsafe mutable \(element.description)"
+      return "*mutable \(element.description)"
     case .weakReference(let inner):
       // Surface weak is `?T` (grammar.bnf <type-prefix>); `?*T` is legacy and
       // rejected on sight.

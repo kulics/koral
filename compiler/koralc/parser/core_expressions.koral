@@ -902,48 +902,10 @@ given Parser {
         let mutable node = PatternNode.Wildcard(self.span_from_start(start));
         when self.current().kind in {
             .QuestionMark() then {
-                // `?name` / `?TypeName(name)` -- weak-reference unpacking.
-                // Lowercase after `?` is a bare binding; uppercase is a typed binding.
-                self.advance();
-                let name = self.expect_identifier("weak binding pattern") or return;
-                if self.is_upper_first(name) then {
-                    // `?TypeName(name)` -- typed binding with a target type check.
-                    when self.current().kind in {
-                        .LParen() then {
-                            self.advance();
-                        },
-                        _ then {
-                            return .Error(
-                                self.parser_error("Expected '(' after weak binding type name"),
-                            );
-                        },
-                    };
-                    let bind_name = self.expect_identifier("weak binding name") or return;
-                    when self.current().kind in {
-                        .RParen() then {
-                            self.advance();
-                        },
-                        _ then {
-                            return .Error(
-                                self.parser_error("Expected ')' after weak binding name"),
-                            );
-                        },
-                    };
-                    return .Ok(
-                        PatternNode.WeakBinding(
-                            bind_name,
-                            Option[TypeNode].Some(TypeNode.Identifier(name, unknown_span())),
-                            self.span_from_start(start),
-                        ),
-                    );
-                };
-                // `?name` -- bare binding.
-                return .Ok(
-                    PatternNode.WeakBinding(
-                        name,
-                        Option[TypeNode].None(),
-                        self.span_from_start(start),
-                    ),
+                // `?v` patterns are removed. Use `?expr` to get `Option[T]`
+                // and match on `.Some` / `.None`.
+                return .Error(
+                    self.parser_error("Weak binding pattern '?v' is removed; use '?expr' to get Option[T]"),
                 );
             },
             .KwMut() then {
@@ -1657,9 +1619,9 @@ given Parser {
         return .Ok(trait_type);
     };
 
-    /// `*unsafe [mutable] T(args)` / `?T(args)` -- a cast whose target type is
+    /// `*T(args)` / `*mutable T(args)` / `?T(args)` -- a cast whose target type is
     /// written with a prefix, at expression start. The spelling matches the type
-    /// annotation: `*unsafe Int(p)`, `*unsafe mutable T(q)`, `?Int(r)`.
+    /// annotation: `*Int(p)`, `*mutable T(q)`, `?Int(r)`.
     module_private parse_prefixed_type_application(
         self,
         start Token,
@@ -2218,10 +2180,10 @@ given Parser {
 
         if self.current().kind is .Star() then {
             let start = self.current();
-            // `*unsafe T(args)` is a pointer type application; bare `*` is deref.
-            // `*unsafe` at expression start can only be a type -- `unsafe` is a
-            // keyword, so there is no deref of a variable named `unsafe`.
-            if self.peek_kind() is .Some(.KwUnsafe()) then {
+            // `*T(args)` is a pointer type application; bare `*` is deref.
+            // `*` + type-head (mutable, uppercase ident, Self) at expression
+            // start can only be a type; `*` + anything else is deref.
+            if self.index_followed_by_type_head_at(self.index) then {
                 return self.parse_prefixed_type_application(start);
             };
             self.advance();
@@ -2230,31 +2192,29 @@ given Parser {
         };
 
         if self.current().kind is .QuestionMark() then {
-            // `?T(args)` is a nullable type application. `?` is not an
-            // expression operator, so it can only start a type.
+            // `?T(args)` is weak-reference construction (type application);
+            // `?expr` upgrades a weak reference to `Option[T]`.
+            // Disambiguation: `?` + type-head tries type application;
+            // `?` + anything else is the upgrade operator.
             let start = self.current();
-            return self.parse_prefixed_type_application(start);
+            if self.index_followed_by_type_head_at(self.index) then {
+                return self.parse_prefixed_type_application(start);
+            };
+            self.advance();
+            let operand = self.parse_unary() or return;
+            return .Ok(Expr.UpgradeExpr(operand, self.span_from_start(start)));
         };
 
         if self.current().kind is .Ampersand() then {
             let start = self.current();
             self.advance();
-            if self.current().kind is .KwUnsafe() then {
+            let is_mutable = self.current().kind is .KwMut();
+            if is_mutable then {
                 self.advance();
-                let is_mutable = self.current().kind is .KwMut();
-                if is_mutable then {
-                    self.advance();
-                };
-                let operand = self.parse_unary() or return;
-                return .Ok(
-                    Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)),
-                );
             };
-            return .Error(
-                self.parser_error_at(
-                    "Managed address-of syntax is removed. Use '&unsafe expr' or '&unsafe mutable expr' for raw pointers.",
-                    start,
-                ),
+            let operand = self.parse_unary() or return;
+            return .Ok(
+                Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)),
             );
         };
 

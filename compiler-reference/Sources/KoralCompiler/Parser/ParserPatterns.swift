@@ -166,43 +166,6 @@ extension Parser {
       try match(.bool(v))
       return .booleanLiteral(value: v, span: startSpan)
     }
-    
-    // Weak-reference unpacking: `?name` / `?TypeName(name)`.
-    // Lowercase after `?` is a bare binding; uppercase is a typed binding.
-    if currentToken === .questionMark {
-      try match(.questionMark)
-      guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(
-          span: currentSpan, got: currentToken.description, context: "weak binding pattern")
-      }
-      try match(.identifier(name))
-      // `?TypeName(name)` -- typed binding with a target type check.
-      if isValidTypeName(name) {
-        guard currentToken === .leftParen else {
-          throw ParserError.unexpectedToken(
-            span: currentSpan, got: currentToken.description, expected: "(")
-        }
-        try match(.leftParen)
-        guard case .identifier(let bindName) = currentToken else {
-          throw ParserError.expectedIdentifier(
-            span: currentSpan, got: currentToken.description, context: "weak binding name")
-        }
-        try match(.identifier(bindName))
-        guard currentToken === .rightParen else {
-          throw ParserError.unexpectedToken(
-            span: currentSpan, got: currentToken.description, expected: ")")
-        }
-        try match(.rightParen)
-        let targetNode = TypeNode.identifier(name, span: startSpan)
-        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-        return .weakBinding(name: bindName, targetType: targetNode, span: span)
-      }
-      // `?name` -- bare binding.
-      if !isValidVariableName(name) {
-        throw ParserError.invalidVariableName(span: startSpan, name: name)
-      }
-      return .weakBinding(name: name, targetType: nil, span: startSpan)
-    }
 
     // Identifier pattern (wildcard, variable binding, or struct destructuring)
     if case .identifier(let name) = currentToken {

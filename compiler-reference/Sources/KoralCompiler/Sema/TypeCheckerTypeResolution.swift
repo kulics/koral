@@ -867,7 +867,7 @@ extension TypeChecker {
 
       let params: [Parameter] = try method.parameters.map { param in
         var resolvedType = try resolveTypeNode(param.type)
-        // For Drop trait: optionally wrap self as *unsafe mutable Self
+        // For Drop trait: optionally wrap self as *mutable Self
         if dropSelfAsPointer && param.name == "self" {
           resolvedType = .mutablePointer(element: resolvedType)
         }

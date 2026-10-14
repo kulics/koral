@@ -303,7 +303,7 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-指针类型与类型标注同拼写：`*unsafe Int(p)`、`*unsafe mutable T(q)`。
+指针类型与类型标注同拼写：`* Int(p)`、`*mutable T(q)`。
 只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
 #### 字符串
@@ -663,7 +663,7 @@ y >>= 2;     // y = y >> 2
 运算符优先级从高到低：
 
 1. 后缀：调用 `()`、下标 `[]`、成员访问 `.`、限定路径 `Type(Trait)`、泛型方法后缀
-2. 前缀 / 控制流：一元 `-`、`~`、解引用 `*`、raw 取址 `&unsafe`、`&unsafe mutable`；`if`、`while`、`for`、`when`
+2. 前缀 / 控制流：一元 `-`、`~`、解引用 `*`、raw 取址 `&`、`&mutable`；`if`、`while`、`for`、`when`
 3. 乘除：`*`、`/`、`%`
 4. 加减：`+`、`-`
 5. 移位：`<<`、`>>`
@@ -1450,12 +1450,12 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 
 约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
-- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`?T(x)` / `is ?v` 亦然）。
-- `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*unsafe` / `*unsafe mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
+- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`?T(x)` / `?expr` 亦然）。
+- `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` / `*mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
-let read_bytes[T foreign](buf List[T]) *unsafe T = buf.borrow_ptr();
+let read_bytes[T foreign](buf List[T]) * T = buf.borrow_ptr();
 ```
 
 泛型参数把自己的约束带进调用：在 `f[T Any]` 里调用要求 `T mutable` 的函数会被拒绝，因为裸 `T` 并未声明为 `mutable`；在 `g[T mutable]` 里同样的调用可以通过。
@@ -1518,7 +1518,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 - **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察，这里按 `type mutable` 对待。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
-- **raw pointer**：指针类型是 `*unsafe T` / `*unsafe mutable T`；`&unsafe` / `&unsafe mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
+- **raw pointer**：指针类型是 `* T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
 - **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
 
 #### `Drop`
@@ -1595,54 +1595,21 @@ b.push(3);
 
 弱引用不维持被引用对象的存活。写作 `?T`，只对满足 `mutable` 约束的类型有效。
 
-用 `?T(x)` 构造弱引用（句柄包装，不是位级重解释）。用 `is ?v` 拆包：对象仍存活时
-模式匹配成功，`v` 绑定到强引用。
+用 `?T(x)` 构造弱引用（句柄包装，不是位级重解释）。用 `?expr` 升级：结果是
+`Option[T]`——对象存活时为 `.Some(v)`，已死时为 `.None()`。
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = ?Node(node);              // ?Node
-if weak is ?v then println(v.value); // v 是 Node，仅在存活时
-```
-
-`w is not ?v` 表示对象已死。`while w is ?v` 在存活期间循环。
-
-```koral
-if weak is not ?v then println("dead");
-while weak is ?v then {
-    println(v.value);
-    break;
+let weak = ?Node(node);                 // ?Node
+let value = when ?weak in {
+    .Some(v) then v.value,              // v 是 Node，仅在存活时
+    .None() then 0,
 };
 ```
 
-`?v` 也可用作 `when` 的分支模式。它是可反驳的——覆盖存活分支但不覆盖已死分支——
-因此 `when` 里保留 `_` 兜底：
-
-```koral
-let value = when weak in {
-    ?v then v.value,
-    _ then 0,
-};
-```
-
-带回退的取值，if-expression 同样可用：
-
-```koral
-let value = if weak is ?v then v.value else 0;
-```
-
-`?v` 是裸绑定（小写）。`?Node(v)` 是带目标类型检查的绑定：
-
-```koral
-if weak is ?Node(n) then println(n.value);
-when weak in {
-    ?Node(n) then n.value,
-    _ then 0,
-};
-```
-
-**弱引用是句柄，不是值。** 在拆包之前它不携带被引用对象的任何字段、
+**弱引用是句柄，不是值。** 在升级之前它不携带被引用对象的任何字段、
 分支或载荷，因此一切试探或利用被引用对象**形状**的操作，对 `?T` 一律拒绝：
 
 - 成员访问，读或写 —— `w.value`、`w.value = 1`
@@ -1659,8 +1626,9 @@ let w2 ?Node = w;              // 可以：复制的是句柄
 let xs = List[?Node].new();
 xs.push(w);
 for h in xs then {             // 可以：`h` 是 `?Node`
-    if h is ?v then {          // 唯一能到达被引用对象的途径
-        // ...
+    when ?h in {               // 唯一能到达被引用对象的途径
+        .Some(v) then { /* ... */ },
+        .None() then {},
     };
 };
 ```
@@ -2320,10 +2288,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### 内建下标规则
 
-- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`*unsafe T` 与 `*unsafe mutable T`。
+- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`* T` 与 `*mutable T`。
 - `String[key]` 返回 `UInt8` 字节值。只读且不可取址。
 - `List[T]` 与 `Deque[T]`（均为 `type mutable`）支持值读取、赋值与嵌套 place 更新。
-- `*unsafe T` 只支持 `*expr` 读取。`*unsafe mutable T` 同时支持 `*expr` 读写。
+- `* T` 只支持 `*expr` 读取。`*mutable T` 同时支持 `*expr` 读写。
 - 用户自定义类型不能通过 trait 实现 `[]`，泛型约束也不能增加下标能力。
 
 ```koral
@@ -2334,7 +2302,7 @@ list[1] = 99;
 let text = "abc";
 let b UInt8 = text[1];
 
-let p *unsafe mutable Int = alloc_memory[Int](2);
+let p *mutable Int = alloc_memory[Int](2);
 p[0] = list[0];
 let first = p[0];
 dealloc_memory(p);
@@ -2563,29 +2531,29 @@ public let main() Void = {
 
 raw pointer 是面向 FFI 与系统编程的低层内存访问：
 
-- `*unsafe T` —— 只读指针。支持 `*expr` 解引用读取，但**不**支持 `*expr` 赋值或 `p[i]` 赋值。
-- `*unsafe mutable T` —— 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取与 `p[i] = value` 赋值。
-- `*unsafe mutable T` 可隐式转换为 `*unsafe T`。反向不允许。
+- `* T` —— 只读指针。支持 `*expr` 解引用读取，但**不**支持 `*expr` 赋值或 `p[i]` 赋值。
+- `*mutable T` —— 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取与 `p[i] = value` 赋值。
+- `*mutable T` 可隐式转换为 `* T`。反向不允许。
 
 ### 不安全取址与解引用
 
-`&unsafe` / `&unsafe mutable` 是 raw 取址操作符。它们要求可取地址的存储；字面量和临时值会被拒绝。
+`&` / `&mutable` 是 raw 取址操作符。它们要求可取地址的存储；字面量和临时值会被拒绝。
 
 ```koral
-let p *unsafe Int = &unsafe value;
-let mp *unsafe mutable UInt8 = &unsafe mutable bytes[0];
+let p * Int = & value;
+let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw 解引用读取
 *mp = 42;         // raw 解引用写入
 
-// let bad = &unsafe 42  // error: raw 取址需要可取地址的存储
+// let bad = & 42  // error: raw 取址需要可取地址的存储
 ```
 
 规则：
 
-- `&unsafe` 产生 `*unsafe T`；`&unsafe mutable` 产生 `*unsafe mutable T`。
+- `&` 产生 `* T`；`&mutable` 产生 `*mutable T`。
 - `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
-- raw pointer 不是「任意类型到 `*unsafe T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
+- raw pointer 不是「任意类型到 `* T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
 
 ### 外部函数接口
 

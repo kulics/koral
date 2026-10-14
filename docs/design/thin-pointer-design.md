@@ -118,7 +118,7 @@ void* r = &local;                 // 或 &local 的 payload 地址
 保证（局部活过借用），不靠引用计数；类型系统已禁止借用逃逸——不能进 struct 字段、
 enum payload、返回类型、全局变量、lambda 捕获。
 
-因此借用就是「非拥有的瘦指针」，与 `*unsafe T` 同宽，只是不可解引用到裸内存之外、
+因此借用就是「非拥有的瘦指针」，与 `* T` 同宽，只是不可解引用到裸内存之外、
 不可 `free`。
 
 | 场景 | 传什么 | retain/release |
@@ -186,7 +186,7 @@ bootstrap 自举包（`check --package-config compiler/koral.json --target-modul
    双字句柄把一个具体内存模型焊进了 ABI。瘦下来之后 `type` 的内联 / 去箱化才有空间。
 2. **与主流 ARC/refcount 语言对齐。** Swift / ObjC / Rust `Rc` / Go 指针都是一个字。
    `shared_ptr` 的双字是 C++ 为 aliasing 做的专门妥协，Koral 不需要 aliasing 却承担了成本。
-3. **FFI 自然。** 托管值过 C 边界就是一个指针，与 `*unsafe T` 一致。
+3. **FFI 自然。** 托管值过 C 边界就是一个指针，与 `* T` 一致。
 4. **解锁后续表示优化**：小字符串 / 小容器、指针打标、vtable 进头。
 
 吞吐收益**不是**理由：`_copy`/`_drop` 辅助函数合计只占 self-time 2.7%，上限 1–3%。

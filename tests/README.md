@@ -154,9 +154,9 @@ Use this bucket when changing statement termination or line-join tokens.
 - `newline_semicolon_comment_blocks_infix`
 - `newline_semicolon_comparison_blocks_error`
 
-### Raw pointer and weak reference surface (`*unsafe T`, `?T`)
+### Raw pointer and weak reference surface (`* T`, `?T`)
 
-Use this bucket when changing raw-pointer or weak-reference syntax/semantics. Managed references (`*T`, `*mutable T`, `?*T`) and `box()` are removed; only `*unsafe T` / `*unsafe mutable T` and `?T` remain.
+Use this bucket when changing raw-pointer or weak-reference syntax/semantics. Managed references (`*T`, `*mutable T`, `?*T`) and `box()` are removed; only `* T` / `*mutable T` and `?T` remain.
 
 - `raw_sigils_basic_test`
 - `raw_address_readonly_pointer_deref_error`
@@ -181,7 +181,7 @@ Use this bucket when changing receiver syntax, `self` parameter passing, or auto
 - `mut_param_trait_signature_regression`
 - `value_param_copy`
 
-New work should add coverage directly under `tests/compiler-cases/` using the current surface: `self` receivers, `type` / `type mutable` declarations, `?T` weak references, and `*unsafe T` / `*unsafe mutable T` raw pointers.
+New work should add coverage directly under `tests/compiler-cases/` using the current surface: `self` receivers, `type` / `type mutable` declarations, `?T` weak references, and `* T` / `*mutable T` raw pointers.
 
 ## Rerun a bucket
 
