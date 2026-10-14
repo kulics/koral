@@ -1511,11 +1511,23 @@ given CstParser {
             return .Ok(.Deref(op, operand));
         };
 
-        // `?T(expr)` -- weak reference construction. `?` is not an expression
-        // operator, so at expression start it can only begin a type.
+        // `?T(expr)` is weak-reference construction (type application);
+        // `?expr` upgrades a weak reference to `Option[T]`.
+        // Disambiguation: `?` + type-head tries type application; `?` + anything
+        // else is the upgrade operator.
         if self.check(.KwWeakref()) then {
-            let cast = self.parse_type_application() or return;
-            return self.parse_postfix_suffixes(cast);
+            if self.peek_is_type_head_at(1) then {
+                let cast = self.parse_type_application() or return;
+                return self.parse_postfix_suffixes(cast);
+            };
+            let op = self.eat();
+            let operand = when self.parse_prefix() in {
+                .Ok(e) then e,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            return .Ok(.Upgrade(op, operand));
         };
 
         // Address-of: &expr, &mutable expr
