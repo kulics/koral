@@ -17,11 +17,11 @@ public let make_uninitialized_bytes(count UInt) List[UInt8];
 
 public let intrinsic alloc_memory[T Any](capacity UInt) *mutable T;
 
-public let intrinsic dealloc_memory[T Any](p * T) Void;
+public let intrinsic dealloc_memory[T Any](p *T) Void;
 
-public let intrinsic copy_memory[T Any](dest *mutable T, source * T, count UInt) Void;
+public let intrinsic copy_memory[T Any](dest *mutable T, source *T, count UInt) Void;
 
-public let intrinsic move_memory[T Any](dest *mutable T, source * T, count UInt) Void;
+public let intrinsic move_memory[T Any](dest *mutable T, source *T, count UInt) Void;
 
 public let intrinsic init_memory[T Any](p *mutable T, value T) Void;
 
@@ -1202,7 +1202,7 @@ given[T Any] List[T] {
 };
 
 given[T foreign] List[T] {
-    public borrow_ptr(self) * T;
+    public borrow_ptr(self) *T;
     public borrow_mut_ptr(self) *mutable T;
 };
 
@@ -1632,16 +1632,16 @@ given StringBuilder {
 };
 
 given String {
-    public from_utf8_ptr_unchecked(bytes * UInt8, len UInt) String;
-    public from_utf8_ptr(bytes * UInt8, len UInt) Result[String];
+    public from_utf8_ptr_unchecked(bytes *UInt8, len UInt) String;
+    public from_utf8_ptr(bytes *UInt8, len UInt) Result[String];
     public from_bytes(bytes List[UInt8]) Result[String];
     public from_bytes_unchecked(bytes List[UInt8]) String;
-    public from_cstring(cstr * UInt8) Result[String];
-    public from_cstring_unchecked(cstr * UInt8) String;
+    public from_cstring(cstr *UInt8) Result[String];
+    public from_cstring_unchecked(cstr *UInt8) String;
     public new() String;
     public count(self) UInt;
     public is_empty(self) Bool;
-    public borrow_ptr(self) * UInt8;
+    public borrow_ptr(self) *UInt8;
     public to_bytes(self) List[UInt8];
     public get(self, index UInt) Option[UInt8];
     public starts_with(self, prefix String) Bool;
@@ -1898,11 +1898,11 @@ given Int64 as Default {
     public default() Self;
 };
 
-given[T Any] * T as Eq {
-    public equals(self, other * T) Bool;
+given[T Any] *T as Eq {
+    public equals(self, other *T) Bool;
 };
 
-given[T Any] * T as Hash {
+given[T Any] *T as Hash {
     public hash(self) UInt;
 };
 
