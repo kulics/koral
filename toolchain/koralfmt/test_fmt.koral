@@ -451,6 +451,19 @@ let main() Void = {
         "type Button(label String);\nlet make() Button=Button(...);\n",
         "Default-fill '...' is not supported",
     );
+    // A trailing comment on a `using` sits after the declaration's own `;`.
+    // The printer used to append a second `;` at the end of the line, where the
+    // line comment swallowed it -- the contract saw a comment token grow a `;`.
+    t.test_checked(
+        "using with trailing comment",
+        "using \"std/io\"; // 全部\n\nlet main() Int = {\n    return 0;\n};\n",
+        "using \"std/io\"; // 全部\n\nlet main() Int = {\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "using with comment before terminator",
+        "using \"std/io\" /* c */;\n\nlet main() Int = {\n    return 0;\n};\n",
+        "using \"std/io\" /* c */;\n\nlet main() Int = {\n    return 0;\n};\n",
+    );
     // `name: Type` is a NAMED field -- a different declaration, not an
     // alternate spelling (grammar.bnf <field>: "named field"). It used to be
     // rejected here, which denied documented syntax.
@@ -491,16 +504,113 @@ let main() Void = {
         "type Point(x Int, y Int);\n",
     );
     t.test_error_contains("missing then rejected", "let main() Void = if 1 1;\n", "then");
+    // `...` was a range operator once, and `....` a full range. grammar.bnf
+    // <range-op> is `..` / `..<` / `<..` / `<..<` and nothing else; `...` is
+    // lexed exactly as koralc lexes it (an ellipsis), `....` is `...` + `.`,
+    // `...<` is `...` + `<`, and `<...` is `<..` + `.`.
     t.test_error_contains(
-        "legacy range form rejected",
+        "legacy range form `1...5` rejected",
+        "let x=1...5;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "legacy range form `1....5` rejected",
+        "let x=1....5;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "legacy range form `1...<5` rejected",
+        "let x=1...<5;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "legacy range form `<...` rejected",
         "let x=<...5\n",
         "expected primary expression",
+    );
+    // ── number literals (grammar.bnf <float-literal> / <duration-literal>) ──
+    // The text is kept verbatim. It used to be re-lexed into `2.5e` `-` `3`
+    // and printed as `2.5e - 3`, which koralc refuses to parse at all.
+    t.test_checked(
+        "signed-exponent floats keep their spelling",
+        "let a=2.5e-3; let b=1e+6; let c=1e10; let d=1.0_0;\n",
+        "let a = 2.5e-3;\nlet b = 1e+6;\nlet c = 1e10;\nlet d = 1.0_0;\n",
+    );
+    t.test_checked(
+        "duration suffixes",
+        "let a=10s; let b=250ms; let c=150us; let d=42ns;\n",
+        "let a = 10s;\nlet b = 250ms;\nlet c = 150us;\nlet d = 42ns;\n",
+    );
+    t.test_error_contains(
+        "duration suffix `h` rejected",
+        "let a = 1h;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "duration suffix `min` rejected",
+        "let a = 1min;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "uppercase `E` is not an exponent",
+        "let a = 1E-3;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "`e` without exponent digits is an identifier",
+        "let a = 1e;\n",
+        "expected ';' after declaration",
     );
     // ── parse parity with the compiler ──────────────────────────────────
     // The formatter's parser must accept exactly what `koralc` accepts. Each
     // case below was verified to be rejected by the compiler; the message text
     // is the compiler's own where it has one. If one of these goes green
     // again, koral-syntax has drifted behind the compiler.
+    t.test_error_contains(
+        "digit separator may not double",
+        "let a = 1__0;\n",
+        "Invalid digit separator '_' in numeric literal",
+    );
+    t.test_error_contains(
+        "digit separator may not trail",
+        "let a = 1_;\n",
+        "Invalid digit separator '_' in numeric literal",
+    );
+    t.test_error_contains(
+        "digit separator may not lead after a base prefix",
+        "let a = 0x_1;\n",
+        "Invalid digit separator '_' in numeric literal",
+    );
+    t.test_error_contains(
+        "digit separator may not touch a dot",
+        "let a = 1_.0;\n",
+        "Invalid digit separator '_' in numeric literal",
+    );
+    t.test_error_contains(
+        "leading zeros rejected",
+        "let a = 007;\n",
+        "Leading zeros are not allowed in integer literals",
+    );
+    t.test_error_contains(
+        "base literal may not carry a fraction",
+        "let a = 0b101.1;\n",
+        "0b literals do not support floating point",
+    );
+    t.test_error_contains(
+        "off-base digit rejected",
+        "let a = 0b2;\n",
+        "Invalid digit '2' in 0b literal",
+    );
+    t.test_error_contains(
+        "base literal needs a digit",
+        "let a = 0b;\n",
+        "0b literal must have at least one digit",
+    );
+    t.test_error_contains(
+        "consecutive dots rejected",
+        "let a = 1.5.6;\n",
+        "consecutive dots are not allowed",
+    );
     t.test(
         "raw pointer type `*T`",
         "type T(a Int);\nlet f(x *T) Int = 0;\n",

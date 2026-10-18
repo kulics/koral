@@ -1214,16 +1214,23 @@ given Printer {
 
     public print_item(self, item CstItem) Void = when item in {
         .Decl(d) then {
-            // The `;` is written here, after the declaration -- reserve the
-            // column for it so width checks see the whole statement. It is set,
-            // not accumulated: a nested statement's terminator replaces the
-            // enclosing one, whose own `;` lands after a closing brace and
-            // cannot be riding on an inner line.
-            let saved_reserve = self.reserve;
-            self.reserve = 1;
-            self.print_decl(d);
-            self.reserve = saved_reserve;
-            self.write(";");
+            // A `using` declaration is a flat token list that already carries
+            // its own `;`, and may carry trailing comments after it -- an
+            // appended `;` would land inside the comment and be swallowed.
+            // Every other declaration gets its `;` written here, after the
+            // declaration: reserve the column for it so width checks see the
+            // whole statement. It is set, not accumulated: a nested statement's
+            // terminator replaces the enclosing one, whose own `;` lands after
+            // a closing brace and cannot be riding on an inner line.
+            if d is .Using(_) then {
+                self.print_decl(d);
+            } else {
+                let saved_reserve = self.reserve;
+                self.reserve = 1;
+                self.print_decl(d);
+                self.reserve = saved_reserve;
+                self.write(";");
+            };
         },
         .Stmt(s) then {
             let saved_reserve = self.reserve;
@@ -1248,7 +1255,7 @@ given Printer {
 
     file_private print_decl(self, d CstDecl) Void = when d in {
         .Using(tokens) then {
-            self.print_token_sequence_stripped(tokens);
+            self.print_token_sequence(tokens);
         },
         .Func(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then self.print_func_decl(
             vis,
@@ -1375,16 +1382,6 @@ given Printer {
 
     file_private print_token_sequence(self, tokens List[Token]) Void = {
         for i in 0..<tokens.count() then {
-            self.print_sequence_token(tokens, i);
-        };
-    };
-
-    file_private print_token_sequence_stripped(self, tokens List[Token]) Void = {
-        let mutable count = tokens.count();
-        while count > 0 and tokens[count - 1] is .Semi() then {
-            count -= 1;
-        };
-        for i in 0..<count then {
             self.print_sequence_token(tokens, i);
         };
     };

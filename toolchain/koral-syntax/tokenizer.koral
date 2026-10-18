@@ -101,10 +101,9 @@ public type Token {
     RangeLt(),
     LtRange(),
     LtRangeLt(),
-    Unbounded(),
-    LtUnbounded(),
-    UnboundedLt(),
-    FullRange(),
+    // `...` exists only to reject it where an old default-fill spelling used
+    // to live; it is never a range operator (grammar.bnf <range-op>).
+    Ellipsis(),
 
     // Delimiters
     LParen(),
@@ -214,10 +213,7 @@ given Token {
         .RangeLt() then "..<",
         .LtRange() then "<..",
         .LtRangeLt() then "<..<",
-        .Unbounded() then "...",
-        .LtUnbounded() then "<...",
-        .UnboundedLt() then "...<",
-        .FullRange() then "....",
+        .Ellipsis() then "...",
         .LParen() then "(",
         .RParen() then ")",
         .LBrace() then "{",
@@ -246,7 +242,7 @@ given Token {
     };
 
     public is_range_op(self) Bool = when self in {
-        .Range() or .RangeLt() or .LtRange() or .LtRangeLt() or .Unbounded() or .LtUnbounded() or .UnboundedLt() or .FullRange() then true,
+        .Range() or .RangeLt() or .LtRange() or .LtRangeLt() then true,
         _ then false,
     };
 
@@ -341,10 +337,7 @@ given Token {
         .RangeLt() then 71,
         .LtRange() then 72,
         .LtRangeLt() then 73,
-        .Unbounded() then 74,
-        .LtUnbounded() then 75,
-        .UnboundedLt() then 76,
-        .FullRange() then 77,
+        .Ellipsis() then 74,
         .LParen() then 78,
         .RParen() then 79,
         .LBrace() then 80,
@@ -432,7 +425,8 @@ given Tokenizer {
                         continue;
                     };
                     if Tokenizer.rune_eq(r2, '*') then {
-                        tokens.push(self.scan_block_comment());
+                        let comment_tok = self.scan_block_comment() or return;
+                        tokens.push(comment_tok);
                         continue;
                     };
                 };
@@ -447,7 +441,8 @@ given Tokenizer {
 
             // Number literal
             if r.is_ascii_digit() then {
-                tokens.push(self.scan_number());
+                let num_tok = self.scan_number() or return;
+                tokens.push(num_tok);
                 continue;
             };
 
@@ -508,41 +503,24 @@ given Tokenizer {
     // Block comment: /* ... */
     // ========================================================================
 
-    file_private scan_block_comment(self) Token = {
+    // Comments do not nest -- the first `*/` ends the comment, and one that
+    // never closes is an error, exactly as koralc lexes it.
+    file_private scan_block_comment(self) Result[Token] = {
         let mutable text = StringBuilder.new();
-        let mutable depth UInt = 0;
+        text.push_string("/*");
+        self.pos += 2;
         while not self.is_eof() then {
-            let r = self.advance();
-            // Check for nested /*
-            if Tokenizer.rune_eq(r, '/') then {
-                if self.peek() is .Some(r2) then {
-                    if Tokenizer.rune_eq(r2, '*') then {
-                        text.push_string(r.to_string());
-                        text.push_string(self.advance().to_string());
-                        depth += 1;
-                        continue;
-                    };
-                };
-            };
-            // Check for */
-            if Tokenizer.rune_eq(r, '*') then {
-                if self.peek() is .Some(r2) then {
-                    if Tokenizer.rune_eq(r2, '/') then {
-                        if depth == 0 then {
-                            text.push_string(r.to_string());
-                            text.push_string(self.advance().to_string());
-                            return .BlockComment(text.to_string());
-                        };
-                        text.push_string(r.to_string());
-                        text.push_string(self.advance().to_string());
-                        depth -= 1;
-                        continue;
-                    };
-                };
+            let r = self.runes[self.pos];
+            if Tokenizer.rune_eq(r, '*') and self.peek_at(1) is .Some(r2) and Tokenizer.rune_eq(r2, '/') then {
+                text.push_string(r.to_string());
+                text.push_string(r2.to_string());
+                self.pos += 2;
+                return .Ok(.BlockComment(text.to_string()));
             };
             text.push_string(r.to_string());
+            self.pos += 1;
         };
-        return Token.BlockComment(text.to_string());
+        return .Error("Unterminated block comment");
     };
 
     // ========================================================================
@@ -679,105 +657,217 @@ given Tokenizer {
     // Number literal
     // ========================================================================
 
-    file_private scan_number(self) Token = {
+    // Number literal. The source spelling is kept verbatim in the token text
+    // (a formatter may not rewrite literals), but the shape is validated the
+    // way koralc lexes it:
+    //   - `0b` / `0o` / `0x` (lowercase) open a base literal carrying only
+    //     that base's digits, and no fraction.
+    //   - `_` sits between two digits of the same run; it may not lead, trail,
+    //     double, or touch `.`.
+    //   - A decimal literal may not carry leading zeros (write `0o7`).
+    //   - Only lowercase `e` opens an exponent, and only before a digit or
+    //     [sign] digit (`1exp` is `1` then `exp`).
+    //   - Duration suffixes are `s` / `ms` / `us` / `ns`, integers only.
+    file_private scan_number(self) Result[Token] = {
+        if Tokenizer.rune_eq(self.runes[self.pos], '0') and self.peek_at(1) is .Some(p) then {
+            if Tokenizer.rune_eq(p, 'b') then {
+                return self.scan_base_number("0b", "01");
+            };
+            if Tokenizer.rune_eq(p, 'o') then {
+                return self.scan_base_number("0o", "01234567");
+            };
+            if Tokenizer.rune_eq(p, 'x') then {
+                return self.scan_base_number("0x", "0123456789abcdefABCDEF");
+            };
+        };
+        return self.scan_decimal_number();
+    };
+
+    // `0b12` blames the stray digit, `0x1.a` is a fraction attempt, and a
+    // prefix with no digits at all is an error -- `0body` is `0b` + `ody`.
+    file_private scan_base_number(self, prefix String, valid String) Result[Token] = {
+        let mutable text = StringBuilder.new();
+        text.push_string(prefix);
+        self.pos += 2;
+        let mutable digit_count UInt = 0;
+        let mutable last_was_digit Bool = false;
+        while not self.is_eof() then {
+            let r = self.runes[self.pos];
+            if valid.contains(r.to_string()) then {
+                text.push_string(r.to_string());
+                self.pos += 1;
+                digit_count += 1;
+                last_was_digit = true;
+            } else if Tokenizer.rune_eq(r, '_') then {
+                if last_was_digit and self.peek_at(1) is .Some(n) and valid.contains(n.to_string()) then {
+                    text.push_string(r.to_string());
+                    text.push_string(n.to_string());
+                    self.pos += 2;
+                    digit_count += 1;
+                    last_was_digit = true;
+                } else {
+                    return .Error("Invalid digit separator '_' in numeric literal");
+                };
+            } else if r.is_ascii_digit() then {
+                return .Error("Invalid digit '" + r.to_string() + "' in " + prefix + " literal");
+            } else if Tokenizer.rune_eq(r, '.') then {
+                if self.peek_at(1) is .Some(n) then {
+                    if n.is_ascii_digit() or valid.contains(n.to_string()) then {
+                        return .Error(prefix + " literals do not support floating point");
+                    };
+                };
+                break;
+            } else {
+                break;
+            };
+        };
+        if digit_count == 0 then {
+            return .Error(prefix + " literal must have at least one digit");
+        };
+        return .Ok(.IntLit(text.to_string()));
+    };
+
+    file_private scan_decimal_number(self) Result[Token] = {
         let mutable text = StringBuilder.new();
         let mutable is_float = false;
+        let mutable last_was_digit Bool = false;
+        let mutable int_digits UInt = 0;
+        let mutable leading_zero Bool = false;
+        let mutable in_integer Bool = true;
 
-        // Consume digits
         while not self.is_eof() then {
             let r = self.runes[self.pos];
             if r.is_ascii_digit() then {
+                if in_integer then {
+                    if int_digits == 0 and Tokenizer.rune_eq(r, '0') then {
+                        leading_zero = true;
+                    };
+                    int_digits += 1;
+                };
                 text.push_string(r.to_string());
                 self.pos += 1;
+                last_was_digit = true;
             } else if Tokenizer.rune_eq(r, '_') then {
-                text.push_string(r.to_string());
-                self.pos += 1;
-            } else if Tokenizer.rune_eq(r, '.') and not is_float then {
-                // Check next char is digit (not range operator)
-                if self.peek_at(1) is .Some(next) then {
-                    if next.is_ascii_digit() then {
-                        is_float = true;
-                        text.push_string(r.to_string());
-                        self.pos += 1;
-                    } else {
+                if last_was_digit and self.peek_at(1) is .Some(n) and n.is_ascii_digit() then {
+                    text.push_string(r.to_string());
+                    text.push_string(n.to_string());
+                    self.pos += 2;
+                    if in_integer then {
+                        int_digits += 1;
+                    };
+                    last_was_digit = true;
+                } else {
+                    return .Error("Invalid digit separator '_' in numeric literal");
+                };
+            } else if Tokenizer.rune_eq(r, '.') then {
+                // `..` / `..<` are range operators, and a `.` that is not
+                // followed by a digit is member access -- neither one is a
+                // decimal point.
+                if self.peek_at(1) is .Some(n) then {
+                    if Tokenizer.rune_eq(n, '.') or Tokenizer.rune_eq(n, '<') then {
+                        break;
+                    };
+                    if not n.is_ascii_digit() then {
                         break;
                     };
                 } else {
                     break;
                 };
-            } else if Tokenizer.rune_eq(r, 'x') or Tokenizer.rune_eq(r, 'b') or Tokenizer.rune_eq(
-                r,
-                'o',
-            ) then {
-                // Hex/binary/octal prefix
+                if is_float then {
+                    return .Error("consecutive dots are not allowed");
+                };
+                is_float = true;
+                in_integer = false;
                 text.push_string(r.to_string());
                 self.pos += 1;
-            } else if Tokenizer.rune_eq(r, 'a') or Tokenizer.rune_eq(r, 'A') or Tokenizer.rune_eq(
-                r,
-                'b',
-            ) or Tokenizer.rune_eq(r, 'B') or Tokenizer.rune_eq(r, 'c') or Tokenizer.rune_eq(
-                r,
-                'C',
-            ) or Tokenizer.rune_eq(r, 'd') or Tokenizer.rune_eq(r, 'D') or Tokenizer.rune_eq(
-                r,
-                'e',
-            ) or Tokenizer.rune_eq(r, 'E') or Tokenizer.rune_eq(r, 'f') or Tokenizer.rune_eq(
-                r,
-                'F',
-            ) then {
-                // Hex digits or exponent
+                last_was_digit = false;
+            } else if Tokenizer.rune_eq(r, 'e') then {
+                // `e` opens an exponent only before a digit or [sign] digit.
+                let mutable starts_exponent Bool = false;
+                if self.peek_at(1) is .Some(n) then {
+                    if n.is_ascii_digit() then {
+                        starts_exponent = true;
+                    } else if Tokenizer.rune_eq(n, '+') or Tokenizer.rune_eq(n, '-') then {
+                        if self.peek_at(2) is .Some(n2) and n2.is_ascii_digit() then {
+                            starts_exponent = true;
+                        };
+                    };
+                };
+                if not starts_exponent then {
+                    break;
+                };
+                is_float = true;
+                in_integer = false;
                 text.push_string(r.to_string());
                 self.pos += 1;
+                if self.peek() is .Some(s) then {
+                    if Tokenizer.rune_eq(s, '+') or Tokenizer.rune_eq(s, '-') then {
+                        text.push_string(s.to_string());
+                        self.pos += 1;
+                    };
+                };
+                last_was_digit = false;
+                while not self.is_eof() then {
+                    let er = self.runes[self.pos];
+                    if er.is_ascii_digit() then {
+                        text.push_string(er.to_string());
+                        self.pos += 1;
+                        last_was_digit = true;
+                    } else if Tokenizer.rune_eq(er, '_') then {
+                        if last_was_digit and self.peek_at(1) is .Some(n) and n.is_ascii_digit() then {
+                            text.push_string(er.to_string());
+                            text.push_string(n.to_string());
+                            self.pos += 2;
+                            last_was_digit = true;
+                        } else {
+                            return .Error("Invalid digit separator '_' in numeric literal");
+                        };
+                    } else {
+                        break;
+                    };
+                };
             } else {
                 break;
             };
         };
 
-        if self.peek() is .Some(r) then {
-            if Tokenizer.rune_eq(r, 'h') then {
-                text.push_string(r.to_string());
-                self.pos += 1;
-                return .IntLit(text.to_string());
-            };
-            if Tokenizer.rune_eq(r, 's') then {
-                text.push_string(r.to_string());
-                self.pos += 1;
-                return .IntLit(text.to_string());
-            };
-            if Tokenizer.rune_eq(r, 'm') then {
-                if self.peek_at(1) is .Some(r2) then {
-                    if Tokenizer.rune_eq(r2, 's') then {
-                        text.push_string(r.to_string());
-                        text.push_string(r2.to_string());
-                        self.pos += 2;
-                        return .IntLit(text.to_string());
-                    };
-                    if Tokenizer.rune_eq(r2, 'i') and self.peek_at(2) is .Some(r3) and Tokenizer.rune_eq(
-                        r3,
-                        'n',
-                    ) then {
-                        text.push_string(r.to_string());
-                        text.push_string(r2.to_string());
-                        text.push_string(r3.to_string());
-                        self.pos += 3;
-                        return .IntLit(text.to_string());
-                    };
-                };
-            };
-            if (Tokenizer.rune_eq(r, 'u') or Tokenizer.rune_eq(r, 'n')) and self.peek_at(
-                1,
-            ) is .Some(r2) and Tokenizer.rune_eq(r2, 's') then {
-                text.push_string(r.to_string());
-                text.push_string(r2.to_string());
-                self.pos += 2;
-                return .IntLit(text.to_string());
-            };
+        if int_digits > 1 and leading_zero then {
+            return .Error("Leading zeros are not allowed in integer literals");
         };
 
-        if is_float then {
-            return Token.FloatLit(text.to_string());
+        if not is_float and self.scan_duration_suffix(text) then {
+            return .Ok(.IntLit(text.to_string()));
         };
-        return Token.IntLit(text.to_string());
+        if is_float then {
+            return .Ok(.FloatLit(text.to_string()));
+        };
+        return .Ok(.IntLit(text.to_string()));
+    };
+
+    // `s` / `ms` / `us` / `ns`, and only when no identifier character
+    // follows: `10s2` is `10` then `s2`, not a duration. The suffix is
+    // appended to `text` only on a match, so a failure leaves `self.pos` (and
+    // the literal text) untouched.
+    file_private scan_duration_suffix(self, text StringBuilder) Bool = {
+        let start = self.pos;
+        let mutable letters = StringBuilder.new();
+        while not self.is_eof() and self.runes[self.pos].is_ascii_alphabetic() then {
+            letters.push_string(self.runes[self.pos].to_string());
+            self.pos += 1;
+        };
+        let word = letters.to_string();
+        let mutable matched = word == "s" or word == "ms" or word == "us" or word == "ns";
+        if matched and not self.is_eof() then {
+            if self.runes[self.pos].is_identifier_continue() then {
+                matched = false;
+            };
+        };
+        if matched then {
+            text.push_string(word);
+            return true;
+        };
+        self.pos = start;
+        return false;
     };
 
     // ========================================================================
@@ -967,7 +1057,7 @@ given Tokenizer {
             return .Some(.Eq());
         };
 
-        // < <= << <<= <> <.. <..< <...
+        // < <= << <<= <> <.. <..<
         if cp == 60 then {
             self.pos += 1;
             if self.peek() is .Some(n) then {
@@ -998,10 +1088,6 @@ given Tokenizer {
                                 if Tokenizer.rune_eq(n3, '<') then {
                                     self.pos += 1;
                                     return .Some(.LtRangeLt());
-                                };
-                                if Tokenizer.rune_eq(n3, '.') then {
-                                    self.pos += 1;
-                                    return .Some(.LtUnbounded());
                                 };
                             };
                             return .Some(.LtRange());
@@ -1036,7 +1122,10 @@ given Tokenizer {
             return .Some(.Gt());
         };
 
-        // . .. ..< ... ...< ....
+        // . .. ..< ...
+        // `...` is not a range operator: it exists only to reject the old
+        // default-fill spelling. `....` is `...` followed by `.`, and `...<`
+        // is `...` followed by `<` -- exactly the split koralc makes.
         if cp == 46 then {
             self.pos += 1;
             if self.peek() is .Some(n) then {
@@ -1049,17 +1138,7 @@ given Tokenizer {
                         };
                         if Tokenizer.rune_eq(n2, '.') then {
                             self.pos += 1;
-                            if self.peek() is .Some(n3) then {
-                                if Tokenizer.rune_eq(n3, '<') then {
-                                    self.pos += 1;
-                                    return .Some(.UnboundedLt());
-                                };
-                                if Tokenizer.rune_eq(n3, '.') then {
-                                    self.pos += 1;
-                                    return .Some(.FullRange());
-                                };
-                            };
-                            return .Some(.Unbounded());
+                            return .Some(.Ellipsis());
                         };
                     };
                     return .Some(.Range());
