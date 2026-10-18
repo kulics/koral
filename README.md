@@ -212,6 +212,7 @@ let result = list.iterator()
 - Wildcard (`_`), literal, variable binding, comparison (`> n`, `<= n`)
 - Struct/Enum destructuring and tuple destructuring (including nested)
 - Logical patterns: `or`, `and`, `not`
+- Arm guards: `pat if cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness
 
 ### Traits and Generics
 

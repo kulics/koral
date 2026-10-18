@@ -1001,7 +1001,7 @@ extension TypeChecker {
       do {
         let bodyAsCurrent = try normalizeBranchExpression(body, expectedType: currentType)
         if bodyAsCurrent.type == currentType || canWidenMutableReference(bodyAsCurrent, expectedType: currentType) {
-          normalizedCases[index] = TypedMatchCase(pattern: normalizedCases[index].pattern, body: bodyAsCurrent)
+          normalizedCases[index] = TypedMatchCase(pattern: normalizedCases[index].pattern, guardExpr: normalizedCases[index].guardExpr, body: bodyAsCurrent)
           continue
         }
       } catch {
@@ -1015,6 +1015,7 @@ extension TypeChecker {
           let coerced = try normalizeBranchExpression(previousBody, expectedType: supertype)
           normalizedCases[previousIndex] = TypedMatchCase(
             pattern: normalizedCases[previousIndex].pattern,
+            guardExpr: normalizedCases[previousIndex].guardExpr,
             body: coerced
           )
         }
@@ -1033,6 +1034,7 @@ extension TypeChecker {
           if coerced.type == candidateType || canWidenMutableReference(coerced, expectedType: candidateType) {
             candidateCases[previousIndex] = TypedMatchCase(
               pattern: candidateCases[previousIndex].pattern,
+              guardExpr: candidateCases[previousIndex].guardExpr,
               body: coerced
             )
           } else {
@@ -1074,7 +1076,7 @@ extension TypeChecker {
         )
       }
       _ = sourceCase
-      return TypedMatchCase(pattern: typedCase.pattern, body: normalizedBody)
+      return TypedMatchCase(pattern: typedCase.pattern, guardExpr: typedCase.guardExpr, body: normalizedBody)
     }
 
     return (normalizedCases, resultType)
@@ -1630,6 +1632,17 @@ extension TypeChecker {
               try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
             }
           }
+          // Arm guard: bindings are in scope; a false guard falls through.
+          var typedGuard: TypedExpressionNode? = nil
+          if let guardExpr = c.guardExpr {
+            let typedGuardExpr = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
+            if typedGuardExpr.type != .bool {
+              throw SemanticError(
+                .typeMismatch(expected: "Bool", got: typedGuardExpr.type.description),
+                span: guardExpr.span)
+            }
+            typedGuard = typedGuardExpr
+          }
           // Use the current target's evolving type, if any, for subsequent arms.
           var branchExpectedType = expectedType
           if branchExpectedType == nil,
@@ -1650,7 +1663,7 @@ extension TypeChecker {
           } else {
             typedBody = try inferTypedExpression(c.body, usage: branchUsage)
           }
-          return TypedMatchCase(pattern: pattern, body: typedBody)
+          return TypedMatchCase(pattern: pattern, guardExpr: typedGuard, body: typedBody)
         }
         if typedCase.body.type == .void {
           sawFallthrough = true
@@ -1666,8 +1679,9 @@ extension TypeChecker {
         typedCases.append(typedCase)
       }
       
-      // Exhaustiveness checking
-      let patterns = typedCases.map { $0.pattern }
+      // Exhaustiveness checking. A guarded arm covers nothing: only
+      // unguarded arms feed the coverage check.
+      let patterns = typedCases.filter { $0.guardExpr == nil }.map { $0.pattern }
       let resolvedCases = resolveEnumCasesForExhaustiveness(subjectType)
       let checker = ExhaustivenessChecker(
         subjectType: subjectType,
@@ -8670,8 +8684,8 @@ extension TypeChecker {
     )
     
     // Build match cases
-    let someCase = TypedMatchCase(pattern: somePattern, body: typedBody)
-    let noneCase = TypedMatchCase(pattern: nonePattern, body: breakExpr)
+    let someCase = TypedMatchCase(pattern: somePattern, guardExpr: nil, body: typedBody)
+    let noneCase = TypedMatchCase(pattern: nonePattern, guardExpr: nil, body: breakExpr)
     
     return .whenExpression(
       subject: nextCall,
@@ -8891,8 +8905,8 @@ extension TypeChecker {
       return .whenExpression(
         subject: typedOperand,
         cases: [
-          TypedMatchCase(pattern: somePattern, body: .variable(identifier: itSym)),
-          TypedMatchCase(pattern: nonePattern, body: typedDefault),
+          TypedMatchCase(pattern: somePattern, guardExpr: nil, body: .variable(identifier: itSym)),
+          TypedMatchCase(pattern: nonePattern, guardExpr: nil, body: typedDefault),
         ],
         type: resultType
       )
@@ -8908,8 +8922,8 @@ extension TypeChecker {
       return .whenExpression(
         subject: typedOperand,
         cases: [
-          TypedMatchCase(pattern: okPattern, body: .variable(identifier: valSym)),
-          TypedMatchCase(pattern: errPattern, body: typedDefault),
+          TypedMatchCase(pattern: okPattern, guardExpr: nil, body: .variable(identifier: valSym)),
+          TypedMatchCase(pattern: errPattern, guardExpr: nil, body: typedDefault),
         ],
         type: resultType
       )
@@ -9062,8 +9076,8 @@ extension TypeChecker {
       return .whenExpression(
         subject: typedOperand,
         cases: [
-          TypedMatchCase(pattern: somePattern, body: someBody),
-          TypedMatchCase(pattern: nonePattern, body: noneBody),
+          TypedMatchCase(pattern: somePattern, guardExpr: nil, body: someBody),
+          TypedMatchCase(pattern: nonePattern, guardExpr: nil, body: noneBody),
         ],
         type: finalType
       )
@@ -9085,8 +9099,8 @@ extension TypeChecker {
       return .whenExpression(
         subject: typedOperand,
         cases: [
-          TypedMatchCase(pattern: okPattern, body: okBody),
-          TypedMatchCase(pattern: errPattern, body: errBody),
+          TypedMatchCase(pattern: okPattern, guardExpr: nil, body: okBody),
+          TypedMatchCase(pattern: errPattern, guardExpr: nil, body: errBody),
         ],
         type: finalType
       )

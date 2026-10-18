@@ -1748,6 +1748,25 @@ let result = when x in {
 };
 ```
 
+An arm may carry a guard: `pat if cond then body`. The pattern's bindings are
+visible in `cond`, the guard is evaluated before the branch body, and a false
+guard falls through to the next arm. The guard is part of the arm, never of a
+sub-pattern -- `a or b if c` reads `(a or b) if c`; give the branches separate
+arms for separate conditions. A guard must be `Bool`.
+
+```koral
+let kind = when v in {
+    .Some(n) if n > 0 then "positive",
+    .Some(n) if n < 0 then "negative",
+    .Some(n) then "zero",
+    .None() then "empty",
+};
+```
+
+A guarded arm covers nothing for exhaustiveness (see [Exhaustiveness
+Checking](#exhaustiveness-checking)): the `when` above is complete because of
+the unguarded `.Some(n)` and `.None()` arms, not because of the guarded ones.
+
 A pattern binding is scoped to its own branch. Inside the branch it names the
 matched payload; outside the `when` it does not exist, and an outer binding of
 the same name keeps its meaning. Different branches may reuse a name freely --
@@ -1967,6 +1986,7 @@ The `when` expression checks that patterns are exhaustive:
 - For struct types, `StructName(_, _)`-style patterns with wildcards for every field are treated as exhaustive.
 - Duplicate patterns are rejected at compile time.
 - Unreachable patterns (patterns already covered by earlier arms) are rejected at compile time. Wildcard and variable binding patterns are exempt from this check.
+- A guarded arm (`pat if cond then ...`) covers nothing: the guard may fail, so the arm is never relied on for exhaustiveness. Cover the same pattern with an unguarded arm, or use a wildcard.
 
 ```koral
 // Exhaustive via comparison patterns

@@ -800,7 +800,16 @@ given Parser {
         self.parse_debug(
             "when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))",
         );
-        let pattern = self.collect_pattern_until_then() or return;
+        let pattern = self.parse_pattern_or(false) or return;
+
+        // Arm guard: `pat if cond then body`. The condition parses like an `if`
+        // condition and stops before `then`.
+        let mutable arm_guard = Option[Expr].None();
+        if self.current().kind is .KwIf() then {
+            self.advance();
+            let guard_expr = self.parse_expression_checked("when arm guard") or return;
+            arm_guard = .Some(guard_expr);
+        };
 
         let _ = self.expect_kw_then("when arm") or return;
 
@@ -820,7 +829,7 @@ given Parser {
             );
         };
 
-        return .Ok(WhenArm(pattern, body, false));
+        return .Ok(WhenArm(pattern, arm_guard, body, false));
     };
 
     module_private parse_when_arms(self) Result[List[WhenArm]] = {

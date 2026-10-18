@@ -226,18 +226,31 @@ extension TypeChecker {
           try checkPattern(c.pattern, subjectType: subjectType)
         }
 
-        let typedBody = try withNewScope {
+        let (typedGuard, typedBody) = try withNewScope {
           for symbol in extractPatternSymbols(from: pattern) {
             if let name = context.getName(symbol.defId) {
               try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
             }
           }
-          return try inferStatementBodyExpression(c.body)
+          // Arm guard: bindings are in scope; a false guard falls through.
+          var guardResult: TypedExpressionNode? = nil
+          if let guardExpr = c.guardExpr {
+            let typedGuardExpr = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
+            if typedGuardExpr.type != .bool {
+              throw SemanticError(
+                .typeMismatch(expected: "Bool", got: typedGuardExpr.type.description),
+                span: guardExpr.span)
+            }
+            guardResult = typedGuardExpr
+          }
+          return (guardResult, try inferStatementBodyExpression(c.body))
         }
-        typedCases.append(TypedStatementMatchCase(pattern: pattern, body: typedBody))
+        typedCases.append(TypedStatementMatchCase(pattern: pattern, guardExpr: typedGuard, body: typedBody))
       }
 
-      let patterns = typedCases.map { $0.pattern }
+      // A guarded arm covers nothing: only unguarded arms feed the coverage
+      // check.
+      let patterns = typedCases.filter { $0.guardExpr == nil }.map { $0.pattern }
       let resolvedCases = resolveEnumCasesForExhaustiveness(subjectType)
       let checker = ExhaustivenessChecker(
         subjectType: subjectType,

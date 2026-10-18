@@ -1302,6 +1302,7 @@ extension Monomorphizer {
             let newCases = cases.map { matchCase in
                 TypedMatchCase(
                     pattern: resolveTypesInPattern(matchCase.pattern),
+                    guardExpr: matchCase.guardExpr.map { resolveTypesInExpression($0) },
                     body: resolveTypesInExpression(matchCase.body)
                 )
             }
@@ -1546,6 +1547,7 @@ extension Monomorphizer {
                 cases: cases.map {
                     TypedStatementMatchCase(
                         pattern: resolveTypesInPattern($0.pattern),
+                        guardExpr: $0.guardExpr.map { resolveTypesInExpression($0) },
                         body: resolveTypesInExpression($0.body)
                     )
                 }

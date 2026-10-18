@@ -1490,6 +1490,13 @@ given MIRFunctionBuilder {
         if arms.count() < UInt(2) then {
             return false;
         };
+        // A guarded arm needs its own conditional test, which a SwitchValue
+        // cannot express -- fall back to the branch chain.
+        for arm in arms then {
+            if arm.guard is .Some(_) then {
+                return false;
+            };
+        };
         let subject_type = subject.expr_type;
         // Dereference reference types
         let matched_type = when subject_type in {
@@ -1832,6 +1839,37 @@ given MIRFunctionBuilder {
             let saved_pattern_places = self.pattern_place_by_def_id.clone();
             let saved_pattern_names = self.pattern_place_by_name.clone();
             self.bind_pattern_variables(arm.pattern, subject_place, subject.expr_type);
+            // Arm guard, evaluated with the pattern's bindings in scope. A
+            // false guard falls through to the next arm's check.
+            when arm.guard in {
+                .Some(guard_expr) then {
+                    let guard_operand = self.lower_operand_for_expected_type(
+                        guard_expr,
+                        Type.BoolType(),
+                    );
+                    // `make_block` moves the cursor, so the branch is emitted
+                    // back in the block the guard computation landed in.
+                    let guard_block = self.current_block_id();
+                    let guard_fail_block = self.make_block();
+                    let real_body_block = self.make_block();
+                    self.set_current_block(guard_block);
+                    self.terminate(
+                        MIRTerminator.Branch(guard_operand, real_body_block, guard_fail_block),
+                    );
+                    // The arm scope is already entered (the guard sees the
+                    // bindings), so the false path leaves it the way the body's
+                    // normal exit does -- drops and scope exit -- before the
+                    // next arm runs.
+                    self.set_current_block(guard_fail_block);
+                    self.emit_deferred_exprs(branch_scope);
+                    if not self.current_block_is_terminated() then {
+                        self.append_statement(MIRStatement.ScopeExit(branch_scope));
+                    };
+                    self.terminate(MIRTerminator.Goto(next_block));
+                    self.set_current_block(real_body_block);
+                },
+                .None() then {},
+            };
             self.lower_branch_body(arm.body, branch_result_local);
             self.pattern_place_by_def_id = saved_pattern_places;
             self.pattern_place_by_name = saved_pattern_names;

@@ -204,6 +204,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 ok_scope,
                             ),
+                            Option[TypedExpr].None(),
                             ok_body,
                             ok_body.expr_type,
                         ),
@@ -233,6 +234,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 err_scope,
                             ),
+                            Option[TypedExpr].None(),
                             typed_def,
                             typed_def.expr_type,
                         ),
@@ -277,6 +279,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 some_scope,
                             ),
+                            Option[TypedExpr].None(),
                             some_body,
                             some_body.expr_type,
                         ),
@@ -295,6 +298,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 none_scope,
                             ),
+                            Option[TypedExpr].None(),
                             typed_def,
                             typed_def.expr_type,
                         ),
@@ -435,6 +439,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 tr_scope,
                             ),
+                            Option[TypedExpr].None(),
                             ok_body,
                             ok_body.expr_type,
                         ),
@@ -482,6 +487,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 err_scope,
                             ),
+                            Option[TypedExpr].None(),
                             err_body,
                             err_body.expr_type,
                         ),
@@ -513,6 +519,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 tr_scope,
                             ),
+                            Option[TypedExpr].None(),
                             some_body,
                             some_body.expr_type,
                         ),
@@ -536,6 +543,7 @@ given TypeChecker {
                                 typed_op.expr_type,
                                 none_scope,
                             ),
+                            Option[TypedExpr].None(),
                             none_body,
                             none_body.expr_type,
                         ),
@@ -630,6 +638,26 @@ given TypeChecker {
                         pattern_subject_type,
                         arm_scope,
                     );
+                    // Arm guard: bindings are in scope; a false guard falls
+                    // through to the next arm.
+                    let mutable typed_guard = Option[TypedExpr].None();
+                    when arm.guard in {
+                        .Some(guard_expr) then {
+                            let raw_guard = self.check_expr_core_ref(
+                                guard_expr,
+                                Option[Type].Some(Type.BoolType()),
+                                arm_scope,
+                            );
+                            if not (raw_guard.expr_type is .BoolType()) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected Bool, got \(self.display_type_name(raw_guard.expr_type))",
+                                    expr_span(guard_expr),
+                                );
+                            };
+                            typed_guard = Option[TypedExpr].Some(raw_guard);
+                        },
+                        .None() then {},
+                    };
                     // An invented arm is checked like any other -- it must
                     // still type-check -- but it carries no type of its own and
                     // is not fitted to the branch the user actually wrote.
@@ -734,9 +762,13 @@ given TypeChecker {
                         typed_subj.expr_type,
                         arm_scope,
                     );
-                    patterns.push(lowered_pattern_ref);
+                    // A guarded arm covers nothing: only unguarded arms
+                    // feed the coverage check.
+                    if typed_guard is .None() then {
+                        patterns.push(lowered_pattern_ref);
+                    };
                     typed_arms.push(
-                        TypedWhenArm(lowered_pattern_ref, typed_body, typed_arm_type),
+                        TypedWhenArm(lowered_pattern_ref, typed_guard, typed_body, typed_arm_type),
                     );
                     arm_index += 1;
                 };

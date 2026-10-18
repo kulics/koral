@@ -1041,7 +1041,7 @@ private final class MIRFunctionBuilder {
       }
       fatalError("Unsupported while-pattern statement reached MIR lowering")
     case .whenStatement(let subject, let cases):
-      let expressionCases = cases.map { TypedMatchCase(pattern: $0.pattern, body: $0.body) }
+      let expressionCases = cases.map { TypedMatchCase(pattern: $0.pattern, guardExpr: $0.guardExpr, body: $0.body) }
       if canLowerSimpleWhen(subject: subject, cases: expressionCases) {
         _ = lowerSimpleWhenExpression(subject: subject, cases: expressionCases, type: .void)
         return
@@ -2866,6 +2866,9 @@ private final class MIRFunctionBuilder {
   private func canLowerToSwitchValue(subject: TypedExpressionNode, cases: [TypedMatchCase]) -> Bool {
     // Must have at least 2 cases to benefit from switch
     guard cases.count >= 2 else { return false }
+    // A guarded arm needs its own conditional test, which a SwitchValue cannot
+    // express -- fall back to the branch chain.
+    guard cases.allSatisfy({ $0.guardExpr == nil }) else { return false }
 
     // Dereference reference types to get the actual subject type
     let subjectType: Type
@@ -2970,6 +2973,18 @@ private final class MIRFunctionBuilder {
 
       setCurrentBlock(caseBlock)
       withPatternBindings(pattern: matchCase.pattern, subjectPlace: subjectPlace, subjectType: subject.type) {
+        if let guardExpr = matchCase.guardExpr {
+          // Arm guard, evaluated with the pattern's bindings in scope. A false
+          // guard falls through to the next arm's check. `makeBlock` moves the
+          // cursor, so the branch is emitted back in the block the guard
+          // computation landed in.
+          let guardOperand = materialize(lowerValue(guardExpr), type: .bool)
+          let guardBlock = currentBlockID
+          let bodyBlock = makeBlock()
+          setCurrentBlock(guardBlock)
+          terminate(.branch(condition: guardOperand, thenBlock: bodyBlock, elseBlock: nextBlock))
+          setCurrentBlock(bodyBlock)
+        }
         lowerBranchBody(matchCase.body, resultLocal: resultLocal)
       }
       if !currentBlockIsTerminated {

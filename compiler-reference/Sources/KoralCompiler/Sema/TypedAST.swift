@@ -166,6 +166,8 @@ public struct TypedMethodDeclaration {
 }
 public struct TypedStatementMatchCase {
   public let pattern: TypedPattern
+  /// The arm guard, nil when the arm has none.
+  public let guardExpr: TypedExpressionNode?
   public let body: TypedExpressionNode
 }
 public indirect enum TypedStatementNode {
@@ -459,6 +461,8 @@ public indirect enum TypedPattern: CustomStringConvertible {
 }
 public struct TypedMatchCase {
   public let pattern: TypedPattern
+  /// The arm guard, nil when the arm has none.
+  public let guardExpr: TypedExpressionNode?
   public let body: TypedExpressionNode
 }
 extension TypedExpressionNode {

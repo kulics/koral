@@ -1763,7 +1763,15 @@ extension Parser {
     var cases: [MatchCaseNode] = []
     while currentToken !== .rightBrace {
       let pattern = try parsePattern()
-      
+
+      // Arm guard: `pat if cond then body`. The condition parses like an `if`
+      // condition and stops before `then`.
+      var guardExpr: ExpressionNode? = nil
+      if currentToken === .ifKeyword {
+        try match(.ifKeyword)
+        guardExpr = try expression()
+      }
+
       try match(.thenKeyword)
 
       let body: ExpressionNode
@@ -1773,7 +1781,7 @@ extension Parser {
         body = try expression()
       }
 
-      cases.append(MatchCaseNode(pattern: pattern, body: body))
+      cases.append(MatchCaseNode(pattern: pattern, guardExpr: guardExpr, body: body))
 
       // Match arms are separated by commas; a trailing comma before '}' is allowed.
       if currentToken === .comma {

@@ -2651,6 +2651,8 @@ given CstParser {
                         CstWhenArm(
                             leading_comments,
                             arm.pattern,
+                            arm.guard_if,
+                            arm.guard,
                             arm.then_kw,
                             arm.body,
                             arm.comma,
@@ -2678,6 +2680,20 @@ given CstParser {
             .Error(e) then {
                 return .Error(e);
             },
+        };
+        // Optional arm guard: `pat if cond then body`. The condition parses
+        // like an `if` condition and stops before `then`.
+        let mutable guard_if = Option[Token].None();
+        let mutable guard = Option[CstExpr].None();
+        if self.check(.KwIf()) then {
+            guard_if = .Some(self.eat());
+            let guard_expr = when self.parse_expr_node() in {
+                .Ok(e) then e,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            guard = .Some(guard_expr);
         };
         let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
@@ -2710,7 +2726,16 @@ given CstParser {
             self.eat();
         };
         return .Ok(
-            CstWhenArm(List[Token].new(), pattern, then_kw, body, comma, trailing_comments),
+            CstWhenArm(
+                List[Token].new(),
+                pattern,
+                guard_if,
+                guard,
+                then_kw,
+                body,
+                comma,
+                trailing_comments,
+            ),
         );
     };
 

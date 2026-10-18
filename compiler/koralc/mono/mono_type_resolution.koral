@@ -4598,10 +4598,15 @@ file_private let resolve_types_in_statement(
             let mutable new_arms = List[TypedWhenArm].new();
             for arm_ref in arms then {
                 let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern);
+                let new_guard = when arm_ref.guard in {
+                    .Some(g) then Option[TypedExpr].Some(resolve_types_in_expression(mono, g)),
+                    .None() then Option[TypedExpr].None(),
+                };
                 let new_body = resolve_types_in_expression(mono, arm_ref.body);
                 new_arms.push(
                     TypedWhenArm(
                         new_pattern,
+                        new_guard,
                         new_body,
                         resolve_parameterized_type(mono, arm_ref.arm_type),
                     ),
@@ -9895,7 +9900,11 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
                     arm_ref.arm_type,
                 );
                 let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern);
-                new_arms.push(TypedWhenArm(new_pattern, new_body, new_arm_type));
+                let new_guard = when arm_ref.guard in {
+                    .Some(g) then Option[TypedExpr].Some(resolve_types_in_expression(mono, g)),
+                    .None() then Option[TypedExpr].None(),
+                };
+                new_arms.push(TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type));
             };
             TypedExprKind.WhenExpr(new_subject, new_arms)
         },

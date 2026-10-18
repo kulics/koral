@@ -826,7 +826,17 @@ public indirect enum PatternNode: CustomStringConvertible {
 
 public struct MatchCaseNode {
   public let pattern: PatternNode
+  /// Arm guard (`pat if cond then body`): evaluated with the pattern's
+  /// bindings in scope; a false guard falls through to the next arm. The
+  /// guard is arm-level, never on a sub-pattern.
+  public let guardExpr: ExpressionNode?
   public let body: ExpressionNode
+
+  public init(pattern: PatternNode, guardExpr: ExpressionNode? = nil, body: ExpressionNode) {
+    self.pattern = pattern
+    self.guardExpr = guardExpr
+    self.body = body
+  }
 }
 
 extension ExpressionNode {

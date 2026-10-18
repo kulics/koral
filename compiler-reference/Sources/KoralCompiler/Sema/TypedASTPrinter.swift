@@ -200,6 +200,10 @@ public func printTypedAST(_ node: TypedProgram) {
       withIndent { printTypedExpression(subject) }
       for matchCase in cases {
         print("\(indent)  Case: \(matchCase.pattern)")
+        if let guardExpr = matchCase.guardExpr {
+          print("\(indent)  Guard:")
+          withIndent { printTypedExpression(guardExpr) }
+        }
         withIndent { printTypedExpression(matchCase.body) }
       }
 
@@ -407,6 +411,10 @@ public func printTypedAST(_ node: TypedProgram) {
       withIndent {
           for c in cases {
               print("\(indent)  Case Pattern: \(c.pattern)")
+              if let guardExpr = c.guardExpr {
+                print("\(indent)  Guard:")
+                withIndent { printTypedExpression(guardExpr) }
+              }
               print("\(indent)  Body:")
               withIndent { printTypedExpression(c.body) }
           }
