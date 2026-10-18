@@ -357,7 +357,7 @@ public indirect enum Type: CustomStringConvertible {
     case .error: return "?"
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
-      return "Func(\(paramTypes)) \(returns)"
+      return "(\(paramTypes)) -> \(returns)"
     case .structure(let defId):
       if let context = SemanticErrorContext.currentCompilerContext {
         return context.getDebugName(self)

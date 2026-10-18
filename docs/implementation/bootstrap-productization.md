@@ -81,7 +81,7 @@ oracle 侧曾有 `uniqueCIdentifier`（冲突就加后缀）与 `detectCIdentifi
   两边不一致会让 `methodIndex` 取错。统一**父在前**。
 - **用户不该看见 `struct#N`。** `struct#N` / `enum#N` 是身份拼法（`stable_type_key`
   的 `S#N` / `E#N`），不是显示名。显示路径一律读声明名，id 拼法只是最后兜底。
-- **`Fn(..)` 与 `Func(..)` 不是缺陷。** `Fn(..)` 是身份键拼法，`Func(..)` 是显示拼法，
+- **`Fn(..)` 与 `(..) -> ..` 不是缺陷。** `Fn(..)` 是身份键拼法，`(T1, ..) -> R` 是显示拼法，
   分离是有意的。
 - **prelude 的边界是包身份**（`package_id_for_kind(.Std())` /
   `Driver.packageID(for:packageName:)` 铸的那一个），不是模块路径拼写。
@@ -108,7 +108,7 @@ oracle 侧曾有 `uniqueCIdentifier`（冲突就加后缀）与 `detectCIdentifi
 只有 `CompilerContext.get_layout_key`（`mono/mono_types.koral` 曾有一份拼写不同的副本，
 已删）。布局键给单态化的 C 实体命名，也当类型相等谓词用，所以必须**单射**——两个类型
 共用一个键就是一个 C 符号。函数类型带签名**且带参数个数**（裸的 `Fn_<params>_<ret>`
-拼接是二义的：`Func() R_I` 与 `Func(R) I` 都拼成 `Fn_R_I`），借用不并进拥有
+拼接是二义的：`() -> R` 与 `(R) -> I` 都拼成 `Fn_R_I`），借用不并进拥有
 （`BR_` / `MBR_` 对 `R_` / `MR_`）。
 
 ## 角色分工

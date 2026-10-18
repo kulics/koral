@@ -157,9 +157,10 @@ given TypeChecker {
                 // `Option[Int]` makes the two lowered `when` arms disagree.
                 if not self.is_unresolved_expr_type(success_type) and not self.contains_generic_parameter(
                     success_type,
-                ) and not self.is_unresolved_expr_type(typed_def.expr_type) and not (
-                    typed_def.expr_type is .NeverType()
-                ) and not self.same_expr_type(typed_def.expr_type, success_type) then {
+                ) and not self.is_unresolved_expr_type(typed_def.expr_type) and not (typed_def.expr_type is .NeverType()) and not self.same_expr_type(
+                    typed_def.expr_type,
+                    success_type,
+                ) then {
                     self.push_diagnostic(
                         "Type mismatch: expected \(self.display_type_name(success_type)), got \(self.display_type_name(typed_def.expr_type))",
                         span,
@@ -566,7 +567,9 @@ given TypeChecker {
                     };
                 };
                 let mutable typed_subj = raw_typed_subj;
-                if has_weak_binding and self.is_weak_reference_type(raw_typed_subj.expr_type) then {
+                if has_weak_binding and self.is_weak_reference_type(
+                    raw_typed_subj.expr_type,
+                ) then {
                     let strong_type = when raw_typed_subj.expr_type in {
                         .WeakReferenceType(inner) then inner,
                         .MutableWeakReferenceType(inner) then inner,
@@ -870,8 +873,8 @@ given TypeChecker {
                             when inferred_return_type in {
                                 .Some(inferred) then inferred,
                                 .None() then {
-                                    if typed_body.expr_type is .NeverType() then Type.VoidType()
-                                    else typed_body.expr_type
+                                    if typed_body.expr_type is .NeverType() then Type.VoidType(
+                                    ) else typed_body.expr_type
                                 },
                             }
                         } else typed_body.expr_type
@@ -1349,11 +1352,7 @@ given TypeChecker {
     /// gives way, and the two branches agree. A literal is flexible only
     /// toward its own kind: an integer literal does not become a float or a
     /// string here.
-    module_private branch_literal_absorbs_type(
-        self,
-        branch TypedExpr,
-        target Type,
-    ) Bool = {
+    module_private branch_literal_absorbs_type(self, branch TypedExpr, target Type) Bool = {
         return when branch.expr_kind in {
             .IntegerLiteral(_) then self.is_integer_type(target),
             .FloatLiteral(_) then self.is_float_type(target),
@@ -1590,7 +1589,9 @@ given TypeChecker {
                                             // other and that is enough.)
                                             if not branches_fit and not self.contains_generic_parameter(
                                                 expected_t,
-                                            ) and not self.is_unresolved_expr_type(expected_t) then {
+                                            ) and not self.is_unresolved_expr_type(
+                                                expected_t,
+                                            ) then {
                                                 if not then_is_never_final and not self.is_unresolved_expr_type(
                                                     typed_then.expr_type,
                                                 ) and not self.same_expr_type(

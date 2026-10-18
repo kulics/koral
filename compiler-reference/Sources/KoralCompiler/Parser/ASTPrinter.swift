@@ -670,7 +670,7 @@ public func printAST(_ node: ASTNode) {
         }
       }.joined(separator: ", ")
       let returnStr = returnType.map { " \($0)" } ?? ""
-      print("\(indent)LambdaExpression: (\(paramsStr))\(returnStr) ->")
+      print("\(indent)LambdaExpression: (\(paramsStr))\(returnStr) =>")
       print("\(indent)  Body:")
       withIndent {
         withIndent {

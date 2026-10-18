@@ -107,7 +107,7 @@ given LatchGate {
 };
 
 given[T Any] Lazy[T] {
-    public new(f Func() T) Lazy[T];
+    public new(f () -> T) Lazy[T];
     public get(self) T;
     public is_initialized(self) Bool;
 };

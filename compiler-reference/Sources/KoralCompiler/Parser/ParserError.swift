@@ -179,7 +179,7 @@ public enum ParserError: Error {
     case .invalidFunctionType(_, let message):
       return "Invalid function type: \(message)"
     case .expectedArrow:
-      return "Expected '->' in lambda expression"
+      return "Expected '=>' in lambda expression"
     case .invalidReceiverParameterSyntax:
       return "Invalid receiver parameter syntax: use 'self' only"
     case .foreignAndIntrinsicConflict:

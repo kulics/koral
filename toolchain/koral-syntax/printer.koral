@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Koral Syntax - Structural CST Printer
 // ============================================================================
 // Every spacing decision is determined by the CST node structure.
@@ -112,6 +112,45 @@ given Printer {
     file_private write_separator(self, comma Token) Void = {
         self.write_token(comma);
         self.pending_space = true;
+    };
+
+    /// Comments between a statement / declaration and its `;`. A line comment
+    /// ends its line, so the `;` that follows lands on the next one.
+    file_private print_pre_semi_comments(self, comments List[Token]) Void = {
+        for c in comments then {
+            if not self.at_line_start then {
+                self.write_space();
+            };
+            self.write_token(c);
+            when c in {
+                .LineComment(_) then {
+                    self.write_newline();
+                },
+                _ then {},
+            };
+        };
+    };
+
+    /// A list item's separator slot: the comments that trail the item come
+    /// first -- they sit before the comma in source -- then the comma itself
+    /// when the source wrote one. A line comment moves the comma to the next
+    /// line, the same way it moves anything else that follows it.
+    file_private print_sep(self, sep CstComma) Void = {
+        for c in sep.comments then {
+            if not self.at_line_start then {
+                self.write_space();
+            };
+            self.write_token(c);
+            when c in {
+                .LineComment(_) then {
+                    self.write_newline();
+                },
+                _ then {},
+            };
+        };
+        if sep.token is .Some(t) then {
+            self.write_separator(t);
+        };
     };
 
     /// A list kept on one line carries no trailing comma -- `[1, 2]`, not
@@ -232,22 +271,23 @@ given Printer {
                 let arg = args[i];
                 self.print_type(arg.inner);
                 if arg.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rb);
         },
-        .Function(func_kw, lp, args, rp, return_type) then {
-            self.write_token(func_kw);
+        .Function(lp, args, rp, return_type) then {
             self.write_token(lp);
             for i in 0..<args.count() then {
                 let arg = args[i];
                 self.print_type(arg.inner);
                 if arg.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rp);
+            self.write_space();
+            self.write("->");
             self.write_space();
             self.print_type(return_type);
         },
@@ -279,7 +319,7 @@ given Printer {
                 self.print_type(p.constraints[j]);
             };
             if p.comma is .Some(c) then {
-                self.write_separator(c);
+                self.print_sep(c);
             };
         };
         self.write_token(gp.rbracket);
@@ -320,7 +360,7 @@ given Printer {
                     };
                     self.print_pattern(a.pattern);
                     if a.comma is .Some(c) then {
-                        self.write_separator(c);
+                        self.print_sep(c);
                     };
                 };
                 if rp is .Some(r) then {
@@ -342,7 +382,7 @@ given Printer {
                 };
                 self.print_pattern(a.pattern);
                 if a.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rp);
@@ -384,8 +424,7 @@ given Printer {
             for item in items then {
                 self.print_pattern(item.pattern);
                 if item.comma is .Some(comma) then {
-                    self.write_token(comma);
-                    self.write_space();
+                    self.print_sep(comma);
                 };
             };
             self.write_token(rp);
@@ -542,7 +581,7 @@ given Printer {
                 let a = type_args[i];
                 self.print_type(a.inner);
                 if a.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rb);
@@ -558,7 +597,13 @@ given Printer {
                 };
             };
         },
-        .Block(lb, items, tail_expr, rb) then self.print_block(lb, items, tail_expr, rb),
+        .Block(lb, items, tail_expr, tail_comments, rb) then self.print_block(
+            lb,
+            items,
+            tail_expr,
+            tail_comments,
+            rb,
+        ),
         .If(kw, cond, then_kw, then_body, else_kw, else_body) then self.print_if(
             kw,
             cond,
@@ -675,7 +720,7 @@ given Printer {
                 let element = elements[i];
                 self.print_expr(element.value);
                 if element.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rb);
@@ -689,12 +734,12 @@ given Printer {
                 self.write_space();
                 self.print_expr(entry.value);
                 if entry.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rb);
         },
-        .Lambda(lp, params, rp, ret, arrow, body) then {
+        .Lambda(lp, params, rp, ret, _, body) then {
             self.write_token(lp);
             for i in 0..<params.count() then {
                 let p = params[i];
@@ -704,7 +749,7 @@ given Printer {
                     self.print_type(pt);
                 };
                 if p.comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             };
             self.write_token(rp);
@@ -713,7 +758,9 @@ given Printer {
                 self.print_type(rt);
             };
             self.write_space();
-            self.write_token(arrow);
+            // The body always opens with `=>`; a legacy `->` lambda is
+            // rewritten to the current spelling here.
+            self.write("=>");
             self.write_space();
             self.print_expr(body);
         },
@@ -752,8 +799,7 @@ given Printer {
                 if wrap then {
                     self.write(",");
                 } else if f.comma is .Some(c) then {
-                    self.write_token(c);
-                    self.write_space();
+                    self.print_sep(c);
                 };
             };
             if wrap then {
@@ -812,7 +858,7 @@ given Printer {
             };
             self.print_expr(value);
             if comma is .Some(c) then {
-                self.write_token(c);
+                self.print_sep(c);
             } else if allow_trailing_comma then {
                 self.write(",");
             };
@@ -824,7 +870,7 @@ given Printer {
             };
             self.write_token(ellipsis);
             if comma is .Some(c) then {
-                self.write_token(c);
+                self.print_sep(c);
             } else if allow_trailing_comma then {
                 self.write(",");
             };
@@ -842,13 +888,13 @@ given Printer {
             };
             self.print_expr(value);
             if comma is .Some(c) then {
-                self.write_separator(c);
+                self.print_sep(c);
             };
         },
         .DefaultFill(_, ellipsis, comma) then {
             self.write_token(ellipsis);
             if comma is .Some(c) then {
-                self.write_separator(c);
+                self.print_sep(c);
             };
         },
     };
@@ -911,6 +957,7 @@ given Printer {
         lb Token,
         items List[CstItem],
         tail_expr Option[CstExpr],
+        tail_comments List[Token],
         rb Token,
     ) Void = {
         self.write_token(lb);
@@ -918,7 +965,7 @@ given Printer {
             self.write_token(rb);
             return;
         };
-        self.print_block_items_multiline(items, tail_expr, rb);
+        self.print_block_items_multiline(items, tail_expr, tail_comments, rb);
     };
 
     file_private print_block_multiline(
@@ -926,6 +973,7 @@ given Printer {
         lb Token,
         items List[CstItem],
         tail_expr Option[CstExpr],
+        tail_comments List[Token],
         rb Token,
     ) Void = {
         self.write_token(lb);
@@ -933,13 +981,14 @@ given Printer {
             self.write_token(rb);
             return;
         };
-        self.print_block_items_multiline(items, tail_expr, rb);
+        self.print_block_items_multiline(items, tail_expr, tail_comments, rb);
     };
 
     file_private print_block_items_multiline(
         self,
         items List[CstItem],
         tail_expr Option[CstExpr],
+        tail_comments List[Token],
         rb Token,
     ) Void = {
         self.write_newline();
@@ -961,6 +1010,8 @@ given Printer {
         };
         if tail_expr is .Some(expr) then {
             self.print_expr(expr);
+            // Comments may trail the tail expression before the `}`.
+            self.print_pre_semi_comments(tail_comments);
             if not self.at_line_start then {
                 self.write_newline();
             };
@@ -989,7 +1040,7 @@ given Printer {
         self.write_token(then_kw);
 
         let then_is_block = when then_body in {
-            .Block(_, _, _, _) then true,
+            .Block(_, _, _, _, _) then true,
             _ then false,
         };
 
@@ -1011,7 +1062,7 @@ given Printer {
             if else_kw is .Some(ek) then {
                 if else_body is .Some(eb) then {
                     let else_is_block_like = when eb in {
-                        .Block(_, _, _, _) or .When(_, _, _, _, _, _) then true,
+                        .Block(_, _, _, _, _) or .When(_, _, _, _, _, _) then true,
                         _ then false,
                     };
                     let eb_expr = eb;
@@ -1130,8 +1181,7 @@ given Printer {
             for item in items then {
                 self.print_pair_binding(item.binding);
                 if item.comma is .Some(comma) then {
-                    self.write_token(comma);
-                    self.write_space();
+                    self.print_sep(comma);
                 };
             };
             self.write_token(rp);
@@ -1185,8 +1235,7 @@ given Printer {
             for item in items then {
                 self.print_pair_binding(item.binding);
                 if item.comma is .Some(comma) then {
-                    self.write_token(comma);
-                    self.write_space();
+                    self.print_sep(comma);
                 };
             };
             self.write_token(rparen);
@@ -1200,8 +1249,7 @@ given Printer {
             for item in items then {
                 self.print_pair_binding(item.binding);
                 if item.comma is .Some(comma) then {
-                    self.write_token(comma);
-                    self.write_space();
+                    self.print_sep(comma);
                 };
             };
             self.write_token(rparen);
@@ -1232,11 +1280,34 @@ given Printer {
                 self.write(";");
             };
         },
+        .DeclPreSemi(comments, d) then {
+            // Comments between the declaration and its `;`. A line comment
+            // takes the `;` to the next line; it cannot ride inside the
+            // comment.
+            if d is .Using(_) then {
+                self.print_decl(d);
+            } else {
+                let saved_reserve = self.reserve;
+                self.reserve = 1;
+                self.print_decl(d);
+                self.reserve = saved_reserve;
+                self.print_pre_semi_comments(comments);
+                self.write(";");
+            };
+        },
         .Stmt(s) then {
             let saved_reserve = self.reserve;
             self.reserve = 1;
             self.print_stmt(s);
             self.reserve = saved_reserve;
+            self.write(";");
+        },
+        .StmtPreSemi(comments, s) then {
+            let saved_reserve = self.reserve;
+            self.reserve = 1;
+            self.print_stmt(s);
+            self.reserve = saved_reserve;
+            self.print_pre_semi_comments(comments);
             self.write(";");
         },
         .Comment(t) then self.write_token(t),
@@ -1361,8 +1432,7 @@ given Printer {
                         self.print_type(pt);
                         self.print_default_value(default_value);
                         if comma is .Some(c) then {
-                            self.write_token(c);
-                            self.write_space();
+                            self.print_sep(c);
                         };
                     },
                 };
@@ -1504,9 +1574,9 @@ given Printer {
 
         // Block/when/if body: same line
         when body in {
-            .Block(lb, items, tail_expr, rb) then {
+            .Block(lb, items, tail_expr, tail_comments, rb) then {
                 self.write_space();
-                self.print_block_multiline(lb, items, tail_expr, rb);
+                self.print_block_multiline(lb, items, tail_expr, tail_comments, rb);
                 return;
             },
             .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
@@ -1672,7 +1742,7 @@ given Printer {
         self,
         kw Token,
         mut_kw Option[Token],
-        comma Option[Token],
+        comma Option[CstComma],
     ) Void = {
         self.write_token(kw);
         if mut_kw is .Some(mk) then {
@@ -1680,7 +1750,7 @@ given Printer {
             self.write_token(mk);
         };
         if comma is .Some(c) then {
-            self.write_separator(c);
+            self.print_sep(c);
         };
     };
 
@@ -1723,7 +1793,7 @@ given Printer {
                 self.print_type(param_type);
                 self.print_default_value(default_value);
                 if comma is .Some(c) then {
-                    self.write_separator(c);
+                    self.print_sep(c);
                 };
             },
         };
@@ -1854,7 +1924,7 @@ given Printer {
         self.print_type(f.field_type);
         self.print_default_value(f.default_value);
         if f.comma is .Some(c) then {
-            self.write_separator(c);
+            self.print_sep(c);
         };
     };
 
@@ -1964,6 +2034,21 @@ given Printer {
                         self.write_newline();
                     };
                 },
+                .StmtPreSemi(comments, s) then {
+                    when s in {
+                        .ExprStmt(expr, _) then {
+                            self.print_expr(expr);
+                        },
+                        _ then {
+                            self.print_stmt(s);
+                        },
+                    };
+                    self.print_pre_semi_comments(comments);
+                    self.write(",");
+                    if not self.at_line_start then {
+                        self.write_newline();
+                    };
+                },
                 .Stmt(s) then {
                     when s in {
                         .ExprStmt(expr, _) then {
@@ -1985,6 +2070,14 @@ given Printer {
                             _ then {},
                         };
                     };
+                    if not self.at_line_start then {
+                        self.write_newline();
+                    };
+                },
+                .DeclPreSemi(comments, d) then {
+                    self.print_decl(d);
+                    self.print_pre_semi_comments(comments);
+                    self.write(",");
                     if not self.at_line_start then {
                         self.write_newline();
                     };
@@ -2230,7 +2323,7 @@ given Printer {
             len
         },
         .Paren(_, inner, _) then 2 + self.estimate_expr_length(inner),
-        .Block(_, _, _, _) then 10,
+        .Block(_, _, _, _, _) then 10,
         .FieldAccess(base, _, field) then self.estimate_expr_length(base) + 1 + field.to_string(
         ).count(),
         .Call(callee, _, args, _) then {
@@ -2290,8 +2383,9 @@ given Printer {
             };
             len
         },
-        .Function(func_kw, _, args, _, return_type) then {
-            let mutable len = func_kw.to_string().count() + 3;
+        .Function(_, args, _, return_type) then {
+            // `(...) -> `: two parens, two arrow runes, two spaces.
+            let mutable len = UInt(6);
             for i in 0..<args.count() then {
                 if i > 0 then {
                     len += 2;
@@ -2781,6 +2875,15 @@ given Printer {
                     self.write(";");
                     self.write_newline();
                 },
+                .DeclPreSemi(comments, d) then {
+                    if public_only and not Printer.is_public(Printer.decl_visibility(d)) then {
+                        continue;
+                    };
+                    self.print_signature(d);
+                    self.print_pre_semi_comments(comments);
+                    self.write(";");
+                    self.write_newline();
+                },
                 _ then {},
             };
         };
@@ -2914,8 +3017,8 @@ file_private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
 };
 
 file_private let validate_item(item CstItem) Result[Void] = when item in {
-    .Decl(decl) then validate_decl(decl),
-    .Stmt(stmt) then validate_stmt(stmt),
+    .Decl(decl) or .DeclPreSemi(_, decl) then validate_decl(decl),
+    .Stmt(stmt) or .StmtPreSemi(_, stmt) then validate_stmt(stmt),
     .Comment(_) or .TrailingComment(_) or .BlankLine() then .Ok({}),
 };
 
@@ -2948,7 +3051,7 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
     },
     .GenericInst(base, _, _, _) then validate_expr_usage(base, false),
     .ImplicitMember(_, _, _, args, _) then validate_call_args(args),
-    .Block(_, items, tail_expr, _) then {
+    .Block(_, items, tail_expr, _, _) then {
         validate_item_list(items) or return;
         return validate_optional_expr_usage(tail_expr, false);
     },

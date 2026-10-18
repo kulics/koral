@@ -349,8 +349,9 @@ given TypeChecker {
             .WeakBinding(name, target_type_opt, span) then {
                 // The subject may be `Option[T]` (already upgraded) or `?T`.
                 let strong_type = when subject_type in {
-                    .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
-                    else Type.Unknown(),
+                    .GenericEnum(_, args) then if args.count() > UInt(0) then args[
+                        UInt(0)
+                    ] else Type.Unknown(),
                     .WeakReferenceType(inner) then inner,
                     .MutableWeakReferenceType(inner) then inner,
                     _ then Type.Unknown(),
@@ -364,7 +365,10 @@ given TypeChecker {
                 let mutable binding_type = strong_type;
                 when target_type_opt in {
                     .Some(target_type) then {
-                        let resolved_target = self.resolve_type_in_scope(target_type, scope);
+                        let resolved_target = self.resolve_type_in_scope(
+                            target_type,
+                            scope,
+                        );
                         if not self.same_expr_type(resolved_target, strong_type) then {
                             self.push_diagnostic_at_span(
                                 "Type mismatch: expected \(self.display_type_name(resolved_target)), got \(self.display_type_name(strong_type))",
@@ -375,17 +379,30 @@ given TypeChecker {
                     },
                     .None() then {},
                 };
-                let symbol = self.pattern_binding_symbol(name, false, binding_type, scope, span);
+                let symbol = self.pattern_binding_symbol(
+                    name,
+                    false,
+                    binding_type,
+                    scope,
+                    span,
+                );
                 // Lower to `Option.Some(name)` so the when-expression matches
                 // the upgraded Option value. Option.None() is tag 0 and
                 // Option.Some(v) is tag 1 in std/option.koral.
                 let mutable elements = List[TypedPatternElement].new();
-                elements.push(TypedPatternElement(Option[String].None(), TypedPattern.Variable(symbol)));
+                elements.push(
+                    TypedPatternElement(
+                        Option[String].None(),
+                        TypedPattern.Variable(symbol),
+                    ),
+                );
                 return TypedPattern.EnumCase("Some", 1, elements);
             },
             _ then {},
         };
-        if self.pattern_tests_subject_shape(pattern) and self.is_weak_reference_type(subject_type) then {
+        if self.pattern_tests_subject_shape(pattern) and self.is_weak_reference_type(
+            subject_type,
+        ) then {
             self.push_diagnostic_at_span(
                 "Cannot match a pattern against a weak reference: upgrade it first",
                 pattern_span(pattern),
@@ -484,7 +501,9 @@ given TypeChecker {
                                 ordered_elements.push(elem);
                             };
                         },
-                        .None() then { return TypedPattern.Wildcard(); },
+                        .None() then {
+                            return TypedPattern.Wildcard();
+                        },
                     };
                     let field_types = self.get_struct_pattern_field_types(
                         subject_type,
@@ -523,7 +542,9 @@ given TypeChecker {
                                 ordered_elements.push(elem);
                             };
                         },
-                        .None() then { return TypedPattern.Wildcard(); },
+                        .None() then {
+                            return TypedPattern.Wildcard();
+                        },
                     };
                     let case_field_types = self.get_enum_case_field_types(
                         subject_type,
@@ -555,18 +576,15 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(
-                    elements,
-                    param_specs,
-                    type_name,
-                    span,
-                ) in {
+                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
                         };
                     },
-                    .None() then { return TypedPattern.Wildcard(); },
+                    .None() then {
+                        return TypedPattern.Wildcard();
+                    },
                 };
                 let field_types = self.get_struct_pattern_field_types(
                     subject_type,
@@ -683,7 +701,9 @@ given TypeChecker {
             },
             .WeakBinding(name, _, span) then {
                 // Handled above with early return; unreachable here.
-                TypedPattern.WeakBinding(self.pattern_binding_symbol(name, false, Type.Unknown(), scope, span))
+                TypedPattern.WeakBinding(
+                    self.pattern_binding_symbol(name, false, Type.Unknown(), scope, span),
+                )
             },
         };
     };
@@ -735,8 +755,9 @@ given TypeChecker {
                 if not (name == "_") then {
                     // Subject may be `Option[T]` (upgraded) or `?T`.
                     let strong_type = when subject_type in {
-                        .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
-                        else Type.Unknown(),
+                        .GenericEnum(_, args) then if args.count() > UInt(0) then args[
+                            UInt(0)
+                        ] else Type.Unknown(),
                         .WeakReferenceType(inner) then inner,
                         .MutableWeakReferenceType(inner) then inner,
                         _ then subject_type,
@@ -775,7 +796,11 @@ given TypeChecker {
                                 .Some(t) then t,
                                 .None() then Type.Unknown(),
                             };
-                            for b in self.bind_pattern_vars(elem.pattern, field_type, scope) then {
+                            for b in self.bind_pattern_vars(
+                                elem.pattern,
+                                field_type,
+                                scope,
+                            ) then {
                                 bound.push(b);
                             };
                             i += 1;
@@ -806,12 +831,7 @@ given TypeChecker {
                 );
                 let mutable ordered_elements = List[PatternElement].new();
                 let mutable args_ok = true;
-                when self.order_pattern_arguments(
-                    elements,
-                    param_specs,
-                    type_name,
-                    span,
-                ) in {
+                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -934,11 +954,9 @@ given TypeChecker {
                         if mismatch is .None() then {
                             when right_type_by_name.get(b.first) in {
                                 .Some(right_type) then {
-                                    if not (
-                                        stable_type_key(b.second) == stable_type_key(
-                                            right_type,
-                                        )
-                                    ) then {
+                                    if not (stable_type_key(b.second) == stable_type_key(
+                                        right_type,
+                                    )) then {
                                         mismatch = Option[Pair[String, String]].Some(
                                             Pair[String, String](
                                                 self.display_type_name(b.second),
@@ -1036,8 +1054,9 @@ given TypeChecker {
                 if not (name == "_") then {
                     if scope.lookup_local(name) is .None() then {
                         let strong_type = when subject_type in {
-                            .GenericEnum(_, args) then if args.count() > UInt(0) then args[UInt(0)]
-                            else Type.Unknown(),
+                            .GenericEnum(_, args) then if args.count() > UInt(0) then args[
+                                UInt(0)
+                            ] else Type.Unknown(),
                             .WeakReferenceType(inner) then inner,
                             .MutableWeakReferenceType(inner) then inner,
                             _ then subject_type,
@@ -1045,7 +1064,10 @@ given TypeChecker {
                         let mutable binding_type = strong_type;
                         when target_type_opt in {
                             .Some(target_type) then {
-                                binding_type = self.resolve_type_in_scope(target_type, scope);
+                                binding_type = self.resolve_type_in_scope(
+                                    target_type,
+                                    scope,
+                                );
                             },
                             .None() then {},
                         };
@@ -1079,7 +1101,11 @@ given TypeChecker {
                                 .Some(t) then t,
                                 .None() then Type.Unknown(),
                             };
-                            self.ensure_pattern_bindings_present(elem.pattern, field_type, scope);
+                            self.ensure_pattern_bindings_present(
+                                elem.pattern,
+                                field_type,
+                                scope,
+                            );
                             i += 1;
                         };
                     },
@@ -1093,18 +1119,15 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(
-                    elements,
-                    param_specs,
-                    type_name,
-                    span,
-                ) in {
+                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
                         };
                     },
-                    .None() then { return; },
+                    .None() then {
+                        return;
+                    },
                 };
                 if not self.check_struct_pattern_field_visibility(
                     subject_type,
@@ -1714,7 +1737,8 @@ given TypeChecker {
             .None() then true,
             .Some(owner) then {
                 let mutable slot UInt = 0;
-                while slot < fields.count() and slot < binds.count() and slot < slot_spans.count() then {
+                while slot < fields.count() and slot < binds.count() and slot < slot_spans.count(
+                ) then {
                     let field = fields[slot];
                     if binds[slot] and not self.is_field_accessible_from_current_context(
                         field.access,

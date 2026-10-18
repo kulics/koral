@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Koral Formatter - Test Suite
 // ============================================================================
 
@@ -561,11 +561,115 @@ let main() Void = {
         "let a = 1e;\n",
         "expected ';' after declaration",
     );
+    // ── comments before terminators ─────────────────────────────────────
+    // A comment may sit between a statement and its `;`, between a list item
+    // and its separator, and after a block's tail expression. koralc treats
+    // comments as trivia and accepts all of these; the formatter must too,
+    // and must keep every comment where the author put it.
+    t.test_checked(
+        "comment before a declaration terminator",
+        "let x = 1 /* c */;\n",
+        "let x = 1 /* c */;\n",
+    );
+    t.test_checked(
+        "line comment before a declaration terminator",
+        "let x = 1 // c\n;\n",
+        "let x = 1 // c\n;\n",
+    );
+    t.test_checked(
+        "comment before a statement terminator",
+        "let main() Void = {\n    f() /* c */;\n};\n",
+        "let main() Void = {\n    f() /* c */;\n};\n",
+    );
+    t.test_checked(
+        "comment before a bare return terminator",
+        "let main() Void = {\n    return /* c */;\n};\n",
+        "let main() Void = {\n    return /* c */;\n};\n",
+    );
+    t.test_checked(
+        "comment after a block tail expression",
+        "let f() Int = {\n    v /* c */\n};\n",
+        "let f() Int = {\n    v /* c */\n};\n",
+    );
+    t.test_checked(
+        "comment before a list separator",
+        "let f(a Int /* c */, b Int) Int = 0;\n",
+        "let f(a Int /* c */, b Int) Int = 0;\n",
+    );
+    t.test_checked(
+        "comment before a closing delimiter",
+        "let main() Void = {\n    f(a /* c */);\n};\n",
+        "let main() Void = {\n    f(a /* c */);\n};\n",
+    );
+    t.test_checked(
+        "comment before an enum variant separator",
+        "type T {\n    A() /* c */,\n    B(),\n};\n",
+        "type T {\n    A(), /* c */\n    B(),\n};\n",
+    );
+
+    // ── function types and lambdas ──────────────────────────────────────
+    // A function TYPE is `(T1, T2) -> R`; a lambda body opens with `=>`.
+    // The two arrows never trade places.
+    t.test_checked(
+        "function type annotation",
+        "let f(Int) -> Int = g;\n",
+        "let f (Int) -> Int = g;\n",
+    );
+    t.test_checked(
+        "nested function type",
+        "let f ((Int) -> Int) -> Int = g;\n",
+        "let f ((Int) -> Int) -> Int = g;\n",
+    );
+    t.test_checked(
+        "zero-parameter function type vs zero-parameter declaration",
+        "let t () -> Void = r;\n\nlet f() Int = {\n    return 0;\n};\n",
+        "let t () -> Void = r;\n\nlet f() Int = {\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "function-typed parameter and return",
+        "let compose(f (Int) -> Int) (Int) -> Int = f;\n",
+        "let compose(f (Int) -> Int) (Int) -> Int = f;\n",
+    );
+    t.test_checked(
+        "lambda with return type",
+        "let f = (x Int) Int => x + 1;\n",
+        "let f = (x Int) Int => x + 1;\n",
+    );
+    t.test_checked(
+        "lambda with inferred params",
+        "let f = (x, y) => x + y;\n",
+        "let f = (x, y) => x + y;\n",
+    );
+    t.test_checked(
+        "lambda taking a function",
+        "let a = (f (Int) -> Int, x Int) Int => f(x);\n",
+        "let a = (f (Int) -> Int, x Int) Int => f(x);\n",
+    );
+    t.test_checked(
+        "lambda returning a function type",
+        "let r = (x) (Int) -> Int => x;\n",
+        "let r = (x) (Int) -> Int => x;\n",
+    );
+    t.test_checked(
+        "function type in generic argument",
+        "let ms List[(Int) -> Int] = [];\n",
+        "let ms List[(Int) -> Int] = [];\n",
+    );
     // ── parse parity with the compiler ──────────────────────────────────
     // The formatter's parser must accept exactly what `koralc` accepts. Each
     // case below was verified to be rejected by the compiler; the message text
     // is the compiler's own where it has one. If one of these goes green
     // again, koral-syntax has drifted behind the compiler.
+    t.test_error_contains(
+        "legacy `Func(T) R` type rejected",
+        "let f Func(Int) Int = g;\n",
+        "expected ';' after declaration",
+    );
+    t.test_error_contains(
+        "legacy `->` lambda rejected",
+        "let main() Void = {\n    let f = (x) -> x;\n};\n",
+        "expected ';' after let declaration",
+    );
     t.test_error_contains(
         "digit separator may not double",
         "let a = 1__0;\n",

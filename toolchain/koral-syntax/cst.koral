@@ -22,13 +22,21 @@ public type CstType {
     // so it carries no inner type.
     ConstraintKeyword(kw Token),
     Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
-    Function(func_kw Token, lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
+    // `(T1, T2) -> R`: the arrow is printed as part of the shape, so the node
+    // keeps the delimiters that carry comments and spacing.
+    Function(lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
     Ptr(inner CstType, kw Token),
     Weakref(inner CstType, kw Token),
 };
 
+// The separator slot of a list item: the comment tokens that trail the item
+// before its separator -- `a /* c */, b` -- and the comma itself when the
+// source wrote one. Comments before a closing delimiter ride the same slot
+// with no comma: `f(a /* c */)`. A formatter may not drop them.
+public type CstComma(comments List[Token], token Option[Token]);
+
 // A type argument with optional trailing comma
-public type CstTypeArg(inner CstType, comma Option[Token]);
+public type CstTypeArg(inner CstType, comma Option[CstComma]);
 
 // ============================================================================
 // CST Expression Nodes
@@ -79,7 +87,7 @@ public type CstExpr {
     ImplicitMember(dot Token, name Token, lparen Option[Token], args List[CstCallArg], rparen Option[Token]),
 
     // Control flow
-    Block(lbrace Token, items List[CstItem], tail_expr Option[CstExpr], rbrace Token),
+    Block(lbrace Token, items List[CstItem], tail_expr Option[CstExpr], tail_comments List[Token], rbrace Token),
     If(kw Token, cond CstExpr, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
     IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
     While(kw Token, cond CstExpr, then_kw Token, body CstExpr),
@@ -109,16 +117,16 @@ public type CstExpr {
 
 // Call argument with optional trailing comma
 public type CstCallArg {
-    Value(label Option[Token], colon Option[Token], value CstExpr, comma Option[Token]),
-    DefaultFill(leading_comments List[Token], ellipsis Token, comma Option[Token]),
+    Value(label Option[Token], colon Option[Token], value CstExpr, comma Option[CstComma]),
+    DefaultFill(leading_comments List[Token], ellipsis Token, comma Option[CstComma]),
 };
 
-public type CstCollectionElement(value CstExpr, comma Option[Token]);
+public type CstCollectionElement(value CstExpr, comma Option[CstComma]);
 
-public type CstDictEntry(key CstExpr, colon Token, value CstExpr, comma Option[Token]);
+public type CstDictEntry(key CstExpr, colon Token, value CstExpr, comma Option[CstComma]);
 
 // Lambda parameter
-public type CstLambdaParam(name Token, param_type Option[CstType], comma Option[Token]);
+public type CstLambdaParam(name Token, param_type Option[CstType], comma Option[CstComma]);
 
 // Enum variant field: Name(Type) as `fieldName FieldType` or `fieldName: FieldType`
 // `comments` are the comment tokens that preceded the field in source. A
@@ -130,7 +138,7 @@ public type CstEnumField(
     colon Option[Token],
     field_type CstType,
     default_value Option[CstDefault],
-    comma Option[Token],
+    comma Option[CstComma],
 );
 
 // A named field's or parameter's `= <literal>` default (grammar.bnf <field>,
@@ -175,13 +183,13 @@ public type CstPatternArg(
     label Option[Token],
     colon Option[Token],
     pattern CstPattern,
-    comma Option[Token],
+    comma Option[CstComma],
 );
 
 // One slot of a `(a, b, c)` tuple pattern: a pattern and the comma that
 // follows it, if any. The commas are kept as tokens so the checked formatter
 // can see every token the author wrote.
-public type CstTuplePatternItem(pattern CstPattern, comma Option[Token]);
+public type CstTuplePatternItem(pattern CstPattern, comma Option[CstComma]);
 
 // ============================================================================
 // CST When Arm
@@ -192,7 +200,7 @@ public type CstWhenArm(
     pattern CstPattern,
     then_kw Token,
     body CstExpr,
-    comma Option[Token],
+    comma Option[CstComma],
     trailing_comments List[Token],
 );
 
@@ -201,11 +209,11 @@ public type CstWhenArm(
 // ============================================================================
 
 public type CstParam {
-    SelfParam(kw Token, mut_kw Option[Token], comma Option[Token]),
-    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
+    SelfParam(kw Token, mut_kw Option[Token], comma Option[CstComma]),
+    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[CstComma]),
 };
 
-public type CstGenericParam(name Token, constraints List[CstType], comma Option[Token]);
+public type CstGenericParam(name Token, constraints List[CstType], comma Option[CstComma]);
 
 public type CstGenericParams(
     lbracket Token,
@@ -239,7 +247,7 @@ public type CstPairBinding {
 
 // One slot of a `let (a, _, c) = ...` tuple binding: a binding and the comma
 // that follows it, if any.
-public type CstTupleBindingItem(binding CstPairBinding, comma Option[Token]);
+public type CstTupleBindingItem(binding CstPairBinding, comma Option[CstComma]);
 
 /// The `for` binding: a single binding element, or a tuple binding `(a, b, c)`.
 /// Matches `<for-binding-pattern> ::= <binding-element> | <tuple-binding>` --
@@ -276,7 +284,7 @@ public type CstStructField(
     colon Option[Token],
     field_type CstType,
     default_value Option[CstDefault],
-    comma Option[Token],
+    comma Option[CstComma],
 );
 
 // ============================================================================
@@ -297,9 +305,9 @@ public type CstDecl {
 // Trait method parameter
 public type CstTraitMethodParam {
     // self -- the only receiver form (grammar.bnf <method-first-param>)
-    SelfParam(kw Token, mut_kw Option[Token], comma Option[Token]),
+    SelfParam(kw Token, mut_kw Option[Token], comma Option[CstComma]),
     // [mutable] name [: Type [= default]]
-    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[Token]),
+    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[CstComma]),
 };
 
 // ============================================================================
@@ -309,6 +317,11 @@ public type CstTraitMethodParam {
 public type CstItem {
     Decl(decl CstDecl),
     Stmt(stmt CstStmt),
+    // Comments between a declaration / statement and its `;` -- `let x = 1
+    // /* c */;`. They travel with the item so the terminator still lands
+    // after them; a line comment pushes it to the next line.
+    DeclPreSemi(comments List[Token], decl CstDecl),
+    StmtPreSemi(comments List[Token], stmt CstStmt),
     Comment(token Token),
     TrailingComment(token Token),
     BlankLine(),

@@ -95,6 +95,8 @@ public type Token {
 
     // Arrow
     Arrow(),
+    // `=>` introduces a lambda body; `->` is the function-type arrow
+    FatArrow(),
 
     // Range operators
     Range(),
@@ -209,6 +211,7 @@ given Token {
         .LShift() then "<<",
         .RShift() then ">>",
         .Arrow() then "->",
+        .FatArrow() then "=>",
         .Range() then "..",
         .RangeLt() then "..<",
         .LtRange() then "<..",
@@ -333,6 +336,7 @@ given Token {
         .LShift() then 67,
         .RShift() then 68,
         .Arrow() then 69,
+        .FatArrow() then 103,
         .Range() then 70,
         .RangeLt() then 71,
         .LtRange() then 72,
@@ -511,7 +515,10 @@ given Tokenizer {
         self.pos += 2;
         while not self.is_eof() then {
             let r = self.runes[self.pos];
-            if Tokenizer.rune_eq(r, '*') and self.peek_at(1) is .Some(r2) and Tokenizer.rune_eq(r2, '/') then {
+            if Tokenizer.rune_eq(r, '*') and self.peek_at(1) is .Some(r2) and Tokenizer.rune_eq(
+                r2,
+                '/',
+            ) then {
                 text.push_string(r.to_string());
                 text.push_string(r2.to_string());
                 self.pos += 2;
@@ -699,7 +706,9 @@ given Tokenizer {
                 digit_count += 1;
                 last_was_digit = true;
             } else if Tokenizer.rune_eq(r, '_') then {
-                if last_was_digit and self.peek_at(1) is .Some(n) and valid.contains(n.to_string()) then {
+                if last_was_digit and self.peek_at(1) is .Some(n) and valid.contains(
+                    n.to_string(),
+                ) then {
                     text.push_string(r.to_string());
                     text.push_string(n.to_string());
                     self.pos += 2;
@@ -709,11 +718,15 @@ given Tokenizer {
                     return .Error("Invalid digit separator '_' in numeric literal");
                 };
             } else if r.is_ascii_digit() then {
-                return .Error("Invalid digit '" + r.to_string() + "' in " + prefix + " literal");
+                return .Error(
+                    "Invalid digit '" + r.to_string() + "' in " + prefix + " literal",
+                );
             } else if Tokenizer.rune_eq(r, '.') then {
                 if self.peek_at(1) is .Some(n) then {
                     if n.is_ascii_digit() or valid.contains(n.to_string()) then {
-                        return .Error(prefix + " literals do not support floating point");
+                        return .Error(
+                            prefix + " literals do not support floating point",
+                        );
                     };
                 };
                 break;
@@ -814,13 +827,16 @@ given Tokenizer {
                         self.pos += 1;
                         last_was_digit = true;
                     } else if Tokenizer.rune_eq(er, '_') then {
-                        if last_was_digit and self.peek_at(1) is .Some(n) and n.is_ascii_digit() then {
+                        if last_was_digit and self.peek_at(1) is .Some(n) and n.is_ascii_digit(
+                        ) then {
                             text.push_string(er.to_string());
                             text.push_string(n.to_string());
                             self.pos += 2;
                             last_was_digit = true;
                         } else {
-                            return .Error("Invalid digit separator '_' in numeric literal");
+                            return .Error(
+                                "Invalid digit separator '_' in numeric literal",
+                            );
                         };
                     } else {
                         break;
@@ -1045,13 +1061,17 @@ given Tokenizer {
             return .Some(.Percent());
         };
 
-        // = ==
+        // = == =>
         if cp == 61 then {
             self.pos += 1;
             if self.peek() is .Some(n) then {
                 if Tokenizer.rune_eq(n, '=') then {
                     self.pos += 1;
                     return .Some(.EqEq());
+                };
+                if Tokenizer.rune_eq(n, '>') then {
+                    self.pos += 1;
+                    return .Some(.FatArrow());
                 };
             };
             return .Some(.Eq());

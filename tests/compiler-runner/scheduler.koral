@@ -18,10 +18,27 @@ file_private let effective_parallel_jobs(config RunnerConfig, total UInt) UInt =
     return min(config.jobs, total);
 };
 
-file_private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UInt, memory_exceeded UInt, infra_failed UInt, start MonoTime) RunSummary = {
+file_private let finalize_summary(
+    total UInt,
+    passed UInt,
+    failed UInt,
+    timed_out UInt,
+    memory_exceeded UInt,
+    infra_failed UInt,
+    start MonoTime,
+) RunSummary = {
     let duration_ms = start.elapsed().as_milliseconds();
     let exit_code = if failed == 0 then 0 else 1;
-    return RunSummary(total, passed, failed, timed_out, memory_exceeded, infra_failed, duration_ms, exit_code);
+    return RunSummary(
+        total,
+        passed,
+        failed,
+        timed_out,
+        memory_exceeded,
+        infra_failed,
+        duration_ms,
+        exit_code,
+    );
 };
 
 file_private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
@@ -56,7 +73,15 @@ file_private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) Run
         };
     };
 
-    return finalize_summary(executed, passed, failed, timed_out, memory_exceeded, infra_failed, start);
+    return finalize_summary(
+        executed,
+        passed,
+        failed,
+        timed_out,
+        memory_exceeded,
+        infra_failed,
+        start,
+    );
 };
 
 file_private let run_case_and_emit_events(
@@ -150,35 +175,37 @@ file_private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) R
         let shared_net_lock = net_lock;
         let shared_env_lock = env_lock;
 
-        let _ = run_task(() -> {
-            while true then {
-                if shared_stop_requested.load() <> 0 then {
-                    break
-                ;};
+        let _ = run_task(
+            () => {
+                while true then {
+                    if shared_stop_requested.load() <> 0 then {
+                        break;
+                    };
 
-                let idx = shared_index.fetch_add(1);
-                if idx < 0 or UInt(idx) >= shared_cases.count() then {
-                    break
-                ;};
+                    let idx = shared_index.fetch_add(1);
+                    if idx < 0 or UInt(idx) >= shared_cases.count() then {
+                        break;
+                    };
 
-                if shared_stop_requested.load() <> 0 then {
-                    break
-                ;};
+                    if shared_stop_requested.load() <> 0 then {
+                        break;
+                    };
 
-                let case_info = shared_cases[UInt(idx)];
-                run_case_with_group_lock(
-                    shared_config,
-                    case_info,
-                    shared_sync_lock,
-                    shared_net_lock,
-                    shared_env_lock,
-                    shared_stop_requested,
-                    shared_sender,
-                )
-            ;};
+                    let case_info = shared_cases[UInt(idx)];
+                    run_case_with_group_lock(
+                        shared_config,
+                        case_info,
+                        shared_sync_lock,
+                        shared_net_lock,
+                        shared_env_lock,
+                        shared_stop_requested,
+                        shared_sender,
+                    );
+                };
 
-            let _ = shared_sender.send(.WorkerExited())
-        ;});
+                let _ = shared_sender.send(.WorkerExited());
+            },
+        );
     };
 
     while workers_exited < worker_count then {
@@ -218,7 +245,15 @@ file_private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) R
         };
     };
 
-    return finalize_summary(received, passed, failed, timed_out, memory_exceeded, infra_failed, start);
+    return finalize_summary(
+        received,
+        passed,
+        failed,
+        timed_out,
+        memory_exceeded,
+        infra_failed,
+        start,
+    );
 };
 
 public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
@@ -229,11 +264,14 @@ public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
 
     let effective_jobs = effective_parallel_jobs(config, cases.count());
 
-    report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + effective_jobs.to_string());
+    report_line(
+        config,
+        "Running " + cases.count().to_string() + " case(s) with jobs=" + effective_jobs.to_string(
+        ),
+    );
 
-    let summary = if effective_jobs <= 1 then
-        run_cases_serial(config, cases) else
-        run_cases_parallel(config, cases);
+    let summary = if effective_jobs <= 1 then run_cases_serial(config, cases)
+    else run_cases_parallel(config, cases);
 
     print_summary(config, summary);
     return summary;

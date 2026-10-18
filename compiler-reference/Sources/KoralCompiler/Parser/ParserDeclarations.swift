@@ -33,6 +33,48 @@ extension Parser {
   // MARK: - Global Declaration Parsing
   
   /// Parse global declaration
+  /// Whether the `(` at the cursor opens a function TYPE's parameter list
+  /// `(T1, T2) -> R` written as a binding's annotation, rather than a
+  /// declaration's parameter list. The tell is the `->` after the closing
+  /// `)`: a function type always has one, a signature never writes its result
+  /// type with one. Restores the stream.
+  private func parenOpensTypeAnnotation() -> Bool {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    guard currentToken === .leftParen else { return false }
+    // The `(` at the cursor is already out of the lexer; count it here.
+    var depth = 1
+    while true {
+      if let next = try? lexer.getNextToken() {
+        currentToken = next
+      } else {
+        return false
+      }
+      switch currentToken {
+      case .leftParen:
+        depth += 1
+      case .rightParen:
+        depth -= 1
+        if depth == 0 {
+          if let after = try? lexer.getNextToken() {
+            currentToken = after
+          } else {
+            return false
+          }
+          return currentToken === .arrow
+        }
+      case .eof:
+        return false
+      default:
+        break
+      }
+    }
+  }
+
   func parseGlobalDeclaration() throws -> GlobalNode {
     let startSpan = currentSpan
     let flags = try parseTopLevelDeclFlags()
@@ -73,20 +115,23 @@ extension Parser {
           throw ParserError.invalidVariableName(span: nameSpan, name: name)
         }
         if isForeign {
-          if currentToken === .leftParen {
+          if currentToken === .leftParen && !parenOpensTypeAnnotation() {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
           }
           return try foreignLetDeclaration(name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
         }
-        if currentToken === .leftParen {
+        if currentToken === .leftParen && !parenOpensTypeAnnotation() {
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
         return try globalVariableDeclaration(
           name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
       }
 
-      // Otherwise check for left paren to determine if it's a function or variable
-      if currentToken === .leftParen {
+      // Otherwise check for left paren to determine if it's a function or variable.
+      // A `(` that opens a function TYPE's parameter list (`let f (Int) -> Int =
+      // value`) is an annotation, not a signature: the first token inside is a
+      // type head, and an empty `()` is decided by `->` following it.
+      if currentToken === .leftParen && !parenOpensTypeAnnotation() {
         if !isValidVariableName(name) {
           throw ParserError.invalidFunctionName(span: nameSpan, name: name)
         }

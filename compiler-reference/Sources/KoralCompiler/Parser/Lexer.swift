@@ -91,6 +91,7 @@ public enum Token: CustomStringConvertible {
   case leftShift  // '<<' - left shift
   case rightShift  // '>>' - right shift
   case arrow  // '->'
+  case fatArrow  // '=>' - lambda body
   case plusEqual  // '+='
   case minusEqual  // '-='
   case multiplyEqual  // '*='
@@ -145,7 +146,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.letKeyword, .letKeyword), (.mutableKeyword, .mutableKeyword):
       return true
-    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.ellipsis, .ellipsis), (.arrow, .arrow):
+    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.ellipsis, .ellipsis), (.arrow, .arrow), (.fatArrow, .fatArrow):
       return true
     case (.leftParen, .leftParen), (.rightParen, .rightParen):
       return true
@@ -339,6 +340,8 @@ public enum Token: CustomStringConvertible {
       return ">>"
     case .arrow:
       return "->"
+    case .fatArrow:
+      return "=>"
     case .plusEqual:
       return "+="
     case .minusEqual:
@@ -1453,6 +1456,9 @@ public class Lexer {
       if let nextChar = getNextChar() {
         if nextChar == "=" {
           return .equalEqual
+        }
+        if nextChar == ">" {
+          return .fatArrow
         }
         unreadChar(nextChar)
       }

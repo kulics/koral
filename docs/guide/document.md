@@ -882,11 +882,11 @@ if b is Button(w, height: _, label: l) then println(l);
 
 #### Function Types
 
-In Koral, functions are also a type. Function types are declared using `Func(T1, T2, ...) R` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
+In Koral, functions are also a type. Function types are declared using `(T1, T2, ...) -> R` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
 
 ```koral
-let square(x Int) Int = x * x;        // Func(Int) Int
-let f Func(Int) Int = square;
+let square(x Int) Int = x * x;        // (Int) -> Int
+let f (Int) -> Int = square;
 let a = f(2);                         // a == 4
 ```
 
@@ -894,8 +894,8 @@ We can also define function type parameters or return values:
 
 ```koral
 let hello() Void = println("Hello, world!");
-let run(f Func() Void) Void = f();
-let toRun() Func(Func() Void) Void = run;
+let run(f () -> Void) Void = f();
+let toRun() (() -> Void) -> Void = run;
 
 let main() Void = toRun()(hello);
 ```
@@ -904,29 +904,29 @@ let main() Void = toRun()(hello);
 
 #### Lambda Expressions
 
-Lambda expressions are very similar to function definitions, except that `=` is replaced by `->`, and there is no function name or `let` keyword.
+Lambda expressions are very similar to function definitions, except that `=` is replaced by `=>`, and there is no function name or `let` keyword.
 
 ```koral
-let f1(x Int) Int = x + 1;            // Func(Int) Int
-let f2 = (x Int) Int -> x + 1;        // Func(Int) Int
+let f1(x Int) Int = x + 1;            // (Int) -> Int
+let f2 = (x Int) Int => x + 1;        // (Int) -> Int
 let a = f1(1) + f2(1);                // a == 4
 ```
 
 When the type of lambda can be inferred from context, parameter types and return type can be omitted:
 
 ```koral
-let f Func(Int) Int = (x) -> x + 1;
+let f (Int) -> Int = (x) => x + 1;
 ```
 
 Lambda supports multiple forms:
 
 ```koral
-() -> 42;                           // No parameters
-(x) -> x * 2;                      // Single param, type inferred
-(x Int) -> x * 2;                  // Single param with type
-(x, y) -> x + y;                   // Multiple params, types inferred
-(x Int, y Int) Int -> x + y;       // Full type annotations
-(x) -> { let y = x * 2; return y + 1 };  // Block body
+() => 42;                           // No parameters
+(x) => x * 2;                      // Single param, type inferred
+(x Int) => x * 2;                  // Single param with type
+(x, y) => x + y;                   // Multiple params, types inferred
+(x Int, y Int) Int => x + y;       // Full type annotations
+(x) => { let y = x * 2; return y + 1 };  // Block body
 ```
 
 #### Closures
@@ -934,8 +934,8 @@ Lambda supports multiple forms:
 Lambda expressions can capture variables from their surrounding scope. This is called a closure.
 
 ```koral
-let make_adder(base Int) Func(Int) Int = {
-    return (x) -> base + x;
+let make_adder(base Int) (Int) -> Int = {
+    return (x) => base + x;
 };
 
 let add10 = make_adder(10);
@@ -953,9 +953,9 @@ Closure capture is **copy-only**. A closure owns its captures, so an escaping cl
 To carry mutable state into a closure, hold it in a `Cell` — a shared `type mutable` box — and capture the cell:
 
 ```koral
-let make_counter() Func() Int = {
+let make_counter() () -> Int = {
     let counter = Cell(0);              // shared mutable state
-    return () -> {
+    return () => {
         counter.value = counter.value + 1;
         return counter.value;
     };
@@ -970,7 +970,7 @@ The same rule applies to any `type mutable` object — capture it and share it:
 
 ```koral
 let xs = [10, 20];
-let add = () -> { xs.push(30) };   // ok: `xs` is a shared handle
+let add = () => { xs.push(30) };   // ok: `xs` is a shared handle
 ```
 
 #### Currying
@@ -978,7 +978,7 @@ let add = () -> { xs.push(30) };   // ok: `xs` is a shared handle
 Closures enable currying:
 
 ```koral
-let add Func(Int) Func(Int) Int = (x) -> (y) -> x + y;
+let add (Int) -> (Int) -> Int = (x) => (y) => x + y;
 
 let add10 = add(10);
 let result = add10(32);  // result == 42
@@ -1508,7 +1508,7 @@ become `Int`, so `sum` remains available and is checked again at each call site.
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
+    public map[U Any](self, f (T) -> U) Option[U] = self and then f(it);
 };
 ```
 

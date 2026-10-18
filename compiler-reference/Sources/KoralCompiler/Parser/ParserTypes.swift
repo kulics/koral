@@ -12,7 +12,7 @@ extension Parser {
 
   func isTypeStart(_ token: Token) -> Bool {
     switch token {
-    case .selfTypeKeyword, .multiply, .questionMark, .identifier:
+    case .selfTypeKeyword, .multiply, .questionMark, .identifier, .leftParen:
       return true
     default:
       return false
@@ -83,14 +83,21 @@ extension Parser {
     return args
   }
 
-  /// `startSpan` is the `Func` keyword -- a `Func(Int) String` type begins
-  /// there, not at its return type.
-  private func parseFunctionTypeAfterFuncKeyword(startSpan: SourceSpan) throws -> TypeNode {
+  /// `(T1, T2) -> R` -- the parameter list is a type list and the arrow is
+  /// mandatory. `startSpan` is the `(`.
+  private func parseFunctionType(startSpan: SourceSpan) throws -> TypeNode {
     let paramTypes = try parseTypeListInParens()
+    guard currentToken === .arrow else {
+      throw ParserError.invalidFunctionType(
+        span: currentSpan,
+        message: "Expected '->' between parameter types and return type"
+      )
+    }
+    try match(.arrow)
     guard isTypeStart(currentToken) else {
       throw ParserError.invalidFunctionType(
         span: currentSpan,
-        message: "Function type must include a return type, e.g. Func(Int) String"
+        message: "Function type must include a return type, e.g. (Int) -> String"
       )
     }
     let returnType = try parseType()
@@ -107,23 +114,15 @@ extension Parser {
       return .inferredSelf(span: startSpan)
     }
 
+    if currentToken === .leftParen {
+      return try parseFunctionType(startSpan: startSpan)
+    }
+
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(
         span: currentSpan, got: currentToken.description)
     }
     try match(.identifier(name))
-
-    if name == "Func" {
-      if currentToken === .leftParen {
-        return try parseFunctionTypeAfterFuncKeyword(startSpan: startSpan)
-      }
-      if currentToken === .leftBracket {
-        throw ParserError.invalidFunctionType(
-          span: currentSpan,
-          message: "Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"
-        )
-      }
-    }
 
     if !isValidTypeName(name) {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
@@ -144,7 +143,7 @@ extension Parser {
   /// Supports:
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
-  /// - Function types: Func(ParamType1, ParamType2) ReturnType
+  /// - Function types: (ParamType1, ParamType2) -> ReturnType
   /// - Raw pointer types: *T, *mutable T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]

@@ -832,7 +832,9 @@ given TypeChecker {
                                     ) then {
                                         found = f.field_type;
                                     } else {
-                                        let access_label = access_modifier_label(f.access);
+                                        let access_label = access_modifier_label(
+                                            f.access,
+                                        );
                                         self.push_diagnostic(
                                             "Cannot access \(access_label) field '\(member)' of type '\(def_id_spelling(template_def_id))'",
                                             unknown_span(),
@@ -1630,10 +1632,10 @@ given TypeChecker {
         // template's own parameters only; the trait arguments stay in `bindings`
         // for the TypeNode path below and for constraint checking.
         let mutable checked_bindings = Dict[String, Type].new();
-        // `checked_*` keep the TARGET's type parameters generic (`Func(T) Bool` on
+        // `checked_*` keep the TARGET's type parameters generic (`(T) -> Bool` on
         // `Iterator[T]`). Bind them the way `bind_direct_method_signature` does —
         // unify the method's own `self` parameter with this receiver — so the
-        // caller sees `Func(Int) Bool` for `ListIterator[Int]`.
+        // caller sees `(Int) -> Bool` for `ListIterator[Int]`.
         when template.checked_parameters in {
             .Some(checked_symbols) then {
                 if not checked_symbols.is_empty() then {
@@ -1657,10 +1659,10 @@ given TypeChecker {
             bindings,
         );
         // The tool method is written against the TRAIT's type parameters
-        // (`fn Func(T) Bool` on `Iterator[T]`). Map them straight to this
+        // (`fn (T) -> Bool` on `Iterator[T]`). Map them straight to this
         // receiver's conformance arguments — `T` becomes `Int` for
         // `ListIterator[Int]` — so the parameter type comes out as
-        // `Func(Int) Bool` rather than a bare `T`. This is the same map
+        // `(Int) -> Bool` rather than a bare `T`. This is the same map
         // `resolve_trait_registry_method_signature` builds via
         // `trait_method_bindings`.
         when template.conformance_trait_name in {
@@ -1783,7 +1785,7 @@ given TypeChecker {
                         return Option[Symbol].None();
                     };
                     // The tool method is written against the TRAIT's type
-                    // parameters (`fn Func(T) Bool` on `Iterator[T]`, `other T` on
+                    // parameters (`fn (T) -> Bool` on `Iterator[T]`, `other T` on
                     // `MyEq[T]`). They must be bound to this receiver's conformance
                     // arguments — the same map `resolve_trait_registry_method_signature`
                     // builds — otherwise the parameter types come back as bare `T`.
@@ -2543,7 +2545,7 @@ given TypeChecker {
                         // `checked_*` carries these too. A template registered
                         // under a TRAIT owner (`given[T Any] Iterator[T]`) resolves
                         // its parameters against the TRAIT's own type parameters, so
-                        // `fn Func(T) Bool` still holds a bare `T` here and only the
+                        // `fn (T) -> Bool` still holds a bare `T` here and only the
                         // conformance's arguments can close it. Without this,
                         // `list.iterator().filter((x) -> ...)` cannot infer `x`.
                         checked_bindings.insert(
@@ -2693,9 +2695,7 @@ given TypeChecker {
                 .None() then {},
             };
 
-            when self.storage.trait_registry.flatten_methods_for_def(
-                trait_def_id,
-            ) in {
+            when self.storage.trait_registry.flatten_methods_for_def(trait_def_id) in {
                 .Ok(methods) then {
                     when methods.get(method_name) in {
                         .Some(member) then {
@@ -3050,9 +3050,7 @@ given TypeChecker {
                 ),
             );
         };
-        return when self.storage.trait_registry.flatten_methods_for_def(
-            trait_def_id,
-        ) in {
+        return when self.storage.trait_registry.flatten_methods_for_def(trait_def_id) in {
             .Ok(methods) then when methods.get(method_name) in {
                 .Some(member) then {
                     let mutable typed_params = List[TypedParam].new();
@@ -4560,10 +4558,7 @@ given TypeChecker {
         if self.storage.trait_registry.flatten_methods_for_def(trait_def_id) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) then {
-            let bindings = self.trait_method_bindings(
-                trait_def_id,
-                receiver_type,
-            );
+            let bindings = self.trait_method_bindings(trait_def_id, receiver_type);
             // member.params 包含 self，跳过第一个
             if member.params.count() > UInt(0) then {
                 let mutable out = List[Type].new();
@@ -4633,10 +4628,7 @@ given TypeChecker {
         if self.storage.trait_registry.flatten_methods_for_def(trait_def_id) is .Ok(methods) and methods.get(
             method_name,
         ) is .Some(member) and member.params.count() > UInt(0) then {
-            let bindings = self.trait_method_bindings(
-                trait_def_id,
-                receiver_type,
-            );
+            let bindings = self.trait_method_bindings(trait_def_id, receiver_type);
             return Option[Type].Some(
                 self.concretize_default_literal_type(
                     self.apply_type_bindings(member.params[UInt(0)].param_type, bindings),
@@ -4768,9 +4760,7 @@ given TypeChecker {
             },
             .None() then {},
         };
-        when self.storage.trait_registry.flatten_methods_for_def(
-            trait_def_id,
-        ) in {
+        when self.storage.trait_registry.flatten_methods_for_def(trait_def_id) in {
             .Ok(methods) then {
                 when methods.get(method_name) in {
                     .Some(member) then {

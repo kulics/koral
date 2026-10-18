@@ -1426,7 +1426,7 @@ extension TypeChecker {
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {
-        throw SemanticError(.generic("spawn_thread: third argument must be [Void]Func"))
+        throw SemanticError(.generic("spawn_thread: third argument must be () -> Void"))
       }
       guard stackSize.type == .uint64 else {
         throw SemanticError(.generic("spawn_thread: fourth argument must be UInt64"))

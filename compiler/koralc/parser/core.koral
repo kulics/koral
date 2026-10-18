@@ -746,11 +746,7 @@ given Parser {
         // and are read by `parse_decl_qualifiers` there. Access modifiers stay
         // in the prefix slot; they say who can see the declaration, not what
         // kind of thing it is.
-        return ParseDeclFlags(
-            access,
-            has_explicit_access,
-            invalid_access_message,
-        );
+        return ParseDeclFlags(access, has_explicit_access, invalid_access_message);
     };
 
     module_private wrap_decl(
@@ -847,6 +843,8 @@ given Parser {
             .Bang() then true,
             .QuestionMark() then true,
             .KwSelfType() then true,
+            // A function type opens with its parameter list: `(T1, T2) -> R`.
+            .LParen() then true,
             .Identifier(_) then true,
             _ then false,
         };
@@ -889,6 +887,23 @@ given Parser {
             .Identifier(name) then self.is_upper_first(name),
             _ then false,
         };
+    };
+
+    /// Whether the token after `*` / `?` at `index` starts the TYPE of a type
+    /// application (`*Int(p)`, `?T(x)`) rather than a deref / upgrade operand.
+    /// A `(` counts only when it opens a function type's parameter list:
+    /// `*(Int) -> Int(p)` is a cast, `*(p)` is a deref.
+    module_private index_followed_by_type_application_at(self, index UInt) Bool = {
+        if self.index_followed_by_type_head_at(index) then {
+            return true;
+        };
+        if index + 1 >= self.tokens.count() or self.tokens[index + 1].kind is not .LParen() then {
+            return false;
+        };
+        let after_params = self.scan_type_param_list_at(index + 1) or else {
+            return false;
+        };
+        return after_params < self.tokens.count() and self.tokens[after_params].kind is .Arrow();
     };
 
     /// The index just past a `[` ... `]` type argument list that starts at
@@ -988,6 +1003,36 @@ given Parser {
         return result;
     };
 
+    /// Whether the `(` at `index` opens a function TYPE's parameter list
+    /// `(T1, T2) -> R` written as a binding's annotation, rather than a
+    /// declaration's parameter list. The tell is the `->` after the closing
+    /// `)`: a function type always has one, a signature never writes its
+    /// result type with one.
+    module_private paren_opens_type_at(self, index UInt) Bool = {
+        if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
+            return false;
+        };
+        let mutable depth UInt = 0;
+        let mutable i = index;
+        while i < self.tokens.count() then {
+            when self.tokens[i].kind in {
+                .LParen() then {
+                    depth += 1;
+                },
+                .RParen() then {
+                    depth -= 1;
+                    if depth == 0 then {
+                        let after = i + 1;
+                        return after < self.tokens.count() and self.tokens[after].kind is .Arrow();
+                    };
+                },
+                _ then {},
+            };
+            i += 1;
+        };
+        return false;
+    };
+
     /// The index just past one type starting at `start_index`, or `None` when
     /// the run there is not a type.
     module_private scan_type_shape_at(self, start_index UInt) Option[UInt] = {
@@ -1000,7 +1045,9 @@ given Parser {
             };
             if self.tokens[i].kind is .QuestionMark() then {
                 i += 1;
-            } else if self.tokens[i].kind is .Star() and self.index_followed_by_type_head_at(i) then {
+            } else if self.tokens[i].kind is .Star() and self.index_followed_by_type_application_at(
+                i,
+            ) then {
                 i += 1;
                 if i < self.tokens.count() and self.tokens[i].kind is .KwMut() then {
                     i += 1;
@@ -1017,14 +1064,19 @@ given Parser {
             .KwSelfType() then {
                 return Option[UInt].Some(i + 1);
             },
+            .LParen() then {
+                // Function type: `( <type-list> ) "->" <type>`. The `->` is
+                // mandatory -- a bare `( ... )` is not a type.
+                let after_params = self.scan_type_param_list_at(i) or else {
+                    return Option[UInt].None();
+                };
+                if after_params >= self.tokens.count() or self.tokens[after_params].kind is not .Arrow() then {
+                    return Option[UInt].None();
+                };
+                return self.scan_type_shape_at(after_params + 1);
+            },
             .Identifier(name) then {
                 i += 1;
-                if name == "Func" and i < self.tokens.count() and self.tokens[i].kind is .LParen() then {
-                    let after_params = self.scan_type_param_list_at(i) or else {
-                        return Option[UInt].None();
-                    };
-                    return self.scan_type_shape_at(after_params);
-                };
                 if not self.is_upper_first(name) then {
                     return Option[UInt].None();
                 };
@@ -1200,36 +1252,39 @@ given Parser {
                 self.advance();
                 return .Ok(TypeNode.InferredSelf(self.span_from_start(start)));
             },
+            .LParen() then {
+                // Function type: `(T1, T2) -> R`. The parameter list is a TYPE
+                // list, and the `->` is mandatory -- it is what separates a
+                // function type from the parenthesized shapes in expression
+                // position.
+                let param_types = self.parse_function_type_param_list() or return;
+                if self.current().kind is not .Arrow() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Expected '->' between parameter types and return type",
+                        ),
+                    );
+                };
+                self.advance();
+                if not self.is_type_start() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Function type must include a return type, e.g. (Int, String) -> Bool",
+                        ),
+                    );
+                };
+                let return_type = self.parse_type() or return;
+                return .Ok(
+                    TypeNode.FunctionType(
+                        param_types,
+                        return_type,
+                        self.span_from_start(start),
+                    ),
+                );
+            },
             .Identifier(module_or_name) then {
                 self.advance();
 
-                if module_or_name == "Func" then {
-                    if self.current().kind is .LParen() then {
-                        let param_types = self.parse_function_type_param_list() or return;
-                        if not self.is_type_start() then {
-                            return .Error(
-                                self.parser_error_at_current(
-                                    "Function type must include a return type, e.g. Func(Int, String) Bool",
-                                ),
-                            );
-                        };
-                        let mutable return_type = self.parse_type() or return;
-                        return .Ok(
-                            TypeNode.FunctionType(
-                                param_types,
-                                return_type,
-                                self.span_from_start(start),
-                            ),
-                        );
-                    };
-                    if self.current().kind is .LBracket() then {
-                        return .Error(
-                            self.parser_error_at_current(
-                                "Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]",
-                            ),
-                        );
-                    };
-                };
 
                 if not self.is_upper_first(module_or_name) then {
                     let mutable message = StringBuilder.new();
@@ -1572,10 +1627,7 @@ given Parser {
         return .Ok(params);
     };
 
-    module_private parse_let_decl(
-        self,
-        access AccessModifier,
-    ) Result[Decl] = {
+    module_private parse_let_decl(self, access AccessModifier) Result[Decl] = {
         let start = self.current();
         self.advance();
 
@@ -1609,7 +1661,10 @@ given Parser {
         };
         let type_params = self.parse_type_parameters() or return;
 
-        if self.current().kind is .LParen() then {
+        // A `(` that opens a function TYPE's parameter list (`let f (Int) ->
+        // Int = value`) is an annotation, not a signature: the first token
+        // inside is a type head, and an empty `()` is decided by `->` after it.
+        if self.current().kind is .LParen() and not self.paren_opens_type_at(self.index) then {
             if is_mut then {
                 return .Error(
                     self.parser_error_at_current(
@@ -1775,10 +1830,7 @@ given Parser {
         return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
     };
 
-    module_private parse_type_decl(
-        self,
-        access AccessModifier,
-    ) Result[Decl] = {
+    module_private parse_type_decl(self, access AccessModifier) Result[Decl] = {
         let start = self.current();
         self.advance();
 
@@ -2166,13 +2218,19 @@ given Parser {
                                                     when self.current().kind in {
                                                         .IntegerLiteral(v) then {
                                                             self.advance();
-                                                            field_default_val = StringBuilder.new();
-                                                            field_default_val.push_string("-\(v)");
+                                                            field_default_val = StringBuilder.new(
+                                                            );
+                                                            field_default_val.push_string(
+                                                                "-\(v)",
+                                                            );
                                                         },
                                                         .FloatLiteral(v) then {
                                                             self.advance();
-                                                            field_default_val = StringBuilder.new();
-                                                            field_default_val.push_string("-\(v)");
+                                                            field_default_val = StringBuilder.new(
+                                                            );
+                                                            field_default_val.push_string(
+                                                                "-\(v)",
+                                                            );
                                                         },
                                                         _ then {
                                                             return .Error(
@@ -2449,11 +2507,7 @@ given Parser {
             self.pending_statements.push(extra);
         };
         return .Ok(
-            Statement.TupleLetStmt(
-                flattened.first,
-                value,
-                self.span_from_start(start),
-            ),
+            Statement.TupleLetStmt(flattened.first, value, self.span_from_start(start)),
         );
     };
 

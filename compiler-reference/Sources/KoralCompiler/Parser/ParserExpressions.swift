@@ -120,6 +120,23 @@ extension Parser {
     }
   }
 
+  /// Whether the token after the `*` / `?` at the cursor starts the TYPE of a
+  /// type application (`*Int(p)`, `?T(x)`) rather than a deref / upgrade
+  /// operand. A `(` counts only when it opens a function type's parameter
+  /// list: `*(Int) -> Int(p)` is a cast, `*(p)` is a deref.
+  /// Restores the stream.
+  private func peekStartsTypeApplication() -> Bool {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    advanceShape() // past the `*` / `?`
+    if isTypeHeadToken(currentToken) { return true }
+    return scanTypeShapeConsuming()
+  }
+
   /// Whether the run at the cursor is exactly one type. Restores the stream.
   @discardableResult
   private func scanTypeShape() -> Bool {
@@ -136,13 +153,14 @@ extension Parser {
   /// false (without promising anything about the cursor) when the run is not
   /// a type -- the caller only reaches this after `scanTypeShape` said yes.
   private func scanTypeShapeConsuming() -> Bool {
-    // Prefixes: `?T`, `*T`, `*mutable T`. They nest.
+    // Prefixes: `?T`, `*T`, `*mutable T`. They nest. A `(` after `*` is a
+    // pointer-to-function type, not a deref -- this is the TYPE shape scan.
     var morePrefixes = true
     while morePrefixes {
       switch currentToken {
       case .questionMark:
         advanceShape()
-      case .multiply where isTypeHeadToken(lexer.peekNextToken()):
+      case .multiply where isTypeHeadToken(lexer.peekNextToken()) || lexer.peekNextToken() === .leftParen:
         advanceShape()
         if currentToken === .mutableKeyword { advanceShape() }
       default:
@@ -154,6 +172,12 @@ extension Parser {
     case .selfTypeKeyword:
       advanceShape()
       return true
+    case .leftParen:
+      // Function type: `( <type-list> ) -> <type>`.
+      guard scanTypeParamListConsuming() else { return false }
+      guard currentToken === .arrow else { return false }
+      advanceShape()
+      return scanTypeShapeConsuming()
     case .identifier(let name):
       advanceShape()
       if name == "Func", currentToken === .leftParen {
@@ -249,7 +273,7 @@ extension Parser {
     return true
   }
 
-  /// Whether `->`, or `<type> ->`, follows a lambda's parameter list.
+  /// Whether `=>`, or `<type> =>`, follows a lambda's parameter list.
   /// Restores the stream.
   private func lambdaReturnClauseFollows() -> Bool {
     let savedLexer = lexer.saveState()
@@ -258,14 +282,14 @@ extension Parser {
       lexer.restoreState(savedLexer)
       currentToken = savedToken
     }
-    if currentToken === .arrow { return true }
+    if currentToken === .fatArrow { return true }
     guard scanTypeShapeConsuming() else { return false }
-    return currentToken === .arrow
+    return currentToken === .fatArrow
   }
 
   /// Whether the `(` at the cursor opens a lambda.
   ///
-  /// SHAPE, not a trial parse: a lambda is `(params) [Type] -> ...`, so the
+  /// SHAPE, not a trial parse: a lambda is `(params) [Type] => ...`, so the
   /// tell is a `->` immediately after the parameter list's `)`, or after an
   /// optional return type written there. Nothing is built and nothing is
   /// rolled back. This replaces a full trial parse of the parameters and body
@@ -912,7 +936,7 @@ extension Parser {
       // `*T(args)` is a pointer type application; bare `*` is deref.
       // `*` + type-head (mutable, uppercase ident, Self) at expression start
       // can only be a type; `*` + anything else is deref.
-      if isTypeHeadToken(lexer.peekNextToken()) {
+      if peekStartsTypeApplication() {
         let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
         return try parsePostfixSuffixes(from: cast)
       }
@@ -926,7 +950,7 @@ extension Parser {
       // `?expr` upgrades a weak reference to `Option[T]`.
       // Disambiguation: `?` + type-start tries type application; `?` + anything
       // else is the upgrade operator.
-      if isTypeHeadToken(lexer.peekNextToken()) {
+      if peekStartsTypeApplication() {
         let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
         return try parsePostfixSuffixes(from: cast)
       }
@@ -1429,18 +1453,18 @@ extension Parser {
   
   /// Parse either a parenthesized expression or a lambda expression.
   /// Lambda syntax:
-  ///   () -> expr                    // no params
-  ///   (x) -> expr                   // single param, type inferred
-  ///   (x, y) -> expr                // multiple params, types inferred
-  ///   (x Int) -> expr               // single param with type
-  ///   (x Int, y Int) -> expr        // multiple params with types
-  ///   (x Int, y Int) Int -> expr    // with return type
+  ///   () => expr                    // no params
+  ///   (x) => expr                   // single param, type inferred
+  ///   (x, y) => expr                // multiple params, types inferred
+  ///   (x Int) => expr               // single param with type
+  ///   (x Int, y Int) => expr        // multiple params with types
+  ///   (x Int, y Int) Int => expr    // with return type
   private func parseParenOrLambda() throws -> ExpressionNode {
     let startSpan = currentSpan
 
     // `(` opens either a lambda or a parenthesized expression. The shape
     // classifier decides BEFORE anything is built -- a lambda is
-    // `(params) [Type] -> ...`, so the `->` is the tell -- and then the chosen
+    // `(params) [Type] => ...`, so the `=>` is the tell -- and then the chosen
     // alternative is parsed for real. There is no trial to roll back and no
     // failed branch to swallow the diagnostic the real parse would produce.
     if shapeIsLambda() {
@@ -1498,13 +1522,14 @@ extension Parser {
     try match(.rightParen)
 
     var returnType: TypeNode? = nil
-    if currentToken !== .arrow {
+    if currentToken !== .fatArrow {
       returnType = try parseType()
     }
-    guard currentToken === .arrow else {
+    // `=>` opens the body.
+    guard currentToken === .fatArrow else {
       throw ParserError.expectedArrow(span: currentSpan)
     }
-    try match(.arrow)
+    try match(.fatArrow)
     let body = try expression()
     return .lambdaExpression(parameters: parameters, returnType: returnType, body: body, span: startSpan)
   }

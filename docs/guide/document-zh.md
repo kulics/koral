@@ -868,11 +868,11 @@ if b is Button(w, height: _, label: l) then println(l);
 
 #### 函数类型
 
-在 Koral 中，函数也是类型。函数类型用 `Func(T1, T2, ...) R` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
+在 Koral 中，函数也是类型。函数类型用 `(T1, T2, ...) -> R` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
 
 ```koral
-let square(x Int) Int = x * x;        // Func(Int) Int
-let f Func(Int) Int = square;
+let square(x Int) Int = x * x;        // (Int) -> Int
+let f (Int) -> Int = square;
 let a = f(2);                         // a == 4
 ```
 
@@ -880,8 +880,8 @@ let a = f(2);                         // a == 4
 
 ```koral
 let hello() Void = println("Hello, world!");
-let run(f Func() Void) Void = f();
-let toRun() Func(Func() Void) Void = run;
+let run(f () -> Void) Void = f();
+let toRun() (() -> Void) -> Void = run;
 
 let main() Void = toRun()(hello);
 ```
@@ -890,29 +890,29 @@ let main() Void = toRun()(hello);
 
 #### Lambda 表达式
 
-Lambda 表达式与函数定义非常相似，只是把 `=` 换成 `->`，且没有函数名和 `let` 关键字。
+Lambda 表达式与函数定义非常相似，只是把 `=` 换成 `=>`，且没有函数名和 `let` 关键字。
 
 ```koral
-let f1(x Int) Int = x + 1;            // Func(Int) Int
-let f2 = (x Int) Int -> x + 1;        // Func(Int) Int
+let f1(x Int) Int = x + 1;            // (Int) -> Int
+let f2 = (x Int) Int => x + 1;        // (Int) -> Int
 let a = f1(1) + f2(1);                // a == 4
 ```
 
 当 lambda 的类型可以从上下文推断时，可以省略参数类型和返回类型：
 
 ```koral
-let f Func(Int) Int = (x) -> x + 1;
+let f (Int) -> Int = (x) => x + 1;
 ```
 
 Lambda 支持多种形式：
 
 ```koral
-() -> 42;                           // 无参数
-(x) -> x * 2;                      // 单参数，类型推断
-(x Int) -> x * 2;                  // 单参数带类型
-(x, y) -> x + y;                   // 多参数，类型推断
-(x Int, y Int) Int -> x + y;       // 完整类型标注
-(x) -> { let y = x * 2; return y + 1 };  // 块体
+() => 42;                           // 无参数
+(x) => x * 2;                      // 单参数，类型推断
+(x Int) => x * 2;                  // 单参数带类型
+(x, y) => x + y;                   // 多参数，类型推断
+(x Int, y Int) Int => x + y;       // 完整类型标注
+(x) => { let y = x * 2; return y + 1 };  // 块体
 ```
 
 #### 闭包
@@ -920,8 +920,8 @@ Lambda 支持多种形式：
 Lambda 表达式可以从周围作用域捕获变量，这被称为闭包。
 
 ```koral
-let make_adder(base Int) Func(Int) Int = {
-    return (x) -> base + x;
+let make_adder(base Int) (Int) -> Int = {
+    return (x) => base + x;
 };
 
 let add10 = make_adder(10);
@@ -939,9 +939,9 @@ let result = add10(32);  // result == 42
 要把可变状态带进闭包，请放进 `Cell`——一个共享的 `type mutable` 盒子——然后捕获这个 cell：
 
 ```koral
-let make_counter() Func() Int = {
+let make_counter() () -> Int = {
     let counter = Cell(0);              // 共享可变状态
-    return () -> {
+    return () => {
         counter.value = counter.value + 1;
         return counter.value;
     };
@@ -956,7 +956,7 @@ c();  // 2
 
 ```koral
 let xs = [10, 20];
-let add = () -> { xs.push(30) };   // ok: `xs` 是共享句柄
+let add = () => { xs.push(30) };   // ok: `xs` 是共享句柄
 ```
 
 #### 柯里化
@@ -964,7 +964,7 @@ let add = () -> { xs.push(30) };   // ok: `xs` 是共享句柄
 闭包支持柯里化：
 
 ```koral
-let add Func(Int) Func(Int) Int = (x) -> (y) -> x + y;
+let add (Int) -> (Int) -> Int = (x) => (y) => x + y;
 
 let add10 = add(10);
 let result = add10(32);  // result == 42
@@ -1476,7 +1476,7 @@ given[T Add[T] and Zero] Iterator[T] {
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f Func(T) U) Option[U] = self and then f(it);
+    public map[U Any](self, f (T) -> U) Option[U] = self and then f(it);
 };
 ```
 

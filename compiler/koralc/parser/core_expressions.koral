@@ -77,21 +77,21 @@ given Parser {
         return self.lambda_return_clause_follows_at(i);
     };
 
-    /// After a lambda's parameter list: `->`, or `<type> ->`.
+    /// After a lambda's parameter list: `=>`, or `<type> =>`.
     module_private lambda_return_clause_follows_at(self, start_index UInt) Bool = {
         if start_index >= self.tokens.count() then {
             return false;
         };
-        if self.tokens[start_index].kind is .Arrow() then {
+        if self.tokens[start_index].kind is .FatArrow() then {
             return true;
         };
         let after_type = self.scan_type_shape_at(start_index) or else {
             return false;
         };
-        return after_type < self.tokens.count() and self.tokens[after_type].kind is .Arrow();
+        return after_type < self.tokens.count() and self.tokens[after_type].kind is .FatArrow();
     };
 
-    // Parse a lambda expression: (params) [ReturnType] -> body
+    // Parse a lambda expression: (params) [ReturnType] => body
     module_private parse_lambda_expression(self) Result[Expr] = {
         let start = self.current();
 
@@ -163,10 +163,7 @@ given Parser {
 
         // Optional return type
         let mutable return_type = Option[TypeNode].None();
-        let has_arrow = when self.current().kind in {
-            .Arrow() then true,
-            _ then false,
-        };
+        let has_arrow = self.current().kind is .FatArrow();
         if not has_arrow then {
             if self.is_type_start() then {
                 let t = self.parse_type() or return;
@@ -174,12 +171,13 @@ given Parser {
             };
         };
 
+        // `=>` opens the body.
         when self.current().kind in {
-            .Arrow() then {
+            .FatArrow() then {
                 self.advance();
             },
             _ then {
-                return .Error(self.parser_error("Expected '->' in lambda expression"));
+                return .Error(self.parser_error("Expected '=>' in lambda expression"));
             },
         };
 
@@ -905,7 +903,9 @@ given Parser {
                 // `?v` patterns are removed. Use `?expr` to get `Option[T]`
                 // and match on `.Some` / `.None`.
                 return .Error(
-                    self.parser_error("Weak binding pattern '?v' is removed; use '?expr' to get Option[T]"),
+                    self.parser_error(
+                        "Weak binding pattern '?v' is removed; use '?expr' to get Option[T]",
+                    ),
                 );
             },
             .KwMut() then {
@@ -1246,9 +1246,7 @@ given Parser {
                 // and the same one the frozen reference produces here. The span
                 // already says the token is inside a pattern.
                 return .Error(
-                    self.parser_error(
-                        "Unexpected token: \(token_text(self.current()))",
-                    ),
+                    self.parser_error("Unexpected token: \(token_text(self.current()))"),
                 );
             },
         };
@@ -1622,10 +1620,7 @@ given Parser {
     /// `*T(args)` / `*mutable T(args)` / `?T(args)` -- a cast whose target type is
     /// written with a prefix, at expression start. The spelling matches the type
     /// annotation: `*Int(p)`, `*mutable T(q)`, `?Int(r)`.
-    module_private parse_prefixed_type_application(
-        self,
-        start Token,
-    ) Result[Expr] = {
+    module_private parse_prefixed_type_application(self, start Token) Result[Expr] = {
         let cast_type = self.parse_type() or return;
         when self.current().kind in {
             .LParen() then {
@@ -1700,7 +1695,9 @@ given Parser {
             },
             _ then {
                 return .Error(
-                    self.parser_error("Expected ')' after qualified method call arguments"),
+                    self.parser_error(
+                        "Expected ')' after qualified method call arguments",
+                    ),
                 );
             },
         };
@@ -1974,7 +1971,8 @@ given Parser {
             );
         };
 
-        if has_lparen and static_receiver is .Some(receiver) and not method_type_args.is_empty() and not self.is_upper_first(member) then {
+        if has_lparen and static_receiver is .Some(receiver) and not method_type_args.is_empty(
+        ) and not self.is_upper_first(member) then {
             self.advance();
             let args = self.parse_argument_list_until_rparen("static method call") or return;
             when self.current().kind in {
@@ -2083,9 +2081,7 @@ given Parser {
                     // construction). Trying each in turn and rolling back is what
                     // used to make `Num(Tag)` a cast of `Num` to `Tag` and made a
                     // failed branch eat the better diagnostic.
-                    let is_type_suffix = self.scan_paren_type_suffix_at(
-                        self.index,
-                    ) is .Some(_);
+                    let is_type_suffix = self.scan_paren_type_suffix_at(self.index) is .Some(_);
                     if is_type_suffix then {
                         expr = self.parse_qualified_call_suffix(expr) or return;
                     } else {
@@ -2153,9 +2149,7 @@ given Parser {
                 },
                 .FloatLiteral(v) then {
                     self.advance();
-                    return .Ok(
-                        Expr.FloatLiteral("-\(v)", self.span_from_start(start)),
-                    );
+                    return .Ok(Expr.FloatLiteral("-\(v)", self.span_from_start(start)));
                 },
                 _ then {},
             };
@@ -2183,7 +2177,7 @@ given Parser {
             // `*T(args)` is a pointer type application; bare `*` is deref.
             // `*` + type-head (mutable, uppercase ident, Self) at expression
             // start can only be a type; `*` + anything else is deref.
-            if self.index_followed_by_type_head_at(self.index) then {
+            if self.index_followed_by_type_application_at(self.index) then {
                 return self.parse_prefixed_type_application(start);
             };
             self.advance();
@@ -2197,7 +2191,7 @@ given Parser {
             // Disambiguation: `?` + type-head tries type application;
             // `?` + anything else is the upgrade operator.
             let start = self.current();
-            if self.index_followed_by_type_head_at(self.index) then {
+            if self.index_followed_by_type_application_at(self.index) then {
                 return self.parse_prefixed_type_application(start);
             };
             self.advance();
@@ -2213,9 +2207,7 @@ given Parser {
                 self.advance();
             };
             let operand = self.parse_unary() or return;
-            return .Ok(
-                Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)),
-            );
+            return .Ok(Expr.PtrExpr(operand, is_mutable, self.span_from_start(start)));
         };
 
         return self.parse_call();

@@ -76,7 +76,7 @@ public indirect enum TypeNode: CustomStringConvertible {
   case weakReference(TypeNode, mutable: Bool, span: SourceSpan)
   case generic(base: String, args: [TypeNode], span: SourceSpan)
   case inferredSelf(span: SourceSpan)
-  /// Function type: Func(ParamType1, ParamType2, ...) ReturnType
+  /// Function type: (ParamType1, ParamType2, ...) -> ReturnType
   case functionType(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
 
   /// Where this type is written.
@@ -109,7 +109,7 @@ public indirect enum TypeNode: CustomStringConvertible {
       return "Self"
     case .functionType(let paramTypes, let returnType, _):
       let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
-      return "Func(\(paramsStr)) \(returnType)"
+      return "(\(paramsStr)) -> \(returnType)"
     }
   }
 }
@@ -649,7 +649,7 @@ public indirect enum ExpressionNode {
   /// - left: Left operand (nil for To, Until, Full)
   /// - right: Right operand (nil for From, After, Full)
   case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?, span: SourceSpan)
-  /// Lambda expression: (params) [ReturnType] -> body
+  /// Lambda expression: (params) [ReturnType] => body
   /// - parameters: Parameter list with optional type annotations
   /// - returnType: Optional return type annotation
   /// - body: Lambda body expression

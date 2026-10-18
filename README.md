@@ -179,10 +179,10 @@ member expression.
 
 ```koral
 let result = list.iterator()
-    .filter((x) -> x > 0)
-    .map((x) -> x * 2)
+    .filter((x) => x > 0)
+    .map((x) => x * 2)
     .take(10)
-    .fold(0, (acc, x) -> acc + x);
+    .fold(0, (acc, x) => acc + x);
 ```
 
 ## Language Capabilities
@@ -194,7 +194,7 @@ let result = list.iterator()
 - Enums (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
-- Function types: `Func(Int, Int) Int` — `(Int, Int) -> Int`
+- Function types: `(Int, Int) -> Int`
 - Type mutability: `type` (shallowly immutable, no identity, no promise of value semantics), `type mutable` (shared object semantics)
 
 ### Control Flow
@@ -226,7 +226,7 @@ let result = list.iterator()
 
 - Top-level and generic functions
 - Call labels and defaults: the declaration fixes the call shape with no optional-label form — a positional parameter (`name Type`) is passed by position and never by label, a named parameter (`name: Type`) must be passed by label, and only named parameters may declare defaults (`name: Int = 1`). Positional parameters must come before named ones, at declarations and at call sites. Constructors, free functions, methods and static methods all follow the same rules
-- Lambda expressions: `(x Int) Int -> x * 2`
+- Lambda expressions: `(x Int) Int => x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
 - Duration suffix literals: `10s`, `250ms`, `150us`, `42ns`

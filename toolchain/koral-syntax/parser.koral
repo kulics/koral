@@ -157,7 +157,9 @@ given CstParser {
                 i += 1;
             } else if self.tokens[i] is .Star() then {
                 let n = self.sig_index_at(i + 1);
-                if n >= self.tokens.count() or not self.token_is_type_head(self.tokens[n]) then {
+                if n >= self.tokens.count() or not self.token_is_type_head(
+                    self.tokens[n],
+                ) then {
                     more_prefixes = false;
                 } else {
                     i = n;
@@ -176,16 +178,20 @@ given CstParser {
         if self.tokens[i] is .KwSelfType() then {
             return Option[UInt].Some(i + 1);
         };
+        if self.tokens[i] is .LParen() then {
+            // Function type: `( <type-list> ) "->" <type>`. The `->` is
+            // mandatory -- a bare `( ... )` is not a type.
+            let after_params = self.scan_type_list_at(i) or else {
+                return Option[UInt].None();
+            };
+            let arrow_index = self.sig_index_at(after_params);
+            if arrow_index >= self.tokens.count() or self.tokens[arrow_index] is not .Arrow() then {
+                return Option[UInt].None();
+            };
+            return self.scan_type_shape_at(arrow_index + 1);
+        };
         if self.tokens[i] is .Ident(name) then {
             let after_name = self.sig_index_at(i + 1);
-            if name == "Func" and after_name < self.tokens.count() and self.tokens[
-                after_name
-            ] is .LParen() then {
-                let after_params = self.scan_type_list_at(after_name) or else {
-                    return Option[UInt].None();
-                };
-                return self.scan_type_shape_at(after_params);
-            };
             if not self.is_type_start(.Ident(name)) then {
                 return Option[UInt].None();
             };
@@ -287,9 +293,9 @@ given CstParser {
         return .None();
     };
 
-    /// Whether `(params) [Type] ->` starts at `start_index`.
+    /// Whether `(params) [Type] =>` starts at `start_index`.
     ///
-    /// SHAPE, not a trial parse: the tell is a `->` after the parameter list's
+    /// SHAPE, not a trial parse: the tell is a `=>` after the parameter list's
     /// `)`, or after an optional return type written there. Reads the buffer
     /// only. This replaces a trial that parsed the whole lambda (body included)
     /// speculatively and rolled back on any failure.
@@ -353,20 +359,20 @@ given CstParser {
         return self.lambda_return_clause_follows_at(i + 1);
     };
 
-    /// After a lambda's parameter list: `->`, or `<type> ->`.
+    /// After a lambda's parameter list: `=>`, or `<type> =>`.
     file_private lambda_return_clause_follows_at(self, raw_start UInt) Bool = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return false;
         };
-        if self.tokens[start_index] is .Arrow() then {
+        if self.tokens[start_index] is .FatArrow() then {
             return true;
         };
         let after_type = self.scan_type_shape_at(start_index) or else {
             return false;
         };
         let arrow_index = self.sig_index_at(after_type);
-        return arrow_index < self.tokens.count() and self.tokens[arrow_index] is .Arrow();
+        return arrow_index < self.tokens.count() and self.tokens[arrow_index] is .FatArrow();
     };
 
     /// The index just past a `( <type> )` suffix starting at `start_index`, or
@@ -396,6 +402,8 @@ given CstParser {
 
     file_private is_type_start(self, t Token) Bool = when t in {
         .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
+        // A function type opens with its parameter list: `(T1, T2) -> R`.
+        .LParen() then true,
         .Ident(name) then {
             // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf): leading
             // underscores are allowed, the first letter is not.
@@ -411,6 +419,37 @@ given CstParser {
             first >= 65 and first <= 90
         },
         _ then false,
+    };
+
+    /// Whether the `(` at `raw_start` opens a TYPE list -- the parameter list
+    /// of a function type `(T1, T2) -> R` written as a binding's annotation --
+    /// rather than a declaration's parameter list. The tell is the `->` after
+    /// the closing `)`: a function type always has one, a signature never
+    /// writes its result type with one.
+    file_private paren_opens_type_at(self, raw_start UInt) Bool = {
+        let start = self.sig_index_at(raw_start);
+        if start >= self.tokens.count() or self.tokens[start] is not .LParen() then {
+            return false;
+        };
+        let mutable depth UInt = 0;
+        let mutable i = start;
+        while i < self.tokens.count() then {
+            when self.tokens[i] in {
+                .LParen() then {
+                    depth += 1;
+                },
+                .RParen() then {
+                    depth -= 1;
+                    if depth == 0 then {
+                        let after = self.sig_index_at(i + 1);
+                        return after < self.tokens.count() and self.tokens[after] is .Arrow();
+                    };
+                },
+                _ then {},
+            };
+            i += 1;
+        };
+        return false;
     };
 
     /// Whether `name` is a value name: lowercase-first after underscores, or
@@ -447,22 +486,52 @@ given CstParser {
         return .Ok(self.eat());
     };
 
-    /// Close a parsed declaration: consume its terminating `;`, then wrap it.
+    /// Close a parsed declaration: collect the comments that trail it before
+    /// its terminating `;` -- `let x = 1 /* c */;` -- consume the `;`, then
+    /// wrap it. A line comment before the `;` pushes the `;` to its own line.
     file_private finish_decl_item(self, d CstDecl) Result[CstItem] = {
+        let mutable comments = List[Token].new();
+        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            comments.push(self.eat());
+        };
         when self.eat_decl_semi() in {
             .Ok(_) then {},
             .Error(e) then {
                 return .Error(e);
             },
         };
+        if comments.count() > 0 then {
+            return .Ok(.DeclPreSemi(comments, d));
+        };
         return .Ok(.Decl(d));
     };
 
-    file_private eat_comma(self) Option[Token] = {
+    /// A list item's separator slot: the comment tokens that trail the item
+    /// before its comma -- `a /* c */, b` -- and the comma itself when the
+    /// source wrote one. Comments before a closing delimiter arrive here with
+    /// no comma and still travel with the item they trail: `f(a /* c */)`.
+    /// A formatter may not drop them.
+    file_private eat_comma(self) Option[CstComma] = {
+        let mutable comments = List[Token].new();
+        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            comments.push(self.eat());
+        };
         if self.check(Token.Comma()) then {
-            return .Some(self.eat());
+            return .Some(CstComma(comments, .Some(self.eat())));
+        };
+        if comments.count() > 0 then {
+            return .Some(CstComma(comments, .None()));
         };
         return .None();
+    };
+
+    /// Whether a separator slot actually carries a comma (a slot of comments
+    /// alone is the last item's trail before a closing delimiter).
+    file_private sep_has_comma(self, sep Option[CstComma]) Bool = {
+        return when sep in {
+            .Some(s) then s.token is .Some(_),
+            .None() then false,
+        };
     };
 
     file_private count_newlines(self) UInt = {
@@ -558,7 +627,7 @@ given CstParser {
     };
 
     file_private is_code_item(item CstItem) Bool = when item in {
-        .Decl(_) or .Stmt(_) then true,
+        .Decl(_) or .Stmt(_) or .DeclPreSemi(_, _) or .StmtPreSemi(_, _) then true,
         _ then false,
     };
 
@@ -571,7 +640,7 @@ given CstParser {
     };
 
     file_private item_is_using_decl(item CstItem) Bool = when item in {
-        .Decl(decl) then when decl in {
+        .Decl(decl) or .DeclPreSemi(_, decl) then when decl in {
             .Using(_) then true,
             _ then false,
         },
@@ -579,11 +648,11 @@ given CstParser {
     };
 
     file_private item_is_non_using_top_level_code(item CstItem) Bool = when item in {
-        .Decl(decl) then when decl in {
+        .Decl(decl) or .DeclPreSemi(_, decl) then when decl in {
             .Using(_) then false,
             _ then true,
         },
-        .Stmt(_) then true,
+        .Stmt(_) or .StmtPreSemi(_, _) then true,
         _ then false,
     };
 
@@ -597,6 +666,53 @@ given CstParser {
 
     public parse_type(self) Result[CstType] = {
         return self.parse_type_node();
+    };
+
+    /// The parameter list, the closing `)`, and the return type of a function
+    /// type whose `(` is already consumed. `arrow_required` is true for the
+    /// `(T1, T2) -> R` spelling and false for the legacy `Func(T1, T2) R`
+    /// spelling, which carries no arrow at all.
+    file_private parse_function_type_tail(
+        self,
+        lp Token,
+        arrow_required Bool,
+    ) Result[CstType] = {
+        let mutable args = List[CstTypeArg].new();
+        while not self.check(.RParen()) and not self.is_eof() then {
+            let inner = when self.parse_type_node() in {
+                .Ok(parsed_type) then parsed_type,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let comma = self.eat_comma();
+            args.push(CstTypeArg(inner, comma));
+        };
+        let rp = when self.expect(.RParen(), "')'") in {
+            .Ok(tok) then tok,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        if self.check(.Arrow()) then {
+            self.eat();
+        } else {
+            if arrow_required then {
+                return .Error("Parse error: expected '->' in function type");
+            };
+        };
+        if not self.is_type_start(self.peek()) then {
+            return .Error(
+                "Parse error: function type must include a return type, e.g. (Int, String) -> Bool",
+            );
+        };
+        let return_type = when self.parse_type_node() in {
+            .Ok(parsed_type) then parsed_type,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        return .Ok(.Function(lp, args, rp, return_type));
     };
 
     file_private parse_type_node(self) Result[CstType] = {
@@ -631,6 +747,14 @@ given CstParser {
                 },
             };
             return .Ok(.Weakref(inner, kw));
+        };
+
+        // Function type: `(T1, T2) -> R`. The parameter list is a TYPE list,
+        // and `->` is mandatory -- it is what separates a function type from
+        // the parenthesized shapes that live in expression position.
+        if self.check(.LParen()) then {
+            let lp = self.eat();
+            return self.parse_function_type_tail(lp, true);
         };
 
         // Self type
@@ -671,44 +795,6 @@ given CstParser {
                     };
                 };
 
-                if n == "Func" and self.check(.LParen()) then {
-                    let lp = self.eat();
-                    let mutable args = List[CstTypeArg].new();
-                    while not self.check(.RParen()) and not self.is_eof() then {
-                        let inner = when self.parse_type_node() in {
-                            .Ok(parsed_type) then parsed_type,
-                            .Error(e) then {
-                                return .Error(e);
-                            },
-                        };
-                        let comma = self.eat_comma();
-                        args.push(CstTypeArg(inner, comma));
-                    };
-                    let rp = when self.expect(.RParen(), "')'") in {
-                        .Ok(tok) then tok,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    if not self.is_type_start(self.peek()) then {
-                        return .Error(
-                            "Parse error: function type must include a return type, e.g. Func(Int, String) Bool",
-                        );
-                    };
-                    let return_type = when self.parse_type_node() in {
-                        .Ok(parsed_type) then parsed_type,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    return .Ok(.Function(name, lp, args, rp, return_type));
-                };
-
-                if n == "Func" and self.check(.LBracket()) then {
-                    return .Error(
-                        "Parse error: use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]",
-                    );
-                };
             },
             _ then {},
         };
@@ -2141,6 +2227,7 @@ given CstParser {
         };
         let mutable items = List[CstItem].new();
         let mutable tail_expr = Option[CstExpr].None();
+        let mutable tail_comments = List[Token].new();
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines();
             if nl_count >= 2 then {
@@ -2164,9 +2251,23 @@ given CstParser {
             };
             when self.parse_block_item() in {
                 .Ok(item) then {
+                    // Comments may trail the expression before the block's
+                    // `}` -- `v // note` as the tail -- and ride the item.
+                    let mutable pre_semi = List[Token].new();
+                    let mutable stmt = Option[CstStmt].None();
                     when item in {
-                        .Stmt(stmt) then {
-                            when stmt in {
+                        .Stmt(s) then {
+                            stmt = .Some(s);
+                        },
+                        .StmtPreSemi(comments, s) then {
+                            pre_semi = comments;
+                            stmt = .Some(s);
+                        },
+                        _ then {},
+                    };
+                    when stmt in {
+                        .Some(s) then {
+                            when s in {
                                 .ExprStmt(expr, semi) then {
                                     // A bare expression is the block's tail
                                     // expression and must be last. Anything
@@ -2177,6 +2278,7 @@ given CstParser {
                                     if semi is .None() then {
                                         if self.check(.RBrace()) then {
                                             tail_expr = .Some(expr);
+                                            tail_comments = pre_semi;
                                         } else {
                                             return .Error(
                                                 "Parse error: expected ';' after expression statement",
@@ -2191,7 +2293,7 @@ given CstParser {
                                 },
                             };
                         },
-                        _ then {
+                        .None() then {
                             items.push(item);
                         },
                     };
@@ -2210,26 +2312,16 @@ given CstParser {
                 return .Error(e);
             },
         };
-        return .Ok(.Block(lb, items, tail_expr, rb));
+        return .Ok(.Block(lb, items, tail_expr, tail_comments, rb));
     };
 
     file_private parse_block_item(self) Result[CstItem] = {
         // Variable declaration: let [mutable] name [Type] = expr
         if self.peek() is .KwLet() then {
-            when self.parse_var_decl_stmt() in {
-                .Ok(s) then {
-                    return .Ok(.Stmt(s));
-                },
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            return self.parse_var_decl_stmt();
         };
         // Statement
-        return when self.parse_stmt() in {
-            .Ok(s) then .Ok(.Stmt(s)),
-            .Error(e) then .Error(e),
-        };
+        return self.parse_stmt();
     };
 
     // ========================================================================
@@ -2239,7 +2331,7 @@ given CstParser {
     file_private parse_paren_or_lambda(self) Result[CstExpr] = {
         // `(` opens either a lambda or a parenthesized expression. The shape
         // classifier decides BEFORE anything is built -- a lambda is
-        // `(params) [Type] -> ...`, so the `->` is the tell -- and then the
+        // `(params) [Type] => ...`, so the `=>` is the tell -- and then the
         // chosen alternative is parsed for real. No trial to roll back.
         if self.shape_is_lambda_at(self.pos) then {
             let lambda_expr = self.parse_lambda_node() or return;
@@ -2332,7 +2424,7 @@ given CstParser {
 
         // Optional return type
         let mutable ret = Option[CstType].None();
-        if not self.check(.Arrow()) then {
+        if not self.check(.FatArrow()) then {
             let t = when self.parse_type_node() in {
                 .Ok(parsed_type) then parsed_type,
                 .Error(e) then {
@@ -2342,12 +2434,11 @@ given CstParser {
             ret = .Some(t);
         };
 
-        let arrow = when self.expect(.Arrow(), "'->'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
+        // `=>` introduces the body.
+        if not self.check(.FatArrow()) then {
+            return .Error("Parse error: expected '=>' in lambda expression");
         };
+        let arrow = self.eat();
         let body = when self.parse_expr_node() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -2846,18 +2937,22 @@ given CstParser {
             if self.check(.Comma()) then {
                 let mutable items = List[CstTuplePatternItem].new();
                 let mutable current = first;
-                while self.check(.Comma()) then {
-                    let comma = self.eat();
-                    let next = when self.parse_pattern_node() in {
-                        .Ok(parsed_pattern) then parsed_pattern,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
+                let mutable more = true;
+                while more then {
+                    let sep = self.eat_comma();
+                    items.push(CstTuplePatternItem(current, sep));
+                    if not self.sep_has_comma(sep) then {
+                        more = false;
+                    } else {
+                        let next = when self.parse_pattern_node() in {
+                            .Ok(parsed_pattern) then parsed_pattern,
+                            .Error(e) then {
+                                return .Error(e);
+                            },
+                        };
+                        current = next;
                     };
-                    items.push(CstTuplePatternItem(current, .Some(comma)));
-                    current = next;
                 };
-                items.push(CstTuplePatternItem(current, .None()));
                 let rp = when self.expect(.RParen(), "')'") in {
                     .Ok(t) then t,
                     .Error(e) then {
@@ -2931,7 +3026,46 @@ given CstParser {
     // Statement parsing
     // ========================================================================
 
-    file_private parse_stmt(self) Result[CstStmt] = {
+    /// The comments between a statement and its `;`, and the `;` when the
+    /// source wrote one.
+    file_private eat_stmt_terminator(self) CstComma = {
+        let mutable comments = List[Token].new();
+        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            comments.push(self.eat());
+        };
+        if self.check(.Semi()) then {
+            return CstComma(comments, .Some(self.eat()));
+        };
+        return CstComma(comments, .None());
+    };
+
+    /// A statement item, carrying the comments that trail it before its `;`.
+    file_private stmt_item(self, terminator CstComma, s CstStmt) CstItem = {
+        if terminator.comments.count() > 0 then {
+            return CstItem.StmtPreSemi(terminator.comments, s);
+        };
+        return CstItem.Stmt(s);
+    };
+
+    /// The next token that is not a comment. Newlines are layout and comments
+    /// stay in place -- this only answers what FOLLOWS them, so a bare
+    /// `return /* c */;` can be told from `return /* c */ 0;`.
+    file_private peek_past_comments(self) Token = {
+        let mutable i = self.pos;
+        while i < self.tokens.count() then {
+            when self.tokens[i] in {
+                .Newline() or .LineComment(_) or .BlockComment(_) then {
+                    i += 1;
+                },
+                _ then {
+                    return self.tokens[i];
+                },
+            };
+        };
+        return Token.EOF();
+    };
+
+    file_private parse_stmt(self) Result[CstItem] = {
         when self.peek() in {
             .KwDefer() then {
                 let kw = self.eat();
@@ -2941,20 +3075,18 @@ given CstParser {
                         return .Error(e);
                     },
                 };
-                if self.peek() is .Semi() then {
-                    self.eat();
-                };
-                return .Ok(.Defer(kw, value));
+                let term = self.eat_stmt_terminator();
+                return .Ok(self.stmt_item(term, .Defer(kw, value)));
             },
             .KwReturn() then {
                 let kw = self.eat();
-                // Check if there's a value on the same line
-                if self.check(.RBrace()) then {
-                    return .Ok(.Return(kw, .None()));
-                };
-                if self.check(.Semi()) then {
-                    self.eat();
-                    return .Ok(.Return(kw, .None()));
+                // A bare `return` is decided before any value: `return /* c */;`
+                // has none. Comments here trail the statement; comments before
+                // a VALUE lead it and the value parse collects them.
+                let next = self.peek_past_comments();
+                if next is .Semi() or next is .RBrace() then {
+                    let term = self.eat_stmt_terminator();
+                    return .Ok(self.stmt_item(term, .Return(kw, .None())));
                 };
                 let value = when self.parse_expr_node() in {
                     .Ok(e) then e,
@@ -2962,27 +3094,27 @@ given CstParser {
                         return .Error(e);
                     },
                 };
-                if self.peek() is not .Semi() then {
+                let term = self.eat_stmt_terminator();
+                if term.token is .None() then {
                     return .Error("Parse error: expected ';' after return");
                 };
-                self.eat();
-                return .Ok(.Return(kw, .Some(value)));
+                return .Ok(self.stmt_item(term, .Return(kw, .Some(value))));
             },
             .KwBreak() then {
                 let kw = self.eat();
-                if self.peek() is not .Semi() then {
+                let term = self.eat_stmt_terminator();
+                if term.token is .None() then {
                     return .Error("Parse error: expected ';' after break");
                 };
-                self.eat();
-                return .Ok(.Break(kw));
+                return .Ok(self.stmt_item(term, .Break(kw)));
             },
             .KwContinue() then {
                 let kw = self.eat();
-                if self.peek() is not .Semi() then {
+                let term = self.eat_stmt_terminator();
+                if term.token is .None() then {
                     return .Error("Parse error: expected ';' after continue");
                 };
-                self.eat();
-                return .Ok(.Continue(kw));
+                return .Ok(self.stmt_item(term, .Continue(kw)));
             },
             _ then {},
         };
@@ -3003,20 +3135,20 @@ given CstParser {
                         return .Error(e);
                     },
                 };
-                if self.peek() is not .Semi() then {
+                let term = self.eat_stmt_terminator();
+                if term.token is .None() then {
                     return .Error("Parse error: expected ';' after assignment");
                 };
-                self.eat();
-                return .Ok(.Assignment(expr, op, value));
+                return .Ok(self.stmt_item(term, .Assignment(expr, op, value)));
             },
             _ then {},
         };
-        let semi Option[Token] = if self.peek() is .Semi() then .Some(self.eat())
-        else .None();
-        return .Ok(.ExprStmt(expr, semi));
+        let term = self.eat_stmt_terminator();
+        let semi = term.token;
+        return .Ok(self.stmt_item(term, .ExprStmt(expr, semi)));
     };
 
-    file_private parse_var_decl_stmt(self) Result[CstStmt] = {
+    file_private parse_var_decl_stmt(self) Result[CstItem] = {
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -3035,21 +3167,25 @@ given CstParser {
             let mutable items = List[CstTupleBindingItem].new();
             let mutable current = first;
             // At least two slots: `let (x) = ...` is not a tuple binding.
-            if not self.check(.Comma()) then {
+            if self.peek_past_comments() is not .Comma() then {
                 return .Error("Parse error: expected ',' in tuple let statement");
             };
-            while self.check(.Comma()) then {
-                let comma = self.eat();
-                let next = when self.parse_pair_binding() in {
-                    .Ok(binding) then binding,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
+            let mutable more = true;
+            while more then {
+                let sep = self.eat_comma();
+                items.push(CstTupleBindingItem(current, sep));
+                if not self.sep_has_comma(sep) then {
+                    more = false;
+                } else {
+                    let next = when self.parse_pair_binding() in {
+                        .Ok(binding) then binding,
+                        .Error(e) then {
+                            return .Error(e);
+                        },
+                    };
+                    current = next;
                 };
-                items.push(CstTupleBindingItem(current, .Some(comma)));
-                current = next;
             };
-            items.push(CstTupleBindingItem(current, .None()));
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then {
@@ -3068,11 +3204,11 @@ given CstParser {
                     return .Error(e);
                 },
             };
-            if self.peek() is not .Semi() then {
+            let term = self.eat_stmt_terminator();
+            if term.token is .None() then {
                 return .Error("Parse error: expected ';' after let declaration");
             };
-            self.eat();
-            return .Ok(.TupleVarDecl(let_kw, lp, items, rp, eq, value));
+            return .Ok(self.stmt_item(term, .TupleVarDecl(let_kw, lp, items, rp, eq, value)));
         };
 
         let mutable mut_kw = Option[Token].None();
@@ -3110,11 +3246,11 @@ given CstParser {
                 return .Error(e);
             },
         };
-        if self.peek() is not .Semi() then {
+        let term = self.eat_stmt_terminator();
+        if term.token is .None() then {
             return .Error("Parse error: expected ';' after let declaration");
         };
-        self.eat();
-        return .Ok(.VarDecl(let_kw, mut_kw, name, var_type, eq, value));
+        return .Ok(self.stmt_item(term, .VarDecl(let_kw, mut_kw, name, var_type, eq, value)));
     };
 
     file_private parse_pair_binding(self) Result[CstPairBinding] = {
@@ -3192,25 +3328,29 @@ given CstParser {
                 return .Error(e);
             },
         };
-        if not self.check(.Comma()) then {
+        if self.peek_past_comments() is not .Comma() then {
             return .Error(
                 "Parse error: expected ',' in tuple binding: a parenthesized binding needs at least two slots",
             );
         };
         let mutable items = List[CstTupleBindingItem].new();
         let mutable current = first;
-        while self.check(.Comma()) then {
-            let comma = self.eat();
-            let next = when self.parse_pair_binding() in {
-                .Ok(binding) then binding,
-                .Error(e) then {
-                    return .Error(e);
-                },
+        let mutable more = true;
+        while more then {
+            let sep = self.eat_comma();
+            items.push(CstTupleBindingItem(current, sep));
+            if not self.sep_has_comma(sep) then {
+                more = false;
+            } else {
+                let next = when self.parse_pair_binding() in {
+                    .Ok(binding) then binding,
+                    .Error(e) then {
+                        return .Error(e);
+                    },
+                };
+                current = next;
             };
-            items.push(CstTupleBindingItem(current, .Some(comma)));
-            current = next;
         };
-        items.push(CstTupleBindingItem(current, .None()));
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -3234,23 +3374,27 @@ given CstParser {
                 },
             };
             // At least two slots: `for (x) in ...` is not a tuple binding.
-            if not self.check(.Comma()) then {
+            if self.peek_past_comments() is not .Comma() then {
                 return .Error("Parse error: expected ',' in tuple binding");
             };
             let mutable items = List[CstTupleBindingItem].new();
             let mutable current = first;
-            while self.check(.Comma()) then {
-                let comma = self.eat();
-                let next = when self.parse_pair_binding() in {
-                    .Ok(binding) then binding,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
+            let mutable more = true;
+            while more then {
+                let sep = self.eat_comma();
+                items.push(CstTupleBindingItem(current, sep));
+                if not self.sep_has_comma(sep) then {
+                    more = false;
+                } else {
+                    let next = when self.parse_pair_binding() in {
+                        .Ok(binding) then binding,
+                        .Error(e) then {
+                            return .Error(e);
+                        },
+                    };
+                    current = next;
                 };
-                items.push(CstTupleBindingItem(current, .Some(comma)));
-                current = next;
             };
-            items.push(CstTupleBindingItem(current, .None()));
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
                 .Error(e) then {
@@ -3402,10 +3546,7 @@ given CstParser {
             _ then {},
         };
         // Statement
-        return when self.parse_stmt() in {
-            .Ok(s) then .Ok(.Stmt(s)),
-            .Error(e) then .Error(e),
-        };
+        return self.parse_stmt();
     };
 
     // ========================================================================
@@ -3733,11 +3874,14 @@ given CstParser {
             },
         };
 
-        // Parameters
+        // Parameters -- unless the `(` opens a function TYPE's parameter list
+        // (`let f (Int) -> Int = value`), which is an annotation, not a
+        // signature. The contents decide: a type-head starts a type list, and
+        // `mutable` / a lowercase name starts parameters.
         let mutable lp = Option[Token].None();
         let mutable params = List[CstParam].new();
         let mutable rp = Option[Token].None();
-        if self.check(.LParen()) then {
+        if self.check(.LParen()) and not self.paren_opens_type_at(self.pos) then {
             lp = .Some(self.eat());
             params = when self.parse_params() in {
                 .Ok(ps) then ps,
@@ -3985,9 +4129,19 @@ given CstParser {
                 };
                 // <variant-list> is `("," <variant>)* ","?` (grammar.bnf), so a
                 // comma is required BETWEEN variants and optional after the last.
-                let _ = self.eat_comma();
+                // Comments that trail a variant before its comma ride as items
+                // after it; the case list prints them once the comma is out.
+                let sep = self.eat_comma();
                 let s = CstStmt.ExprStmt(expr, .None());
                 cases.push(CstItem.Stmt(s));
+                when sep in {
+                    .Some(slot) then {
+                        for c in slot.comments then {
+                            cases.push(CstItem.TrailingComment(c));
+                        };
+                    },
+                    .None() then {},
+                };
             };
             let rb = when self.expect(.RBrace(), "'}'") in {
                 .Ok(t) then t,

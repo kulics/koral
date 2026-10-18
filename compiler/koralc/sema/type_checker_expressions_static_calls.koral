@@ -1063,15 +1063,12 @@ given TypeChecker {
             let typed_arg = typed_args[arg_i];
             when expected_types.get(arg_i) in {
                 .Some(expected_t) then {
-                    if not self.same_expr_type(typed_arg.expr_type, expected_t)
-                        and not self.type_matches_expected_pattern(
-                            expected_t,
-                            typed_arg.expr_type,
-                        )
-                        and not self.contains_generic_parameter(expected_t)
-                        and not self.is_unresolved_expr_type(expected_t)
-                        and not self.is_unresolved_expr_type(typed_arg.expr_type)
-                    then {
+                    if not self.same_expr_type(typed_arg.expr_type, expected_t) and not self.type_matches_expected_pattern(
+                        expected_t,
+                        typed_arg.expr_type,
+                    ) and not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(
+                        expected_t,
+                    ) and not self.is_unresolved_expr_type(typed_arg.expr_type) then {
                         self.push_diagnostic(
                             self.format_call_type_mismatch_message(
                                 Expr.ImplicitMemberExpr(
@@ -1415,7 +1412,11 @@ given TypeChecker {
                     let target = self.resolve_type_in_scope(type_node, scope);
                     // `?T(expr)` is weak-reference construction.
                     if target is .WeakReferenceType(_) or target is .MutableWeakReferenceType(_) then {
-                        let weak_typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                        let weak_typed_inner = self.check_expr_scoped_ref(
+                            inner,
+                            .None(),
+                            scope,
+                        );
                         let mutable weak_result_type = target;
                         if not self.enforce_mutable_constraint_for_call(
                             weak_typed_inner.expr_type,
@@ -1426,67 +1427,73 @@ given TypeChecker {
                         };
                         make_typed_expr(
                             TypedExprKind.IntrinsicCall(
-                                TypedIntrinsic.DowngradeRef(weak_typed_inner, weak_result_type),
+                                TypedIntrinsic.DowngradeRef(
+                                    weak_typed_inner,
+                                    weak_result_type,
+                                ),
                             ),
                             weak_result_type,
                         )
                     } else {
-                    let raw_typed_inner = when inner in {
-                        .IntegerLiteral(value, lit_span) then {
-                            let _ = self.check_integer_literal_range(
-                                value,
+                        let raw_typed_inner = when inner in {
+                            .IntegerLiteral(value, lit_span) then {
+                                let _ = self.check_integer_literal_range(
+                                    value,
+                                    target,
+                                    lit_span,
+                                );
+                                make_typed_expr(
+                                    TypedExprKind.IntegerLiteral(value),
+                                    target,
+                                )
+                            },
+                            .FloatLiteral(value, _) then make_typed_expr(
+                                TypedExprKind.FloatLiteral(value),
                                 target,
-                                lit_span,
-                            );
-                            make_typed_expr(
-                                TypedExprKind.IntegerLiteral(value),
-                                target,
-                            )
-                        },
-                        .FloatLiteral(value, _) then make_typed_expr(
-                            TypedExprKind.FloatLiteral(value),
+                            ),
+                            .RuneLiteral(value, rune_span) then {
+                                let outer_span = self.enter_current_span(rune_span);
+                                let lowered = self.lower_rune_literal_for_cast(
+                                    value,
+                                    target,
+                                );
+                                self.leave_current_span(outer_span);
+                                lowered
+                            },
+                            _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                        };
+                        let adapted_inner = self.adapt_expr_to_expected_type_at(
+                            raw_typed_inner,
+                            .Some(target),
+                            Option[SourceSpan].Some(expr_span(inner)),
+                        );
+                        let typed_inner = when adapted_inner.expr_type in {
+                            .ReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+                                adapted_inner,
+                                .Some(inner_ref),
+                                Option[SourceSpan].Some(expr_span(inner)),
+                            ) else adapted_inner,
+                            .MutableReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+                                adapted_inner,
+                                .Some(inner_ref),
+                                Option[SourceSpan].Some(expr_span(inner)),
+                            ) else adapted_inner,
+                            .WeakReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+                                adapted_inner,
+                                .Some(inner_ref),
+                                Option[SourceSpan].Some(expr_span(inner)),
+                            ) else adapted_inner,
+                            .MutableWeakReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+                                adapted_inner,
+                                .Some(inner_ref),
+                                Option[SourceSpan].Some(expr_span(inner)),
+                            ) else adapted_inner,
+                            _ then adapted_inner,
+                        };
+                        make_typed_expr(
+                            TypedExprKind.CastExpr(target, typed_inner),
                             target,
-                        ),
-                        .RuneLiteral(value, rune_span) then {
-                            let outer_span = self.enter_current_span(rune_span);
-                            let lowered = self.lower_rune_literal_for_cast(
-                                value,
-                                target,
-                            );
-                            self.leave_current_span(outer_span);
-                            lowered
-                        },
-                        _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
-                    };
-                    let adapted_inner = self.adapt_expr_to_expected_type_at(
-                        raw_typed_inner,
-                        .Some(target),
-                        Option[SourceSpan].Some(expr_span(inner)),
-                    );
-                    let typed_inner = when adapted_inner.expr_type in {
-                        .ReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
-                            adapted_inner,
-                            .Some(inner_ref),
-                            Option[SourceSpan].Some(expr_span(inner)),
-                        ) else adapted_inner,
-                        .MutableReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
-                            adapted_inner,
-                            .Some(inner_ref),
-                            Option[SourceSpan].Some(expr_span(inner)),
-                        ) else adapted_inner,
-                        .WeakReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
-                            adapted_inner,
-                            .Some(inner_ref),
-                            Option[SourceSpan].Some(expr_span(inner)),
-                        ) else adapted_inner,
-                        .MutableWeakReferenceType(inner_ref) then if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
-                            adapted_inner,
-                            .Some(inner_ref),
-                            Option[SourceSpan].Some(expr_span(inner)),
-                        ) else adapted_inner,
-                        _ then adapted_inner,
-                    };
-                    make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target)
+                        )
                     }
                 },
                 .DerefExpr(inner, _) then {
@@ -1935,7 +1942,10 @@ given TypeChecker {
 
     // MARK: - Integer literal range checking
 
-    module_private parse_integer_literal_text(self, text String) Pair[Bool, Pair[UInt64, Bool]] = {
+    module_private parse_integer_literal_text(
+        self,
+        text String,
+    ) Pair[Bool, Pair[UInt64, Bool]] = {
         let _ = text;
         return Pair[Bool, Pair[UInt64, Bool]](false, Pair[UInt64, Bool](0, true));
     };
@@ -1947,13 +1957,16 @@ given TypeChecker {
         span SourceSpan,
     ) Bool = {
         let i64max = UInt64(9223372036854775807);
-        let u64max = i64max *UInt64(2) + UInt64(1);
+        let u64max = i64max * UInt64(2) + UInt64(1);
         let bounds = when target_type in {
             .IntType() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
             .Int64Type() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
             .Int8Type() then Pair[UInt64, UInt64](UInt64(128), UInt64(127)),
             .Int16Type() then Pair[UInt64, UInt64](UInt64(32768), UInt64(32767)),
-            .Int32Type() then Pair[UInt64, UInt64](UInt64(2147483648), UInt64(2147483647)),
+            .Int32Type() then Pair[UInt64, UInt64](
+                UInt64(2147483648),
+                UInt64(2147483647),
+            ),
             .UIntType() then Pair[UInt64, UInt64](UInt64(0), u64max),
             .UInt64Type() then Pair[UInt64, UInt64](UInt64(0), u64max),
             .UInt8Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(255)),
@@ -1961,7 +1974,9 @@ given TypeChecker {
             .UInt32Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(4294967295)),
             _ then Pair[UInt64, UInt64](UInt64(0), UInt64(0)),
         };
-        if bounds.first == UInt64(0) and bounds.second == UInt64(0) and not self.is_integer_type(target_type) then {
+        if bounds.first == UInt64(0) and bounds.second == UInt64(0) and not self.is_integer_type(
+            target_type,
+        ) then {
             return true;
         };
         let s = value.replace_all("_", with: "");
@@ -1974,11 +1989,14 @@ given TypeChecker {
         let mutable radix UInt64 = 10;
         let mutable digits = rest;
         if rest.starts_with("0x") or rest.starts_with("0X") then {
-            radix = 16; digits = rest.substring(2..);
+            radix = 16;
+            digits = rest.substring(2..);
         } else if rest.starts_with("0b") or rest.starts_with("0B") then {
-            radix = 2; digits = rest.substring(2..);
+            radix = 2;
+            digits = rest.substring(2..);
         } else if rest.starts_with("0o") or rest.starts_with("0O") then {
-            radix = 8; digits = rest.substring(2..);
+            radix = 8;
+            digits = rest.substring(2..);
         };
         let mutable magnitude UInt64 = UInt64(0);
         let mutable overflow = digits.is_empty();
@@ -2009,8 +2027,7 @@ given TypeChecker {
         else magnitude <= bounds.second;
         if not fits then {
             let sign = if is_negative then "-" else "";
-            let display = if overflow then s
-            else sign + magnitude.to_string();
+            let display = if overflow then s else sign + magnitude.to_string();
             self.push_diagnostic_at_span(
                 "Integer literal \(display) is out of range for \(type_to_string(target_type))",
                 span,
@@ -2094,7 +2111,13 @@ given TypeChecker {
                 "A cast takes exactly one positional argument: write 'Type(expr)'",
                 span,
             );
-            return make_typed_expr(TypedExprKind.CastExpr(target_type, self.empty_typed_block(Type.Unknown())), target_type);
+            return make_typed_expr(
+                TypedExprKind.CastExpr(
+                    target_type,
+                    self.empty_typed_block(Type.Unknown()),
+                ),
+                target_type,
+            );
         };
         let arg = call_args[UInt(0)];
         when arg in {
@@ -2103,22 +2126,21 @@ given TypeChecker {
                     "A cast takes exactly one positional argument: write 'Type(expr)'",
                     arg_span,
                 );
-                return make_typed_expr(TypedExprKind.CastExpr(target_type, self.empty_typed_block(Type.Unknown())), target_type);
+                return make_typed_expr(
+                    TypedExprKind.CastExpr(
+                        target_type,
+                        self.empty_typed_block(Type.Unknown()),
+                    ),
+                    target_type,
+                );
             },
             _ then {},
         };
         // Literal optimization: fold integer/float literals to the target type.
         let raw_typed_inner = when arg in {
             .IntegerLiteral(value, lit_span) then {
-                let _ = self.check_integer_literal_range(
-                    value,
-                    target_type,
-                    lit_span,
-                );
-                make_typed_expr(
-                    TypedExprKind.IntegerLiteral(value),
-                    target_type,
-                )
+                let _ = self.check_integer_literal_range(value, target_type, lit_span);
+                make_typed_expr(TypedExprKind.IntegerLiteral(value), target_type)
             },
             .FloatLiteral(value, _) then make_typed_expr(
                 TypedExprKind.FloatLiteral(value),
@@ -2209,7 +2231,9 @@ given TypeChecker {
             .Identifier(name, name_span) then {
                 when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
                     .Some(resolved_type) then {
-                        if self.is_integer_type(resolved_type) or self.is_float_type(resolved_type) then {
+                        if self.is_integer_type(resolved_type) or self.is_float_type(
+                            resolved_type,
+                        ) then {
                             return self.infer_type_application_cast(
                                 resolved_type,
                                 call_args,
@@ -3153,9 +3177,7 @@ given TypeChecker {
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 when self.trait_object_dispatch_type(base.expr_type) in {
                     .Some(dispatch_trait_type) then {
-                        let method_name = self.semantic_method_name_for_symbol(
-                            method,
-                        );
+                        let method_name = self.semantic_method_name_for_symbol(method);
                         when self.trait_vtable_method_index_for_type(
                             dispatch_trait_type,
                             method_name,

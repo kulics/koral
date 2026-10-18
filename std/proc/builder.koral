@@ -15,9 +15,9 @@ using "std/os" { Path, IntoPath };
 /// Create a child process via Unix(posix_spawn ) / CreateProcess (Windows).
 let foreign __koral_spawn(
     program *UInt8,
-    argv * *UInt8,
+    argv **UInt8,
     argc Int32,
-    envp * *UInt8,
+    envp **UInt8,
     envc Int32,
     cwd *UInt8,
     stdin_mode Int32,
@@ -58,7 +58,7 @@ file_private let stdio_to_fd(s IoRedirect) Int32 = when s in {
 };
 
 /// Convert a list of strings to an array of UInt8 pointers for FFI.
-file_private let argv_to_ptrs(argv List[String]) * *UInt8 = {
+file_private let argv_to_ptrs(argv List[String]) **UInt8 = {
     let count = argv.count();
     let ptrs = alloc_memory[*UInt8](count);
     for i in 0..<count then {
@@ -82,7 +82,7 @@ file_private let build_env_strings(actions List[EnvAction]) List[String] = {
 };
 
 /// Convert env strings list to pointer array for FFI.
-file_private let env_strs_to_ptrs(strs List[String]) * *UInt8 = {
+file_private let env_strs_to_ptrs(strs List[String]) **UInt8 = {
     let count = strs.count();
     if count == 0 then {
         return null_ptr[*UInt8]();
@@ -135,18 +135,17 @@ public type mutable Command(file_private mutable storage CommandStorage);
 given Command {
 
     /// Create a new command builder for the specified program.
-    public new(program String) Command =
-        Command(
-            CommandStorage(
-                program,
-                [],
-                [],
-                .None(),
-                IoRedirect.Inherit(),
-                IoRedirect.Inherit(),
-                IoRedirect.Inherit(),
-            ),
-        );
+    public new(program String) Command = Command(
+        CommandStorage(
+            program,
+            [],
+            [],
+            .None(),
+            IoRedirect.Inherit(),
+            IoRedirect.Inherit(),
+            IoRedirect.Inherit(),
+        ),
+    );
 
     /// Add a single argument (chainable).
     public arg(self, value String) Command = {
@@ -244,7 +243,7 @@ given Command {
             stdin_fd,
             stdout_fd,
             stderr_fd,
-            & proc,
+            &proc,
         );
 
         if result <> 0 then {

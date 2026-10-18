@@ -210,19 +210,23 @@
 
 <type-prefix> ::= "*" "mutable"?
                | "?"
-// * T         — read-only pointer
-// *mutable T     — mutable pointer
-// ?T            — weak reference
+// *T          — read-only pointer
+// *mutable T  — mutable pointer
+// ?T          — weak reference
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
-<function-type> ::= "Func" "(" <function-type-param-list>? ")" <type>
+<function-type> ::= "(" <function-type-param-list>? ")" "->" <type>
 <function-type-param-list> ::= <type> ("," <type>)* ","?
-// Function type: Func(T1, T2, TN) ReturnType
-// The types inside parentheses are parameter types, followed by a return type
+// Function type: (T1, T2, TN) -> ReturnType
+// The types inside parentheses are parameter types; `->` separates them from
+// the return type. `->` is right-associative: `(A) -> (B) -> C` is
+// `(A) -> ((B) -> C)`. A function type in a type list is self-delimiting;
+// `(` in a TYPE opens a parameter list and nothing else (no grouping parens).
 // Examples:
-//   Func() Int           - () -> Int (no params, returns Int)
-//   Func(Int) Int        - (Int) -> Int (one param, returns Int)
-//   Func(Int, Int) Int - (Int, Int) -> Int (two params, returns Int)
+//   () -> Int           - no params, returns Int
+//   (Int) -> Int        - one param, returns Int
+//   (Int, Int) -> Int   - two params, returns Int
+//   ((Int) -> Int) -> Int - takes a function, returns Int
 // Module-prefixed type syntax is not part of the language. Import concrete
 // type symbols with `using "module/path" { TypeName };`, then refer to `TypeName`
 // directly.
@@ -441,9 +445,17 @@
 //
 //   **类型形状**（与 <type> 的文法逐条对齐）：
 //     类型前缀：`?`、`*` [`mutable`]（可嵌套，如 `?* T`）
-//     类型头  ：`Self`、首字母大写的标识符、`Func(...)` + 返回类型
+//     类型头  ：`Self`、首字母大写的标识符、`(` <type-list> `)` `->` <type>
 //     类型头后可跟 `[` <type-list> `]`
 //     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*` 才是类型。
+//
+//   **`let` 声明的 `(`**（签名还是类型标注）：
+//     括号内首 token 是类型头/类型前缀 -> 函数类型标注（变量绑定）
+//        例：`let f (Int) -> Int = g`、`let h ((Int) -> Int) -> Int = g`
+//     括号内首 token 是 `mutable`/小写标识符 -> 参数表（函数声明）
+//        例：`let f(x Int) Int = ...`、`let inc(mutable x Int) Int = ...`
+//     括号为空时看 `)` 之后：`->` 是函数类型 `() -> R`，其余是零参签名。
+//     函数声明的结果类型**裸写**、不带 `->`（与 lambda 的结果类型一致）。
 //
 //   `(` 的归类：
 //     括号内是**单个类型**且后面紧跟 `)`：
@@ -465,8 +477,8 @@
 //     `[` <type-list> `]` `(` -> 泛型方法调用
 //     `[` <type-list> `]`     -> 方法上的类型实参（方法不接受时报错）
 //
-//   **lambda 与括号表达式**共用 `(`，判据是 `->`：
-//     (params) [ReturnType] `->` ... 是 lambda，其余是括号表达式。
+//   **lambda 与括号表达式**共用 `(`，判据是 `=>`：
+//     (params) [ReturnType] `=>` ... 是 lambda，其余是括号表达式。
 //     params 是 `name [Type] (, name [Type])* ,?`；`name: Type` 是写错的
 //     lambda 参数，仍按 lambda 解析并报
 //     `Lambda parameters use 'name Type', not 'name: Type'`。
@@ -568,16 +580,17 @@
 <block-expression> ::= "{" <statement>* <tail-expression>? "}"
 <tail-expression> ::= <expression>
 
-<lambda-expression> ::= "(" <lambda-param-list>? ")" <type-annotation>? "->" <expression>
+<lambda-expression> ::= "(" <lambda-param-list>? ")" <type-annotation>? "=>" <expression>
 <lambda-param-list> ::= <lambda-param> ("," <lambda-param>)* ","?
 <lambda-param> ::= <identifier> <type-annotation>?
-// Lambda expression examples:
-//   () -> 42                           - no params
-//   (x) -> x * 2                       - single param, type inferred
-//   (x Int) -> x * 2                   - single param with type
-//   (x, y) -> x + y                    - multiple params, types inferred
-//   (x Int, y Int) Int -> x + y        - full type annotations
-//   (x) -> { let y = x * 2; return y + 1 } - block body
+// Lambda expression examples (`=>` opens the body; `->` is the function-TYPE
+// arrow and never introduces a lambda body):
+//   () => 42                           - no params
+//   (x) => x * 2                       - single param, type inferred
+//   (x Int) => x * 2                   - single param with type
+//   (x, y) => x + y                    - multiple params, types inferred
+//   (x Int, y Int) Int => x + y        - full type annotations
+//   (x) => { let y = x * 2; return y + 1 } - block body
 
 // ============================================================================
 // Patterns
@@ -794,7 +807,8 @@
 // Bitwise: & | ^ ~ << >>
 // Assignment: = += -= *= /= %= &= |= ^= <<= >>=
 // Range: .. ..< <.. <..<
-// Lambda: ->
+// Function type: ->   (between a type's parameter list and its return type)
+// Lambda: =>          (before a lambda body)
 // Early-return propagation: or return
 // Value coalescing: or else
 // Optional chaining: and then

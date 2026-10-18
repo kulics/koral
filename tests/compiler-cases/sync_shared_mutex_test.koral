@@ -33,14 +33,18 @@ let main() Void = {
     let mutable threads = List[Thread].new();
     let mutable i = 0;
     while i < 5 then {
-        threads.push(run_task(() -> {
-            sm2.lock_shared();
-            let _ = shared_count.fetch_add(1);
-            while not all_in.load() then {
-                sleep(5ms);
-            };
-            sm2.unlock_shared();
-        }));
+        threads.push(
+            run_task(
+                () => {
+                    sm2.lock_shared();
+                    let _ = shared_count.fetch_add(1);
+                    while not all_in.load() then {
+                        sleep(5ms);
+                    };
+                    sm2.unlock_shared();
+                },
+            ),
+        );
         i = i + 1;
     };
 
@@ -66,14 +70,16 @@ let main() Void = {
     let cv_ready = AtomicBool.new(false);
     let cv_done = AtomicBool.new(false);
 
-    let waiter = run_task(() -> {
-        sm3.lock();
-        while not cv_ready.load() then {
-            cv3.wait();
-        };
-        cv_done.store(true);
-        sm3.unlock();
-    });
+    let waiter = run_task(
+        () => {
+            sm3.lock();
+            while not cv_ready.load() then {
+                cv3.wait();
+            };
+            cv_done.store(true);
+            sm3.unlock();
+        },
+    );
 
     sleep(30ms);
     sm3.lock();
