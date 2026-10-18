@@ -9,9 +9,6 @@ extension TypeChecker {
   /// Validate call argument order: positional args first, named args after.
   /// Also validates that positional params can't use labels and named params must use labels.
   func validateCallArgumentOrder(_ callArgs: [CallArg], functionName: String, paramNames: [String]? = nil, paramIsNamed: [Bool]? = nil) throws {
-    if callArgs.contains(where: { $0.isDefaultFill }) {
-      throw SemanticError(.generic("Default-fill '...' is not supported; use named parameter defaults instead"), span: currentSpan)
-    }
     var seenNamed = false
     for arg in callArgs {
       if arg.label != nil {
@@ -64,11 +61,6 @@ extension TypeChecker {
     defaultsKeyPrefix: String,
     paramTypeKeys: [String] = []
   ) throws -> ConstructorArgumentPlan {
-    // Reject spread syntax
-    if callArgs.contains(where: { $0.isDefaultFill }) {
-      throw SemanticError(.generic("Default-fill '...' is not supported; use named parameter defaults instead"), span: currentSpan)
-    }
-
     var orderedCallArgs: [CallArg?] = Array(repeating: nil, count: paramNames.count)
     var positionalIndex = 0
     var seenNamed = false

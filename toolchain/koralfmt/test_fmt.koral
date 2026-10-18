@@ -446,10 +446,10 @@ let main() Void = {
         "let x=1;\nusing \"foo\";\n",
         "using declarations must appear before other top-level declarations",
     );
-    t.test_error_contains(
-        "default fill rejected",
-        "type Button(label String);\nlet make() Button=Button(...);\n",
-        "Default-fill '...' is not supported",
+    t.test(
+        "full range argument",
+        "type Button(label Range[Int]);\nlet make() Button=Button(...);\n",
+        "type Button(label Range[Int]);\nlet make() Button = Button(...);\n",
     );
     // A trailing comment on a `using` sits after the declaration's own `;`.
     // The printer used to append a second `;` at the end of the line, where the
@@ -504,29 +504,54 @@ let main() Void = {
         "type Point(x Int, y Int);\n",
     );
     t.test_error_contains("missing then rejected", "let main() Void = if 1 1;\n", "then");
-    // `...` was a range operator once, and `....` a full range. grammar.bnf
-    // <range-op> is `..` / `..<` / `<..` / `<..<` and nothing else; `...` is
-    // lexed exactly as koralc lexes it (an ellipsis), `....` is `...` + `.`,
-    // `...<` is `...` + `<`, and `<...` is `<..` + `.`.
+    // Range spellings (grammar.bnf <range-op> / <open-range-op>): the `..`
+    // family is closed (both bounds written), the `...` family elides one.
+    // Maximal munch: `...<` > `...` > `..<` > `..` at a dot, `<...` > `<..<`
+    // > `<..` at a `<`. `....` is `...` + `.` and `<....` is `<...` + `.`.
+    t.test(
+        "range operators round-trip",
+        "let a=1..5; let b=1..<5; let c=1<..5; let d=1<..<5; let e=1...; let f=1<...; let g=...5; let h=...<5; let i=...;\n",
+        "let a = 1..5;\nlet b = 1..<5;\nlet c = 1<..5;\nlet d = 1<..<5;\nlet e = 1...;\nlet f = 1<...;\nlet g = ...5;\nlet h = ...<5;\nlet i = ...;\n",
+    );
     t.test_error_contains(
-        "legacy range form `1...5` rejected",
+        "two bounds on a '...' range rejected",
         "let x=1...5;\n",
-        "expected ';' after declaration",
+        "a '...' range takes at most one bound",
     );
     t.test_error_contains(
-        "legacy range form `1....5` rejected",
-        "let x=1....5;\n",
-        "expected ';' after declaration",
-    );
-    t.test_error_contains(
-        "legacy range form `1...<5` rejected",
+        "'...<5' as a value rejected",
         "let x=1...<5;\n",
-        "expected ';' after declaration",
+        "'...<' opens a range with no left bound",
     );
     t.test_error_contains(
-        "legacy range form `<...` rejected",
-        "let x=<...5\n",
-        "expected primary expression",
+        "'<...5' as a value rejected",
+        "let x=<...5;\n",
+        "'<...' follows a range bound",
+    );
+    t.test_error_contains(
+        "old open range `1..` rejected",
+        "let x=1..;\n",
+        "open ranges are spelled with '...': write 'a...' or 'a<...'",
+    );
+    t.test_error_contains(
+        "old open range `1<..` rejected",
+        "let x=1<..;\n",
+        "open ranges are spelled with '...': write 'a...' or 'a<...'",
+    );
+    t.test_error_contains(
+        "old open range `..<5` rejected",
+        "let x=..<5;\n",
+        "open ranges are spelled with '...': write '...b', '...<b', or '...'",
+    );
+    t.test_error_contains(
+        "old full range `..` rejected",
+        "let x=..;\n",
+        "open ranges are spelled with '...': write '...b', '...<b', or '...'",
+    );
+    t.test_error_contains(
+        "old range default `= ..` rejected",
+        "type Span(range: Range[Int] = ..);\n",
+        "open ranges are spelled with '...'",
     );
     // ── number literals (grammar.bnf <float-literal> / <duration-literal>) ──
     // The text is kept verbatim. It used to be re-lexed into `2.5e` `-` `3`
@@ -992,12 +1017,12 @@ let main() Void = {
         "type A();\ntrait T {\n    inc(self, mutable value Int) Int;\n};\ngiven A as T {\n    inc(self, mutable value Int) Int = value;\n};\n",
     );
 
-    // Default values are literals, and the literal set includes `..` (the empty
-    // range) and rune literals (grammar.bnf <default-value-literal>).
+    // Default values are literals, and the literal set includes `...` (the
+    // empty range) and rune literals (grammar.bnf <default-value-literal>).
     t.test(
         "empty range default",
-        "type Span(range: Range[Int] = ..);\n",
-        "type Span(range: Range[Int] = ..);\n",
+        "type Span(range: Range[Int] = ...);\n",
+        "type Span(range: Range[Int] = ...);\n",
     );
     t.test("rune default", "type C(c: Rune = 'x');\n", "type C(c: Rune = 'x');\n");
 

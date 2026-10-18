@@ -475,8 +475,13 @@ public class Parser {
       }
       throw ParserError.unexpectedToken(span: span, got: currentToken.description, expected: "empty default value '[]'")
     case .range:
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "open ranges are spelled with '...': write '...b', '...<b', or '...'"
+      )
+    case .ellipsis:
       let span = currentSpan
-      try match(.range)
+      try match(.ellipsis)
       return .emptyLiteral(span: span)
     default:
       throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "a literal default value (number, bool, string, rune, [], or range)")

@@ -13,11 +13,11 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self, into: List[UInt8], span: Range[UInt] = ..) Result[UInt];
+    read(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];
 };
 
 public trait Writer {
-    write(self, from: List[UInt8], span: Range[UInt] = ..) Result[UInt];
+    write(self, from: List[UInt8], span: Range[UInt] = ...) Result[UInt];
     flush(self) Result[Void];
 };
 
@@ -54,7 +54,7 @@ given[R Reader] BufReader[R] {
     public with_capacity(cap UInt, r R) BufReader[R];
     public read_byte(self) Result[Option[UInt8]];
     public read_rune(self) Result[Option[Rune]];
-    public read_until(self, delim UInt8, into: List[UInt8], span: Range[UInt] = ..) Result[UInt];
+    public read_until(self, delim UInt8, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];
     public read_line(self) Result[Option[String]];
     public skip(self, n UInt) Result[UInt];
 };
@@ -117,6 +117,6 @@ given Reader {
 };
 
 given Writer {
-    public write_all(self, from: List[UInt8], span: Range[UInt] = ..) Result[Void];
+    public write_all(self, from: List[UInt8], span: Range[UInt] = ...) Result[Void];
 };
 ```

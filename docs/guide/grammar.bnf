@@ -370,12 +370,30 @@
                      | <range-prefix>
                      | <range-prefix> <comparison-expression>
 
-<range-suffix> ::= <range-op> <comparison-expression>
-                 | <postfix-range-op>
+<range-suffix> ::= <closed-range-op> <comparison-expression>
+                 | <open-postfix-range-op>
 
-<range-op> ::= ".." | "..<" | "<.." | "<..<"
-<postfix-range-op> ::= ".." | "<.."
-<range-prefix> ::= ".." | "..<"
+// 范围算符分两族，按界是否写出来分：
+//   `..` 族（<closed-range-op>）-- 两端都在。连接符，严格二元，缺界即错。
+//   `...` 族（<open-range-op>）-- 至少缺一端。`...` 站在缺掉的那个界的
+//     位置上：`a...` / `a<...` 缺右界，`...b` / `...<b` 缺左界，`...` 两端
+//     都缺（Range[T].Full()）。至多一端有界，`a...b` 是错的。
+// `<` 永远夹在点与被排除的界之间，读作"点侧 < 界侧"：
+//   `a<..b` 是 a 之后到 b，`a..<b` 是 a 到 b 之前，`a<...` 是 a 之后，
+//   `...<b` 是 b 之前。`<...<` 不存在：无界可排。
+// 词法最大吞并：`.` 处 `...<` > `...` > `..<` > `..` > `.`；
+//               `<` 处 `<...` > `<..<` > `<..` < `<`。
+//   所以 `....` = `...` + `.`，`<....` = `<...` + `.`，`a...b` 是 `a...`
+//   后跟 `b`（错），`a<...b` 是 `a<...` 后跟 `b`（错）。
+// `...` 还预留给：模式匹配的 rest 模式（模式槽）、变长参数（声明形参槽）。
+// **不做 spread**：变长槽类型化为 List[T] 后，调用端传列表就是摊开，运行时
+// 无须再摊一次（Java/Swift 路线）；spread 只在"调用是无类型值序列"的语言里
+// 是变长的另一半（JS/Python）。
+<closed-range-op> ::= ".." | "..<" | "<.." | "<..<"
+<open-range-op> ::= "..." | "...<" | "<..."
+<open-postfix-range-op> ::= "..." | "<..."
+<open-prefix-range-op> ::= "..." | "...<"
+<range-prefix> ::= <open-prefix-range-op>
 
 <comparison-expression> ::= <bitwise-or-expression> <comparison-tail>?
 
@@ -768,13 +786,13 @@
                           | <string-literal>
                           | <rune-literal>
                           | "[" "]"                    // empty collection (List, Set, or Dict, inferred from type)
-                          | ".."                       // empty range (Range[T].Full)
+                          | "..."                      // empty range (Range[T].Full)
 // Default values are only allowed on named parameters (name: Type = value).
 // Numbers may be negative (`= -1`, `= -2.5`); other defaults are positive
 // literals only.
 // The empty collection literal [] is resolved by type context:
 //   List[T] -> List.new(), Set[T] -> Set.new(), Dict[K,V] -> Dict.new()
-// The range literal .. resolves to Range[T].Full()
+// The range literal ... resolves to Range[T].Full()
 
 <identifier> ::= "_"* [a-z] [a-zA-Z0-9_]*
              | "_"+
@@ -806,7 +824,8 @@
 // Logical: and or not
 // Bitwise: & | ^ ~ << >>
 // Assignment: = += -= *= /= %= &= |= ^= <<= >>=
-// Range: .. ..< <.. <..<
+// Range: .. ..< <.. <..<          (closed -- both bounds written)
+//        ... ...< <...            (open -- one bound elided, see <open-range-op>)
 // Function type: ->   (between a type's parameter list and its return type)
 // Lambda: =>          (before a lambda body)
 // Early-return propagation: or return

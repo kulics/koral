@@ -167,7 +167,7 @@ given Parser {
         // `parse_primary`, which rejects it. Without this, `a < ..b` parsed as
         // `a < (..b)` and codegen emitted a comparison against a range.
         when self.current().kind in {
-            .Range() then {
+            .Ellipsis() then {
                 let start = self.current();
                 self.advance();
                 if self.can_start_range_bound(self.current().kind) then {
@@ -190,7 +190,7 @@ given Parser {
                     ),
                 );
             },
-            .RangeLess() then {
+            .EllipsisLt() then {
                 let start = self.current();
                 self.advance();
                 let rhs = self.parse_comparison() or return;
@@ -203,6 +203,20 @@ given Parser {
                     ),
                 );
             },
+            .Range() or .RangeLess() then {
+                return .Error(
+                    self.parser_error_at_current(
+                        "open ranges are spelled with '...': write '...b', '...<b', or '...'",
+                    ),
+                );
+            },
+            .LtEllipsis() then {
+                return .Error(
+                    self.parser_error_at_current(
+                        "'<...' follows a range bound; write 'a<...'",
+                    ),
+                );
+            },
             _ then {},
         };
 
@@ -211,6 +225,7 @@ given Parser {
         while true then {
             when self.current().kind in {
                 .Range() then {
+                    let op = self.current();
                     self.advance();
                     if self.can_start_range_bound(self.current().kind) and true then {
                         let rhs = self.parse_comparison() or return;
@@ -221,11 +236,11 @@ given Parser {
                             self.span_from_expr_start(expr),
                         );
                     } else {
-                        expr = Expr.RangeExpr(
-                            RangeOperator.From(),
-                            .Some(expr),
-                            Option[Expr].None(),
-                            self.span_from_expr_start(expr),
+                        return .Error(
+                            self.parser_error_at(
+                                "open ranges are spelled with '...': write 'a...' or 'a<...'",
+                                op,
+                            ),
                         );
                     };
                 },
@@ -240,6 +255,7 @@ given Parser {
                     );
                 },
                 .LessRange() then {
+                    let op = self.current();
                     self.advance();
                     if self.can_start_range_bound(self.current().kind) and true then {
                         let rhs = self.parse_comparison() or return;
@@ -250,11 +266,11 @@ given Parser {
                             self.span_from_expr_start(expr),
                         );
                     } else {
-                        expr = Expr.RangeExpr(
-                            RangeOperator.FromOpen(),
-                            .Some(expr),
-                            Option[Expr].None(),
-                            self.span_from_expr_start(expr),
+                        return .Error(
+                            self.parser_error_at(
+                                "open ranges are spelled with '...': write 'a...' or 'a<...'",
+                                op,
+                            ),
                         );
                     };
                 },
@@ -266,6 +282,45 @@ given Parser {
                         .Some(expr),
                         .Some(rhs),
                         self.span_from_expr_start(expr),
+                    );
+                },
+                .Ellipsis() then {
+                    self.advance();
+                    if self.can_start_range_bound(self.current().kind) then {
+                        return .Error(
+                            self.parser_error_at_current(
+                                "a '...' range takes at most one bound; write 'a..b' for a closed range",
+                            ),
+                        );
+                    };
+                    expr = Expr.RangeExpr(
+                        RangeOperator.From(),
+                        .Some(expr),
+                        Option[Expr].None(),
+                        self.span_from_expr_start(expr),
+                    );
+                },
+                .LtEllipsis() then {
+                    self.advance();
+                    if self.can_start_range_bound(self.current().kind) then {
+                        return .Error(
+                            self.parser_error_at_current(
+                                "a '...' range takes at most one bound; write 'a..b' for a closed range",
+                            ),
+                        );
+                    };
+                    expr = Expr.RangeExpr(
+                        RangeOperator.FromOpen(),
+                        .Some(expr),
+                        Option[Expr].None(),
+                        self.span_from_expr_start(expr),
+                    );
+                },
+                .EllipsisLt() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "'...<' opens a range with no left bound; write '...<b'",
+                        ),
                     );
                 },
                 _ then {
@@ -903,6 +958,16 @@ given Parser {
                     ),
                 );
             };
+            if self.current().kind is .Ellipsis() then {
+                // `...` is the elision glyph (open ranges today, rest imports
+                // someday); it is never a name to import.
+                return .Error(
+                    self.parser_error_at(
+                        "\"...\" is not an import item; omit the list to import every visible member of \"\(specifier)\"",
+                        self.current(),
+                    ),
+                );
+            };
             let name_token = self.current();
             let name = self.expect_identifier("import item") or return;
 
@@ -1511,6 +1576,8 @@ let token_text(token Token) String = {
         .RangeLess() then "..<",
         .LessRange() then "<..",
         .LessRangeLess() then "<..<",
+        .EllipsisLt() then "...<",
+        .LtEllipsis() then "<...",
         .Arrow() then "->",
         .FatArrow() then "=>",
         .Bang() then "!",

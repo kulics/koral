@@ -1334,6 +1334,14 @@ extension Parser {
           message: "\"..\" is not an import item; omit the list to import every visible member of \"\(specifier)\""
         )
       }
+      if currentToken === .ellipsis {
+        // `...` is the elision glyph (open ranges today, rest imports someday);
+        // it is never a name to import.
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "\"...\" is not an import item; omit the list to import every visible member of \"\(specifier)\""
+        )
+      }
       guard case .identifier(let symbolName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "import item")
       }

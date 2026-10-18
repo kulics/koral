@@ -550,16 +550,6 @@ public struct CallArg {
         self.expression = expression
     self.span = span
     }
-
-  public init(defaultFill: Void = ()) {
-    self.label = nil
-    self.expression = nil
-    self.span = .unknown
-  }
-
-  public var isDefaultFill: Bool {
-    expression == nil
-  }
 }
 
 public struct PatternArg {

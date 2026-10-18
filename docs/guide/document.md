@@ -637,12 +637,18 @@ Range operators generate a range (Range), commonly used in loops or pattern matc
 1..<5;    // 1 <= x < 5  (Right open interval)
 1<..5;    // 1 < x <= 5  (Left open interval)
 1<..<5;   // 1 < x < 5   (Open interval)
-1..;      // 1 <= x      (Right unbounded, inclusive start)
-1<..;     // 1 < x       (Right unbounded, exclusive start)
-..5;      // x <= 5      (Left unbounded, inclusive end)
-..<5;     // x < 5       (Left unbounded, exclusive end)
-..;       // Full range
+1...;     // 1 <= x      (Right unbounded, inclusive start)
+1<...;    // 1 < x       (Right unbounded, exclusive start)
+...5;     // x <= 5      (Left unbounded, inclusive end)
+...<5;    // x < 5       (Left unbounded, exclusive end)
+...;      // Full range
 ```
+
+The `..` family is the connector: both bounds are written, always. The `...`
+family marks the elided bound — it stands where the missing bound would be, so
+a `...` range has at most one bound (`1...` is the range from 1 onward, `...5`
+the range up to 5, `...` the full range). The `<` always sits between the dots
+and the bound it excludes.
 
 These range operators construct `Range` values. They are distinct from chained comparison predicates such as `1 < x < 5`, which produce `Bool`.
 
@@ -677,7 +683,7 @@ Operator precedence from high to low:
 7. Bitwise XOR: `^`
 8. Bitwise OR: `|`
 9. Comparison: `==`, `<>`, `<`, `>`, `<=`, `>=`
-10. Range: `..`, `..<`, `<..`, `<..<`
+10. Range: `..`, `..<`, `<..`, `<..<` (closed); `...`, `...<`, `<...` (open)
 11. Pattern test: `is`, `is not`
 12. Logical NOT: `not`
 13. Flow layer, tightest to loosest: `and then`, then `or else` / `or return`
@@ -821,7 +827,7 @@ type Config(
     ch: Rune = 'A',
     items: List[Int] = [],
     flags: Dict[String, Int] = [],
-    span: Range[Int] = ..,
+    span: Range[Int] = ...,
 );
 ```
 
@@ -835,7 +841,7 @@ Supported default value literals:
 | String | `"hello"` |
 | Rune | `'A'` |
 | Empty collection | `[]` (List, Set, or Dict, inferred from type context) |
-| Empty range | `..` (resolves to `Range[T].Full()`) |
+| Empty range | `...` (resolves to `Range[T].Full()`) |
 
 The default value type must match the parameter type. For example, `name: String = 42` is an error.
 
@@ -1227,7 +1233,7 @@ Rules:
 
 - Positional fields must come before named fields.
 - Only named fields can have default values.
-- Default values must be literals: integer, float, bool, string, rune, `[]` (empty collection), or `..` (empty range).
+- Default values must be literals: integer, float, bool, string, rune, `[]` (empty collection), or `...` (empty range).
 - A `type` cannot declare `mutable` fields, and cannot be declared `mutable` itself (`type mutable` is the other declaration form).
 
 #### Construction

@@ -98,14 +98,17 @@ public type Token {
     // `=>` introduces a lambda body; `->` is the function-type arrow
     FatArrow(),
 
-    // Range operators
+    // Range operators. `..`-family: both bounds written (grammar.bnf
+    // <range-op>). `...`-family: at least one bound elided (<open-range-op>)
+    // -- `...` also stands for the elided rest in future rest patterns and
+    // variadic declarations; it is never a spread (see grammar.bnf).
     Range(),
     RangeLt(),
     LtRange(),
     LtRangeLt(),
-    // `...` exists only to reject it where an old default-fill spelling used
-    // to live; it is never a range operator (grammar.bnf <range-op>).
     Ellipsis(),
+    EllipsisLt(),
+    LtEllipsis(),
 
     // Delimiters
     LParen(),
@@ -217,6 +220,8 @@ given Token {
         .LtRange() then "<..",
         .LtRangeLt() then "<..<",
         .Ellipsis() then "...",
+        .EllipsisLt() then "...<",
+        .LtEllipsis() then "<...",
         .LParen() then "(",
         .RParen() then ")",
         .LBrace() then "{",
@@ -245,7 +250,8 @@ given Token {
     };
 
     public is_range_op(self) Bool = when self in {
-        .Range() or .RangeLt() or .LtRange() or .LtRangeLt() then true,
+        .Range() or .RangeLt() or .LtRange() or .LtRangeLt()
+            or .Ellipsis() or .EllipsisLt() or .LtEllipsis() then true,
         _ then false,
     };
 
@@ -342,6 +348,8 @@ given Token {
         .LtRange() then 72,
         .LtRangeLt() then 73,
         .Ellipsis() then 74,
+        .EllipsisLt() then 104,
+        .LtEllipsis() then 105,
         .LParen() then 78,
         .RParen() then 79,
         .LBrace() then 80,
@@ -1099,6 +1107,7 @@ given Tokenizer {
                     };
                     return .Some(.LShift());
                 };
+                // `<...` < `<..<` < `<..` < `<` -- maximal munch at `<`.
                 if Tokenizer.rune_eq(n, '.') then {
                     self.pos += 1;
                     if self.peek() is .Some(n2) then {
@@ -1108,6 +1117,10 @@ given Tokenizer {
                                 if Tokenizer.rune_eq(n3, '<') then {
                                     self.pos += 1;
                                     return .Some(.LtRangeLt());
+                                };
+                                if Tokenizer.rune_eq(n3, '.') then {
+                                    self.pos += 1;
+                                    return .Some(.LtEllipsis());
                                 };
                             };
                             return .Some(.LtRange());
@@ -1142,23 +1155,29 @@ given Tokenizer {
             return .Some(.Gt());
         };
 
-        // . .. ..< ...
-        // `...` is not a range operator: it exists only to reject the old
-        // default-fill spelling. `....` is `...` followed by `.`, and `...<`
-        // is `...` followed by `<` -- exactly the split koralc makes.
+        // . .. ..< ... ...<
+        // Maximal munch at `.`: `...<` > `...` > `..<` > `..` > `.`.
+        // `....` is `...` followed by `.`; a `..`-family operator is always a
+        // closed range (both bounds), a `...`-family operator never has two.
         if cp == 46 then {
             self.pos += 1;
             if self.peek() is .Some(n) then {
                 if Tokenizer.rune_eq(n, '.') then {
                     self.pos += 1;
                     if self.peek() is .Some(n2) then {
+                        if Tokenizer.rune_eq(n2, '.') then {
+                            self.pos += 1;
+                            if self.peek() is .Some(n3) then {
+                                if Tokenizer.rune_eq(n3, '<') then {
+                                    self.pos += 1;
+                                    return .Some(.EllipsisLt());
+                                };
+                            };
+                            return .Some(.Ellipsis());
+                        };
                         if Tokenizer.rune_eq(n2, '<') then {
                             self.pos += 1;
                             return .Some(.RangeLt());
-                        };
-                        if Tokenizer.rune_eq(n2, '.') then {
-                            self.pos += 1;
-                            return .Some(.Ellipsis());
                         };
                     };
                     return .Some(.Range());

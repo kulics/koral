@@ -874,8 +874,14 @@ given CstParser {
                 },
             };
         } else {
+            if self.peek() is .Range() then {
+                return .Error(
+                    "Parse error: open ranges are spelled with '...': write '...b', '...<b', or '...'",
+                );
+            };
             when self.peek() in {
-                .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse() or .Range() then {
+                .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse()
+                    or .Ellipsis() then {
                     value_tokens.push(self.eat());
                 },
                 _ then {
@@ -1313,9 +1319,11 @@ given CstParser {
     };
 
     file_private parse_range(self) Result[CstExpr] = {
-        // Prefix range: ..b, ..<b, ..
+        // Prefix ranges: `...b`, `...<b`, `...`. `<...` is postfix-only: its
+        // `<` hugs the left bound. The `..` family is always closed (both
+        // bounds written); a missing bound is spelled with `...`.
         when self.peek() in {
-            .Range() then {
+            .Ellipsis() then {
                 let op = self.eat();
                 if self.can_start_range_bound() then {
                     let right = when self.parse_comparison() in {
@@ -1328,7 +1336,7 @@ given CstParser {
                 };
                 return .Ok(.RangeExpr(.None(), op, .None()));
             },
-            .RangeLt() then {
+            .EllipsisLt() then {
                 let op = self.eat();
                 let right = when self.parse_comparison() in {
                     .Ok(e) then e,
@@ -1337,6 +1345,16 @@ given CstParser {
                     },
                 };
                 return .Ok(.RangeExpr(.None(), op, .Some(right)));
+            },
+            .Range() or .RangeLt() then {
+                return .Error(
+                    "Parse error: open ranges are spelled with '...': write '...b', '...<b', or '...'",
+                );
+            },
+            .LtEllipsis() then {
+                return .Error(
+                    "Parse error: '<...' follows a range bound; write 'a<...'",
+                );
             },
             _ then {},
         };
@@ -1360,7 +1378,9 @@ given CstParser {
                     };
                     return .Ok(.RangeExpr(.Some(left), op, .Some(right)));
                 };
-                return .Ok(.RangeExpr(.Some(left), op, .None()));
+                return .Error(
+                    "Parse error: open ranges are spelled with '...': write 'a...' or 'a<...'",
+                );
             },
             .RangeLt() or .LtRangeLt() then {
                 let op = self.eat();
@@ -1383,7 +1403,23 @@ given CstParser {
                     };
                     return .Ok(.RangeExpr(.Some(left), op, .Some(right)));
                 };
+                return .Error(
+                    "Parse error: open ranges are spelled with '...': write 'a...' or 'a<...'",
+                );
+            },
+            .Ellipsis() or .LtEllipsis() then {
+                let op = self.eat();
+                if self.can_start_range_bound() then {
+                    return .Error(
+                        "Parse error: a '...' range takes at most one bound; write 'a..b' for a closed range",
+                    );
+                };
                 return .Ok(.RangeExpr(.Some(left), op, .None()));
+            },
+            .EllipsisLt() then {
+                return .Error(
+                    "Parse error: '...<' opens a range with no left bound; write '...<b'",
+                );
             },
             _ then {
                 return .Ok(left);
@@ -1959,11 +1995,6 @@ given CstParser {
                 leading_comments.push(self.eat());
             };
             let before = self.pos;
-            if self.check(.Ellipsis()) then {
-                return .Error(
-                    "Parse error: Default-fill '...' is not supported; use named parameter defaults instead",
-                );
-            };
             let mutable label = Option[Token].None();
             let mutable colon = Option[Token].None();
             if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
@@ -3654,6 +3685,11 @@ given CstParser {
                 if tokens[i] is .Range() then {
                     return .Error(
                         "Parse error: '..' is not an import item; omit the list to import every visible member",
+                    );
+                };
+                if tokens[i] is .Ellipsis() then {
+                    return .Error(
+                        "Parse error: '...' is not an import item; omit the list to import every visible member",
                     );
                 };
                 return .Error(

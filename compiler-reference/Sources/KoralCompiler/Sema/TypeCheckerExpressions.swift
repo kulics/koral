@@ -2104,9 +2104,6 @@ extension TypeChecker {
       return resolvedSubscript
 
     case .genericMethodCall(let baseExpr, let methodTypeArgs, let methodName, let arguments, _):
-      if arguments.contains(where: { $0.expression == nil }) {
-        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
-      }
       return try inferGenericMethodCallExpression(
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
@@ -2115,9 +2112,6 @@ extension TypeChecker {
       )
 
     case .qualifiedMethodCall(let base, let traitType, let methodName, let arguments, _):
-      if arguments.contains(where: { $0.expression == nil }) {
-        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
-      }
       return try inferQualifiedMethodCallExpression(
         base: base,
         traitType: traitType,
@@ -2127,9 +2121,6 @@ extension TypeChecker {
       )
 
     case .qualifiedGenericMethodCall(let base, let traitType, let methodTypeArgs, let methodName, let arguments, _):
-      if arguments.contains(where: { $0.expression == nil }) {
-        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
-      }
       return try inferQualifiedMethodCallExpression(
         base: base,
         traitType: traitType,
@@ -2142,9 +2133,6 @@ extension TypeChecker {
       return try inferMemberPathExpression(baseExpr: baseExpr, path: path)
 
     case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments, _):
-      if arguments.contains(where: { $0.expression == nil }) {
-        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
-      }
       return try inferStaticMethodCallExpression(
         typeName: typeName,
         typeArgs: typeArgs,
@@ -2503,7 +2491,7 @@ extension TypeChecker {
       )
     case .range:
       throw SemanticError(
-        .generic("Range literal '..' cannot be used as a collection literal"),
+        .generic("Range literal '...' cannot be used as a collection literal"),
         span: span
       )
     }
@@ -2862,9 +2850,6 @@ extension TypeChecker {
     expectedType: Type?,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
-    if callArgs.contains(where: { $0.isDefaultFill && $0.expression != nil }) {
-      throw SemanticError(.generic("Invalid default-fill argument"), span: currentSpan)
-    }
     let arguments = callArgs.compactMap { $0.expression }
     // 1. Check if we have an expected type
     guard let expected = expectedType else {
@@ -8145,7 +8130,7 @@ extension TypeChecker {
       if let eet = expectedElementType {
         elementType = eet
       } else {
-        throw SemanticError(.generic("Full range '..' requires type annotation or context type"), span: currentSpan)
+        throw SemanticError(.generic("Full range '...' requires type annotation or context type"), span: currentSpan)
       }
     }
     

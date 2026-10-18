@@ -58,12 +58,6 @@ extension Parser {
     }
 
   private func rejectNonConstructorCallSyntax(arguments: [CallArg], span: SourceSpan) throws {
-    if arguments.contains(where: { $0.isDefaultFill }) {
-      throw ParserError.unexpectedToken(
-        span: span,
-        got: "Default-fill '...' is not supported; use named parameter defaults instead"
-      )
-    }
     // Named labels are now allowed for all calls (functions, methods, constructors)
   }
 
@@ -677,10 +671,11 @@ extension Parser {
   
   /// Range expressions: a..b, a..<b, a<..b, a<..<b, a.., a<.., ..b, ..<b, ..
   private func parseRangeExpression() throws -> ExpressionNode {
-    // Handle prefix range operators: ..b, ..<b, ..
-    if currentToken === .range {
+    // Prefix ranges: `...b`, `...<b`, `...` -- the `...` marks the elided
+    // left bound (grammar.bnf <open-range-op>).
+    if currentToken === .ellipsis {
       let opSpan = currentSpan
-      try match(.range)
+      try match(.ellipsis)
       if canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .to, left: nil, right: right,
@@ -689,46 +684,90 @@ extension Parser {
       return .rangeExpression(operator: .full, left: nil, right: nil,
                               span: SourceSpan(start: opSpan.start, end: opSpan.end))
     }
-    if currentToken === .rangeLess {
+    if currentToken === .ellipsisLess {
       let opSpan = currentSpan
-      try match(.rangeLess)
+      try match(.ellipsisLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .toOpen, left: nil, right: right,
                               span: SourceSpan(start: opSpan.start, end: right.span.end))
     }
-    
+    if currentToken === .range || currentToken === .rangeLess {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "open ranges are spelled with '...': write '...b', '...<b', or '...'"
+      )
+    }
+    if currentToken === .lessEllipsis {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'<...' follows a range bound; write 'a<...'"
+      )
+    }
+
     let left = try parseComparisonExpression()
-    
-    // Handle infix and postfix range operators
+
+    // Infix and postfix range operators. `..`-family operators take both
+    // bounds; `...`-family operators elide one and never take the other.
     switch currentToken {
-    case .range:  // ..
+    case .range:  // a..b
+      let closedOpSpan = currentSpan
       try match(.range)
-      if canStartRangeBound() {
-        let right = try parseComparisonExpression()
-        return .rangeExpression(operator: .closed, left: left, right: right,
-                                span: SourceSpan(start: left.span.start, end: right.span.end))
+      guard canStartRangeBound() else {
+        throw ParserError.rejectedConstruct(
+          span: closedOpSpan,
+          message: "open ranges are spelled with '...': write 'a...' or 'a<...'"
+        )
       }
-      return .rangeExpression(operator: .from, left: left, right: nil,
-                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
-    case .rangeLess:  // ..<
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .closed, left: left, right: right,
+                              span: SourceSpan(start: left.span.start, end: right.span.end))
+    case .rangeLess:  // a..<b
       try match(.rangeLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .closedOpen, left: left, right: right,
                               span: SourceSpan(start: left.span.start, end: right.span.end))
-    case .lessRange:  // <..
+    case .lessRange:  // a<..b
+      let openClosedOpSpan = currentSpan
       try match(.lessRange)
-      if canStartRangeBound() {
-        let right = try parseComparisonExpression()
-        return .rangeExpression(operator: .openClosed, left: left, right: right,
-                                span: SourceSpan(start: left.span.start, end: right.span.end))
+      guard canStartRangeBound() else {
+        throw ParserError.rejectedConstruct(
+          span: openClosedOpSpan,
+          message: "open ranges are spelled with '...': write 'a...' or 'a<...'"
+        )
       }
-      return .rangeExpression(operator: .fromOpen, left: left, right: nil,
-                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
-    case .lessRangeLess:  // <..<
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .openClosed, left: left, right: right,
+                              span: SourceSpan(start: left.span.start, end: right.span.end))
+    case .lessRangeLess:  // a<..<b
       try match(.lessRangeLess)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .open, left: left, right: right,
                               span: SourceSpan(start: left.span.start, end: right.span.end))
+    case .ellipsis:  // a...
+      try match(.ellipsis)
+      if canStartRangeBound() {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "a '...' range takes at most one bound; write 'a..b' for a closed range"
+        )
+      }
+      return .rangeExpression(operator: .from, left: left, right: nil,
+                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
+    case .lessEllipsis:  // a<...
+      try match(.lessEllipsis)
+      if canStartRangeBound() {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "a '...' range takes at most one bound; write 'a..b' for a closed range"
+        )
+      }
+      return .rangeExpression(operator: .fromOpen, left: left, right: nil,
+                              span: SourceSpan(start: left.span.start, end: currentSpan.end))
+    case .ellipsisLess:  // ...<b has no left bound
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "'...<' opens a range with no left bound; write '...<b'"
+      )
     default:
       return left
     }
@@ -1142,17 +1181,6 @@ extension Parser {
 
   /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
   private func parseCallArgument() throws -> CallArg {
-    if currentToken === .ellipsis {
-      // `...` is a removed language feature, so it is rejected HERE, at the
-      // token, as syntax. Letting it through to the type checker moved the
-      // complaint to whatever call the argument belonged to and relabelled it
-      // a semantic error; the reader was pointed at a callee instead of at the
-      // `...` they have to delete.
-      throw ParserError.rejectedConstruct(
-        span: currentSpan,
-        message: "Default-fill '...' is not supported; use named parameter defaults instead")
-    }
-
     // A bounded two-token shape rule decides named vs positional: a lower-first
     // `ident` immediately followed by `:`. Once that matches, the argument IS
     // labeled -- `ident : …` can never be a positional argument (there is no

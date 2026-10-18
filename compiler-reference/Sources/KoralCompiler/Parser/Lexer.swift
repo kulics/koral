@@ -106,6 +106,8 @@ public enum Token: CustomStringConvertible {
   case rangeLess  // '..<'
   case lessRange  // '<..'
   case lessRangeLess  // '<..<'
+  case ellipsisLess // '...<'
+  case lessEllipsis // '<...'
   case selfKeyword // 'self' keyword
   case selfTypeKeyword // 'Self' keyword
   case returnKeyword // 'return' keyword
@@ -173,6 +175,8 @@ public enum Token: CustomStringConvertible {
     case (.ampersandEqual, .ampersandEqual), (.pipeEqual, .pipeEqual), (.caretEqual, .caretEqual), (.leftShiftEqual, .leftShiftEqual), (.rightShiftEqual, .rightShiftEqual):
       return true
     case (.range, .range), (.rangeLess, .rangeLess), (.lessRange, .lessRange), (.lessRangeLess, .lessRangeLess):
+      return true
+    case (.ellipsisLess, .ellipsisLess), (.lessEllipsis, .lessEllipsis):
       return true
     case (.selfKeyword, .selfKeyword):
       return true
@@ -370,6 +374,10 @@ public enum Token: CustomStringConvertible {
       return "<.."
     case .lessRangeLess:
       return "<..<"
+    case .ellipsisLess:
+      return "...<"
+    case .lessEllipsis:
+      return "<..."
     case .bang:
       return "!"
     case .deferKeyword:
@@ -1517,6 +1525,9 @@ public class Lexer {
                 if nextNextNextChar == "<" {
                   return .lessRangeLess
                 }
+                if nextNextNextChar == "." {
+                  return .lessEllipsis
+                }
                 unreadChar(nextNextNextChar)
               }
               return .lessRange
@@ -1556,6 +1567,12 @@ public class Lexer {
         if nextChar == "." {
           if let nextNextChar = getNextChar() {
             if nextNextChar == "." {
+              if let nextNextNextChar = getNextChar() {
+                if nextNextNextChar == "<" {
+                  return .ellipsisLess
+                }
+                unreadChar(nextNextNextChar)
+              }
               return .ellipsis
             }
             if nextNextChar == "<" {

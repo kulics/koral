@@ -1179,9 +1179,9 @@ given[T Any] List[T] {
     public count(self) UInt;
     public reserve(self, additional UInt) Void;
     public push(self, value T) Void;
-    public push_list(self, other List[T], span: Range[UInt] = ..) Void;
+    public push_list(self, other List[T], span: Range[UInt] = ...) Void;
     public pop(self) Option[T];
-    public insert_list_at(self, index UInt, other List[T], span: Range[UInt] = ..) Void;
+    public insert_list_at(self, index UInt, other List[T], span: Range[UInt] = ...) Void;
     public insert_at(self, index UInt, value T) Void;
     public remove_at(self, index UInt) Void;
     public take_at(self, index UInt) T;
@@ -1625,7 +1625,7 @@ given StringBuilder {
     public count(self) UInt;
     public is_empty(self) Bool;
     public push_byte(self, value UInt8) Void;
-    public push_string(self, other String, span: Range[UInt] = ..) Void;
+    public push_string(self, other String, span: Range[UInt] = ...) Void;
     public push_rune(self, rune Rune) Void;
     public clear(self) Void;
     public to_string(self) String;
