@@ -282,7 +282,7 @@ Declaration qualifiers sit **immediately after the keyword** — the slot `type 
 - `type foreign` for opaque or layout-compatible C types
 - `let intrinsic` / `type intrinsic` for declarations built into the compiler (standard library only)
 - Native library linking is configured in `koral.json` / `std/koral.json` via `links`, not via source syntax
-- Raw pointers: `*T` (read-only), `*mutable T` (read-write); formed with `- Raw pointers: `*unsafe T` (read-only), `*unsafe mutable T` (read-write); formed with `&unsafe` / `&unsafe mutable`` / `- Raw pointers: `*unsafe T` (read-only), `*unsafe mutable T` (read-write); formed with `&unsafe` / `&unsafe mutable`mutable`
+- Raw pointers: `*T` (read-only), `*mutable T` (read-write); formed with `&` / `&mutable`
 - Weak references: `?T` (requires `mutable` constraint); `?T(x)` constructs, `?expr` upgrades to `Option[T]`
 
 ## Standard Library Overview
