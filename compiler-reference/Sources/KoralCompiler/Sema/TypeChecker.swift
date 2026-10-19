@@ -324,6 +324,10 @@ public class TypeChecker {
   /// extension and cannot hold stored properties.
   var importedNameBindings: [String: DefId?] = [:]
 
+  /// std's root module, resolved once. `nil` under `--no-std`, where there is
+  /// no prelude to collide with. Used by the §3.3 import-collision check.
+  var stdRootModulePath: [String]? = nil
+
 
   func beginSpeculativeQuery() {
     speculativeQueryDepth += 1

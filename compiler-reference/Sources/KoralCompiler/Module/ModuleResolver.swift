@@ -122,7 +122,7 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "Module '\(name)' does not exist in package '\(packageName)'; declared modules: \(declaredList)"
         case .noMainModule(let packageName, let declared, _):
             let declaredList = declared.isEmpty ? "<none>" : declared.sorted().joined(separator: ", ")
-            return "Package '\(packageName)' has no main module; write its subpath instead; declared modules: \(declaredList)"
+            return "Package '\(packageName)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declaredList)"
         case .invalidModuleSpecifier(let specifier, _):
             return "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments"
         case .fileMergeWithList(let specifier, _):
@@ -193,34 +193,6 @@ public func validateModuleFileName(_ filename: String) -> String? {
     return nil
 }
 
-/// 验证代码中的模块名是否合法（PascalCase）
-public func validateModuleIdentifier(_ name: String) -> String? {
-    guard !name.isEmpty else {
-        return "Module name cannot be empty"
-    }
-
-    let chars = Array(name)
-    guard let first = chars.first else {
-        return "Module name cannot be empty"
-    }
-
-    guard first >= "A" && first <= "Z" else {
-        return "Module name must start with an uppercase letter (A-Z)"
-    }
-
-    for char in chars {
-        let isUppercaseLetter = char >= "A" && char <= "Z"
-        let isLowercaseLetter = char >= "a" && char <= "z"
-        let isDigit = char >= "0" && char <= "9"
-
-        if !isUppercaseLetter && !isLowercaseLetter && !isDigit {
-            return "Module name can only contain letters (A-Z, a-z) and digits (0-9)"
-        }
-    }
-
-    return nil
-}
-
 public func moduleFileNameToIdentifier(_ filename: String) -> String {
     filename
         .split(separator: "_")
@@ -247,6 +219,12 @@ public func moduleIdentifierToFileName(_ identifier: String) -> String {
         }
     }
     return result
+}
+
+/// 模块路径渲染成 `using` 里的说明符拼写：`["Std", "Time"]` -> `std/time`。
+/// 诊断要给出用户写得出的那行代码，而不是内部标识符拼接。
+public func modulePathToUsingSpecifier(_ modulePath: [String]) -> String {
+    modulePath.map { moduleIdentifierToFileName($0) }.joined(separator: "/")
 }
 
 // MARK: - Module Info

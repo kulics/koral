@@ -24,8 +24,8 @@ public enum VisibilityError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .symbolNotImported(let symbol, let modulePath):
-            let path = modulePath.joined(separator: "::")
-            return "'\(symbol)' is defined in module '\(path)'. Import it explicitly with using \(path) { \(symbol) }."
+            let spec = modulePathToUsingSpecifier(modulePath)
+            return "'\(symbol)' is defined in module '\(spec)'. Import it explicitly with using \"\(spec)\" { \(symbol) };"
         case .notAccessible(let symbol, let reason):
             return "Cannot access '\(symbol)': \(reason)"
         case .genericParameterNoPrefix(let name):
@@ -61,8 +61,8 @@ public class VisibilityChecker {
     /// 可以直接访问的情况：
     /// 1. 符号是泛型参数
     /// 2. 符号来自同一模块
-    /// 3. 符号通过 `using module::path { .. }` 引入
-    /// 4. 符号通过 `using module::path { Symbol }` 引入
+    /// 3. 符号通过 `using "std";`（导入全部可见成员）引入
+    /// 4. 符号通过 `using "std/io" { Symbol }` 引入
     /// 
     /// 不允许直接访问的情况：
     /// 1. 符号来自未显式导入的其它模块
@@ -306,7 +306,7 @@ public class VisibilityChecker {
         symbolModulePath: [String],
         currentModulePath: [String]
     ) -> String {
-        let modulePath = symbolModulePath.joined(separator: "::")
-        return "'\(symbolName)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(symbolName) }."
+        let spec = modulePathToUsingSpecifier(symbolModulePath)
+        return "'\(symbolName)' is defined in module '\(spec)'. Import it explicitly with using \"\(spec)\" { \(symbolName) };"
     }
 }

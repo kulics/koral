@@ -307,6 +307,39 @@ Pointer types use the same spelling as type annotations: `* Int(p)`,
 `*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
 and `String(x)` are errors (`Type does not support cast`).
 
+#### String ↔ Number
+
+Converting between text and numbers is not a cast — there is no numeric
+relationship to exploit. It goes through `std/text`, which defines three
+traits: `Parseable` (`parse`), `RadixParseable` (`parse_radix`) and
+`Formattable` (`format`).
+
+```koral
+using "std/text";
+
+// String -> number: a static method on the target type, returning Result[Self]
+let n = Int.parse("42") or else 0;            // 42
+let f = Float64.parse("3.14") or else 0.0;    // 3.14
+let b = Int.parse_radix("ff", 16) or else 0;  // 255
+
+// number -> String
+let s = 42.to_string();                       // "42"
+
+// number -> String with a format spec
+let hex = 255.format("x");                    // "ff"
+let fixed = 3.14159.format(".2f");            // "3.14"
+let sci = 1500.0.format(".2e");               // "1.50e3"
+```
+
+`parse` rejects anything it cannot make sense of, so it hands back a
+`Result` rather than a best-effort number — `Int.parse("abc")` is
+`.Error`, not `0`. Integer types implement `RadixParseable` for bases
+2–36; floats parse decimal, `nan`, `inf` and `-inf` only.
+
+There are no free-function conversions in `std` — no `parse_int`, `to_int`
+or `to_string(x)`. Use `T.parse(s)`, `parse_radix`, `.to_string()` and
+`.format(spec)`.
+
 #### Strings
 
 In Koral, strings are used to represent text data. `String` type is a UTF-8 encoded character sequence.
@@ -538,7 +571,7 @@ Examples:
 ```koral
 let load(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 
 let increment() Int = {
@@ -1191,7 +1224,7 @@ let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 ```
 
@@ -1496,13 +1529,13 @@ A bound-constrained extension block only contributes members where the bound
 actually holds. Given
 
 ```koral
-given[T Add[T] and Zero] Iterator[T] {
+given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
     public sum(self) T = { ... };
 };
 ```
 
-`sum` is a member of `Iterator[T]` only for `T` that satisfy `Add[T] and Zero`.
-`Pair[A, B]` satisfies neither, so `Iterator[Pair[A, B]]` does not acquire `sum`,
+`sum` is a member of `LazyView` only for `T` that satisfy `Add[T] and Zero`.
+A pipeline over `Pair[A, B]` satisfies neither, so it does not acquire `sum`,
 and a call to it there is a type error. Constraints that are still open are not
 rejections: for a generic conformance such as
 `given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T]`, `T` may still
@@ -1927,6 +1960,49 @@ if opt is .Some(v) and v > 0 then {
     println(v);
 };
 ```
+
+### Lazy Pipelines
+
+Iteration splits into two roles:
+
+- **`Iterator[T]`** is a **cursor**. It is one-shot and has exactly one method,
+  `next(self) Option[T]`. Nothing on it observes without advancing, so no call
+  can quietly spend it while pretending to ask a question. Handing a cursor to
+  `for` walks it to the end.
+- **`Iterable[T, R]`** can hand out a **fresh cursor on every call**
+  (`iterator(self) R`): containers, ranges, and every lazy pipeline.
+
+A lazy pipeline is entered through `lazy()` and never leaves: it returns a
+`LazyView`, and each adapter returns another `LazyView`, so a chain is written
+once and never repeats `lazy()`. Nothing lazy is spelled on the container
+itself — `dict.take(key)`, `string.find(pat)`, `list.first()` and friends keep
+the container's own meaning, and names like `map`, `filter`, `to_list` and
+`collect` on a container are left free for a future eager API.
+
+```koral
+let view = list.lazy().filter((x) => x > 0).map((x) => x * 2);
+
+view.count();        // builds a cursor, walks it, drops it
+view.is_empty();     // looks at one element, drops the cursor
+view.into_list();    // [2, 4, 6]
+view.count();        // 3 -- the pipeline was never spent
+
+list.count();        // the container's own O(1) count
+```
+
+`lazy()` is a door, not a wrapper: `list.lazy().lazy()` is `list.lazy()`, not a
+nesting. A `LazyView` is a value — nothing in it mutates — so binding one to a
+name and using it twice agrees with itself.
+
+Its signature is `LazyView[T, R]`: the element type and the cursor type
+`lazy()` will hand out. It holds a cursor factory rather than a source, so the
+chain does not pick up a type parameter per stage and no per-stage view type
+exists. The cursor that comes out is an ordinary monomorphized `Iterator`, so
+`next` on it is a direct call.
+
+A cursor is a different thing: `list.iterator()` names one position, and
+pulling from it advances it. To run a pipeline over a one-shot source (a file's
+lines, a socket), collect it into a list first.
 
 ### Conditions and Loop Bindings
 
@@ -2403,8 +2479,8 @@ The `given` block can also be used to directly add methods to types:
 ```koral
 given Point {
     public distance(self) Float64 = {
-        let dx = self.x(Float64);
-        let dy = self.y(Float64);
+        let dx = Float64(self.x);
+        let dy = Float64(self.y);
         return dx + dy; // ...
     };
 
@@ -2424,7 +2500,8 @@ The most commonly used core traits are:
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
 - `Clone`: explicit shallow copy (`clone(self) Self`).
-- `Iterator[T]`: iteration protocol (`next(self) Option[T]`).
+- `Iterator[T]`: iteration protocol — a one-shot cursor (`next(self) Option[T]`), and nothing else.
+- `Iterable[T, R]`: can hand out a fresh cursor on every call (`iterator(self) R`). Enter a lazy pipeline with `lazy()`, which returns a `LazyView`.
 - `Error`: error message interface (`message(self) String`).
 - `Drop`: destructor hook (`drop(self) Void`).
 
@@ -2527,6 +2604,32 @@ using "std/io" { Reader as IoReader }; // per-name alias
 4. Imported names are file-local bindings and are not re-exported;
 5. A name collision is an error; `as` disambiguates. When an import-all collides
    with a local declaration, switch to an explicit list.
+
+##### Name Collisions
+
+A spelling has **one** owner. A second, *different* owner under the same
+spelling is the clash. Identity is the declaration, not the name — so the same
+declaration arriving twice is never a clash.
+
+| The import's name vs… | Result |
+| --- | --- |
+| a top-level declaration in this module | **error** |
+| another import in this file, different declaration | **error** |
+| the prelude (`std`'s root: `List`, `Eq`, `Clone`, …), different declaration | **error** |
+| the same declaration arriving again (two files of one module each `using "std";`) | fine |
+| a local `let` inside a function | fine — nested shadowing is legal |
+
+The fix depends on which form the import has: an import-all cannot be renamed,
+so switch to an explicit list; an explicit item can take `as`. The diagnostic
+says which.
+
+```koral
+using "game/render" { List };        // error: the prelude already owns `List`
+using "game/render" { List as RList };  // fine
+
+using "game/render";                 // error if `render` exports a `List`
+using "game/render" { Sprite };      // fine
+```
 
 #### Resolution
 
@@ -2745,7 +2848,7 @@ let doubled = Option[Int].Some(21) and then it * 2;
 // or return
 let read_number(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 
 // Result (error side is Error trait object)

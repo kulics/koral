@@ -48,7 +48,7 @@ public enum PackageManifestError: Error, CustomStringConvertible {
       return "Module '\(name)' does not exist in package '\(packageName)'; declared modules: \(declaredList)"
     case .noMainModule(let packageName, let declared):
       let declaredList = declared.isEmpty ? "<none>" : declared.sorted().joined(separator: ", ")
-      return "Package '\(packageName)' has no main module; write its subpath instead; declared modules: \(declaredList)"
+      return "Package '\(packageName)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declaredList)"
     case .duplicatePackageName(let name):
       return "Package name '\(name)' is registered twice"
     case .duplicateDependencySource(let source, let first, let second):

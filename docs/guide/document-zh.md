@@ -306,6 +306,36 @@ let d UInt8 = UInt8(255);      // Int -> UInt8
 指针类型与类型标注同拼写：`* Int(p)`、`*mutable T(q)`。
 只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
+#### 字符串 ↔ 数值
+
+文本与数值之间的转换不是转型——两者之间没有可利用的数值关系。它走 `std/text`，
+由三个 trait 承担：`Parseable`（`parse`）、`RadixParseable`（`parse_radix`）与
+`Formattable`（`format`）。
+
+```koral
+using "std/text";
+
+// 字符串 -> 数值：目标类型上的静态方法，返回 Result[Self]
+let n = Int.parse("42") or else 0;            // 42
+let f = Float64.parse("3.14") or else 0.0;    // 3.14
+let b = Int.parse_radix("ff", 16) or else 0;  // 255
+
+// 数值 -> 字符串
+let s = 42.to_string();                       // "42"
+
+// 数值 -> 字符串，带格式说明符
+let hex = 255.format("x");                    // "ff"
+let fixed = 3.14159.format(".2f");            // "3.14"
+let sci = 1500.0.format(".2e");               // "1.50e3"
+```
+
+`parse` 会拒绝它认不出来的输入，因此返回 `Result` 而不是尽力而为的数字——
+`Int.parse("abc")` 是 `.Error`，不是 `0`。整数类型实现 `RadixParseable`，
+支持 2–36 进制；浮点只接受十进制、`nan`、`inf` 与 `-inf`。
+
+`std` 中没有自由函数形式的转换——没有 `parse_int`、`to_int`、`to_string(x)`。
+用 `T.parse(s)`、`parse_radix`、`.to_string()` 和 `.format(spec)`。
+
 #### 字符串
 
 在 Koral 中，字符串用于表示文本数据。`String` 类型是 UTF-8 编码的字符序列。
@@ -532,7 +562,7 @@ a = 2;  // 合法
 ```koral
 let load(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 
 let increment() Int = {
@@ -1175,7 +1205,7 @@ let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 ```
 
@@ -1467,12 +1497,12 @@ let read_bytes[T foreign](buf List[T]) * T = buf.borrow_ptr();
 带约束的扩展块只在约束真正成立的类型上贡献成员。给定
 
 ```koral
-given[T Add[T] and Zero] Iterator[T] {
+given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
     public sum(self) T = { ... };
 };
 ```
 
-`sum` 只是那些满足 `Add[T] and Zero` 的 `Iterator[T]` 的成员。`Pair[A, B]` 两者都不满足，因此 `Iterator[Pair[A, B]]` 上没有 `sum`，在那里调用它是类型错误。仍未确定的约束不算拒绝：对 `given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T]` 这样的泛型实现，`T` 仍可能变成 `Int`，所以 `sum` 依旧可用，并在每个调用点再次检查。
+`sum` 只是那些 `T` 满足 `Add[T] and Zero` 的 `LazyView` 的成员。`Pair[A, B]` 两者都不满足，因此以它为元素的管线上没有 `sum`，在那里调用它是类型错误。仍未确定的约束不算拒绝：对 `given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T]` 这样的泛型实现，`T` 仍可能变成 `Int`，所以 `sum` 依旧可用，并在每个调用点再次检查。
 
 #### 泛型方法
 
@@ -1869,6 +1899,42 @@ if opt is .Some(v) and v > 0 then {
     println(v);
 };
 ```
+
+### 惰性管线
+
+迭代分成两个角色：
+
+- **`Iterator[T]`** 是**游标**。一次性，只有一个方法 `next(self) Option[T]`。
+  上面没有任何"只问不推进"的观察方法，所以没有哪个调用能在提问的同时偷偷把它花掉。
+  把游标交给 `for` 会一路走到尽头。
+- **`Iterable[T, R]`** 每次调用都能给出一个**新的游标**（`iterator(self) R`）：
+  容器、范围，以及每一条惰性管线。
+
+惰性管线从 `lazy()` 进入后就不再离开：它返回 `LazyView`，每个适配器再返回一个
+`LazyView`，所以一条链只写一次 `lazy()`。容器面上不写任何惰性名字——
+`dict.take(key)`、`string.find(pat)`、`list.first()` 等等各自回到类型自己的语义，
+`map`、`filter`、`to_list`、`collect` 这些名字在容器面上留空，给将来的 eager API。
+
+```koral
+let view = list.lazy().filter((x) => x > 0).map((x) => x * 2);
+
+view.count();        // 造游标、走完、丢弃
+view.is_empty();     // 看一个元素，丢掉游标
+view.into_list();    // [2, 4, 6]
+view.count();        // 3 —— 管线从未被花掉
+
+list.count();        // 容器自己的 O(1) count
+```
+
+`lazy()` 是一扇门，不是一层包装：`list.lazy().lazy()` 就是 `list.lazy()`，不会套娃。
+`LazyView` 是值——它内部没有任何东西被修改——所以把它绑到名字上用两次，结果总是自洽。
+
+它的签名是 `LazyView[T, R]`：元素类型，加上 `lazy()` 会给出的游标类型。它持有的是
+**游标工厂**而不是源，所以链条不会每多一级就多一个类型参数，也不存在逐级的视图类型。
+拿出来的游标是普通的单态化 `Iterator`，`next` 是直接调用。
+
+游标是另一回事：`list.iterator()` 指着一个位置，拉取会推进它。要对一次性源
+（文件行、网络流）跑管线，先收集成 List。
 
 ### 条件与循环绑定
 
@@ -2345,8 +2411,8 @@ dealloc_memory(p);
 ```koral
 given Point {
     public distance(self) Float64 = {
-        let dx = self.x(Float64);
-        let dy = self.y(Float64);
+        let dx = Float64(self.x);
+        let dy = Float64(self.y);
         return dx + dy; // ...
     };
 
@@ -2366,7 +2432,8 @@ let p = Point.origin();
 - `Hash`：dict/set 键的哈希支持。
 - `ToString`：转换为字符串。
 - `Clone`：显式浅拷贝（`clone(self) Self`）。
-- `Iterator[T]`：迭代协议（`next(self) Option[T]`）。
+- `Iterator[T]`：迭代协议——一次性游标，只有 `next(self) Option[T]` 一个方法，再无其它。
+- `Iterable[T, R]`：每次调用都能给出一个新游标（`iterator(self) R`）。惰性管线从 `lazy()` 进入，返回 `LazyView`。
 - `Error`：错误消息接口（`message(self) String`）。
 - `Drop`：析构钩子（`drop(self) Void`）。
 
@@ -2455,6 +2522,30 @@ using "std/io" { Reader as IoReader }; // 逐项别名
    导入 `Reader` 后写 `Reader`，不写 `io.Reader`；
 4. 被导入的名字是文件局部绑定，不自动再导出；
 5. 同名冲突报错，用 `as` 消歧；import-all 与本模块定义重名时只能改成显式列表。
+
+##### 同名冲突
+
+一个拼写只有**一个**属主。同一个拼写下出现第二个*不同的*属主，就是冲突。
+判据是**声明**而不是名字——同一个声明再进来一次永远不算冲突。
+
+| 导入名与…… | 结果 |
+| --- | --- |
+| 本模块的顶层定义 | **报错** |
+| 本文件另一条导入（不同声明） | **报错** |
+| prelude（`std` 根模块：`List`、`Eq`、`Clone` …），不同声明 | **报错** |
+| 同一声明再次到达（同模块两个文件各写 `using "std";`） | 放行 |
+| 函数体内的局部 `let` | 放行——嵌套遮蔽合法 |
+
+改法取决于导入的写法：import-all 不能改名，只能换成显式列表；显式项可以用 `as`。
+诊断里会写明是哪一种。
+
+```koral
+using "game/render" { List };           // 报错：prelude 已经占着 `List`
+using "game/render" { List as RList };  // 可以
+
+using "game/render";                    // 若 render 导出 `List` 则报错
+using "game/render" { Sprite };         // 可以
+```
 
 #### 解析
 
@@ -2664,7 +2755,7 @@ let doubled = Option[Int].Some(21) and then it * 2;
 // or return
 let read_number(path String) Result[Int] = {
     let text = read_text_file(path) or return;
-    return parse_int(text);
+    return Int.parse(text);
 };
 
 // Result（错误侧是 Error trait object）

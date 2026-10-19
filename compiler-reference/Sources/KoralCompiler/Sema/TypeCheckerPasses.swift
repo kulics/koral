@@ -547,6 +547,48 @@ extension TypeChecker {
     }
   }
 
+  /// The prelude is a real import -- one the language writes for you -- so it
+  /// OWNS its names exactly like a written `using` does. Without this, an
+  /// import could quietly take `List` or `Eq` away from the reader.
+  ///
+  /// Reaches the DECLARATION through `defIdMap`, not through `moduleSymbols`:
+  /// generic templates and intrinsic types never land in the public-symbol
+  /// table, and `List` is exactly the name worth protecting.
+  private func preludeDeclaration(named name: String) -> DefId? {
+    let root: [String]
+    if let known = stdRootModulePath {
+      root = known
+    } else {
+      var found: [String]? = nil
+      for decl in traitDeclsByDefId.values where isStdRootModuleDecl(decl) {
+        found = decl.modulePath
+        break
+      }
+      if found == nil {
+        for moduleInfo in moduleSymbols.values {
+          guard moduleInfo.modulePath.count == 1 else { continue }
+          for symbol in moduleInfo.publicSymbols.values {
+            if let packageID = symbol.defId.packageID(in: defIdMap), isStdPackageID(packageID) {
+              found = moduleInfo.modulePath
+              break
+            }
+          }
+          if found != nil { break }
+        }
+      }
+      guard let resolved = found else {
+        // No prelude at all (`--no-std`): nothing to protect.
+        return nil
+      }
+      root = resolved
+      stdRootModulePath = resolved
+    }
+    guard let defId = defIdMap.lookup(modulePath: root, name: name, sourceFile: nil) else {
+      return nil
+    }
+    return defId
+  }
+
   /// A name a `using` brings in cannot silently lose to a DIFFERENT
   /// declaration already under that spelling (§3.3).
   ///
@@ -560,8 +602,8 @@ extension TypeChecker {
   ///   each `using "std";` (§3.3.4 scopes a `using` to a file, not to a
   ///   module), and those are all the same declarations;
   /// - the unqualified global index, which is last-wins across modules and is
-  ///   not a binding any file can see. Only a declaration in THIS module, or
-  ///   another import in THIS FILE, owns the spelling.
+  ///   not a binding any file can see. A declaration in THIS module, another
+  ///   import in THIS FILE, or the prelude owns the spelling.
   private func checkImportNameCollision(
     name: String,
     bound: DefId?,
@@ -578,6 +620,15 @@ extension TypeChecker {
         try reportImportCollision(name: name, fromModule: fromModule, sourceFile: sourceFile, span: span, isImportAll: isImportAll)
         importedNameBindings[key] = bound
       }
+      return
+    }
+
+    // The prelude already answers to this spelling. Taking it for a DIFFERENT
+    // declaration is the same clash as any other import -- the reader loses a
+    // name they never wrote. Re-importing the prelude's own declaration is not.
+    if let preludeDef = preludeDeclaration(named: name), preludeDef != bound {
+      try reportImportCollision(name: name, fromModule: fromModule, sourceFile: sourceFile, span: span, isImportAll: isImportAll)
+      importedNameBindings[key] = bound
       return
     }
 
@@ -601,7 +652,7 @@ extension TypeChecker {
     span: SourceSpan,
     isImportAll: Bool
   ) throws {
-    let modulePath = fromModule.joined(separator: "::")
+    let modulePath = modulePathToUsingSpecifier(fromModule)
     let message: String
     if isImportAll {
       message = "Import of '\(name)' from '\(modulePath)' collides with a name already in scope; an import-all cannot be renamed, so use an explicit list"

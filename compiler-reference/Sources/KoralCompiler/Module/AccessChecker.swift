@@ -6,7 +6,6 @@ import Foundation
 public enum AccessError: Error, CustomStringConvertible {
     case filePrivateAccess(symbol: String, span: SourceSpan)
     case modulePrivateAccess(symbol: String, definedIn: [String], accessedFrom: [String], span: SourceSpan)
-    case cannotReexportExternal(path: [String], span: SourceSpan)
     case insufficientTypeVisibility(
         symbol: String,
         symbolAccess: AccessModifier,
@@ -25,9 +24,6 @@ public enum AccessError: Error, CustomStringConvertible {
             let definedPath = definedIn.isEmpty ? "<root>" : definedIn.joined(separator: ".")
             let accessPath = accessedFrom.isEmpty ? "<root>" : accessedFrom.joined(separator: ".")
             return "\(span): Cannot access module_private symbol '\(symbol)' defined in '\(definedPath)' from '\(accessPath)'"
-            
-        case .cannotReexportExternal(let path, let span):
-            return "\(span): Cannot re-export external module symbol '\(path.joined(separator: "."))'"
             
         case .insufficientTypeVisibility(let symbol, let symbolAccess, let type, let typeAccess, let span):
             return "\(span): \(symbolAccess) symbol '\(symbol)' uses \(typeAccess) type '\(type)' in its signature"

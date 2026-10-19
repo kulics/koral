@@ -409,7 +409,31 @@ extension TypeChecker {
     }
   }
 
-  private func inferTraitTypeArgsForReceiver(_ receiverType: Type, traitName: String) throws -> [Type]? {
+  /// The trait type arguments a written conformance pairs with `selfType`.
+  ///
+  /// Unifies the conformance's own (possibly generic) receiver against the
+  /// concrete one to bind its parameters, then substitutes them into the
+  /// arguments it was written with.
+  private func recordedTraitTypeArgs(selfType: Type, traitDefId: DefId) -> [Type]? {
+    for rec in recordedConformances {
+      guard rec.traitDefId == traitDefId else { continue }
+      var inferred: [String: Type] = [:]
+      guard unifyGenericTypePattern(
+        pattern: rec.selfType,
+        actual: selfType,
+        typeParamNames: Set(rec.typeParamNames),
+        inferred: &inferred
+      ) else {
+        continue
+      }
+      return rec.traitTypeArgs.map {
+        SemaUtils.substituteType($0, substitution: inferred, context: context)
+      }
+    }
+    return nil
+  }
+
+  func inferTraitTypeArgsForReceiver(_ receiverType: Type, traitName: String) throws -> [Type]? {
     guard let traitInfo = visibleTraitInfo(traitName) else {
       return nil
     }
@@ -478,6 +502,22 @@ extension TypeChecker {
     let ordered = typeParamNames.compactMap { inferred[$0] }
     if ordered.count == typeParamNames.count {
       return ordered
+    }
+
+    // A parameter that appears only in another parameter's bound is invisible
+    // in the trait's method signatures -- `Iterable[T, R Iterator[T]]`'s `T`
+    // never shows up in `iterator(self) R`. The conformance was written with
+    // both arguments, so read the missing ones from there.
+    if let recorded = recordedTraitTypeArgs(selfType: receiverType, traitDefId: traitInfo.defId),
+       recorded.count == typeParamNames.count {
+      var merged = inferred
+      for (name, arg) in zip(typeParamNames, recorded) where merged[name] == nil {
+        merged[name] = arg
+      }
+      let all = typeParamNames.compactMap { merged[$0] }
+      if all.count == typeParamNames.count {
+        return all
+      }
     }
     return nil
   }
@@ -554,6 +594,11 @@ extension TypeChecker {
     modulePath: [String],
     packageID: String
   ) -> Symbol {
+    if !method.typeParameters.isEmpty {
+      // The symbol keeps the method's own parameters in its function type --
+      // they bind at the call site -- so the names have to travel with it.
+      context.methodTypeParameterNames[method.defId] = method.typeParameters.map { $0.name }
+    }
     return context.createSymbol(
       name: method.name,
       modulePath: modulePath,

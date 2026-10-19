@@ -172,18 +172,29 @@ let parse_int(s String) Result[Int] =
 
 ### Lazy streams
 
+Lazy pipelines enter through `lazy()` and stay on `LazyView`. Nothing lazy is
+spelled on the container: `dict.take(key)`, `string.find(pat)`, `list.first()`
+and friends stay the container's own method, and names like `map` / `filter` /
+`to_list` / `collect` on a container are kept free for a future eager API.
+
 A chain is one expression — the calls are joined by the leading `.`, and the
 statement ends at the single trailing `;`. Do not put `;` between the calls;
 that would terminate the statement and leave the next line as a bare implicit
 member expression.
 
 ```koral
-let result = list.iterator()
+let result = list.lazy()
     .filter((x) => x > 0)
     .map((x) => x * 2)
     .take(10)
     .fold(0, (acc, x) => acc + x);
 ```
+
+`lazy()` is a door, not a wrapper — `list.lazy().lazy()` is `list.lazy()`, and
+an adapter returns another `LazyView`, so a chain never repeats it. Every
+terminal builds a fresh cursor and drops it, so asking twice gives the same
+answer and the source is never spent. A cursor (`list.iterator()`) is
+one-shot and has only `next`; to run a pipeline over one, collect it first.
 
 ## Language Capabilities
 
@@ -264,7 +275,7 @@ Module rules summary:
 - File merge (`using "./helpers.koral";` / `using "../shared/format.koral";`) resolves against the current file's directory, must end in `.koral`, and merges the target's top-level definitions into the current module. It takes no part in package/module resolution and may not be combined with `{ ... }`.
 - Module import (`using "std/io";` / `using "std/io" { Reader, Writer };` / `using "std/io" { Reader as IoReader };`) binds symbols only. `{ ... }` omitted means every visible member; if written, it may not be empty — `{ .. }` and `{ * }` are no longer spellings of anything.
 - Module imports do not bind a module name or namespace. Use `Symbol`, not `module.Symbol`; `as` renames one imported symbol, never the module.
-- Imported names are file-local bindings and are never re-exported; a name collision is an error and `as` disambiguates.
+- Imported names are file-local bindings and are never re-exported; a name collision is an error and `as` disambiguates. A spelling has one owner — an import colliding with a top-level declaration here, with another import of a *different* declaration, or with a prelude name (`List`, `Eq`, …) is an error; the same declaration arriving twice is not, and a local `let` inside a function may still shadow.
 - Modules are declared in `koral.json`; `std` modules are declared in `std/koral.json`. `modules` maps a package-internal name (`.`, `conn`, `compiler/parser`) to `{ entry, links }`, and `entry` is the entry **file** relative to the package root.
 - The module graph is the union of the modules' `using` statements. There is no `requires` and no top-level `entry` — the default build target is the main module.
 - Module full names are `package[/subpath]`; a package name is a single identifier segment. `/` separates subpaths.
@@ -308,7 +319,7 @@ let port = Option[Int].Some(8080) or else 80;
 let doubled = Option[Int].Some(21) and then it * 2;
 
 let parse_port(text String) Result[Int] = {
-    let port = parse_int(text) or return;
+    let port = Int.parse(text) or return;
     return .Ok(port);
 };
 

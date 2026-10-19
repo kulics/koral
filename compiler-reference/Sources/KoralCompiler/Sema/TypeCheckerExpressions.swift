@@ -1743,10 +1743,10 @@ extension TypeChecker {
       if !symbolModulePath.isEmpty && !currentModulePath.isEmpty {
         // 检查符号是否可以从当前模块直接访问（传递符号名用于成员导入检查）
         if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
-          let modulePath = symbolModulePath.joined(separator: "::")
+          let spec = modulePathToUsingSpecifier(symbolModulePath)
           // The name is used more than once in a file; each unimported use is
           // a place the reader has to look at.
-          try handleError(SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(name) }."), span: nameSpan))
+          try handleError(SemanticError(.generic("'\(name)' is defined in module '\(spec)'. Import it explicitly with using \"\(spec)\" { \(name) };"), span: nameSpan))
         }
       }
       

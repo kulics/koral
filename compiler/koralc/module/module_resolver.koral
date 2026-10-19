@@ -86,7 +86,7 @@ given ModuleError as Error {
             },
             .NoMainModule(package_name, declared, _) then {
                 let declared_list = join_sorted(declared);
-                "Package '\(package_name)' has no main module; write its subpath instead; declared modules: \(declared_list)"
+                "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared_list)"
             },
             .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
         };
@@ -780,6 +780,16 @@ public let module_identifier_to_file_name(identifier String) String = {
     return result.to_string();
 };
 
+// Render a module path as the `using` specifier a user would actually write.
+// ["Std", "Time"] -> "std/time". Diagnostics must quote code, not internal names.
+public let module_path_to_using_specifier(module_path List[String]) String = {
+    let mutable parts = List[String].new();
+    for seg in module_path then {
+        parts.push(module_identifier_to_file_name(seg));
+    };
+    return parts.join_to_string("/");
+};
+
 // Convert snake_case file name to PascalCase module identifier
 // e.g. "primitives" -> "Primitives", "buf_reader" -> "BufReader"
 public let module_file_name_to_identifier(filename String) String = {
@@ -798,26 +808,6 @@ public let module_file_name_to_identifier(filename String) String = {
         };
     };
     return result.to_string();
-};
-
-// Validate a PascalCase module identifier (used in source code)
-// Returns Some(reason) if invalid, None if valid
-file_private let validate_module_identifier(name String) Option[String] = {
-    if name.is_empty() then {
-        return .Some("Module name cannot be empty");
-    };
-    let runes = name.to_runes();
-    let first = runes[0];
-    if not first.is_ascii_uppercase() then {
-        return .Some("Module name must start with an uppercase letter (A-Z)");
-    };
-    for ch in runes then {
-        if not ch.is_ascii_uppercase() and not ch.is_ascii_lowercase() and not ch.is_ascii_digit(
-        ) then {
-            return .Some("Module name can only contain letters and digits");
-        };
-    };
-    return .None();
 };
 
 file_private let module_debug(message String) Void = {

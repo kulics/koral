@@ -18,9 +18,9 @@ public enum SymbolKind {
 public enum ImportKind {
   /// 当前模块定义的符号（包括文件合并）
   case local
-  /// 显式成员导入：using module::path { Symbol } / using module::path { Symbol as Alias }
+  /// 显式成员导入：using "std/io" { Symbol } / using "std/io" { Symbol as Alias }
   case memberImport
-  /// 导入模块全部 public 符号：using module::path { .. }
+  /// 导入模块全部可见成员：using "std";（不写列表）
   case batchImport
   /// 内部导入边，表示当前文件可见该模块但符号不直接可用
   case moduleImport
