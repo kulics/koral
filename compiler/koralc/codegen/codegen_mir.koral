@@ -1506,10 +1506,35 @@ given MIRFunctionCodeEmitter {
         };
     };
 
+    /// A float constant's spelling is a decimal literal, and C reads an
+    /// unsuffixed one as `double`. A `Float32` operand has to compare and
+    /// compute at `float` width, so it carries the `f` suffix: without it
+    /// `y == 1.1` for `y: Float32` promotes the subject and compares
+    /// `(double)1.1f` against `1.1`, which is false. A synthesized constant
+    /// may carry an integer spelling (`0`); the suffix only attaches to a real
+    /// floating token, so that one becomes `0.0f` -- `0f` is not valid C.
+    module_private float_constant_literal(
+        self,
+        value String,
+        constant_type Type,
+    ) String = {
+        let base = self.codegen.sanitize_c_numeric_literal(value);
+        if not (constant_type is .Float32Type()) then {
+            return base;
+        };
+        if base.contains(".") or base.contains("e") or base.contains("E") then {
+            return base + "f";
+        };
+        return base + ".0f";
+    };
+
     module_private constant_expression(self, constant MIRConstant) String = {
         return when constant in {
             .Integer(value, _) then self.codegen.sanitize_c_numeric_literal(value),
-            .Float(value, _) then self.codegen.sanitize_c_numeric_literal(value),
+            .Float(value, constant_type) then self.float_constant_literal(
+                value,
+                constant_type,
+            ),
             .StringLiteral(value, string_type) then self.codegen.generate_string_literal(
                 value,
                 string_type,

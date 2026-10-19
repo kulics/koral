@@ -1388,6 +1388,21 @@ final class MIRFunctionCodeEmitter {
     nestedTypeDefinitions += structBuffer
   }
 
+  /// A float constant's spelling is a decimal literal, and C reads an
+  /// unsuffixed one as `double`. A `Float32` operand has to compare and compute
+  /// at `float` width, so it carries the `f` suffix: without it `y == 1.1` for
+  /// `y: Float32` promotes the subject and compares `(double)1.1f` against
+  /// `1.1`, which is false. A synthesized constant may carry an integer
+  /// spelling (`0`); the suffix only attaches to a real floating token, so
+  /// that one becomes `0.0f` -- `0f` is not valid C.
+  private func floatConstantLiteral(_ value: String, type: Type) -> String {
+    guard type == .float32 else { return value }
+    if value.contains(".") || value.contains("e") || value.contains("E") {
+      return "\(value)f"
+    }
+    return "\(value).0f"
+  }
+
   private func emitOperandValue(_ operand: MIROperand) -> MIRValueEmission {
     switch operand {
     case .local(let local):
@@ -1403,8 +1418,8 @@ final class MIRFunctionCodeEmitter {
       switch constant {
       case .integer(let value, _):
         return MIRValueEmission(expression: value, cleanups: [])
-      case .float(let value, _):
-        return MIRValueEmission(expression: value, cleanups: [])
+      case .float(let value, let type):
+        return MIRValueEmission(expression: floatConstantLiteral(value, type: type), cleanups: [])
       case .boolean(let value):
         return MIRValueEmission(expression: value ? "1" : "0", cleanups: [])
       case .void:
@@ -2520,8 +2535,10 @@ final class MIRFunctionCodeEmitter {
       return codeGen.callableName(for: symbol)
     case .constant(let constant):
       switch constant {
-      case .integer(let value, _), .float(let value, _):
+      case .integer(let value, _):
         return value
+      case .float(let value, let type):
+        return floatConstantLiteral(value, type: type)
       case .boolean(let value):
         return value ? "1" : "0"
       case .void:

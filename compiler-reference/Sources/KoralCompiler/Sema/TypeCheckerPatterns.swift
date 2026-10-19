@@ -204,9 +204,9 @@ extension TypeChecker {
       )
       return (.traitObjectTypeBinding(symbol: symbol, targetType: resolvedTarget), [(name, mutable, resolvedTarget)])
 
-    case .integerLiteral(let val, _):
+    case .integerLiteral(let val, let span):
       if !subjectType.isIntegerType {
-        throw SemanticError.typeMismatch(expected: "integer type", got: subjectType.description)
+        throw SemanticError(.typeMismatch(expected: "integer type", got: subjectType.description), span: span)
       }
       return (.integerLiteral(value: val), [])
       
@@ -224,9 +224,9 @@ extension TypeChecker {
       // Store as negative value string
       return (.integerLiteral(value: "-\(val)"), [])
 
-    case .booleanLiteral(let val, _):
+    case .booleanLiteral(let val, let span):
       if subjectType != .bool {
-        throw SemanticError.typeMismatch(expected: "Bool", got: subjectType.description)
+        throw SemanticError(.typeMismatch(expected: "Bool", got: subjectType.description), span: span)
       }
       return (.booleanLiteral(value: val), [])
 
@@ -255,7 +255,7 @@ extension TypeChecker {
         }
         return (.integerLiteral(value: String(cp)), [])
       }
-      throw SemanticError.typeMismatch(expected: "Rune or UInt8", got: subjectType.description)
+      throw SemanticError(.typeMismatch(expected: "Rune or UInt8", got: subjectType.description), span: span)
 
     case .wildcard(_):
       return (.wildcard, [])
