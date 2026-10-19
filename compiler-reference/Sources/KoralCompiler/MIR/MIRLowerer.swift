@@ -3227,18 +3227,69 @@ private final class MIRFunctionBuilder {
     return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
   }
 
+  /// Generic-parameter names in a type, in first-appearance order.
+  private func genericParameterNames(in type: Type) -> [String] {
+    var seen: [String] = []
+    func walk(_ t: Type) {
+      switch t {
+      case .genericParameter(let name):
+        if !seen.contains(name) { seen.append(name) }
+      case .function(let params, let returns):
+        for p in params { walk(p.type) }
+        walk(returns)
+      case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+        for arg in args { walk(arg) }
+      case .structure, .enum, .opaque:
+        // A nominal's members are not part of the type expression; only its
+        // arguments are, and those are the generic cases above.
+        break
+      case .reference(let inner), .mutableReference(let inner),
+           .borrowedReference(let inner), .mutableBorrowedReference(let inner),
+           .weakReference(let inner), .mutableWeakReference(let inner):
+        walk(inner)
+      case .pointer(let element), .mutablePointer(let element):
+        walk(element)
+      default:
+        break
+      }
+    }
+    walk(type)
+    return seen
+  }
+
   private func lowerCall(
     callee: TypedExpressionNode,
     arguments: [TypedExpressionNode],
     type: Type,
     original: TypedExpressionNode
   ) -> MIRExprResult? {
-    if case .methodReference(let base, let method, _, _, _) = callee,
-       !context.containsGenericParameter(callee.type),
-       let callableMethod = concreteMethodSymbol(method: method, calleeType: callee.type, resultType: type) {
-      let _methodName = context.getName(method.defId) ?? ""
-      if _methodName == "count" || _methodName == "fold" {
+    // A method-generic call still spells the method's own parameters in its
+    // function type: `fold[U](self, U, (U, T) -> U) U` says `U` even at a call
+    // site that already knows `U = Int`. Substitute them before deciding the
+    // callee is generic, or the call falls through to the generic bail-out.
+    let resolvedCalleeType: Type = {
+      guard case .methodReference(_, let method, _, let methodTypeArgs, _) = callee,
+            let margs = methodTypeArgs, !margs.isEmpty
+      else {
+        return callee.type
       }
+      // Declaration order when it is on file, first-appearance order otherwise.
+      // A method's own parameters are exactly the generic parameters still left
+      // in its function type -- the receiver's have already been substituted.
+      let names = context.methodTypeParameterNames[method.defId]
+        ?? genericParameterNames(in: callee.type)
+      guard !names.isEmpty else { return callee.type }
+      var substitution: [String: Type] = [:]
+      for (name, arg) in zip(names, margs) where substitution[name] == nil {
+        substitution[name] = arg
+      }
+      guard !substitution.isEmpty else { return callee.type }
+      return SemaUtils.substituteType(callee.type, substitution: substitution, context: context)
+    }()
+
+    if case .methodReference(let base, let method, _, _, _) = callee,
+       !context.containsGenericParameter(resolvedCalleeType),
+       let callableMethod = concreteMethodSymbol(method: method, calleeType: resolvedCalleeType, resultType: type) {
       var argumentValues: [MIRValue] = [lowerMethodReceiverArgument(base, method: callableMethod)]
       argumentValues.reserveCapacity(arguments.count + 1)
       let methodType: Type

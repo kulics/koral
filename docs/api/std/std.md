@@ -189,6 +189,8 @@ public type mutable ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]];
 
 public type mutable FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]];
 
+public type LazyView[T Any, R Iterator[T]];
+
 public type mutable List[T Any];
 
 public type mutable ListIterator[T Any];
@@ -1110,24 +1112,26 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
     public next(self) Option[U];
 };
 
-given[T Any] Iterator[T] {
-    public filter(self, fn (T) -> Bool) FilterIterator[T, Self];
-    public map[U Any](self, fn (T) -> U) MapIterator[T, U, Self];
-    public filter_map[U Any](self, fn (T) -> Option[U]) FilterMapIterator[T, U, Self];
-    public take(self, n UInt) TakeIterator[T, Self];
-    public skip(self, n UInt) SkipIterator[T, Self];
-    public step_by(self, n UInt) StepIterator[T, Self];
-    public enumerate(self) EnumerateIterator[T, Self];
-    public inspect(self, fn (T) -> Void) InspectIterator[T, Self];
-    public intersperse(self, v T) IntersperseIterator[T, Self];
-    public take_while(self, fn (T) -> Bool) TakeWhileIterator[T, Self];
-    public skip_while(self, fn (T) -> Bool) SkipWhileIterator[T, Self];
-    public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2];
-    public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2];
-    public flat_map[U Any, InnerR Iterator[U]](self, fn (T) -> InnerR) FlatMapIterator[T, U, Self, InnerR];
+given[T Any, R Iterator[T]] LazyView[T, R] as Iterable[T, R] {
+    public iterator(self) R;
 };
 
-given[T Any] Iterator[T] {
+given[T Any, R Iterator[T]] LazyView[T, R] {
+    public lazy(self) LazyView[T, R];
+    public filter(self, fn (T) -> Bool) LazyView[T, FilterIterator[T, R]];
+    public map[U Any](self, fn (T) -> U) LazyView[U, MapIterator[T, U, R]];
+    public filter_map[U Any](self, fn (T) -> Option[U]) LazyView[U, FilterMapIterator[T, U, R]];
+    public take(self, n UInt) LazyView[T, TakeIterator[T, R]];
+    public skip(self, n UInt) LazyView[T, SkipIterator[T, R]];
+    public step_by(self, n UInt) LazyView[T, StepIterator[T, R]];
+    public enumerate(self) LazyView[Pair[UInt, T], EnumerateIterator[T, R]];
+    public inspect(self, fn (T) -> Void) LazyView[T, InspectIterator[T, R]];
+    public intersperse(self, v T) LazyView[T, IntersperseIterator[T, R]];
+    public take_while(self, fn (T) -> Bool) LazyView[T, TakeWhileIterator[T, R]];
+    public skip_while(self, fn (T) -> Bool) LazyView[T, SkipWhileIterator[T, R]];
+    public chain[R2 Iterator[T], S2 Iterable[T, R2]](self, other S2) LazyView[T, ChainIterator[T, R, R2]];
+    public zip[U Any, R2 Iterator[U], S2 Iterable[U, R2]](self, other S2) LazyView[Pair[T, U], ZipIterator[T, U, R, R2]];
+    public flat_map[U Any, InnerR Iterator[U], InnerS Iterable[U, InnerR]](self, fn (T) -> InnerS) LazyView[U, FlatMapIterator[T, U, R, InnerR]];
     public fold[U Any](self, initial U, fn (U, T) -> U) U;
     public reduce(self, fn (T, T) -> T) Option[T];
     public into_list(self) List[T];
@@ -1146,29 +1150,33 @@ given[T Any] Iterator[T] {
     public min_by[K Ord](self, fn (T) -> K) Option[T];
 };
 
-given[T Eq] Iterator[T] {
+given[T Eq, R Iterator[T]] LazyView[T, R] {
     public contains(self, value T) Bool;
 };
 
-given[T Ord] Iterator[T] {
+given[T Ord, R Iterator[T]] LazyView[T, R] {
     public max(self) Option[T];
     public min(self) Option[T];
 };
 
-given[T Hash] Iterator[T] {
+given[T Hash, R Iterator[T]] LazyView[T, R] {
     public into_set(self) Set[T];
 };
 
-given[T Add[T] and Zero] Iterator[T] {
+given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
     public sum(self) T;
 };
 
-given[T Mul[T] and One] Iterator[T] {
+given[T Mul[T] and One, R Iterator[T]] LazyView[T, R] {
     public product(self) T;
 };
 
-given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
+given[T Add[T] and Div[T] and Zero and One, R Iterator[T]] LazyView[T, R] {
     public average(self) Option[T];
+};
+
+given[T Any, R Iterator[T]] Iterable[T, R] {
+    public lazy(self) LazyView[T, R];
 };
 
 given[T Any] List[T] as Drop {};
@@ -1195,7 +1203,6 @@ given[T Any] List[T] {
     public reverse(self) Void;
     public slice_spec(self, range Range[UInt]) SliceSpec;
     public sublist(self, range Range[UInt]) List[T];
-    public enumerate(self) EnumerateIterator[T, ListIterator[T]];
     public retain(self, predicate (T) -> Bool) Void;
     public sort_by[K Ord](self, key (T) -> K) Void;
     public binary_search_by[K Ord](self, key (T) -> K, target K) Pair[UInt, Bool];
@@ -1782,7 +1789,7 @@ given[T ToString] List[T] as ToString {
     public to_string(self) String;
 };
 
-given[T ToString] Iterator[T] {
+given[T ToString, R Iterator[T]] LazyView[T, R] {
     public join_to_string(self, seperator String) String;
 };
 

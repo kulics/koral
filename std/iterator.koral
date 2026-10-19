@@ -1,26 +1,51 @@
 // ============================================================================
 // Koral Standard Library - Iterator API
 // ============================================================================
-// Provides lazy, chainable operations on iterators similar to Java Streams.
+// Two roles, deliberately different:
+//
+//   Iterator  -- a CURSOR. One-shot, only advances. `next(self)` is the whole
+//                protocol: there is nothing on it that pretends to observe and
+//                then quietly steps. A cursor is `type mutable`, so a cursor
+//                value names one shared position; handing one to `for` walks
+//                it to the end. It gets no adapters and no terminals.
+//   Iterable  -- something that can hand out a FRESH cursor on every call.
+//
+// Lazy pipelines enter through one door, `lazy()`, and stay on `LazyView`:
+//
+//   list.lazy().filter((x) => x > 0).map((x) => x * 2).count()
+//
+// Nothing lazy is spelled on the container itself. `dict.take(key)`,
+// `string.find(pat)`, `list.first()` and friends stay the container's own
+// method, and names like `map` / `filter` / `to_list` / `collect` on a
+// container are kept free for a future eager api -- do not spend them here.
+//
+// A `LazyView[T, R]` holds a cursor FACTORY, not a source: `make () -> R`
+// builds a fresh cursor whenever asked. Two type parameters, and the chain
+// does not grow a third one per stage. Every terminal builds a cursor, walks
+// it, and drops it, so asking twice gives the same answer and the source is
+// never spent.
+//
+// A one-shot source (a file's lines, a socket) is a cursor and stays one. It
+// has no `lazy()`. To run a pipeline over it, collect first (`into_list()`).
 // ============================================================================
 
-// Generic Iterator trait for for-loop support
+// Generic Iterator trait: a one-shot cursor. Nothing more.
 public trait Iterator[T Any] {
     next(self) Option[T];
 };
 
-// Iterable trait - types that can produce an iterator
+// Iterable trait - types that can produce a fresh iterator on every call
 public trait Iterable[T Any, R Iterator[T]] {
     iterator(self) R;
 };
 
 // ============================================================================
-// Intermediate Iterator Types
+// Cursors - one-shot, `type mutable`, implement Iterator
 // ============================================================================
 
 // FilterIterator - filters elements based on predicate
 public type mutable FilterIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private predicate (T) -> Bool,
 );
 
@@ -38,7 +63,7 @@ given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
 
 // MapIterator - transforms elements using mapper function
 public type mutable MapIterator[T Any, U Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private mapper (T) -> U,
 );
 
@@ -49,7 +74,7 @@ given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
 
 // FilterMapIterator - filters and transforms in one operation
 public type mutable FilterMapIterator[T Any, U Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private mapper (T) -> Option[U],
 );
 
@@ -70,24 +95,24 @@ given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
 
 // TakeIterator - takes first n elements
 public type mutable TakeIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
-    module_private mutable remaining UInt,
+    module_private iter R,
+    module_private mutable limit UInt,
 );
 
 given[T Any, R Iterator[T]] TakeIterator[T, R] as Iterator[T] {
 
     public next(self) Option[T] = {
-        if self.remaining == 0 then {
+        if self.limit == 0 then {
             return Option[T].None();
         };
-        self.remaining -= 1;
+        self.limit -= 1;
         return self.iter.next();
     };
 };
 
 // SkipIterator - skips first n elements
 public type mutable SkipIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private mutable to_skip UInt,
 );
 
@@ -106,7 +131,7 @@ given[T Any, R Iterator[T]] SkipIterator[T, R] as Iterator[T] {
 
 // StepIterator - takes every nth element
 public type mutable StepIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private step_size UInt,
     module_private mutable first Bool,
 );
@@ -132,7 +157,7 @@ given[T Any, R Iterator[T]] StepIterator[T, R] as Iterator[T] {
 
 // EnumerateIterator - pairs each element with its index
 public type mutable EnumerateIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private mutable index UInt,
 );
 
@@ -149,7 +174,7 @@ given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
 
 // InspectIterator - executes side effect without modifying elements
 public type mutable InspectIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private action (T) -> Void,
 );
 
@@ -165,7 +190,7 @@ given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
 
 // IntersperseIterator - inserts separator between elements
 public type mutable IntersperseIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private separator T,
     module_private mutable next_is_separator Bool,
     module_private mutable pending Option[T],
@@ -224,7 +249,7 @@ given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
 
 // TakeWhileIterator - takes elements while predicate is true
 public type mutable TakeWhileIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private predicate (T) -> Bool,
     module_private mutable done Bool,
 );
@@ -253,7 +278,7 @@ given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
 
 // SkipWhileIterator - skips elements while predicate is true
 public type mutable SkipWhileIterator[T Any, R Iterator[T]](
-    module_private mutable iter R,
+    module_private iter R,
     module_private predicate (T) -> Bool,
     module_private mutable skipping Bool,
 );
@@ -276,39 +301,39 @@ given[T Any, R Iterator[T]] SkipWhileIterator[T, R] as Iterator[T] {
 
 // ChainIterator - chains two iterators of the same element type
 public type mutable ChainIterator[T Any, R1 Iterator[T], R2 Iterator[T]](
-    module_private mutable first R1,
-    module_private mutable second R2,
-    module_private mutable use_second Bool,
+    module_private head R1,
+    module_private tail R2,
+    module_private mutable use_tail Bool,
 );
 
 given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterator[T] {
 
     public next(self) Option[T] = {
-        if not self.use_second then {
-            when self.first.next() in {
+        if not self.use_tail then {
+            when self.head.next() in {
                 .Some(v) then {
                     return Option[T].Some(v);
                 },
                 .None() then {
-                    self.use_second = true;
+                    self.use_tail = true;
                 },
             };
         };
-        return self.second.next();
+        return self.tail.next();
     };
 };
 
 // ZipIterator - zips two iterators into pairs
 public type mutable ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]](
-    module_private mutable first R1,
-    module_private mutable second R2,
+    module_private left R1,
+    module_private right R2,
 );
 
 given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as Iterator[Pair[A, B]] {
 
     public next(self) Option[Pair[A, B]] = {
-        return when self.first.next() in {
-            .Some(a) then when self.second.next() in {
+        return when self.left.next() in {
+            .Some(a) then when self.right.next() in {
                 .Some(b) then Option[Pair[A, B]].Some(Pair[A, B](a, b)),
                 .None() then Option[Pair[A, B]].None(),
             },
@@ -319,7 +344,7 @@ given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as
 
 // FlatMapIterator - flattens nested iterators (fully lazy)
 public type mutable FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]](
-    module_private mutable outer R,
+    module_private outer R,
     module_private mapper (T) -> InnerR,
     module_private mutable current_inner Option[InnerR],
 );
@@ -330,22 +355,16 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
         while true then {
             when self.current_inner in {
                 .Some(inner) then {
-                    // Copy out the inner iterator
-                    let mutable inner_copy = inner;
-                    when inner_copy.next() in {
+                    when inner.next() in {
                         .Some(v) then {
-                            // Write modified iterator back
-                            self.current_inner = Option[InnerR].Some(inner_copy);
                             return Option[U].Some(v);
                         },
                         .None() then {
-                            // Inner exhausted, clear it
                             self.current_inner = Option[InnerR].None();
                         },
                     };
                 },
                 .None() then {
-                    // Get next from outer iterator
                     when self.outer.next() in {
                         .None() then {
                             return Option[U].None();
@@ -364,81 +383,152 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
 };
 
 // ============================================================================
-// Iterator Intermediate Operations
+// LazyView - the public face of a lazy pipeline
 // ============================================================================
-given[T Any] Iterator[T] {
+// Enters through `lazy()` and never leaves: an adapter returns another
+// `LazyView`, so a chain is written once and never repeats `.lazy()`.
+//
+// It holds a cursor FACTORY rather than a source. That keeps the signature
+// two parameters wide (`T` and the cursor type `R`) no matter how long the
+// chain gets, and it means no per-stage view type has to exist at all.
 
-    // Filter - returns iterator with elements matching predicate
-    public filter(self, fn (T) -> Bool) FilterIterator[T, Self] =
-        FilterIterator[T, Self](self, fn);
+public type LazyView[T Any, R Iterator[T]](module_private make () -> R);
 
-    // Map - transforms each element
-    public map[U Any](self, fn (T) -> U) MapIterator[T, U, Self] =
-        MapIterator[T, U, Self](self, fn);
+given[T Any, R Iterator[T]] LazyView[T, R] as Iterable[T, R] {
 
-    // FilterMap - filter and transform in one operation
-    public filter_map[U Any](self, fn (T) -> Option[U]) FilterMapIterator[T, U, Self] =
-        FilterMapIterator[T, U, Self](self, fn);
+    public iterator(self) R = (self.make)();
+};
 
-    // Take - take first n elements
-    public take(self, n UInt) TakeIterator[T, Self] = TakeIterator[T, Self](self, n);
+given[T Any, R Iterator[T]] LazyView[T, R] {
 
-    // Skip - skip first n elements
-    public skip(self, n UInt) SkipIterator[T, Self] = SkipIterator[T, Self](self, n);
+    // More specific than the `Iterable` extension: a LazyView is already a
+    // pipeline, so `x.lazy().lazy()` is `x.lazy()` and not a nesting.
+    public lazy(self) LazyView[T, R] = self;
 
-    // StepBy - take every nth element
-    public step_by(self, n UInt) StepIterator[T, Self] = {
+    // ========================================================================
+    // Adapters - each one wraps the cursor this view already builds
+    // ========================================================================
+
+    public filter(self, fn (T) -> Bool) LazyView[T, FilterIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, FilterIterator[T, R]](() => FilterIterator[T, R](base(), fn));
+    };
+
+    public map[U Any](self, fn (T) -> U) LazyView[U, MapIterator[T, U, R]] = {
+        let base = self.make;
+        return LazyView[U, MapIterator[T, U, R]](() => MapIterator[T, U, R](base(), fn));
+    };
+
+    public filter_map[U Any](
+        self,
+        fn (T) -> Option[U],
+    ) LazyView[U, FilterMapIterator[T, U, R]] = {
+        let base = self.make;
+        return LazyView[U, FilterMapIterator[T, U, R]](
+            () => FilterMapIterator[T, U, R](base(), fn),
+        );
+    };
+
+    public take(self, n UInt) LazyView[T, TakeIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, TakeIterator[T, R]](() => TakeIterator[T, R](base(), n));
+    };
+
+    public skip(self, n UInt) LazyView[T, SkipIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, SkipIterator[T, R]](() => SkipIterator[T, R](base(), n));
+    };
+
+    public step_by(self, n UInt) LazyView[T, StepIterator[T, R]] = {
         if n < 1 then {
             panic("step size must be at least 1");
         };
-        return StepIterator[T, Self](self, n, true);
+        let base = self.make;
+        return LazyView[T, StepIterator[T, R]](
+            () => StepIterator[T, R](base(), n, true),
+        );
     };
 
-    // Enumerate - pair each element with its index
-    public enumerate(self) EnumerateIterator[T, Self] =
-        EnumerateIterator[T, Self](self, 0);
+    public enumerate(self) LazyView[Pair[UInt, T], EnumerateIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[Pair[UInt, T], EnumerateIterator[T, R]](
+            () => EnumerateIterator[T, R](base(), 0),
+        );
+    };
 
-    // Inspect - execute side effect without modifying elements
-    public inspect(self, fn (T) -> Void) InspectIterator[T, Self] =
-        InspectIterator[T, Self](self, fn);
+    public inspect(self, fn (T) -> Void) LazyView[T, InspectIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, InspectIterator[T, R]](
+            () => InspectIterator[T, R](base(), fn),
+        );
+    };
 
-    // Intersperse - insert separator between elements
-    public intersperse(self, v T) IntersperseIterator[T, Self] =
-        IntersperseIterator[T, Self](self, v, false, Option[T].None());
+    public intersperse(self, v T) LazyView[T, IntersperseIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, IntersperseIterator[T, R]](
+            () => IntersperseIterator[T, R](base(), v, false, Option[T].None()),
+        );
+    };
 
-    // TakeWhile - take elements while predicate is true
-    public take_while(self, fn (T) -> Bool) TakeWhileIterator[T, Self] =
-        TakeWhileIterator[T, Self](self, fn, false);
+    public take_while(self, fn (T) -> Bool) LazyView[T, TakeWhileIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, TakeWhileIterator[T, R]](
+            () => TakeWhileIterator[T, R](base(), fn, false),
+        );
+    };
 
-    // SkipWhile - skip elements while predicate is true
-    public skip_while(self, fn (T) -> Bool) SkipWhileIterator[T, Self] =
-        SkipWhileIterator[T, Self](self, fn, true);
+    public skip_while(self, fn (T) -> Bool) LazyView[T, SkipWhileIterator[T, R]] = {
+        let base = self.make;
+        return LazyView[T, SkipWhileIterator[T, R]](
+            () => SkipWhileIterator[T, R](base(), fn, true),
+        );
+    };
 
-    // Chain - chain with another iterator of the same element type
-    public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2] =
-        ChainIterator[T, Self, R2](self, other, false);
-
-    // Zip - zip with another iterator into pairs
-    public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2] =
-        ZipIterator[T, U, Self, R2](self, other);
-
-    // FlatMap - map each element to an iterator and flatten results
-    public flat_map[U Any, InnerR Iterator[U]](
+    public chain[R2 Iterator[T], S2 Iterable[T, R2]](
         self,
-        fn (T) -> InnerR,
-    ) FlatMapIterator[T, U, Self, InnerR] =
-        FlatMapIterator[T, U, Self, InnerR](self, fn, Option[InnerR].None());
-};
+        other S2,
+    ) LazyView[T, ChainIterator[T, R, R2]] = {
+        let base = self.make;
+        let src = other;
+        return LazyView[T, ChainIterator[T, R, R2]](
+            () => ChainIterator[T, R, R2](base(), src.iterator(), false),
+        );
+    };
 
-// ============================================================================
-// Iterator Terminal Operations
-// ============================================================================
-given[T Any] Iterator[T] {
+    public zip[U Any, R2 Iterator[U], S2 Iterable[U, R2]](
+        self,
+        other S2,
+    ) LazyView[Pair[T, U], ZipIterator[T, U, R, R2]] = {
+        let base = self.make;
+        let src = other;
+        return LazyView[Pair[T, U], ZipIterator[T, U, R, R2]](
+            () => ZipIterator[T, U, R, R2](base(), src.iterator()),
+        );
+    };
+
+    public flat_map[U Any, InnerR Iterator[U], InnerS Iterable[U, InnerR]](
+        self,
+        fn (T) -> InnerS,
+    ) LazyView[U, FlatMapIterator[T, U, R, InnerR]] = {
+        let base = self.make;
+        let mapper = fn;
+        return LazyView[U, FlatMapIterator[T, U, R, InnerR]](
+            () => FlatMapIterator[T, U, R, InnerR](
+                base(),
+                (item) => mapper(item).iterator(),
+                Option[InnerR].None(),
+            ),
+        );
+    };
+
+    // ========================================================================
+    // Terminals - each one on a fresh cursor, then throw the cursor away
+    // ========================================================================
 
     // Fold - reduce with initial value
     public fold[U Any](self, initial U, fn (U, T) -> U) U = {
         let mutable acc = initial;
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             acc = fn(acc, v);
         };
@@ -447,7 +537,7 @@ given[T Any] Iterator[T] {
 
     // Reduce - reduce without initial value
     public reduce(self, fn (T, T) -> T) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         when iter.next() in {
             .None() then {
                 return Option[T].None();
@@ -465,7 +555,7 @@ given[T Any] Iterator[T] {
     // ToList - collect into List
     public into_list(self) List[T] = {
         let mutable result List[T] = [];
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             result.push(v);
         };
@@ -474,7 +564,7 @@ given[T Any] Iterator[T] {
 
     // ForEach - execute side effect for each element
     public for_each(self, fn (T) -> Void) Void = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             fn(v);
         };
@@ -483,7 +573,7 @@ given[T Any] Iterator[T] {
     // Count - count elements
     public count(self) UInt = {
         let mutable n UInt = 0;
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(_) then {
             n += 1;
         };
@@ -492,14 +582,14 @@ given[T Any] Iterator[T] {
 
     // First - get first element
     public first(self) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         return iter.next();
     };
 
     // Last - get last element
     public last(self) Option[T] = {
         let mutable result = Option[T].None();
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             result = Option[T].Some(v);
         };
@@ -508,7 +598,7 @@ given[T Any] Iterator[T] {
 
     // Nth - get element at index
     public nth(self, n UInt) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         let mutable i UInt = 0;
         while iter.next() is .Some(v) then {
             if i == n then {
@@ -521,7 +611,7 @@ given[T Any] Iterator[T] {
 
     // Position - find index of first element matching predicate
     public position(self, fn (T) -> Bool) Option[UInt] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         let mutable i UInt = 0;
         while iter.next() is .Some(v) then {
             if fn(v) then {
@@ -534,7 +624,7 @@ given[T Any] Iterator[T] {
 
     // Find - find first element matching predicate
     public find(self, fn (T) -> Bool) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             if fn(v) then {
                 return Option[T].Some(v);
@@ -545,7 +635,7 @@ given[T Any] Iterator[T] {
 
     // FindMap - find first element that maps to Some
     public find_map[U Any](self, fn (T) -> Option[U]) Option[U] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             when fn(v) in {
                 .Some(u) then {
@@ -559,7 +649,7 @@ given[T Any] Iterator[T] {
 
     // Any - check if any element matches predicate
     public any(self, fn (T) -> Bool) Bool = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             if fn(v) then {
                 return true;
@@ -570,7 +660,7 @@ given[T Any] Iterator[T] {
 
     // All - check if all elements match predicate
     public all(self, fn (T) -> Bool) Bool = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             if not fn(v) then {
                 return false;
@@ -579,15 +669,18 @@ given[T Any] Iterator[T] {
         return true;
     };
 
-    // IsEmpty - check if iterator has no elements
+    // IsEmpty - check if there is nothing to iterate
+    //
+    // Observational: it builds a cursor, looks at one element, and throws the
+    // cursor away. The pipeline is untouched.
     public is_empty(self) Bool = {
-        let mutable iter = self;
+        let iter = self.iterator();
         return iter.next().is_none();
     };
 
     // MaxBy - find element with maximum key
     public max_by[K Ord](self, fn (T) -> K) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         when iter.next() in {
             .None() then {
                 return Option[T].None();
@@ -609,7 +702,7 @@ given[T Any] Iterator[T] {
 
     // MinBy - find element with minimum key
     public min_by[K Ord](self, fn (T) -> K) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         when iter.next() in {
             .None() then {
                 return Option[T].None();
@@ -631,13 +724,13 @@ given[T Any] Iterator[T] {
 };
 
 // ============================================================================
-// Iterator Terminal Operations with Eq constraint
+// Terminals with Eq constraint
 // ============================================================================
-given[T Eq] Iterator[T] {
+given[T Eq, R Iterator[T]] LazyView[T, R] {
 
-    // Contains - check if iterator contains a value
+    // Contains - check if a value appears
     public contains(self, value T) Bool = {
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             if v == value then {
                 return true;
@@ -648,13 +741,13 @@ given[T Eq] Iterator[T] {
 };
 
 // ============================================================================
-// Iterator Terminal Operations with Ord constraint
+// Terminals with Ord constraint
 // ============================================================================
-given[T Ord] Iterator[T] {
+given[T Ord, R Iterator[T]] LazyView[T, R] {
 
     // Max - find maximum element
     public max(self) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         when iter.next() in {
             .None() then {
                 return Option[T].None();
@@ -673,7 +766,7 @@ given[T Ord] Iterator[T] {
 
     // Min - find minimum element
     public min(self) Option[T] = {
-        let mutable iter = self;
+        let iter = self.iterator();
         when iter.next() in {
             .None() then {
                 return Option[T].None();
@@ -692,14 +785,14 @@ given[T Ord] Iterator[T] {
 };
 
 // ============================================================================
-// Iterator Terminal Operations with Hash constraint
+// Terminals with Hash constraint
 // ============================================================================
-given[T Hash] Iterator[T] {
+given[T Hash, R Iterator[T]] LazyView[T, R] {
 
     // ToSet - collect into Set
     public into_set(self) Set[T] = {
         let mutable result = Set[T].new();
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             result.insert(v);
         };
@@ -708,14 +801,14 @@ given[T Hash] Iterator[T] {
 };
 
 // ============================================================================
-// Iterator Numeric Aggregations
+// Numeric Aggregations
 // ============================================================================
-given[T Add[T] and Zero] Iterator[T] {
+given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
 
     // Sum - sums elements using Zero.zero/Add.add
     public sum(self) T = {
         let mutable acc = T.zero();
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             acc = acc.add(v);
         };
@@ -723,12 +816,12 @@ given[T Add[T] and Zero] Iterator[T] {
     };
 };
 
-given[T Mul[T] and One] Iterator[T] {
+given[T Mul[T] and One, R Iterator[T]] LazyView[T, R] {
 
     // Product - multiplies elements using One.one/Mul.mul
     public product(self) T = {
         let mutable acc = T.one();
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             acc = acc.mul(v);
         };
@@ -736,19 +829,33 @@ given[T Mul[T] and One] Iterator[T] {
     };
 };
 
-given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
+given[T Add[T] and Div[T] and Zero and One, R Iterator[T]] LazyView[T, R] {
 
-    // Average - returns None for empty iterators to avoid division by zero.
+    // Average - returns None for empty pipelines to avoid division by zero.
     public average(self) Option[T] = {
         let mutable acc = T.zero();
         let mutable count = 0;
         let mutable count_t = T.zero();
-        let mutable iter = self;
+        let iter = self.iterator();
         while iter.next() is .Some(v) then {
             acc = acc.add(v);
             count += 1;
             count_t = count_t.add(T.one());
         };
         return if count == 0 then Option[T].None() else Option[T].Some(acc.div(count_t));
+    };
+};
+
+// ============================================================================
+// The one door in
+// ============================================================================
+given[T Any, R Iterator[T]] Iterable[T, R] {
+
+    // Enter a lazy pipeline. Adapters and terminals live on `LazyView`, so
+    // nothing lazy is spelled on the container -- `map`, `filter`, `to_list`
+    // and friends stay free there for a future eager api.
+    public lazy(self) LazyView[T, R] = {
+        let src = self;
+        return LazyView[T, R](() => src.iterator());
     };
 };

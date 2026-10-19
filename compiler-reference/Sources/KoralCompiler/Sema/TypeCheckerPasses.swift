@@ -1890,6 +1890,12 @@ extension TypeChecker {
       }
       declaredConformances.insert(key)
       conformanceDeclOrigins[key] = span
+      recordedConformances.append(RecordedConformance(
+        selfType: selfType,
+        typeParamNames: typeParams.map { $0.name },
+        traitDefId: key.traitDefId,
+        traitTypeArgs: traitArgTypes
+      ))
 
       // Populate blanketGivenConstraints cache for type modifier given declarations.
       // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:<Eq's DefId>"] = ["Eq"]
@@ -3758,6 +3764,12 @@ extension TypeChecker {
 
       explicitConformances.insert(conformanceKey)
       conformanceDeclOrigins[conformanceKey] = span
+      recordedConformances.append(RecordedConformance(
+        selfType: selfType,
+        typeParamNames: typeParams.map { $0.name },
+        traitDefId: conformanceKey.traitDefId,
+        traitTypeArgs: traitArgTypes
+      ))
 
       let typedConformance = TypedTraitConformance(
         traitDefId: traitDefId,

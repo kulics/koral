@@ -20,7 +20,7 @@ let test_filter_map() Void = {
     list.push(5);
 
     // Test filter via iterator pipeline
-    let filtered = list.iterator().filter((x) => x > 2).into_list();
+    let filtered = list.lazy().filter((x) => x > 2).into_list();
     if filtered.count() <> 3 then {
         panic("filter count failed");
     };
@@ -52,28 +52,28 @@ let test_stream_terminal_ops() Void = {
     list.push(5);
 
     // Test any_match
-    if not list.iterator().any((x) => x > 3) then {
+    if not list.lazy().any((x) => x > 3) then {
         panic("any failed");
     };
 
     // Test all_match
-    if not list.iterator().all((x) => x > 0) then {
+    if not list.lazy().all((x) => x > 0) then {
         panic("all failed");
     };
 
     // Test none_match
-    if list.iterator().any((x) => x > 10) then {
+    if list.lazy().any((x) => x > 10) then {
         panic("not any failed");
     };
 
     // Test iterator join_to_string
-    let joined = list.iterator().join_to_string(", ");
+    let joined = list.lazy().join_to_string(", ");
     if joined <> "1, 2, 3, 4, 5" then {
         panic("join_to_string failed");
     };
 
     // Test find_index
-    when list.iterator().position((x) => x == 3) in {
+    when list.lazy().position((x) => x == 3) in {
         .Some(pos) then {
             if pos <> 2 then {
                 panic("find_index value failed");
@@ -84,10 +84,23 @@ let test_stream_terminal_ops() Void = {
         },
     };
 
-    // Test is_empty
-    let mutable empty_list = List[Int].new();
-    if not empty_list.iterator().is_empty() then {
+    // Test is_empty -- on a LazyView, so this is the pipeline path that must
+    // not consume anything. `List` has its own O(1) `is_empty`, and that one
+    // is separate: `empty_list.is_empty()` is the container, `empty_list.lazy()`
+    // is the pipeline.
+    let empty_list = List[Int].new();
+    if not empty_list.is_empty() then {
+        panic("container is_empty failed");
+    };
+    if not empty_list.lazy().is_empty() then {
         panic("is_empty failed");
+    };
+    let empty_view = empty_list.lazy().filter((x) => x > 0);
+    if not empty_view.is_empty() then {
+        panic("view is_empty failed");
+    };
+    if not empty_view.is_empty() then {
+        panic("view is_empty consumed the view");
     };
 
     println("test_stream_terminal_ops passed");
@@ -102,7 +115,7 @@ let test_stream_comparable_ops() Void = {
     list.push(5);
 
     // Test max
-    when list.iterator().max() in {
+    when list.lazy().max() in {
         .Some(m) then {
             if m <> 5 then {
                 panic("max value failed");
@@ -114,7 +127,7 @@ let test_stream_comparable_ops() Void = {
     };
 
     // Test min
-    when list.iterator().min() in {
+    when list.lazy().min() in {
         .Some(m) then {
             if m <> 1 then {
                 panic("min value failed");
@@ -135,10 +148,10 @@ let test_stream_equatable_ops() Void = {
     list.push(3);
 
     // Test contains
-    if not list.iterator().contains(2) then {
+    if not list.lazy().contains(2) then {
         panic("contains failed");
     };
-    if list.iterator().contains(99) then {
+    if list.lazy().contains(99) then {
         panic("contains should not find 99");
     };
 
@@ -154,7 +167,7 @@ let test_stream_intermediate_ops() Void = {
     list.push(5);
 
     // Test stream filter + into_list
-    let filtered = list.iterator().filter((x) => x > 2).into_list();
+    let filtered = list.lazy().filter((x) => x > 2).into_list();
     if filtered.count() <> 3 then {
         panic("stream filter count failed");
     };
@@ -163,7 +176,7 @@ let test_stream_intermediate_ops() Void = {
     };
 
     // Test stream map + into_list
-    let mapped = list.iterator().map((x) => x * 2).into_list();
+    let mapped = list.lazy().map((x) => x * 2).into_list();
     if mapped.count() <> 5 then {
         panic("stream map count failed");
     };
@@ -172,7 +185,7 @@ let test_stream_intermediate_ops() Void = {
     };
 
     // Test stream take + into_list
-    let taken = list.iterator().take(3).into_list();
+    let taken = list.lazy().take(3).into_list();
     if taken.count() <> 3 then {
         panic("stream take count failed");
     };
@@ -181,7 +194,7 @@ let test_stream_intermediate_ops() Void = {
     };
 
     // Test stream skip + into_list
-    let skipped = list.iterator().skip(2).into_list();
+    let skipped = list.lazy().skip(2).into_list();
     if skipped.count() <> 3 then {
         panic("stream skip count failed");
     };
@@ -190,7 +203,7 @@ let test_stream_intermediate_ops() Void = {
     };
 
     // Test chained operations: filter + map + into_list
-    let chained = list.iterator().filter((x) => x > 1).map((x) => x * 10).into_list();
+    let chained = list.lazy().filter((x) => x > 1).map((x) => x * 10).into_list();
     if chained.count() <> 4 then {
         panic("chained count failed");
     };
@@ -213,13 +226,13 @@ let test_stream_fold_reduce() Void = {
     list.push(5);
 
     // Test fold - sum
-    let sum = list.iterator().fold(0, (acc, x) => acc + x);
+    let sum = list.lazy().fold(0, (acc, x) => acc + x);
     if sum <> 15 then {
         panic("fold sum failed");
     };
 
     // Test reduce - sum
-    when list.iterator().reduce((acc, x) => acc + x) in {
+    when list.lazy().reduce((acc, x) => acc + x) in {
         .Some(s) then {
             if s <> 15 then {
                 panic("reduce sum value failed");
@@ -303,13 +316,13 @@ let test_set_filter_map() Void = {
     set.insert(5);
 
     // Test filter
-    let filtered = set.iterator().filter((x) => x > 2).into_set();
+    let filtered = set.lazy().filter((x) => x > 2).into_set();
     if filtered.count() <> 3 then {
         panic("set filter count failed");
     };
 
     // Test map
-    let mapped = set.iterator().map((x) => x * 10).into_set();
+    let mapped = set.lazy().map((x) => x * 10).into_set();
     if mapped.count() <> 5 then {
         panic("set map count failed");
     };

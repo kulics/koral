@@ -5157,6 +5157,53 @@ extension TypeChecker {
         }
       }
       
+      // The callee's function type must not still spell the method's own
+      // parameters: MIR lowering cannot call a generic function. The
+      // substitution above is conditional on `hasMethodLevelGenerics`, and a
+      // call can reach here with bindings but an unsubstituted type.
+      if !methodTypeParamBindings.isEmpty {
+        finalMethodType = SemaUtils.substituteType(finalMethodType, substitution: methodTypeParamBindings, context: context)
+        finalReturns = SemaUtils.substituteType(finalReturns, substitution: methodTypeParamBindings, context: context)
+      }
+
+      // A method-generic extension method is instantiated HERE: the template
+      // registration cannot see the call site's inferred arguments, so without
+      // this the call lowers to a monomorphic symbol nothing ever emits.
+      if let mta = inferredMethodTypeArgs, !mta.isEmpty {
+        // Trait extensions are keyed by the TRAIT's declaration, not by the
+        // receiver's owner -- `List`'s own `given List[T] { }` methods and
+        // `Iterable`'s tools live in different buckets.
+        let dispatch = receiverMethodDispatchByDefId[method.defId]
+        let traitName = dispatch?.conformanceTraitName ?? methodName
+        var found: GenericExtensionMethodTemplate? = nil
+        if let traitDefId = dispatch?.conformanceTraitDefId {
+          for (bucketOwner, templates) in genericExtensionMethods {
+            guard case .decl(let bucketDefId) = bucketOwner, bucketDefId == traitDefId else { continue }
+            found = templates.first(where: { $0.method.name == methodName && !$0.method.typeParameters.isEmpty })
+            break
+          }
+        }
+        if let template = found {
+          // `typeArgs` is the TRAIT's arguments -- `Iterable`'s `[T, R]` -- the
+          // same shape `resolveGenericExtensionMethod` records, so the request
+          // keys match the one the template registration would have made.
+          let traitArgs = (try? inferTraitTypeArgsForReceiver(finalBase.type, traitName: traitName)) ?? []
+          if traitArgs.count == template.typeParams.count {
+            recordInstantiation(InstantiationRequest(
+              kind: .extensionMethod(
+                templateName: traitName,
+                baseType: finalBase.type,
+                template: template,
+                typeArgs: traitArgs,
+                methodTypeArgs: mta
+              ),
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
+            ))
+          }
+        }
+      }
+
       // Create final callee with inferred method type args
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: finalMethodType)

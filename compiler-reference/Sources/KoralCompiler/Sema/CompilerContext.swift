@@ -803,6 +803,12 @@ public final class CompilerContext: @unchecked Sendable {
         return containsGenericParameterInternal(type, visited: &visited)
     }
 
+    /// Declared type-parameter names for a method's DefId, in declaration
+    /// order. A `methodReference` carries the ARGUMENTS but not the names they
+    /// bind, and substituting the method's own parameters out of a function
+    /// type needs both.
+    public var methodTypeParameterNames: [DefId: [String]] = [:]
+
     private func containsGenericParameterInternal(_ type: Type, visited: inout Set<DefId>) -> Bool {
         switch type {
         case .int, .int8, .int16, .int32, .int64,

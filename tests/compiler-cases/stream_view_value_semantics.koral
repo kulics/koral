@@ -1,0 +1,97 @@
+// A lazy pipeline is a VALUE: adapting or observing one never spends it, and
+// never spends the source. Before adapters moved off the cursor, every
+// terminal ran `let mutable iter = self` -- which for a `type mutable` cursor
+// is an ALIAS, not a snapshot -- so `is_empty()` advanced the caller's cursor
+// and left it exhausted.
+// EXPECT: empty_is_observational
+// EXPECT: terminals_repeatable
+// EXPECT: source_untouched
+// EXPECT: view_is_a_value
+// EXPECT: chain_repeatable
+// EXPECT: lazy_is_idempotent
+// EXPECT: container_methods_stay_own
+// EXPECT: cursor_still_walks
+
+let main() Int = {
+    let list = List[Int].new();
+    list.push(1);
+    list.push(2);
+    list.push(3);
+
+    let view = list.lazy().filter((x) => x > 1);
+
+    // is_empty must look, not consume.
+    if view.is_empty() == false and view.is_empty() == false and view.count() == UInt(2) then {
+        println("empty_is_observational");
+    } else {
+        panic("is_empty consumed the view");
+    };
+
+    // Every terminal builds its own cursor, so asking twice agrees.
+    if view.count() == UInt(2) and view.count() == UInt(2) and view.into_list().count() == UInt(
+        2,
+    ) then {
+        println("terminals_repeatable");
+    } else {
+        panic("a terminal consumed the view");
+    };
+
+    // Adapting the source left the source alone.
+    if list.lazy().count() == UInt(3) and list.lazy().filter((x) => x > 0).count() == UInt(
+        3,
+    ) then {
+        println("source_untouched");
+    } else {
+        panic("adapting the source consumed it");
+    };
+
+    // A pipeline bound to a name is independent of later uses.
+    let other = view.map((x) => x * 10);
+    if other.into_list().count() == UInt(2) and view.count() == UInt(2) and other.count() == UInt(
+        2,
+    ) then {
+        println("view_is_a_value");
+    } else {
+        panic("pipelines share progress");
+    };
+
+    // So is a chain.
+    let chain = list.lazy().filter((x) => x > 0).map((x) => x + 1).take(2);
+    if chain.count() == UInt(2) and chain.into_list().count() == UInt(2) then {
+        println("chain_repeatable");
+    } else {
+        panic("the chain was spent");
+    };
+
+    // `lazy()` is a door, not a wrapper: a second one is a no-op, so
+    // `list.lazy().lazy()` behaves exactly like `list.lazy()` and the chain
+    // never grows a nesting level.
+    if list.lazy().lazy().count() == UInt(3) and list.lazy().lazy().filter((x) => x > 1).count(
+    ) == UInt(2) and list.lazy().lazy().into_list().count() == UInt(3) then {
+        println("lazy_is_idempotent");
+    } else {
+        panic("lazy() nested a LazyView inside a LazyView");
+    };
+
+    // Container methods keep their own meaning: `count` is O(1) size here,
+    // `first` is the head element -- none of them is the pipeline's.
+    if list.count() == UInt(3) and list.is_empty() == false and list.first().is_some() then {
+        println("container_methods_stay_own");
+    } else {
+        panic("a container method was hijacked");
+    };
+
+    // A cursor is still one-shot: pulling walks it to the end.
+    let cursor = list.iterator();
+    let mutable pulled UInt = 0;
+    while cursor.next() is .Some(_) then {
+        pulled += 1;
+    };
+    if pulled == UInt(3) and cursor.next().is_none() then {
+        println("cursor_still_walks");
+    } else {
+        panic("cursor did not walk once");
+    };
+
+    return 0;
+};

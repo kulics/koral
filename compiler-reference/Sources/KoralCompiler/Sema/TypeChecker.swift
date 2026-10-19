@@ -168,6 +168,23 @@ public class TypeChecker {
   // Explicit nominal conformances.
   var explicitConformances: Set<ConformanceKey> = []
   var declaredConformances: Set<ConformanceKey> = []
+
+  /// A conformance as WRITTEN, kept in `Type` form next to the normalised key.
+  ///
+  /// `ConformanceKey` throws away everything but identity, so it can answer
+  /// "does this conform?" but not "with which type arguments?". Method lookup
+  /// needs the second question: a trait parameter that appears only in another
+  /// parameter's bound (`Iterable[T, R Iterator[T]]`'s `T`) is invisible in the
+  /// trait's method signatures, so signature inference cannot find it. The
+  /// conformance was written down with both arguments, and this is where they
+  /// survive.
+  struct RecordedConformance {
+    let selfType: Type
+    let typeParamNames: [String]
+    let traitDefId: DefId
+    let traitTypeArgs: [Type]
+  }
+  var recordedConformances: [RecordedConformance] = []
   var conformanceDeclOrigins: [ConformanceKey: SourceSpan] = [:]
   var conformanceWitnesses: [String: ConformanceWitness] = [:]
   
@@ -1393,6 +1410,7 @@ public class TypeChecker {
     }
     if !typeParameters.isEmpty {
       methodTypeParamsByDefId[defId] = typeParameters
+      context.methodTypeParameterNames[defId] = typeParameters.map { $0.name }
     }
     return context.createSymbol(
       name: name,

@@ -74,11 +74,16 @@ Use `self` on either kind of type when consuming the receiver is part of the API
 
 Common consumption cases:
 
-- terminal extraction such as `unwrap`, `expect`, `into_list`
+- terminal extraction such as `unwrap`, `expect`
 - transforming combinators on ownership-carrying enums such as `Option.map` and `Result.map`
-- iterator adapters or terminal operations that must consume iteration state
 - linear builders such as `Task.set_name(...).set_stack_size(...).spawn()`
 - explicit ownership-conversion methods with `into_*` naming
+
+Lazy pipeline adapters and terminals are NOT in this list. A `LazyView` is a
+value describing a pipeline; every terminal builds a fresh cursor, walks it and
+drops it, so `count`, `into_list` and `is_empty` on one all leave it usable.
+Consume the receiver only for a one-shot cursor (`Iterator.next`), which is the
+one thing in the iteration API that genuinely advances state.
 
 Builder-style APIs need one extra distinction:
 
@@ -148,11 +153,50 @@ Examples:
 - a `List` or `String` method may remain observational even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
 - a stream, generator, or one-shot parser should not expose observation methods that secretly consume its progression state
 
-### Iterable as a Borrowed Protocol
+### Cursors Are Consuming, Pipelines Are Not
 
-`Iterator` itself is inherently consuming: `next(self)` advances the iterator's internal cursor and may exhaust the iteration.
+Iteration splits into two roles, and the split is the whole rule.
 
-`Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not a change to it.
+`Iterator` is a **cursor**: one-shot, only `next(self)`. It advances the
+cursor's own position and may exhaust the iteration. There is nothing else on
+it — no `count`, no `is_empty`, no adapter — so no call can quietly spend the
+cursor while pretending to ask a question. A one-shot source (a generator, a
+socket, a parser whose progression lives in the value) is a cursor and stays
+one; it has no `lazy()`.
+
+`Iterable` is something that can hand out a **fresh cursor on every call**.
+Creating an iterator is an observation of the source, not a change to it.
+
+Lazy pipelines enter through `lazy()` and stay on `LazyView`. A `LazyView[T, R]`
+holds a cursor FACTORY — `make () -> R` — not a source: two type parameters no
+matter how long the chain gets, and no per-stage view type to declare. Nothing
+in it mutates, so it is repeatable and safe to share. Adapters return another
+`LazyView` wrapping the factory they already had (so chains never nest), and
+every terminal builds a cursor, walks it and drops it. That makes the whole
+pipeline surface observational: `count`, `into_list`, `is_empty`, `fold` and
+friends all leave the pipeline and the source untouched.
+
+Reaching for a factory rather than a source is deliberate. Holding the source
+directly would drag a third type parameter (the source's own type) into every
+signature, and it would need a per-stage view type just to describe "this
+configuration applied to that source". The factory erases both. The cost is one
+closure allocation per adapter when the chain is built and one indirect call
+per terminal when the cursor is made — never per element: the cursor that comes
+out is an ordinary monomorphized `Iterator`, and `next` on it is a direct call.
+An existential cursor (`any Iterator`) would buy the last type parameter at the
+price of an indirect call per element, which is not a trade this library makes
+on the default path; that belongs behind an explicit `any_iter()` escape hatch.
+
+This also settles where the names live. Nothing lazy is spelled on a container:
+`dict.take(key)`, `string.find(pat)`, `list.first()` and `d.count()` keep the
+container's own meaning. Names like `map`, `filter`, `flat_map`, `to_list` and
+`collect` on a container are kept free for a future eager API — do not spend
+them on a lazy combinator.
+
+A stream, generator, or one-shot parser must not expose observation methods
+that secretly consume its progression state. That was the bug `is_empty` on a
+cursored iterator used to be; the cursor/pipeline split removes the shape that
+made it possible.
 
 For `type mutable` containers, `iterator(self)` naturally models this: the call passes the shared handle to the container, creates an iterator that snapshots the container's storage and cursor state, and the container itself remains reusable. The `type mutable` declaration ensures the container has shared-object identity, and the iterator is an independent cursor over that shared storage.
 
@@ -163,7 +207,9 @@ Typical `Iterable` cases where the source remains reusable:
 - containers such as `List`, `Set`, `Dict`, `Deque`, `Queue`, `Stack`, and `PriorityQueue` (all `type mutable`)
 - range-like values where the range is a reusable description and the iterator carries the advancing cursor (typically `type`)
 
-Typical consuming `Iterable`-like cases would be one-shot sources such as generators, streams, or parsers whose progression state lives in the source value itself.
+One-shot sources such as generators, streams, or parsers whose progression
+state lives in the source value itself are NOT `Iterable`: they cannot hand out
+a fresh cursor, so they are plain cursors and get no `lazy()`.
 
 This design also means observational methods such as set algebra should not be treated as consuming merely because they happen to call `iterator()`. If the source collection is `type mutable`, the public API naturally preserves the shared handle.
 
