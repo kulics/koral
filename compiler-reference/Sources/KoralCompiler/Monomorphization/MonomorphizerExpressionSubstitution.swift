@@ -1036,7 +1036,7 @@ extension Monomorphizer {
         substitution: [String: Type]
     ) -> TypedPattern {
         switch pattern {
-        case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
+        case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard:
             return pattern
         case .weakBinding(let symbol):
             let newSymbol = copySymbolPreservingDefId(

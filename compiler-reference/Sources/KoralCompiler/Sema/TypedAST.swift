@@ -390,6 +390,9 @@ public indirect enum TypedIntrinsic {
 public indirect enum TypedPattern: CustomStringConvertible {
   case booleanLiteral(value: Bool)
   case integerLiteral(value: String)  // Store as string to support arbitrary precision
+  /// Float literal pattern; the spelling is kept and the value takes the
+  /// subject's width (`1.1` against `Float32` is `Float32(1.1)`).
+  case floatLiteral(value: String)
   case stringLiteral(value: String)
   case wildcard
   case variable(symbol: Symbol)
@@ -402,8 +405,10 @@ public indirect enum TypedPattern: CustomStringConvertible {
   
   // Comparison pattern - matches values based on comparison operators
   // - operator: The comparison operator (>, <, >=, <=)
-  // - value: The integer value to compare against
-  case comparisonPattern(operator: ComparisonPatternOperator, value: Int64)
+  // - value: The literal to compare against. A rune is desugared to its code
+  //   point here, so the spelling carries the subject's domain: integer
+  //   digits, a code point, or a float spelling.
+  case comparisonPattern(operator: ComparisonPatternOperator, value: String)
   
   // Combination patterns for logical composition of patterns
   case andPattern(left: TypedPattern, right: TypedPattern)
@@ -418,6 +423,7 @@ public indirect enum TypedPattern: CustomStringConvertible {
     switch self {
     case .booleanLiteral(let v): return "\(v)"
     case .integerLiteral(let v): return "\(v)"
+    case .floatLiteral(let v): return "\(v)"
     case .stringLiteral(let v): return "\"\(v)\""
     case .wildcard: return "_"
     case .variable(let s):

@@ -2015,6 +2015,12 @@ given MIRFunctionBuilder {
                 MIROperand.Constant(MIRConstant.Integer("-\(value)", subject_type)),
                 ComparisonOperator.Equal(),
             ),
+            .FloatLiteral(value) then self.pattern_compare(
+                subject_place,
+                subject_type,
+                self.pattern_literal_constant(value, subject_type),
+                ComparisonOperator.Equal(),
+            ),
             .EnumCase(case_name, tag_index, elements) then self.lower_enum_case_pattern_condition(
                 subject_place,
                 subject_type,
@@ -2034,12 +2040,23 @@ given MIRFunctionBuilder {
                     .GreaterEqual() then ComparisonOperator.GreaterEqual(),
                     .LessEqual() then ComparisonOperator.LessEqual(),
                 };
-                self.pattern_compare(
-                    subject_place,
-                    subject_type,
-                    MIROperand.Constant(MIRConstant.Integer(value, subject_type)),
-                    comparison_op,
-                )
+                // A rune subject compares through its `value` field, the way a
+                // rune equality pattern matches; the value is already a code
+                // point. Everything else compares against its own domain.
+                when self.rune_pattern_value_access(subject_place, subject_type) in {
+                    .Some(access) then self.pattern_compare(
+                        access.first,
+                        access.second,
+                        MIROperand.Constant(MIRConstant.Integer(value, access.second)),
+                        comparison_op,
+                    ),
+                    .None() then self.pattern_compare(
+                        subject_place,
+                        subject_type,
+                        self.pattern_literal_constant(value, subject_type),
+                        comparison_op,
+                    ),
+                }
             },
             .AndPattern(left, right) then {
                 let left_condition = self.lower_pattern_condition(
@@ -2131,6 +2148,20 @@ given MIRFunctionBuilder {
             ),
         );
         return self.materialize(match_value, Type.BoolType());
+    };
+
+    /// The constant a literal pattern compares against: a float spelling for a
+    /// float subject (it takes the subject's width, so `1.1` against `Float32`
+    /// is `Float32(1.1)`), an integer otherwise.
+    file_private pattern_literal_constant(
+        self,
+        value String,
+        subject_type Type,
+    ) MIROperand = {
+        if self.is_float_type(subject_type) then {
+            return MIROperand.Constant(MIRConstant.Float(value, subject_type));
+        };
+        return MIROperand.Constant(MIRConstant.Integer(value, subject_type));
     };
 
     file_private pattern_bool(self, value Bool) MIROperand = {

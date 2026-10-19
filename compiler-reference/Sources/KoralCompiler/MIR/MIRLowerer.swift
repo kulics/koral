@@ -1498,6 +1498,17 @@ private final class MIRFunctionBuilder {
         .binary(MIRBinaryOperation(left: comparisonSubject, operatorKind: .comparison(op), right: expected, type: .bool)),
         type: .bool
       )
+    case .floatLiteral(let value):
+      // The literal takes the subject's width: `1.1` against `Float32` is the
+      // `Float32` nearest 1.1, the same value `y == 1.1` compares against.
+      guard matchedType == .float32 || matchedType == .float64 else { return nil }
+      let subjectOperand = materialize(matchedValue, type: matchedType)
+      let expected = MIROperand.constant(.float(value, matchedType))
+      let floatOp: ComparisonOperator = negated ? .notEqual : .equal
+      return materialize(
+        .binary(MIRBinaryOperation(left: subjectOperand, operatorKind: .comparison(floatOp), right: expected, type: .bool)),
+        type: .bool
+      )
     case .stringLiteral(let value):
       guard isStringPatternType(matchedType),
             let equalsMethod = stringEqualsMethodSymbol(for: matchedType) else {
@@ -1538,11 +1549,25 @@ private final class MIRFunctionBuilder {
         negated: negated
       )
     case .comparisonPattern(let patternOperator, let value):
-      guard matchedType.isIntegerType else { return nil }
-      let subjectOperand = materialize(matchedValue, type: matchedType)
-      let expected = MIROperand.constant(.integer(String(value), matchedType))
+      // A rune subject compares through its `value` field, the way a rune
+      // equality pattern matches; the value is already a code point.
+      let comparisonSubject: MIROperand
+      let comparisonType: Type
+      if let matchedPlace,
+         let runeValue = runePatternValueAccess(subjectPlace: matchedPlace, subjectType: matchedType) {
+        comparisonSubject = materialize(.placeRead(runeValue.place, ownership: .borrow), type: runeValue.type)
+        comparisonType = runeValue.type
+      } else {
+        guard matchedType.isIntegerType || matchedType == .float32 || matchedType == .float64 else { return nil }
+        comparisonSubject = materialize(matchedValue, type: matchedType)
+        comparisonType = matchedType
+      }
+      let expected: MIROperand =
+        (comparisonType == .float32 || comparisonType == .float64)
+        ? .constant(.float(value, comparisonType))
+        : .constant(.integer(value, comparisonType))
       return materialize(
-        .binary(MIRBinaryOperation(left: subjectOperand, operatorKind: .comparison(comparisonOperator(for: patternOperator, negated: negated)), right: expected, type: .bool)),
+        .binary(MIRBinaryOperation(left: comparisonSubject, operatorKind: .comparison(comparisonOperator(for: patternOperator, negated: negated)), right: expected, type: .bool)),
         type: .bool
       )
     case .notPattern(let inner):
@@ -2202,8 +2227,11 @@ private final class MIRFunctionBuilder {
       return isStringPatternType(matchedType)
     case .integerLiteral:
       return matchedType.isIntegerType || isRunePatternType(matchedType)
+    case .floatLiteral:
+      return matchedType == .float32 || matchedType == .float64
     case .comparisonPattern:
-      return matchedType.isIntegerType
+      return matchedType.isIntegerType || isRunePatternType(matchedType)
+        || matchedType == .float32 || matchedType == .float64
     case .enumCase(_, let tagIndex, let elements):
       guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else { return false }
@@ -2499,7 +2527,7 @@ private final class MIRFunctionBuilder {
       assignPatternBindingLocals(pattern: right, subjectPlace: matchedPlace, subjectType: matchedType)
     case .orPattern(let left, let right):
       bindOrPatternVariables(left: left, right: right, subjectPlace: subjectPlace, subjectType: subjectType)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType:
+    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType:
       break
     }
   }

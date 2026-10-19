@@ -2739,9 +2739,13 @@ given CstParser {
         );
     };
 
+    /// A pattern bound: an integer, float, or rune literal. Rune literals scan
+    /// as `IntLit` tokens carrying their quoted spelling, so the integer case
+    /// already covers them.
     file_private expect_pattern_value(self, what String) Result[Token] = {
         return when self.peek() in {
             .IntLit(_) then .Ok(self.eat()),
+            .FloatLit(_) then .Ok(self.eat()),
             _ then .Error(self.expected_error(what)),
         };
     };
@@ -2840,22 +2844,28 @@ given CstParser {
             _ then {},
         };
 
-        // Negative integer: -5
+        // Negative numeric literal: -5, -1.5
         if self.check(.Minus()) then {
             let minus = self.eat();
-            let value = when self.expect_pattern_value("integer literal") in {
+            let value = when self.expect_pattern_value("integer or float literal") in {
                 .Ok(v) then v,
                 .Error(e) then {
                     return .Error(e);
                 },
             };
-            return .Ok(.NegIntLit(minus, value));
+            return when value in {
+                .FloatLit(_) then .Ok(.NegFloatLit(minus, value)),
+                _ then .Ok(.NegIntLit(minus, value)),
+            };
         };
 
-        // Integer literal
+        // Integer / float literal
         when self.peek() in {
             .IntLit(_) then {
                 return .Ok(.PatIntLit(self.eat()));
+            },
+            .FloatLit(_) then {
+                return .Ok(.PatFloatLit(self.eat()));
             },
             .StrLit(_) then {
                 return .Ok(.PatStrLit(self.eat()));

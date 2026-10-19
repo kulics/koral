@@ -278,6 +278,15 @@ public type ComparisonPatternOperator {
     LessEqual(),
 };
 
+/// Which literal kind a comparison pattern wrote (`> 5`, `> 1.5`, `> 'a'`).
+/// The value's kind must match the subject's; the type checker desugars a
+/// rune value to its code point, so the typed pattern stores only a spelling.
+public type ComparisonPatternValueKind {
+    Integer(),
+    Float(),
+    Rune(),
+};
+
 public type TraitMember(
     name String,
     type_params List[TypeParameter],
@@ -446,6 +455,9 @@ public type PatternNode {
     BoolLiteral(value Bool, span SourceSpan),
     IntegerLiteral(value String, span SourceSpan),
     NegativeIntegerLiteral(value String, span SourceSpan),
+    /// Float literal pattern (e.g., 1.5, -2.0). The sign is folded into the
+    /// spelling: a float has no unsigned counterpart to exclude.
+    FloatLiteral(value String, span SourceSpan),
     StringLiteral(value String, span SourceSpan),
     RuneLiteral(value String, span SourceSpan),
     TraitObjectType(target_type TypeNode, span SourceSpan),
@@ -455,7 +467,15 @@ public type PatternNode {
     /// `(a, b, c)` -- positional destructuring of a struct with exactly that
     /// many fields. No type name is written, so identity comes from the subject.
     TuplePattern(elements List[PatternElement], span SourceSpan),
-    ComparisonPattern(op ComparisonPatternOperator, value String, span SourceSpan),
+    /// Comparison pattern. `value_kind` is the literal kind the source wrote
+    /// (`> 5`, `> 1.5`, `> 'a'`); the value's kind must match the subject's,
+    /// and the type checker desugars a rune to its code point.
+    ComparisonPattern(
+        op ComparisonPatternOperator,
+        value String,
+        value_kind ComparisonPatternValueKind,
+        span SourceSpan,
+    ),
     AndPattern(left PatternNode, right PatternNode, span SourceSpan),
     OrPattern(left PatternNode, right PatternNode, span SourceSpan),
     NotPattern(pattern PatternNode, span SourceSpan),
@@ -555,6 +575,7 @@ public let pattern_span(pattern PatternNode) SourceSpan = {
         .BoolLiteral(_, span) then span,
         .IntegerLiteral(_, span) then span,
         .NegativeIntegerLiteral(_, span) then span,
+        .FloatLiteral(_, span) then span,
         .StringLiteral(_, span) then span,
         .RuneLiteral(_, span) then span,
         .TraitObjectType(_, span) then span,
@@ -562,7 +583,7 @@ public let pattern_span(pattern PatternNode) SourceSpan = {
         .EnumCase(_, _, span) then span,
         .StructPattern(_, _, span) then span,
         .TuplePattern(_, span) then span,
-        .ComparisonPattern(_, _, span) then span,
+        .ComparisonPattern(_, _, _, span) then span,
         .AndPattern(_, _, span) then span,
         .OrPattern(_, _, span) then span,
         .NotPattern(_, span) then span,

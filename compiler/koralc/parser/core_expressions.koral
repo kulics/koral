@@ -870,6 +870,71 @@ given Parser {
         return .Ok(arms);
     };
 
+    /// `> n`, `< n`, `>= n`, `<= n`. The operand is an integer, float, or rune
+    /// literal; a sign folds into a numeric value and a rune is never negative
+    /// (grammar.bnf <comparison-pattern>).
+    module_private parse_comparison_pattern(
+        self,
+        start Token,
+        op ComparisonPatternOperator,
+    ) Result[PatternNode] = {
+        self.advance();
+        let mutable is_negative = false;
+        if self.current().kind is .Minus() then {
+            self.advance();
+            is_negative = true;
+        };
+        when self.current().kind in {
+            .IntegerLiteral(v) then {
+                self.advance();
+                return .Ok(
+                    PatternNode.ComparisonPattern(
+                        op,
+                        if is_negative then "-\(v)" else v,
+                        ComparisonPatternValueKind.Integer(),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
+            .FloatLiteral(v) then {
+                self.advance();
+                return .Ok(
+                    PatternNode.ComparisonPattern(
+                        op,
+                        if is_negative then "-\(v)" else v,
+                        ComparisonPatternValueKind.Float(),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
+            .RuneLiteral(v) then {
+                if is_negative then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected integer or float literal after '-'",
+                        ),
+                    );
+                };
+                self.advance();
+                return .Ok(
+                    PatternNode.ComparisonPattern(
+                        op,
+                        v,
+                        ComparisonPatternValueKind.Rune(),
+                        self.span_from_start(start),
+                    ),
+                );
+            },
+            _ then {
+                return .Error(
+                    self.parser_error(
+                        "Expected integer, float, or rune literal in comparison pattern",
+                    ),
+                );
+            },
+        };
+    };
+
     module_private parse_pattern_primary(self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current();
 
@@ -931,24 +996,37 @@ given Parser {
             },
             .Minus() then {
                 self.advance();
-                let value = if self.current().kind is .IntegerLiteral(v) then {
-                    self.advance();
-                    v
-                } else {
-                    return .Error(
-                        self.parser_error(
-                            "Expected integer literal after '-' in negative pattern",
-                        ),
-                    );
+                when self.current().kind in {
+                    .FloatLiteral(v) then {
+                        self.advance();
+                        node = PatternNode.FloatLiteral(
+                            "-\(v)",
+                            self.span_from_start(start),
+                        );
+                    },
+                    .IntegerLiteral(v) then {
+                        self.advance();
+                        node = PatternNode.NegativeIntegerLiteral(
+                            v,
+                            self.span_from_start(start),
+                        );
+                    },
+                    _ then {
+                        return .Error(
+                            self.parser_error(
+                                "Expected integer or float literal after '-'",
+                            ),
+                        );
+                    },
                 };
-                node = PatternNode.NegativeIntegerLiteral(
-                    value,
-                    self.span_from_start(start),
-                );
             },
             .IntegerLiteral(value) then {
                 self.advance();
                 node = PatternNode.IntegerLiteral(value, self.span_from_start(start));
+            },
+            .FloatLiteral(value) then {
+                self.advance();
+                node = PatternNode.FloatLiteral(value, self.span_from_start(start));
             },
             .StringLiteral(value) then {
                 self.advance();
@@ -959,95 +1037,27 @@ given Parser {
                 node = PatternNode.RuneLiteral(value, self.span_from_start(start));
             },
             .Greater() then {
-                self.advance();
-                let mutable is_negative = false;
-                if self.current().kind is .Minus() then {
-                    self.advance();
-                    is_negative = true;
-                };
-                let value = if self.current().kind is .IntegerLiteral(v) then {
-                    self.advance();
-                    if is_negative then "-\(v)" else v
-                } else {
-                    return .Error(
-                        self.parser_error(
-                            "Expected integer literal after '>' in comparison pattern",
-                        ),
-                    );
-                };
-                node = PatternNode.ComparisonPattern(
+                return self.parse_comparison_pattern(
+                    start,
                     ComparisonPatternOperator.Greater(),
-                    value,
-                    self.span_from_start(start),
                 );
             },
             .Less() then {
-                self.advance();
-                let mutable is_negative = false;
-                if self.current().kind is .Minus() then {
-                    self.advance();
-                    is_negative = true;
-                };
-                let value = if self.current().kind is .IntegerLiteral(v) then {
-                    self.advance();
-                    if is_negative then "-\(v)" else v
-                } else {
-                    return .Error(
-                        self.parser_error(
-                            "Expected integer literal after '<' in comparison pattern",
-                        ),
-                    );
-                };
-                node = PatternNode.ComparisonPattern(
+                return self.parse_comparison_pattern(
+                    start,
                     ComparisonPatternOperator.Less(),
-                    value,
-                    self.span_from_start(start),
                 );
             },
             .GreaterEqual() then {
-                self.advance();
-                let mutable is_negative = false;
-                if self.current().kind is .Minus() then {
-                    self.advance();
-                    is_negative = true;
-                };
-                let value = if self.current().kind is .IntegerLiteral(v) then {
-                    self.advance();
-                    if is_negative then "-\(v)" else v
-                } else {
-                    return .Error(
-                        self.parser_error(
-                            "Expected integer literal after '>=' in comparison pattern",
-                        ),
-                    );
-                };
-                node = PatternNode.ComparisonPattern(
+                return self.parse_comparison_pattern(
+                    start,
                     ComparisonPatternOperator.GreaterEqual(),
-                    value,
-                    self.span_from_start(start),
                 );
             },
             .LessEqual() then {
-                self.advance();
-                let mutable is_negative = false;
-                if self.current().kind is .Minus() then {
-                    self.advance();
-                    is_negative = true;
-                };
-                let value = if self.current().kind is .IntegerLiteral(v) then {
-                    self.advance();
-                    if is_negative then "-\(v)" else v
-                } else {
-                    return .Error(
-                        self.parser_error(
-                            "Expected integer literal after '<=' in comparison pattern",
-                        ),
-                    );
-                };
-                node = PatternNode.ComparisonPattern(
+                return self.parse_comparison_pattern(
+                    start,
                     ComparisonPatternOperator.LessEqual(),
-                    value,
-                    self.span_from_start(start),
                 );
             },
             .Identifier(name) then {

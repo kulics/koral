@@ -256,6 +256,62 @@ given TypeChecker {
         return TypedPattern.StringLiteral(value);
     };
 
+    /// The single code point a rune pattern matches on, or nothing when the
+    /// spelling is not one rune. Shared by rune equality and rune comparison
+    /// patterns so both say the same thing about `'ab'`.
+    module_private rune_pattern_scalar_value(
+        self,
+        value String,
+        span SourceSpan,
+    ) Option[String] = {
+        let rune_count = value.to_runes().count();
+        if rune_count == UInt(0) then {
+            self.push_diagnostic_at_span("Rune literal cannot be empty", span);
+            return Option[String].None();
+        };
+        if rune_count <> UInt(1) then {
+            self.push_diagnostic_at_span(
+                "Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(rune_count.to_string())'",
+                span,
+            );
+            return Option[String].None();
+        };
+        return Option[String].Some(self.rune_literal_scalar_value(value));
+    };
+
+    /// Which subject types a rune pattern matches: std's `Rune`, or `UInt8`
+    /// for a single ASCII character (a byte holds no other code point).
+    module_private rune_pattern_subject_scalar(
+        self,
+        value String,
+        matched_type Type,
+        span SourceSpan,
+    ) Option[String] = {
+        let scalar_value = self.rune_pattern_scalar_value(value, span) or else {
+            return Option[String].None();
+        };
+        if self.is_rune_type(matched_type) then {
+            return Option[String].Some(scalar_value);
+        };
+        if matched_type is .UInt8Type() then {
+            let bytes = value.to_bytes();
+            if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
+                return Option[String].Some(scalar_value);
+            };
+            self.push_diagnostic_at_span(
+                "Rune literal pattern must be a single ASCII character when matching UInt8",
+                span,
+            );
+            return Option[String].None();
+        };
+
+        self.push_diagnostic_at_span(
+            "Type mismatch: expected Rune or UInt8, got \(type_to_string(matched_type))",
+            span,
+        );
+        return Option[String].None();
+    };
+
     module_private lower_rune_literal_pattern(
         self,
         value String,
@@ -263,40 +319,10 @@ given TypeChecker {
         span SourceSpan,
     ) TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
-        let rune_count = value.to_runes().count();
-        if rune_count == UInt(0) then {
-            self.push_diagnostic_at_span("Rune literal cannot be empty", span);
-            return TypedPattern.IntegerLiteral("0");
+        return when self.rune_pattern_subject_scalar(value, matched_type, span) in {
+            .Some(scalar_value) then TypedPattern.IntegerLiteral(scalar_value),
+            .None() then TypedPattern.IntegerLiteral("0"),
         };
-        if rune_count <> UInt(1) then {
-            self.push_diagnostic_at_span(
-                "Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(rune_count.to_string())'",
-                span,
-            );
-            return TypedPattern.IntegerLiteral("0");
-        };
-
-        let scalar_value = self.rune_literal_scalar_value(value);
-        if self.is_rune_type(matched_type) then {
-            return TypedPattern.IntegerLiteral(scalar_value);
-        };
-        if matched_type is .UInt8Type() then {
-            let bytes = value.to_bytes();
-            if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
-                return TypedPattern.IntegerLiteral(scalar_value);
-            };
-            self.push_diagnostic_at_span(
-                "Rune literal pattern must be a single ASCII character when matching UInt8",
-                span,
-            );
-            return TypedPattern.IntegerLiteral("0");
-        };
-
-        self.push_diagnostic_at_span(
-            "Type mismatch: expected Rune or UInt8, got \(type_to_string(matched_type))",
-            span,
-        );
-        return TypedPattern.IntegerLiteral("0");
     };
 
     /// A bool literal pattern only matches a `Bool` subject.
@@ -358,22 +384,69 @@ given TypeChecker {
         return TypedPattern.NegativeIntegerLiteral(value);
     };
 
-    /// Comparison patterns match integers by ordering bounds.
-    module_private lower_comparison_pattern(
+    /// A float literal pattern only matches a float subject.
+    module_private lower_float_literal_pattern(
         self,
-        op ComparisonPatternOperator,
         value String,
         subject_type Type,
         span SourceSpan,
     ) TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
-        if not self.is_integer_type(matched_type) then {
+        if not self.is_float_type(matched_type) then {
             self.push_diagnostic_at_span(
-                "Comparison patterns only support integer types, got '\(self.display_type_name(matched_type))'",
+                "Type mismatch: expected Float32 or Float64, got \(self.display_type_name(matched_type))",
                 span,
             );
         };
-        return TypedPattern.ComparisonPattern(op, value);
+        return TypedPattern.FloatLiteral(value);
+    };
+
+    /// Comparison patterns order the subject against a literal. The value's
+    /// kind must match the subject's kind -- the same rule a literal equality
+    /// pattern follows. A comparison bound may sit outside the subject's
+    /// domain (`>= -1` on `UInt8` is true of everything), so unlike a negative
+    /// equality pattern there is no signedness check here.
+    module_private lower_comparison_pattern(
+        self,
+        op ComparisonPatternOperator,
+        value String,
+        value_kind ComparisonPatternValueKind,
+        subject_type Type,
+        span SourceSpan,
+    ) TypedPattern = {
+        let matched_type = self.pattern_match_subject_type(subject_type);
+        return when value_kind in {
+            .Integer() then {
+                if not self.is_integer_type(matched_type) then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected integer type, got \(self.display_type_name(matched_type))",
+                        span,
+                    );
+                };
+                TypedPattern.ComparisonPattern(op, value)
+            },
+            .Float() then {
+                if not self.is_float_type(matched_type) then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected Float32 or Float64, got \(self.display_type_name(matched_type))",
+                        span,
+                    );
+                };
+                TypedPattern.ComparisonPattern(op, value)
+            },
+            .Rune() then {
+                // Desugar to the code point, the way a rune equality pattern
+                // does; the typed pattern carries no rune spelling.
+                let scalar = self.rune_pattern_subject_scalar(
+                    value,
+                    matched_type,
+                    span,
+                ) or else {
+                    return TypedPattern.ComparisonPattern(op, "0");
+                };
+                TypedPattern.ComparisonPattern(op, scalar)
+            },
+        };
     };
 
     /// Whether a pattern TESTS the shape of its subject, as opposed to simply
@@ -539,6 +612,11 @@ given TypeChecker {
                     span,
                 )
             },
+            .FloatLiteral(value, span) then self.lower_float_literal_pattern(
+                value,
+                subject_type,
+                span,
+            ),
             .StringLiteral(value, span) then self.lower_string_literal_pattern(
                 value,
                 subject_type,
@@ -549,8 +627,14 @@ given TypeChecker {
                 subject_type,
                 span,
             ),
-            .ComparisonPattern(op, value, span) then {
-                self.lower_comparison_pattern(op, value, subject_type, span)
+            .ComparisonPattern(op, value, value_kind, span) then {
+                self.lower_comparison_pattern(
+                    op,
+                    value,
+                    value_kind,
+                    subject_type,
+                    span,
+                )
             },
             .AndPattern(left, right, _) then {
                 TypedPattern.AndPattern(

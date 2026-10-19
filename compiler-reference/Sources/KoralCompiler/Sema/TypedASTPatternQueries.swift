@@ -27,6 +27,7 @@ extension TypedPattern {
     case .wildcard,
          .booleanLiteral,
          .integerLiteral,
+         .floatLiteral,
          .stringLiteral,
          .comparisonPattern:
       return false
@@ -42,6 +43,7 @@ extension TypedPattern {
       return elements.allSatisfy { $0.isWildcardOnly }
     case .booleanLiteral,
          .integerLiteral,
+         .floatLiteral,
          .stringLiteral,
          .variable,
           .traitObjectType,
@@ -95,6 +97,7 @@ extension TypedPattern {
     case .wildcard,
          .booleanLiteral,
          .integerLiteral,
+         .floatLiteral,
          .stringLiteral,
          .traitObjectType,
          .comparisonPattern:

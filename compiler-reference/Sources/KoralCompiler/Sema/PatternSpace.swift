@@ -152,7 +152,7 @@ extension PatternSpace {
         case .booleanLiteral(let value):
             return subtractBoolLiteral(value, type: type)
             
-        case .integerLiteral, .stringLiteral:
+        case .integerLiteral, .floatLiteral, .stringLiteral:
             // Literals on infinite types don't reduce the space meaningfully
             // (we still need a catchall for exhaustiveness)
             return self
@@ -372,7 +372,7 @@ extension PatternSpace {
                 return remaining == [value]
             }
             return false
-        case .integerLiteral, .stringLiteral:
+        case .integerLiteral, .floatLiteral, .stringLiteral:
             // Literals don't cover the entire space
             return false
         case .enumCase(let caseName, _, let elements):

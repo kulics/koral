@@ -209,11 +209,17 @@ extension TypeChecker {
         throw SemanticError(.typeMismatch(expected: "integer type", got: subjectType.description), span: span)
       }
       return (.integerLiteral(value: val), [])
-      
+
+    case .floatLiteral(let val, let span):
+      if !isFloatType(subjectType) {
+        throw SemanticError(.typeMismatch(expected: "Float32 or Float64", got: subjectType.description), span: span)
+      }
+      return (.floatLiteral(value: val), [])
+
     case .negativeIntegerLiteral(let val, let span):
       // Negative integer literal pattern - verify subject is integer type
       if !subjectType.isIntegerType {
-        throw SemanticError.typeMismatch(expected: "integer type", got: subjectType.description)
+        throw SemanticError(.typeMismatch(expected: "integer type", got: subjectType.description), span: span)
       }
       switch subjectType {
       case .uint, .uint8, .uint16, .uint32, .uint64:
@@ -362,30 +368,44 @@ extension TypeChecker {
         .enumCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
       )
       
-    case .comparisonPattern(let op, let value, let span):
-      // Comparison patterns only support integer types
-      if !subjectType.isIntegerType {
-        throw SemanticError(.generic(
-          "Comparison patterns only support integer types, got '\(subjectType)'"
-        ), span: span)
-      }
-      
-      // Parse the integer value
-      let intValue: Int64
-      if value.hasPrefix("-") {
-        let positiveValue = String(value.dropFirst())
-        guard let parsed = Int64(positiveValue) else {
-          throw SemanticError(.generic("Invalid integer literal in comparison pattern: \(value)"), span: span)
+    case .comparisonPattern(let op, let value, let valueKind, let span):
+      // The value's kind must match the subject's kind -- the same rule a
+      // literal equality pattern follows. A comparison bound may sit outside
+      // the subject's domain (`>= -1` on `UInt8` is true of everything), so
+      // unlike a negative equality pattern there is no signedness check here.
+      switch valueKind {
+      case .integer:
+        if !subjectType.isIntegerType {
+          throw SemanticError(.typeMismatch(expected: "integer type", got: subjectType.description), span: span)
         }
-        intValue = -parsed
-      } else {
-        guard let parsed = Int64(value) else {
-          throw SemanticError(.generic("Invalid integer literal in comparison pattern: \(value)"), span: span)
+        return (.comparisonPattern(operator: op, value: value), [])
+      case .float:
+        if !isFloatType(subjectType) {
+          throw SemanticError(.typeMismatch(expected: "Float32 or Float64", got: subjectType.description), span: span)
         }
-        intValue = parsed
+        return (.comparisonPattern(operator: op, value: value), [])
+      case .rune:
+        // Desugar to the code point, the way a rune equality pattern does.
+        guard let cp = singleRuneCodePoint(from: value) else {
+          let count = value.unicodeScalars.count
+          if count == 0 {
+            throw SemanticError(.generic("Rune literal cannot be empty"), span: span)
+          }
+          throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(count)"), span: span)
+        }
+        if isRuneType(subjectType) {
+          return (.comparisonPattern(operator: op, value: String(cp)), [])
+        }
+        if subjectType == .uint8 {
+          guard cp <= 127 else {
+            throw SemanticError(
+              .generic("Rune literal pattern must be a single ASCII character when matching UInt8"),
+              span: span)
+          }
+          return (.comparisonPattern(operator: op, value: String(cp)), [])
+        }
+        throw SemanticError(.typeMismatch(expected: "Rune or UInt8", got: subjectType.description), span: span)
       }
-      
-      return (.comparisonPattern(operator: op, value: intValue), [])
       
     case .andPattern(let left, let right, let span):
       let (typedLeft, leftBindings) = try checkPattern(left, subjectType: subjectType)
@@ -721,7 +741,7 @@ extension TypeChecker {
       return patternContainsBindings(left) || patternContainsBindings(right)
     case .notPattern(let inner):
       return patternContainsBindings(inner)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       return false
     }
   }
@@ -764,7 +784,7 @@ extension TypeChecker {
       collectPatternSymbols(right, into: &symbols, seenDefIds: &seenDefIds)
     case .notPattern(let pattern):
       collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       break
     }
   }
@@ -824,7 +844,7 @@ extension TypeChecker {
       )
     case .notPattern(let inner):
       return .notPattern(pattern: canonicalizePatternBindings(inner, canonicalSymbolsByName: canonicalSymbolsByName))
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       return pattern
     }
   }

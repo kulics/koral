@@ -1576,7 +1576,7 @@ extension Monomorphizer {
     /// Resolves types in a pattern.
     internal func resolveTypesInPattern(_ pattern: TypedPattern) -> TypedPattern {
         switch pattern {
-        case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
+        case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard:
             return pattern
         case .weakBinding(let symbol):
             let newSymbol = copySymbolPreservingDefId(

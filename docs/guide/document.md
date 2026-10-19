@@ -1691,15 +1691,26 @@ Koral has powerful pattern matching capabilities, mainly used through `when` exp
 Supported patterns include:
 
 - Wildcard pattern: `_` (matches any value)
-- Literal patterns: `1`, `-5`, `"abc"`, `'a'`, `true` (negative integer literals such as `-5` are supported)
+- Literal patterns: `1`, `-5`, `1.5`, `-2.25`, `"abc"`, `'a'`, `true` (negative numeric literals such as `-5` are supported)
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
-- Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
+- Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`, `> 1.5`, `>= 'a'`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
 - (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`)
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
+
+A literal matches exactly the types its `==` would accept: integers against
+integer types (`-5` never matches an unsigned type), floats against `Float32` /
+`Float64`, `true` against `Bool`, strings against `String`, runes against
+`Rune` (or an ASCII `UInt8`). A float literal matches under IEEE equality at
+the subject's width (`1.1` against `Float32` is `Float32(1.1)`), so NaN matches
+no literal -- catch it with a guard such as `v if v <> v` -- and `0.0` matches
+`-0.0`. A comparison bound follows the same kind rule: `> 1` is an integer
+bound, `> 1.0` a float one, `> 'a'` a rune one (compared by code point). A
+bound may lie outside the subject's domain (`>= -1` on `UInt8` matches
+everything).
 
 Destructuring follows exactly the call rules: a field declared named must be
 matched by label, and a field declared positional must not be.
@@ -1983,6 +1994,7 @@ The `when` expression checks that patterns are exhaustive:
 - For `Bool` types, both `true` and `false` must be covered (or a wildcard used).
 - For `enum` types, all cases must be covered (or a wildcard used).
 - For `Int` / `UInt` types, comparison patterns (`> 0`, `<= 0`, etc.) can establish exhaustiveness when they fully cover the integer range. A wildcard is otherwise required.
+- For float and `Rune` types, literal and comparison patterns contribute no coverage -- there is no finite domain to close -- so a wildcard or variable binding is required.
 - For struct types, `StructName(_, _)`-style patterns with wildcards for every field are treated as exhaustive.
 - Duplicate patterns are rejected at compile time.
 - Unreachable patterns (patterns already covered by earlier arms) are rejected at compile time. Wildcard and variable binding patterns are exempt from this check.

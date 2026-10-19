@@ -530,6 +530,15 @@ public enum ComparisonPatternOperator {
   case lessEqual     // <=
 }
 
+/// Which literal kind a comparison pattern wrote (`> 5`, `> 1.5`, `> 'a'`).
+/// The value's kind must match the subject's; the type checker desugars a
+/// rune value to its code point, so the typed pattern stores only a spelling.
+public enum ComparisonPatternValueKind {
+  case integer
+  case float
+  case rune
+}
+
 /// Interpolated string parts
 public enum InterpolatedPart {
   case literal(String)
@@ -710,6 +719,9 @@ public indirect enum PatternNode: CustomStringConvertible {
   case integerLiteral(value: String, span: SourceSpan)  // Store as string
   /// Negative integer literal pattern for matching negative integers (e.g., -5)
   case negativeIntegerLiteral(value: String, span: SourceSpan)
+  /// Float literal pattern (e.g., 1.5, -2.0). The sign is folded into the
+  /// spelling: a float has no unsigned counterpart to exclude.
+  case floatLiteral(value: String, span: SourceSpan)
   case stringLiteral(value: String, span: SourceSpan)
   case runeLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
@@ -717,8 +729,9 @@ public indirect enum PatternNode: CustomStringConvertible {
   case enumCase(caseName: String, elements: [PatternArg], span: SourceSpan)
   /// Comparison pattern for matching values using comparison operators (e.g., > 5, <= 10)
   /// - operator: The comparison operator (>, <, >=, <=)
-  /// - value: The integer literal value to compare against (stored as string)
-  case comparisonPattern(operator: ComparisonPatternOperator, value: String, span: SourceSpan)
+  /// - value: The literal to compare against (stored as string; sign folded)
+  /// - valueKind: which literal kind the source wrote
+  case comparisonPattern(operator: ComparisonPatternOperator, value: String, valueKind: ComparisonPatternValueKind, span: SourceSpan)
   /// And pattern for combining two patterns with logical AND
   case andPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
   /// Or pattern for combining two patterns with logical OR
@@ -748,6 +761,8 @@ public indirect enum PatternNode: CustomStringConvertible {
       return "\(value)"
     case .negativeIntegerLiteral(let value, _):
       return "-\(value)"
+    case .floatLiteral(let value, _):
+      return value
     case .stringLiteral(let value, _): return "\"\(value)\""
     case .runeLiteral(let value, _): return "'\(value)'"
     case .wildcard: return "_"
@@ -761,7 +776,7 @@ public indirect enum PatternNode: CustomStringConvertible {
         }
       }.joined(separator: ", ")
       return ".\(name)(\(args))"
-    case .comparisonPattern(let op, let value, _):
+    case .comparisonPattern(let op, let value, let valueKind, _):
       let opStr: String
       switch op {
       case .greater: opStr = ">"
@@ -769,7 +784,12 @@ public indirect enum PatternNode: CustomStringConvertible {
       case .greaterEqual: opStr = ">="
       case .lessEqual: opStr = "<="
       }
-      return "\(opStr) \(value)"
+      let rendered: String
+      switch valueKind {
+      case .integer, .float: rendered = value
+      case .rune: rendered = "'\(value)'"
+      }
+      return "\(opStr) \(rendered)"
     case .andPattern(let left, let right, _):
       return "(\(left.description) and \(right.description))"
     case .orPattern(let left, let right, _):
@@ -806,12 +826,13 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .booleanLiteral(_, let span): return span
     case .integerLiteral(_, let span): return span
     case .negativeIntegerLiteral(_, let span): return span
+    case .floatLiteral(_, let span): return span
     case .stringLiteral(_, let span): return span
     case .runeLiteral(_, let span): return span
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
     case .enumCase(_, _, let span): return span
-    case .comparisonPattern(_, _, let span): return span
+    case .comparisonPattern(_, _, _, let span): return span
     case .andPattern(_, _, let span): return span
     case .orPattern(_, _, let span): return span
     case .notPattern(_, let span): return span

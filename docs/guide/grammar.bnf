@@ -641,6 +641,7 @@
 
 <primary-pattern> ::= "_"                                     // wildcard
                     | "-"? <integer-literal>                  // integer literal pattern (including negative)
+                    | "-"? <float-literal>                    // float literal pattern (including negative)
                     | <bool-literal>                          // bool literal pattern
                     | <string-literal>                        // string literal pattern (plain literal only -- no interpolation)
                     | <rune-literal>                          // rune literal pattern
@@ -688,9 +689,23 @@
 //   Rect(Point(a, b), w, h)  - nested struct destructuring
 //   Box(v)                   - works with generic structs (e.g., Box[Int])
 
-<comparison-pattern> ::= <comparison-pattern-op> "-"? <integer-literal>
+<comparison-pattern> ::= <comparison-pattern-op> <comparison-pattern-value>
 <comparison-pattern-op> ::= ">" | "<" | ">=" | "<="
-// Comparison patterns: > n, < n, >= n, <= n (where n is an integer literal, optionally negative)
+<comparison-pattern-value> ::= "-"? <integer-literal>
+                             | "-"? <float-literal>
+                             | <rune-literal>
+// 比较模式：> n、< n、>= n、<= n。值是字面量，且种类必须与主体的种类一致——
+// 与常量模式同一条规则：能匹配什么，等于该字面量与该类型做 `==` 能否通过
+// 类型检查。因此 `> 1` 不作用于浮点主体（写 `> 1.0`），`> 'a'` 不作用于整数
+// 主体。具体对应：
+//   整数主体   <- "-"? <integer-literal>
+//   Rune 主体  <- <rune-literal>（脱糖为码点比较）
+//   UInt8 主体 <- "-"? <integer-literal> 或 <rune-literal>（rune 限 ASCII）
+//   Float 主体 <- "-"? <float-literal>
+// 比较界允许落在主体的域外（UInt8 上的 `>= -1` 恒真），所以这里的负号不查
+// 有无符号；等值模式的负数字面量仍然不能匹配无符号类型。
+// 浮点字面量模式按 IEEE 等值匹配（与 `==` 一致）：NaN 不匹配任何常量模式，
+// `0.0` 与 `-0.0` 互匹配；浮点常量与比较模式都不贡献穷尽性覆盖。
 
 <enum-case-pattern> ::= "." <type-identifier> "(" <pattern-arg-list>? ")"
 // 模式语法独立于构造语法；即使是零字段 enum case，模式位置也写空括号，如 .None()

@@ -111,27 +111,60 @@ extension Parser {
         fatalError("Unreachable")
       }
       
-      // Parse integer operand (may be negative)
+      // Comparison operand: an integer, float, or rune literal. A sign folds
+      // into a numeric value; a rune is never negative.
       var isNegative = false
       if currentToken === .minus {
         try match(.minus)
         isNegative = true
       }
-      
-      guard case .integer(let v) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Comparison pattern requires integer literal")
+
+      switch currentToken {
+      case .integer(let v):
+        try match(.integer(v))
+        return .comparisonPattern(
+          operator: op,
+          value: isNegative ? "-\(v)" : v,
+          valueKind: .integer,
+          span: startSpan
+        )
+      case .float(let v):
+        try match(.float(v))
+        return .comparisonPattern(
+          operator: op,
+          value: isNegative ? "-\(v)" : v,
+          valueKind: .float,
+          span: startSpan
+        )
+      case .rune(let v):
+        if isNegative {
+          throw ParserError.rejectedConstruct(
+            span: currentSpan,
+            message: "Expected integer or float literal after '-'"
+          )
+        }
+        try match(.rune(v))
+        return .comparisonPattern(operator: op, value: v, valueKind: .rune, span: startSpan)
+      default:
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Expected integer, float, or rune literal in comparison pattern"
+        )
       }
-      try match(.integer(v))
-      
-      let value = isNegative ? "-\(v)" : v
-      return .comparisonPattern(operator: op, value: value, span: startSpan)
     }
-    
-    // Negative integer literal pattern: -n
+
+    // Negative numeric literal pattern: -n, -1.5
     if currentToken === .minus {
       try match(.minus)
+      if case .float(let v) = currentToken {
+        try match(.float(v))
+        return .floatLiteral(value: "-\(v)", span: startSpan)
+      }
       guard case .integer(let v) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Expected integer or float literal after '-'"
+        )
       }
       try match(.integer(v))
       return .negativeIntegerLiteral(value: v, span: startSpan)
@@ -159,6 +192,12 @@ extension Parser {
       }
       
       return .integerLiteral(value: v, span: startSpan)
+    }
+
+    // Float literal pattern: 1.5, 1e-3
+    if case .float(let v) = currentToken {
+      try match(.float(v))
+      return .floatLiteral(value: v, span: startSpan)
     }
     
     // Boolean literal pattern

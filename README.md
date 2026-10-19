@@ -209,7 +209,7 @@ let result = list.iterator()
 
 ### Pattern Matching
 
-- Wildcard (`_`), literal, variable binding, comparison (`> n`, `<= n`)
+- Wildcard (`_`), literal (`1`, `1.5`, `"s"`, `'a'`, `true`), variable binding, comparison (`> n`, `<= n`, `> 1.5`, `>= 'a'`)
 - Struct/Enum destructuring and tuple destructuring (including nested)
 - Logical patterns: `or`, `and`, `not`
 - Arm guards: `pat if cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness

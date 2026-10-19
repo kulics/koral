@@ -492,7 +492,7 @@ extension TypeChecker {
       collectPatternBindingNames(right, into: &names)
     case .notPattern(let inner, _):
       collectPatternBindingNames(inner, into: &names)
-    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       break
     }
   }

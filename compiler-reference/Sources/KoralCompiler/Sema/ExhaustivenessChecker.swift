@@ -303,17 +303,21 @@ extension ExhaustivenessChecker {
             guard let parsed = Int64(value) else { return nil }
             return IntegerCoverage(hasLowerBound: true, lowerBound: parsed, hasUpperBound: true, upperBound: parsed)
         case .comparisonPattern(let op, let value):
+            // A rune value is desugared to its code point, so it parses as an
+            // integer; a float spelling never does, and a float comparison
+            // contributes no coverage (there is no finite float domain).
+            guard let parsed = Int64(value) else { return nil }
             switch op {
             case .greater:
-                if value == Int64.max { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
-                return IntegerCoverage(hasLowerBound: true, lowerBound: value + 1, hasUpperBound: false, upperBound: 0)
+                if parsed == Int64.max { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
+                return IntegerCoverage(hasLowerBound: true, lowerBound: parsed + 1, hasUpperBound: false, upperBound: 0)
             case .greaterEqual:
-                return IntegerCoverage(hasLowerBound: true, lowerBound: value, hasUpperBound: false, upperBound: 0)
+                return IntegerCoverage(hasLowerBound: true, lowerBound: parsed, hasUpperBound: false, upperBound: 0)
             case .less:
-                if value == Int64.min { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
-                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: value - 1)
+                if parsed == Int64.min { return IntegerCoverage(hasLowerBound: true, lowerBound: 1, hasUpperBound: true, upperBound: 0) }
+                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: parsed - 1)
             case .lessEqual:
-                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: value)
+                return IntegerCoverage(hasLowerBound: false, lowerBound: 0, hasUpperBound: true, upperBound: parsed)
             }
         default:
             return nil

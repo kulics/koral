@@ -1244,7 +1244,7 @@ extension TypeChecker {
          .traitObjectTypeBinding:
       return true
     case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
-         .stringLiteral, .runeLiteral, .comparisonPattern, .traitObjectType:
+         .floatLiteral, .stringLiteral, .runeLiteral, .comparisonPattern, .traitObjectType:
       return false
     case .enumCase(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
@@ -1279,6 +1279,7 @@ extension TypeChecker {
          .booleanLiteral,
          .integerLiteral,
          .negativeIntegerLiteral,
+         .floatLiteral,
          .stringLiteral,
          .runeLiteral,
          .comparisonPattern:
@@ -8718,6 +8719,8 @@ extension TypeChecker {
       return .integerLiteral(value: value)
     case .negativeIntegerLiteral(let value, _):
       return .integerLiteral(value: "-\(value)")
+    case .floatLiteral(let value, _):
+      return .floatLiteral(value: value)
     case .stringLiteral(let value, _):
       return .stringLiteral(value: value)
     case .runeLiteral(let value, _):
@@ -8734,15 +8737,14 @@ extension TypeChecker {
         try convertPatternToTypedPattern(elem.pattern, expectedType: .void)
       }
       return .enumCase(caseName: caseName, tagIndex: 0, elements: typedElements)
-    case .comparisonPattern(let op, let value, _):
-      let intValue: Int64
-      if value.hasPrefix("-") {
-        let positiveValue = String(value.dropFirst())
-        intValue = -(Int64(positiveValue) ?? 0)
-      } else {
-        intValue = Int64(value) ?? 0
+    case .comparisonPattern(let op, let value, let valueKind, _):
+      switch valueKind {
+      case .integer, .float:
+        return .comparisonPattern(operator: op, value: value)
+      case .rune:
+        let cp = singleRuneCodePoint(from: value).map { String($0) } ?? value
+        return .comparisonPattern(operator: op, value: cp)
       }
-      return .comparisonPattern(operator: op, value: intValue)
     case .traitObjectType, .traitObjectTypeBinding:
       let (typedPattern, _) = try checkPattern(pattern, subjectType: expectedType)
       return typedPattern
@@ -8785,7 +8787,7 @@ extension TypeChecker {
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
       try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType:
+    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType:
       break
     case .traitObjectTypeBinding(let name, let mutable, let targetType, let span):
       let boundType = try resolveTraitObjectPatternTargetType(targetType, subjectType: type, span: span)
