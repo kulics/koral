@@ -6319,6 +6319,24 @@ given MIRFunctionBuilder {
                 self.collect_captures_expr(l, param_names, out);
                 self.collect_captures_expr(r, param_names, out);
             },
+            // Constructors carry their field values as sub-expressions. Missing
+            // these meant `TypeConstruction`/`EnumConstruction` fell through to
+            // the default arm and their arguments were never walked, so a
+            // captured closure used as a constructor argument was reported as
+            // no capture at all -- and codegen then read it as an uninitialised
+            // local.
+            .TypeConstruction(_, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            .EnumConstruction(_, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            // Only type arguments, no expressions.
+            .GenericInstantiation(_, _) then {},
+            .IntegerLiteral(_) then {},
+            .FloatLiteral(_) then {},
+            .StringLiteral(_) then {},
+            .BoolLiteral(_) then {},
             .IsExpr(subject, _, _) then self.collect_captures_expr(
                 subject,
                 param_names,
@@ -6329,8 +6347,56 @@ given MIRFunctionBuilder {
                 param_names,
                 out,
             ),
-            .IntrinsicCall(_) then {},
-            _ then {},
+            .IntrinsicCall(node) then self.collect_captures_intrinsic(
+                node,
+                param_names,
+                out,
+            ),
+        };
+    };
+
+    file_private collect_captures_intrinsic(
+        self,
+        node TypedIntrinsic,
+        param_names Set[String],
+        out List[Symbol],
+    ) Void = {
+        when node in {
+            .DowngradeRef(ref_expr, _) then self.collect_captures_expr(
+                ref_expr,
+                param_names,
+                out,
+            ),
+            .UpgradeRef(weak_expr, _) then self.collect_captures_expr(
+                weak_expr,
+                param_names,
+                out,
+            ),
+            .SpawnThread(a, b, c, d) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+                self.collect_captures_expr(d, param_names, out);
+            },
+            .AllocMemory(count, _) then self.collect_captures_expr(count, param_names, out),
+            .DeallocMemory(p) then self.collect_captures_expr(p, param_names, out),
+            .CopyMemory(a, b, c) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+            },
+            .MoveMemory(a, b, c) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+            },
+            .InitMemory(a, b) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+            },
+            .DeinitMemory(p) then self.collect_captures_expr(p, param_names, out),
+            .TakeMemory(p, _) then self.collect_captures_expr(p, param_names, out),
+            .NullPtr(_) then {},
         };
     };
 

@@ -1,0 +1,71 @@
+// A lambda that captures ANOTHER lambda used to lose the capture entirely.
+// `collect_captures_expr` had no arm for `TypeConstruction` / `EnumConstruction`
+// and swallowed `IntrinsicCall` outright, so the captured closure was never
+// listed -- codegen then emitted a `(void)` signature with no env struct and
+// read the capture as an uninitialised local (garbage, then a crash).
+//
+// Every shape below puts a captured closure's CALL RESULT into a constructor
+// argument, which is what walked past the missing arms.
+// EXPECT: box_ok
+// EXPECT: enum_ok
+// EXPECT: nested_ok
+// EXPECT: chain_ok
+
+public type Box[T Any](value T);
+
+public type Tagged {
+    Tagged(box Box[ListIterator[Int]]),
+    Empty(),
+};
+
+let main() Int = {
+    let xs List[Int] = [1, 2, 3];
+
+    // A captured closure whose result feeds a GENERIC type constructor.
+    let base = () => xs.iterator();
+    let boxed = () => Box[ListIterator[Int]](base());
+    let b = boxed();
+    if b.value.next().is_some() then {
+        println("box_ok");
+    } else {
+        panic("generic constructor lost the capture");
+    };
+
+    // ... and an ENUM constructor.
+    let tagged = () Tagged => .Tagged(Box[ListIterator[Int]](base()));
+    let t = tagged();
+    when t in {
+        .Tagged(inner) then if inner.value.next().is_some() then {
+            println("enum_ok");
+        } else {
+            panic("enum constructor lost the capture");
+        },
+        .Empty() then panic("enum constructor produced the wrong case"),
+    };
+
+    // A lambda capturing a lambda that itself captures: the inner capture has
+    // to survive being read through the outer closure's env.
+    let probe = () => Box[ListIterator[Int]](base());
+    let run = () => {
+        let c = probe();
+        return c.value.next().is_some();
+    };
+    if run() then {
+        println("nested_ok");
+    } else {
+        panic("nested closure call lost the capture");
+    };
+
+    // Two levels deep, and the outermost value is itself inside a constructor.
+    let inner = () => xs;
+    let mid = () => Box[List[Int]](inner());
+    let outer = () => Box[Box[List[Int]]](mid());
+    let o = outer();
+    if o.value.value.count() == UInt(3) then {
+        println("chain_ok");
+    } else {
+        panic("chained capture lost the source");
+    };
+
+    return 0;
+};
