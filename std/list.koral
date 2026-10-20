@@ -117,6 +117,13 @@ given[T Any] List[T] {
         if other_len == 0 then {
             return;
         };
+        // Snapshot `other` first: `other` may be `self`, and the shift below would
+        // otherwise overwrite the elements still to be read. No identity test exists,
+        // so the snapshot is unconditional.
+        let mutable snap List[T] = List[T].with_capacity(other_len);
+        for j in start..<end then {
+            snap.push(other.source[j]);
+        };
         self.ensure_capacity(self.len + other_len);
         // Shift elements to the right by other_len
         let mutable i = self.len;
@@ -126,10 +133,11 @@ given[T Any] List[T] {
             init_memory(dst, take_memory(src));
             i = i - 1;
         };
-        // Copy other's elements into the gap
-        for j in start..<end then {
-            let v = other.source[j];
-            init_memory(self.source + (index + (j - start)), v);
+        // Fill the gap from the snapshot, in reverse so pop() hands ownership over cleanly.
+        let mutable w = index + other_len;
+        while w > index then {
+            w = w - 1;
+            init_memory(self.source + w, snap.pop().unwrap());
         };
         self.len = self.len + other_len;
     };
@@ -344,7 +352,18 @@ given[T Any] List[T] {
         return self.make_slice(span.start(), span.len());
     };
 
-    // ============ 运算符 Add(trait ) ============
+    /// Concatenation: returns a new list, leaving both inputs usable.
+    /// Deliberately not `Add` — arithmetic traits stay off heap-owning containers.
+    public concat(self, other List[T]) List[T] = {
+        let mutable result = List[T].with_capacity(self.len + other.len);
+        for v in self then {
+            result.push(v);
+        };
+        for v in other then {
+            result.push(v);
+        };
+        return result;
+    };
 
     // Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate (T) -> Bool) Void = {
