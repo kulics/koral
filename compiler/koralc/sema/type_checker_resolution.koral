@@ -63,7 +63,7 @@ given TypeChecker {
                 if not self.ensure_generic_template_visible(base, def_id, span) then {
                     return Type.Unknown();
                 };
-                self.validate_template_bounds(def_id, resolved_args, span);
+                self.validate_template_bounds(def_id, resolved_args, span, false);
                 Type.GenericStruct(
                     def_id,
                     self.to_type_ref_list_in_resolution(resolved_args),
@@ -73,7 +73,7 @@ given TypeChecker {
                 if not self.ensure_generic_template_visible(base, def_id, span) then {
                     return Type.Unknown();
                 };
-                self.validate_template_bounds(def_id, resolved_args, span);
+                self.validate_template_bounds(def_id, resolved_args, span, false);
                 Type.GenericEnum(
                     def_id,
                     self.to_type_ref_list_in_resolution(resolved_args),
@@ -87,16 +87,20 @@ given TypeChecker {
     };
 
     /// Check the template's declared bounds against the arguments being written.
-    /// Swift does this in `enforceGenericConstraints` while resolving the generic
-    /// type node; koralc used to check only method-call generics, so a bad
-    /// `Random[NotRandom]` slipped through while `pick(NotOrd(), NotOrd())` did
-    /// not. Each bound is also validated by name, so an unimported `RandomSource`
-    /// is `Undefined trait` rather than a silent pass.
+    ///
+    /// `check_conformance` is the difference between a TYPE NODE and a CALL
+    /// SITE. Only a call site may report that an argument fails a bound --
+    /// Swift calls `enforceGenericConstraints` from `resolveGenericExtensionMethod`
+    /// alone, and checking a declaration while its conformance is still being
+    /// materialized is what made koralc reject its own `Set[InstantiationRequest]`
+    /// fields. Names are validated either way: an unimported `RandomSource` is
+    /// `Undefined trait` wherever it is spelled.
     module_private validate_template_bounds(
         self,
         def_id DefId,
         resolved_args List[Type],
         span SourceSpan,
+        check_conformance Bool,
     ) Void = {
         let mutable type_params = Option[List[TypeParameterDecl]].None();
         if self.storage.generic_templates.struct_by_def_id(def_id) is .Some(tmpl) then {
@@ -115,13 +119,11 @@ given TypeChecker {
                 // An argument that still mentions a generic parameter cannot be
                 // judged here: `ZipIterator[T, U, R, R2]` inside `LazyView`'s own
                 // body is not yet a concrete type, and its conformance is settled
-                // when the template is instantiated for real. Only the bound's
-                // spelling can be checked -- an unimported trait is `Undefined
-                // trait` either way.
+                // when the template is instantiated for real.
                 let arg_is_concrete = not self.contains_generic_parameter(bound_type) and not self.is_unresolved_expr_type(
                     bound_type,
                 );
-                if arg_is_concrete then {
+                if check_conformance and arg_is_concrete then {
                     for constraint in param.constraints then {
                         if not self.enforce_bound_requirement(
                             bound_type,
