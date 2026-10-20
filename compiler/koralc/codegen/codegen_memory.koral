@@ -19,7 +19,7 @@ given CodeGen {
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then true,
+                        .TraitObject(...) then true,
                         _ then type_needs_drop(mapped),
                     },
                     .None() then false,
@@ -121,7 +121,7 @@ given CodeGen {
                 self.buffer.push_string(value);
                 self.buffer.push_string(").control);\n");
             },
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 self.append_release_value_line(
                     value,
                     "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
@@ -169,7 +169,7 @@ given CodeGen {
     /// 判断类型是否是 trait object（含 OpaqueType 映射到 trait object 的情况）。
     public is_trait_object_type(self, var_type Type) Bool = {
         return when var_type in {
-            .TraitObject(_, _) then true,
+            .TraitObject(...) then true,
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then self.is_trait_object_type(mapped),
@@ -196,8 +196,8 @@ given CodeGen {
             // managed 名义 wrapper 是 `struct X { void* ptr; }`，单字。
             .StructureType(_) then self.uses_managed_nominal_representation(var_type),
             .EnumType(_) then self.uses_managed_nominal_representation(var_type),
-            .GenericStruct(_, _) then self.uses_managed_nominal_representation(var_type),
-            .GenericEnum(_, _) then self.uses_managed_nominal_representation(var_type),
+            .GenericStruct(...) then self.uses_managed_nominal_representation(var_type),
+            .GenericEnum(...) then self.uses_managed_nominal_representation(var_type),
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
             .BorrowedReferenceType(_) then true,
@@ -310,7 +310,7 @@ given CodeGen {
         let def_id = when t in {
             .EnumType(id) then Option[DefId].Some(id),
             // Identity is the instance's LAYOUT declaration, not the template.
-            .GenericEnum(_, _) then self.find_type_def_id_by_layout_or_template(t),
+            .GenericEnum(...) then self.find_type_def_id_by_layout_or_template(t),
             _ then Option[DefId].None(),
         };
         return when def_id in {
@@ -342,7 +342,7 @@ given CodeGen {
         return when var_type in {
             .StructureType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
             .EnumType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
-            .GenericStruct(_, _) then {
+            .GenericStruct(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -353,7 +353,7 @@ given CodeGen {
                 };
                 "(__koral_Dtor)__koral_\(type_name)_drop"
             },
-            .GenericEnum(_, _) then {
+            .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -364,10 +364,10 @@ given CodeGen {
                 };
                 "(__koral_Dtor)__koral_\(type_name)_drop"
             },
-            .FunctionType(_, _) then "(__koral_Dtor)__koral_closure_drop",
+            .FunctionType(...) then "(__koral_Dtor)__koral_closure_drop",
             .WeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
             .MutableWeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
-            .TraitObject(_, _) then "(__koral_Dtor)__koral_traitref_drop",
+            .TraitObject(...) then "(__koral_Dtor)__koral_traitref_drop",
             .ReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
             .MutableReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
             .OpaqueType(def_id) then {
@@ -440,7 +440,7 @@ given CodeGen {
                 var_type,
                 value,
             ),
-            .FunctionType(_, _) then {
+            .FunctionType(...) then {
                 self.buffer.push_string("__koral_closure_release(");
                 self.buffer.push_string(value);
                 self.buffer.push_string(");\n");
@@ -456,7 +456,7 @@ given CodeGen {
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then self.append_release_handle_statement(
+                        .TraitObject(...) then self.append_release_handle_statement(
                             var_type,
                             value,
                         ),
@@ -466,7 +466,7 @@ given CodeGen {
                     .None() then {},
                 };
             },
-            .GenericStruct(_, _) then {
+            .GenericStruct(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -477,7 +477,7 @@ given CodeGen {
                 };
                 self.append_drop_call_line(type_name, value);
             },
-            .GenericEnum(_, _) then {
+            .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -488,7 +488,7 @@ given CodeGen {
                 };
                 self.append_drop_call_line(type_name, value);
             },
-            .TraitObject(_, _) then self.append_release_handle_statement(var_type, value),
+            .TraitObject(...) then self.append_release_handle_statement(var_type, value),
             .TypeVar(_) then {
                 // TypeVar 是编译器内部的类型擦除，落到 codegen 时内层类型已不可知。
                 // 头里不存析构函数之后只能传 NULL（drop glue 不会跑）——这是一个
@@ -526,13 +526,13 @@ given CodeGen {
                 self.add_indent();
                 self.append_release_control_line("__koral_retain", dest);
             },
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
                 self.append_release_control_line("__koral_retain", dest);
             },
-            .FunctionType(_, _) then {
+            .FunctionType(...) then {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
@@ -555,7 +555,7 @@ given CodeGen {
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then {
+                        .TraitObject(...) then {
                             self.add_indent();
                             self.append_assignment_line(dest, source);
                             self.add_indent();
@@ -573,7 +573,7 @@ given CodeGen {
                     },
                 };
             },
-            .GenericStruct(_, _) then {
+            .GenericStruct(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -585,7 +585,7 @@ given CodeGen {
                 self.add_indent();
                 self.append_copy_call_line(type_name, source, dest);
             },
-            .GenericEnum(_, _) then {
+            .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {

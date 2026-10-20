@@ -35,7 +35,7 @@ file_private let is_reference_like_type(t Type) Bool = {
         .MutableBorrowedReferenceType(_) then true,
         .WeakReferenceType(_) then true,
         .MutableWeakReferenceType(_) then true,
-        .TraitObject(_, _) then true,
+        .TraitObject(...) then true,
         _ then false,
     };
 };
@@ -1254,7 +1254,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression);
                 self.codegen.buffer.push_string(").ptr);\n");
             },
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("__koral_retain_value((");
                 self.codegen.buffer.push_string(emission.expression);
@@ -1269,7 +1269,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression);
                 self.codegen.buffer.push_string(").control)); }\n");
             },
-            .FunctionType(_, _) then {
+            .FunctionType(...) then {
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("__koral_closure_retain(");
                 self.codegen.buffer.push_string(emission.expression);
@@ -2271,7 +2271,7 @@ given MIRFunctionCodeEmitter {
     module_private emit_aggregate(self, aggregate MIRAggregate) MIRValueEmission = {
         let struct_fields_opt = when aggregate.aggregate_type in {
             .StructureType(def_id) then self.codegen.context.get_struct_fields(def_id),
-            .GenericStruct(_, _) then when self.codegen.find_type_def_id_by_layout_or_template(
+            .GenericStruct(...) then when self.codegen.find_type_def_id_by_layout_or_template(
                 aggregate.aggregate_type,
             ) in {
                 .Some(def_id) then self.codegen.context.get_struct_fields(def_id),
@@ -2553,7 +2553,7 @@ given MIRFunctionCodeEmitter {
         let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow();
         // If inner is a scalar type mutable (not a ref), we need to heap-allocate it first
         let is_ref_type = when inner_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(...) then true,
             _ then false,
         };
         let mutable ref_expression = inner.expression;
@@ -2645,20 +2645,20 @@ given MIRFunctionCodeEmitter {
     module_private trait_object_source_concrete_type(self, t Type) Option[Type] = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None(
+            .ReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
-            .MutableReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None(
+            .MutableReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None(
+            .BorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then Option[Type].None(
+            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
             // In the simplified type system, concrete types can be directly
             // assigned to trait object fields without going through references.
             .StructureType(_) then Option[Type].Some(t),
             .EnumType(_) then Option[Type].Some(t),
-            .GenericStruct(_, _) then Option[Type].Some(t),
-            .GenericEnum(_, _) then Option[Type].Some(t),
+            .GenericStruct(...) then Option[Type].Some(t),
+            .GenericEnum(...) then Option[Type].Some(t),
             _ then Option[Type].None(),
         };
     };
@@ -2672,7 +2672,7 @@ given MIRFunctionCodeEmitter {
         bare_function_source Bool,
     ) String = {
         // Wrap bare function pointers in closure structs when target is FunctionType
-        if target_type is .FunctionType(_, _) and source_type is .FunctionType(_, _) then {
+        if target_type is .FunctionType(...) and source_type is .FunctionType(...) then {
             if bare_function_source then {
                 return "(struct __koral_Closure){ .fn = (void*)\(expression), .env = NULL, .drop = NULL }";
             };
@@ -2688,7 +2688,7 @@ given MIRFunctionCodeEmitter {
                     // If the source is not a reference-like type, we need to wrap it
                     // in a __koral_Ref first (allocate control + payload).
                     let is_ref = when source_type in {
-                        .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .TraitObject(_, _) then true,
+                        .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .TraitObject(...) then true,
                         _ then false,
                     };
                     if is_ref then {
@@ -4087,7 +4087,7 @@ given MIRFunctionCodeEmitter {
     ) Pair[UInt, List[EnumCaseParam]] = {
         let def_id = when enum_type in {
             .EnumType(id) then id,
-            .GenericEnum(_, _) then self.codegen.find_type_def_id_by_layout_or_template(
+            .GenericEnum(...) then self.codegen.find_type_def_id_by_layout_or_template(
                 enum_type,
             ) or else DefId(UInt(0)),
             _ then DefId(UInt(0)),
@@ -4189,7 +4189,7 @@ given MIRFunctionCodeEmitter {
             );
         };
         return when value_type in {
-            .ReferenceType(inner) then if inner is .TraitObject(_, _) then {
+            .ReferenceType(inner) then if inner is .TraitObject(...) then {
                 let result = self.codegen.next_temp_with_decl(
                     "struct __koral_TraitWeakRef",
                 );
@@ -4223,7 +4223,7 @@ given MIRFunctionCodeEmitter {
                 emission,
                 result_type,
             ),
-            .MutableReferenceType(inner) then if inner is .TraitObject(_, _) then {
+            .MutableReferenceType(inner) then if inner is .TraitObject(...) then {
                 let result = self.codegen.next_temp_with_decl(
                     "struct __koral_TraitWeakRef",
                 );
@@ -4257,7 +4257,7 @@ given MIRFunctionCodeEmitter {
                 emission,
                 result_type,
             ),
-            .BorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then {
+            .BorrowedReferenceType(inner) then if inner is .TraitObject(...) then {
                 let result = self.codegen.next_temp_with_decl(
                     "struct __koral_TraitWeakRef",
                 );
@@ -4291,7 +4291,7 @@ given MIRFunctionCodeEmitter {
                 emission,
                 result_type,
             ),
-            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(_, _) then {
+            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then {
                 let result = self.codegen.next_temp_with_decl(
                     "struct __koral_TraitWeakRef",
                 );
@@ -4359,8 +4359,8 @@ given MIRFunctionCodeEmitter {
         let success = self.codegen.next_temp_with_decl("int");
         let value_type = self.type_of_value(value);
         let is_trait_weak = when value_type in {
-            .WeakReferenceType(inner) then inner is .TraitObject(_, _),
-            .MutableWeakReferenceType(inner) then inner is .TraitObject(_, _),
+            .WeakReferenceType(inner) then inner is .TraitObject(...),
+            .MutableWeakReferenceType(inner) then inner is .TraitObject(...),
             _ then false,
         };
         if is_trait_weak then {

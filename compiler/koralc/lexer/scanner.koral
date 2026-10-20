@@ -884,21 +884,16 @@ given Lexer {
                     start_line,
                     start_col + UInt(1),
                 ) or return;
-                if parts.count() == UInt(1) then {
-                    when parts[UInt(0)] in {
-                        .Literal(text) then self.add(
-                            TokenKind.StringLiteral(text.to_string()),
-                            start_line,
-                            start_col,
-                        ),
-                        .ExpressionTokens(_) then self.add(
-                            TokenKind.InterpolatedString(parts),
-                            start_line,
-                            start_col,
-                        ),
-                    };
-                } else {
-                    self.add(TokenKind.InterpolatedString(parts), start_line, start_col);
+                // A single literal part is a plain string literal; anything
+                // else -- more than one part, or one interpolation -- is an
+                // interpolated string carrying the parts as they were scanned.
+                when parts in {
+                    [.Literal(text)] then self.add(
+                        TokenKind.StringLiteral(text.to_string()),
+                        start_line,
+                        start_col,
+                    ),
+                    _ then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
                 };
                 return .Ok({});
             };
@@ -1649,21 +1644,15 @@ given Lexer {
             start_line + UInt(1),
             closing_indent_count + UInt(1),
         ) or return;
-        if parts.count() == UInt(1) then {
-            when parts[UInt(0)] in {
-                .Literal(text) then self.add(
-                    TokenKind.StringLiteral(text.to_string()),
-                    start_line,
-                    start_col,
-                ),
-                .ExpressionTokens(_) then self.add(
-                    TokenKind.InterpolatedString(parts),
-                    start_line,
-                    start_col,
-                ),
-            };
-        } else {
-            self.add(TokenKind.InterpolatedString(parts), start_line, start_col);
+        // Same rule as the single-line form: one literal part is a plain
+        // string literal, everything else is an interpolated string.
+        when parts in {
+            [.Literal(text)] then self.add(
+                TokenKind.StringLiteral(text.to_string()),
+                start_line,
+                start_col,
+            ),
+            _ then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
         };
         return .Ok({});
     };

@@ -92,7 +92,7 @@ file_private let substitution_debug_expr_kind(kind TypedExprKind) String = {
         .BitwiseExpr(_, _, _) then "BitwiseExpr",
         .AndExpr(_, _) then "AndExpr",
         .OrExpr(_, _) then "OrExpr",
-        .IsExpr(_, _, _) then "IsExpr",
+        .IsExpr(...) then "IsExpr",
         .CastExpr(_, _) then "CastExpr",
         .TraitObjectConversion(_, _, _) then "TraitObjectConversion",
         .Unary(_, _) then "Unary",
@@ -248,10 +248,10 @@ file_private let recover_type_construction_type(
         .EnumType(_) then {
             return resolved_identifier_type;
         },
-        .GenericStruct(_, _) then {
+        .GenericStruct(...) then {
             return resolved_identifier_type;
         },
-        .GenericEnum(_, _) then {
+        .GenericEnum(...) then {
             return resolved_identifier_type;
         },
         _ then {},
@@ -585,10 +585,10 @@ file_private let synthetic_args_from_expected_method_type(
                         .EnumType(_) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _) then mono.storage.context.get_layout_key(
+                        .GenericStruct(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _) then mono.storage.context.get_layout_key(
+                        .GenericEnum(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
                         .ReferenceType(rhs) then mono.storage.context.get_layout_key(
@@ -620,10 +620,10 @@ file_private let synthetic_args_from_expected_method_type(
                         .EnumType(_) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _) then mono.storage.context.get_layout_key(
+                        .GenericStruct(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _) then mono.storage.context.get_layout_key(
+                        .GenericEnum(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
                         .MutableReferenceType(rhs) then mono.storage.context.get_layout_key(
@@ -645,10 +645,10 @@ file_private let synthetic_args_from_expected_method_type(
                         .EnumType(_) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _) then mono.storage.context.get_layout_key(
+                        .GenericStruct(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _) then mono.storage.context.get_layout_key(
+                        .GenericEnum(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
                         .ReferenceType(rhs) then mono.storage.context.get_layout_key(
@@ -680,10 +680,10 @@ file_private let synthetic_args_from_expected_method_type(
                         .EnumType(_) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericStruct(_, _) then mono.storage.context.get_layout_key(
+                        .GenericStruct(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
-                        .GenericEnum(_, _) then mono.storage.context.get_layout_key(
+                        .GenericEnum(...) then mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, lhs),
                         ) == mono.storage.context.get_layout_key(resolved_receiver_type),
                         .MutableReferenceType(rhs) then mono.storage.context.get_layout_key(
@@ -1030,31 +1030,19 @@ file_private let normalize_method_symbol_type_for_base(
                 mono,
                 (param_types[UInt(0)]),
             );
+            // A reference-like first parameter whose pointee has the base
+            // type's layout IS the base type -- a `self` handed over as `*T`
+            // for a method declared on `T`. Anything else keeps the parameter.
             let normalized_first_param = when first_param_type in {
-                .ReferenceType(inner) then if mono.storage.context.get_layout_key(
+                .ReferenceType(inner)
+                    or .MutableReferenceType(inner)
+                    or .WeakReferenceType(inner)
+                    or .MutableWeakReferenceType(inner)
+                    or .PointerType(inner)
+                    or .MutablePointerType(inner)
+                if mono.storage.context.get_layout_key(
                     resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
-                .MutableReferenceType(inner) then if mono.storage.context.get_layout_key(
-                    resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
-                .WeakReferenceType(inner) then if mono.storage.context.get_layout_key(
-                    resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
-                .MutableWeakReferenceType(inner) then if mono.storage.context.get_layout_key(
-                    resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
-                .PointerType(inner) then if mono.storage.context.get_layout_key(
-                    resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
-                .MutablePointerType(inner) then if mono.storage.context.get_layout_key(
-                    resolve_parameterized_type(mono, inner),
-                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type
-                else first_param_type,
+                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type,
                 _ then first_param_type,
             };
             if mono.storage.context.get_layout_key(normalized_first_param) == mono.storage.context.get_layout_key(
@@ -1861,7 +1849,7 @@ file_private let substitute_expr_kind(
                 .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                     when substitution_trait_object_type(base.expr_type) in {
                         .Some(trait_object_type) then when trait_object_type in {
-                            .TraitObject(_, _) then {
+                            .TraitObject(...) then {
                                 let method_name = substitution_semantic_method_name(
                                     mono,
                                     method,
@@ -1881,14 +1869,14 @@ file_private let substitute_expr_kind(
                                                 mono,
                                                 ref_inner,
                                             ) in {
-                                                .TraitObject(_, _) then inner,
+                                                .TraitObject(...) then inner,
                                                 _ then base,
                                             },
                                             .MutableReferenceType(ref_inner) then when resolve_parameterized_type(
                                                 mono,
                                                 ref_inner,
                                             ) in {
-                                                .TraitObject(_, _) then inner,
+                                                .TraitObject(...) then inner,
                                                 _ then base,
                                             },
                                             _ then base,
@@ -4332,11 +4320,11 @@ let bind_receiver_method_symbol(
         resolved_receiver_type,
     );
     when resolved_receiver_type in {
-        .TraitObject(_, _) then {
+        .TraitObject(...) then {
             return method;
         },
         .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},
@@ -4345,7 +4333,7 @@ let bind_receiver_method_symbol(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},
@@ -4354,7 +4342,7 @@ let bind_receiver_method_symbol(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},
@@ -4363,7 +4351,7 @@ let bind_receiver_method_symbol(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},
@@ -4372,7 +4360,7 @@ let bind_receiver_method_symbol(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},
@@ -4381,7 +4369,7 @@ let bind_receiver_method_symbol(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(_, _) then {
+            .TraitObject(...) then {
                 return method;
             },
             _ then {},

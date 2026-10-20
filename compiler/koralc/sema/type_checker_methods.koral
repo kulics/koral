@@ -187,26 +187,20 @@ given TypeChecker {
         };
         if self.is_std_type(unwrapped, "List") then {
             let args = self.std_type_arguments(unwrapped);
-            if args.count() == UInt(1) then {
-                return Option[BuiltinSubscriptKind].Some(
-                    BuiltinSubscriptKind.List(args[UInt(0)]),
-                );
+            if args is [element] then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List(element));
             };
         };
         if self.is_std_type(unwrapped, "Deque") then {
             let args = self.std_type_arguments(unwrapped);
-            if args.count() == UInt(1) then {
-                return Option[BuiltinSubscriptKind].Some(
-                    BuiltinSubscriptKind.Deque(args[UInt(0)]),
-                );
+            if args is [element] then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(element));
             };
         };
         if self.is_std_type(unwrapped, "Dict") then {
             let args = self.std_type_arguments(unwrapped);
-            if args.count() == UInt(2) then {
-                return Option[BuiltinSubscriptKind].Some(
-                    BuiltinSubscriptKind.Dict(args[UInt(0)], args[UInt(1)]),
-                );
+            if args is [key, value] then {
+                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(key, value));
             };
         };
         return when unwrapped in {
@@ -869,7 +863,7 @@ given TypeChecker {
                     .None() then raw_field_type,
                 }
             },
-            .GenericEnum(_, _) then // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
+            .GenericEnum(...) then // 泛型 enum 的成员访问（通常不常见，返回 Unknown）
             Type.Unknown(),
             _ then Type.Unknown(),
         };
@@ -1209,10 +1203,9 @@ given TypeChecker {
         return when normalized_pattern in {
             .GenericParameter(name) then {
                 when bindings.get(name) in {
-                    .Some(existing) then if self.same_expr_type(
-                        existing,
-                        normalized_concrete,
-                    ) then bindings else bindings,
+                    // An already-inferred binding stands: the first sighting of
+                    // a parameter fixes its type.
+                    .Some(_) then bindings,
                     .None() then {
                         let mutable next_bindings = bindings;
                         next_bindings.insert(name, normalized_concrete);
@@ -4991,8 +4984,8 @@ given TypeChecker {
                     .FunctionType(_, ret) then ret,
                     .StructureType(_) then sym.symbol_type,
                     .EnumType(_) then sym.symbol_type,
-                    .GenericStruct(_, _) then sym.symbol_type,
-                    .GenericEnum(_, _) then sym.symbol_type,
+                    .GenericStruct(...) then sym.symbol_type,
+                    .GenericEnum(...) then sym.symbol_type,
                     _ then if self.resolve_type_name_binding(sym_name) is .Some(t) then t
                     else Type.Unknown(),
                 };

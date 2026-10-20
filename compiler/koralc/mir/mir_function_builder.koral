@@ -560,45 +560,27 @@ given MIRFunctionBuilder {
                             .Global(_) then symbol.symbol_type,
                             _ then symbol.symbol_type,
                         };
+                        // Every reference-like shape behaves alike: deref when
+                        // the declared pointee is the expression's own type,
+                        // keep the place otherwise. In particular a raw-pointer
+                        // local whose expression type is the POINTEE is the
+                        // re-typed `self` of a drop body -- the drop ABI hands
+                        // it in as a pointer while the type system still calls
+                        // it `Self`. A pointer the user declared carries the
+                        // pointer type on both sides and is left alone.
                         let result_place = when declared_type in {
-                            .ReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
+                            .ReferenceType(inner_ref)
+                                or .MutableReferenceType(inner_ref)
+                                or .BorrowedReferenceType(inner_ref)
+                                or .MutableBorrowedReferenceType(inner_ref)
+                                or .WeakReferenceType(inner_ref)
+                                or .MutableWeakReferenceType(inner_ref)
+                                or .PointerType(inner_ref)
+                                or .MutablePointerType(inner_ref)
+                            if inner_ref == expression.expr_type then MIRPlace.Deref(
                                 MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                                 inner_ref,
-                            ) else place,
-                            .MutableReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            .BorrowedReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            .MutableBorrowedReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            .WeakReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            .MutableWeakReferenceType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            // A raw-pointer local whose expression type is the
-                            // POINTEE is the re-typed `self` of a drop body: the
-                            // drop ABI hands it in as a pointer while the type
-                            // system still calls it `Self`. A pointer the user
-                            // declared has the pointer type on both sides and is
-                            // left alone.
-                            .PointerType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
-                            .MutablePointerType(inner_ref) then if inner_ref == expression.expr_type then MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner_ref,
-                            ) else place,
+                            ),
                             _ then place,
                         };
                         Option[MIRExprResult].Some(
@@ -748,7 +730,7 @@ given MIRFunctionBuilder {
                     .None() then self.void_result(),
                 }
             },
-            .MemberPath(_, _) then {
+            .MemberPath(...) then {
                 when self.lower_place(expression) in {
                     .Some(place) then {
                         let mutable place_result_type = self.place_type(place);
@@ -2332,6 +2314,15 @@ given MIRFunctionBuilder {
 
         self.set_current_block(slots_block);
         let mutable slots_result = MIROperand.Constant(MIRConstant.Boolean(true));
+        // A slot is its own subject: clear the cached subject before recursing,
+        // the way nested enum payloads do. Otherwise an inner pattern would
+        // read the OUTER list as though it were the slot's value.
+        let saved_slot_source = self.pattern_subject_operand;
+        let saved_slot_tag = self.pattern_subject_tag;
+        let saved_slot_comparison = self.pattern_comparison_local;
+        self.pattern_subject_operand = Option[MIROperand].None();
+        self.pattern_subject_tag = Option[MIROperand].None();
+        self.pattern_comparison_local = Option[MIRLocalID].None();
         for slot_index in fixed_slot_indices then {
             let element = elements[slot_index];
             let element_place = self.materialize_list_slot(
@@ -2347,6 +2338,9 @@ given MIRFunctionBuilder {
                 element,
                 false,
             );
+            self.pattern_subject_operand = Option[MIROperand].None();
+            self.pattern_subject_tag = Option[MIROperand].None();
+            self.pattern_comparison_local = Option[MIRLocalID].None();
             slots_result = self.materialize(
                 MIRValue.Binary(
                     MIRBinaryOperation(
@@ -2359,6 +2353,9 @@ given MIRFunctionBuilder {
                 Type.BoolType(),
             );
         };
+        self.pattern_subject_operand = saved_slot_source;
+        self.pattern_subject_tag = saved_slot_tag;
+        self.pattern_comparison_local = saved_slot_comparison;
         if negated then {
             slots_result = self.materialize(
                 MIRValue.Unary(
@@ -2410,7 +2407,7 @@ given MIRFunctionBuilder {
         let concrete_type = when target_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
-            .StructureType(_) or .EnumType(_) or .GenericStruct(_, _) or .GenericEnum(_, _) then target_type,
+            .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then target_type,
             _ then Type.Unknown(),
         };
         let subject_value = MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow());
@@ -3322,6 +3319,14 @@ given MIRFunctionBuilder {
             .NotPattern(_) then {},
             .ListPattern(ops, elements) then {
                 let count_value = self.list_count_value(matched_place, ops);
+                // A slot is its own subject -- clear the cached subject before
+                // descending, or an inner pattern reads the OUTER list.
+                let saved_slot_source = self.pattern_subject_operand;
+                let saved_slot_tag = self.pattern_subject_tag;
+                let saved_slot_comparison = self.pattern_comparison_local;
+                self.pattern_subject_operand = Option[MIROperand].None();
+                self.pattern_subject_tag = Option[MIROperand].None();
+                self.pattern_comparison_local = Option[MIRLocalID].None();
                 let mutable slot_index UInt = 0;
                 for element in elements then {
                     if element is .RestPattern() then {
@@ -3341,8 +3346,14 @@ given MIRFunctionBuilder {
                         ops.element_type,
                         mode,
                     );
+                    self.pattern_subject_operand = Option[MIROperand].None();
+                    self.pattern_subject_tag = Option[MIROperand].None();
+                    self.pattern_comparison_local = Option[MIRLocalID].None();
                     slot_index += 1;
                 };
+                self.pattern_subject_operand = saved_slot_source;
+                self.pattern_subject_tag = saved_slot_tag;
+                self.pattern_comparison_local = saved_slot_comparison;
             },
             _ then {},
         };
@@ -6282,41 +6293,23 @@ given MIRFunctionBuilder {
         expr_type Type,
     ) MIRPlace = {
         let _ = self;
+        // Every reference-like shape behaves alike: deref when the declared
+        // pointee is the expression's own type, keep the place otherwise. A
+        // raw-pointer local typed as its own pointee is the drop body's `self`
+        // -- see the matching cases in `lower_expression`.
         return when declared_type in {
-            .ReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
+            .ReferenceType(inner_ref)
+                or .MutableReferenceType(inner_ref)
+                or .BorrowedReferenceType(inner_ref)
+                or .MutableBorrowedReferenceType(inner_ref)
+                or .WeakReferenceType(inner_ref)
+                or .MutableWeakReferenceType(inner_ref)
+                or .PointerType(inner_ref)
+                or .MutablePointerType(inner_ref)
+            if inner_ref == expr_type then MIRPlace.Deref(
                 MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                 inner_ref,
-            ) else place,
-            .MutableReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            .BorrowedReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            .MutableBorrowedReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            .WeakReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            .MutableWeakReferenceType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            // See the matching cases in `lower_expression`: a raw-pointer local
-            // typed as its own pointee is the drop body's `self`.
-            .PointerType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
-            .MutablePointerType(inner_ref) then if inner_ref == expr_type then MIRPlace.Deref(
-                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                inner_ref,
-            ) else place,
+            ),
             _ then place,
         };
     };

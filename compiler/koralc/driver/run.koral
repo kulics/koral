@@ -43,18 +43,21 @@ public let run_driver() Int = {
     };
 
     let first = argv[1];
-    if first == "help" or first == "-h" or first == "--help" then {
-        print_usage();
-        return 0;
-    };
     let mutable command = StringBuilder.new();
     command.push_string("build");
     let mutable index UInt = 1;
 
-    if first == "check" or first == "build" or first == "emit-c" or first == "run" then {
-        command = StringBuilder.new();
-        command.push_string(first);
-        index = 2;
+    when first in {
+        "help" or "-h" or "--help" then {
+            print_usage();
+            return 0;
+        },
+        "check" or "build" or "emit-c" or "run" then {
+            command = StringBuilder.new();
+            command.push_string(first);
+            index = 2;
+        },
+        _ then {},
     };
 
     let mutable package_config_path = Option[String].None();
@@ -70,80 +73,92 @@ public let run_driver() Int = {
     let mutable i = index;
     while i < argv.count() then {
         let arg = argv[i];
-        if arg == "-h" or arg == "--help" then {
-            print_usage();
-            return 0;
-        } else if arg == "--no-std" then {
-            no_std = true;
-        } else if arg == "--debug" then {
-            optimize_args = List[String].new();
-            optimize_args.push("-O0");
-            optimize_args.push("-g");
-        } else if arg == "--release" then {
-            optimize_args = List[String].new();
-            optimize_args.push("-O2");
-        } else if arg == "--optimize" then {
-            i += 1;
-            if i >= argv.count() or argv[i].starts_with("-") then {
-                eprintln("Error: Missing value for --optimize option");
+        when arg in {
+            "-h" or "--help" then {
+                print_usage();
+                return 0;
+            },
+            "--no-std" then {
+                no_std = true;
+            },
+            "--debug" then {
+                optimize_args = List[String].new();
+                optimize_args.push("-O0");
+                optimize_args.push("-g");
+            },
+            "--release" then {
+                optimize_args = List[String].new();
+                optimize_args.push("-O2");
+            },
+            "--optimize" then {
+                i += 1;
+                if i >= argv.count() or argv[i].starts_with("-") then {
+                    eprintln("Error: Missing value for --optimize option");
+                    return 1;
+                };
+                let level = argv[i];
+                if level <> "0" and level <> "1" and level <> "2" and level <> "3" and level <> "s" and level <> "fast" then {
+                    eprintln(
+                        "Error: Invalid value for --optimize (expected 0, 1, 2, 3, s or fast): \(level)",
+                    );
+                    return 1;
+                };
+                optimize_args = List[String].new();
+                optimize_args.push("-O\(level)");
+            },
+            "--package-config" then {
+                i += 1;
+                if i >= argv.count() then {
+                    eprintln("Error: Missing path for --package-config option");
+                    return 1;
+                };
+                package_config_path = Option[String].Some(argv[i]);
+            },
+            "--target-module" then {
+                i += 1;
+                if i >= argv.count() then {
+                    eprintln("Error: Missing value for --target-module option");
+                    return 1;
+                };
+                target_module_name = Option[String].Some(argv[i]);
+            },
+            "--requires-root" then {
+                i += 1;
+                if i >= argv.count() then {
+                    eprintln("Error: Missing path for --requires-root option");
+                    return 1;
+                };
+                requires_root = Option[String].Some(argv[i]);
+            },
+            "--std-config" then {
+                i += 1;
+                if i >= argv.count() then {
+                    eprintln("Error: Missing path for --std-config option");
+                    return 1;
+                };
+                std_config_path = Option[String].Some(argv[i]);
+            },
+            "-o" or "--output" then {
+                i += 1;
+                if i >= argv.count() then {
+                    eprintln("Error: Missing path for -o option");
+                    return 1;
+                };
+                out_dir = Option[String].Some(argv[i]);
+            },
+            _ if arg.starts_with("-") then {
+                eprintln("Error: Unknown argument: \(arg)");
+                print_usage();
                 return 1;
-            };
-            let level = argv[i];
-            if level <> "0" and level <> "1" and level <> "2" and level <> "3" and level <> "s" and level <> "fast" then {
-                eprintln(
-                    "Error: Invalid value for --optimize (expected 0, 1, 2, 3, s or fast): \(level)",
-                );
-                return 1;
-            };
-            optimize_args = List[String].new();
-            optimize_args.push("-O\(level)");
-        } else if arg == "--package-config" then {
-            i += 1;
-            if i >= argv.count() then {
-                eprintln("Error: Missing path for --package-config option");
-                return 1;
-            };
-            package_config_path = Option[String].Some(argv[i]);
-        } else if arg == "--target-module" then {
-            i += 1;
-            if i >= argv.count() then {
-                eprintln("Error: Missing value for --target-module option");
-                return 1;
-            };
-            target_module_name = Option[String].Some(argv[i]);
-        } else if arg == "--requires-root" then {
-            i += 1;
-            if i >= argv.count() then {
-                eprintln("Error: Missing path for --requires-root option");
-                return 1;
-            };
-            requires_root = Option[String].Some(argv[i]);
-        } else if arg == "--std-config" then {
-            i += 1;
-            if i >= argv.count() then {
-                eprintln("Error: Missing path for --std-config option");
-                return 1;
-            };
-            std_config_path = Option[String].Some(argv[i]);
-        } else if arg == "-o" or arg == "--output" then {
-            i += 1;
-            if i >= argv.count() then {
-                eprintln("Error: Missing path for -o option");
-                return 1;
-            };
-            out_dir = Option[String].Some(argv[i]);
-        } else if arg.starts_with("-") then {
-            eprintln("Error: Unknown argument: \(arg)");
-            print_usage();
-            return 1;
-        } else {
-            if package_config_path is .None() and entry_file_path is .None() then {
+            },
+            _ if package_config_path is .None() and entry_file_path is .None() then {
                 entry_file_path = Option[String].Some(arg);
-            } else {
+            },
+            _ then {
                 eprintln("Error: Unknown positional argument: \(arg)");
                 print_usage();
                 return 1;
-            };
+            },
         };
         i += 1;
     };
@@ -264,13 +279,11 @@ file_private let format_cli_diagnostic_record(
     let rendered_message = diag.detail;
     let mutable header = StringBuilder.new();
     when diag.span in {
-        .Some(span) then if is_known_span(span) then header.push_string(
+        .Some(span) if is_known_span(span) then header.push_string(
             "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
-        )
-        else header.push_string(
-            "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
         ),
-        .None() then header.push_string(
+        // No span, or a span with no position: say so without a location.
+        _ then header.push_string(
             "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
         ),
     };

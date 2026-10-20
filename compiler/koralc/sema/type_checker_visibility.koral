@@ -109,6 +109,42 @@ given TypeChecker {
         return msg.to_string();
     };
 
+    /// The complaint for a value that does not fit the type it is being used as.
+    ///
+    /// A weak handle reaching a trait-object type is not a wrong type but a
+    /// handle kind with no conformance of its own, and "expected Greeter, got
+    /// ?Person" would send the reader looking for a conversion that is not
+    /// allowed to exist. Say what is actually missing.
+    ///
+    /// A trait object always sits behind a reference, so the expected side is
+    /// peeled first.
+    module_private type_mismatch_message(self, expected Type, actual Type) String = {
+        let expected_inner = when expected in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            _ then expected,
+        };
+        let expected_is_trait_object = when expected_inner in {
+            .TraitObject(...) then true,
+            _ then false,
+        };
+        let actual_is_weak_handle = when actual in {
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        };
+        if expected_is_trait_object and actual_is_weak_handle then {
+            return self.trait_requirement_missing_blanket_given_message(
+                actual,
+                self.trait_name_from_type(expected_inner),
+                "weakref",
+            );
+        };
+        return "Type mismatch: expected \(self.display_type_name(expected)), got \(self.display_type_name(actual))";
+    };
+
     /// Whether the type parameter `name` was itself declared `T foreign`.
     module_private generic_param_is_foreign_bounded(self, name String) Bool = {
         return when self.storage.generic_param_shape_bounds.get(name) in {
