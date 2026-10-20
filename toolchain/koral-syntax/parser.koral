@@ -2989,6 +2989,44 @@ given CstParser {
             );
         };
 
+        // `...` -- rest slot. In the compiler this is only legal as a slot of an
+        // element list; the CST records what was written, so it is a pattern
+        // node here and the round trip keeps the token.
+        if self.check(.Ellipsis()) then {
+            return .Ok(.Rest(self.eat()));
+        };
+
+        // `[ p, q ]` -- list pattern: destructuring of a `List[T]` by length
+        if self.check(.LBracket()) then {
+            let lb = self.eat();
+            let mutable items = List[CstListPatternItem].new();
+            let mutable more = true;
+            while more then {
+                if self.check(.RBracket()) or self.is_eof() then {
+                    more = false;
+                } else {
+                    let p = when self.parse_pattern_node() in {
+                        .Ok(parsed_pattern) then parsed_pattern,
+                        .Error(e) then {
+                            return .Error(e);
+                        },
+                    };
+                    let sep = self.eat_comma();
+                    items.push(CstListPatternItem(p, sep));
+                    if not self.sep_has_comma(sep) then {
+                        more = false;
+                    };
+                };
+            };
+            let rb = when self.expect(.RBracket(), "']'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            return .Ok(.ListPattern(lb, items, rb));
+        };
+
         // `( p )` -- parenthesized pattern
         // `( a, b, c )` -- tuple pattern: positional destructuring of a struct,
         // also the `for (a, b, c) in ...` binding form
