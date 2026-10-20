@@ -55,31 +55,98 @@ given TypeChecker {
         base String,
         resolved_args List[Type],
         base_type Type,
+        span SourceSpan,
     ) Type = {
         let canonical = self.canonicalize_alias_type(base_type);
         return when canonical in {
             .StructureType(def_id) then {
-                if not self.ensure_generic_template_visible(base, def_id, unknown_span()) then {
+                if not self.ensure_generic_template_visible(base, def_id, span) then {
                     return Type.Unknown();
                 };
+                self.validate_template_bounds(def_id, resolved_args, span);
                 Type.GenericStruct(
                     def_id,
                     self.to_type_ref_list_in_resolution(resolved_args),
                 )
             },
             .EnumType(def_id) then {
-                if not self.ensure_generic_template_visible(base, def_id, unknown_span()) then {
+                if not self.ensure_generic_template_visible(base, def_id, span) then {
                     return Type.Unknown();
                 };
+                self.validate_template_bounds(def_id, resolved_args, span);
                 Type.GenericEnum(
                     def_id,
                     self.to_type_ref_list_in_resolution(resolved_args),
                 )
             },
             _ then {
-                self.push_diagnostic("Undefined type: \(base)", unknown_span());
+                self.push_diagnostic("Undefined type: \(base)", span);
                 Type.Unknown()
             },
+        };
+    };
+
+    /// Check the template's declared bounds against the arguments being written.
+    /// Swift does this in `enforceGenericConstraints` while resolving the generic
+    /// type node; koralc used to check only method-call generics, so a bad
+    /// `Random[NotRandom]` slipped through while `pick(NotOrd(), NotOrd())` did
+    /// not. Each bound is also validated by name, so an unimported `RandomSource`
+    /// is `Undefined trait` rather than a silent pass.
+    module_private validate_template_bounds(
+        self,
+        def_id DefId,
+        resolved_args List[Type],
+        span SourceSpan,
+    ) Void = {
+        let mutable type_params = Option[List[TypeParameterDecl]].None();
+        if self.storage.generic_templates.struct_by_def_id(def_id) is .Some(tmpl) then {
+            type_params = Option[List[TypeParameterDecl]].Some(tmpl.type_parameters);
+        } else if self.storage.generic_templates.enum_by_def_id(def_id) is .Some(tmpl) then {
+            type_params = Option[List[TypeParameterDecl]].Some(tmpl.type_parameters);
+        };
+        if type_params is .Some(params) then {
+            if params.count() <> resolved_args.count() then {
+                return;
+            };
+            let mutable i UInt = 0;
+            while i < params.count() then {
+                let param = params[i];
+                let bound_type = resolved_args[i];
+                // An argument that still mentions a generic parameter cannot be
+                // judged here: `ZipIterator[T, U, R, R2]` inside `LazyView`'s own
+                // body is not yet a concrete type, and its conformance is settled
+                // when the template is instantiated for real. Only the bound's
+                // spelling can be checked -- an unimported trait is `Undefined
+                // trait` either way.
+                let arg_is_concrete = not self.contains_generic_parameter(bound_type) and not self.is_unresolved_expr_type(
+                    bound_type,
+                );
+                if arg_is_concrete then {
+                    for constraint in param.constraints then {
+                        if not self.enforce_bound_requirement(
+                            bound_type,
+                            constraint,
+                            param.name,
+                            Dict[String, Type].new(),
+                            span,
+                        ) then {
+                            return;
+                        };
+                    };
+                } else {
+                    for constraint in param.constraints then {
+                        when constraint in {
+                            .Trait(_, trait_name, _) then {
+                                if not self.validate_trait_name(trait_name) then {
+                                    return;
+                                };
+                            },
+                            _ then {},
+                        };
+                    };
+                };
+                i = i + 1;
+            };
         };
     };
 
@@ -227,11 +294,12 @@ given TypeChecker {
                             base,
                             resolved_args,
                             base_type,
+                            span,
                         );
                     },
                     .None() then {},
                 };
-                self.push_diagnostic("Undefined type: \(base)", unknown_span());
+                self.push_diagnostic("Undefined type: \(base)", span);
                 return Type.Unknown();
             },
             .InferredSelf(span) then {
@@ -373,6 +441,7 @@ given TypeChecker {
                             base,
                             resolved_args,
                             base_type,
+                            span,
                         );
                     },
                     .None() then when self.try_resolve_named_type_without_diag(base) in {
@@ -381,6 +450,7 @@ given TypeChecker {
                                 base,
                                 resolved_args,
                                 base_type,
+                                span,
                             );
                         },
                         .None() then {},
@@ -568,6 +638,7 @@ given TypeChecker {
                             base,
                             resolved_args,
                             base_type,
+                            span,
                         );
                     },
                     .None() then {},

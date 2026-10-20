@@ -12,6 +12,25 @@ given TypeChecker {
         };
     };
 
+    /// Swift's `validateTraitName`. A bound spelling has to name a trait this
+    /// module can see: an unknown name, or one that lives in another module and
+    /// was never imported, is `Undefined trait`. Blamed at the first column of
+    /// the line the bound sits on, matching the seed's `currentLine, column: 1`.
+    ///
+    /// Returns false when the name is not usable, so callers can stop where the
+    /// seed throws instead of piling a conformance complaint on top.
+    module_private validate_trait_name(self, trait_name String) Bool = {
+        if self.trait_def_id_of(trait_name) is .Some(_) then {
+            return true;
+        };
+        let line = self.storage.current_span.start.line;
+        self.push_diagnostic(
+            "Undefined trait: " + trait_name,
+            SourceSpan(SourceLocation(line, 1), SourceLocation(line, 1)),
+        );
+        return false;
+    };
+
     /// Bind a bound's spelling to its declaration identity.
     ///
     /// A bound leaves the parser with `DefId(0)` -- the parser has no symbol

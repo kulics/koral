@@ -1164,6 +1164,22 @@ given TypeChecker {
         for rt in receiver_type_args then {
             receiver_type_arg_refs.push(rt);
         };
+        // `Random[NotRandom].new(..)` is spelled as a static call, not a bare
+        // generic instantiation, so the template's bounds have to be checked
+        // here too. Without this a bad argument type slipped through.
+        if self.storage.generic_templates.lookup_struct(effective_type_name) is .Some(struct_template) then {
+            self.validate_template_bounds(
+                struct_template.def_id,
+                receiver_type_args,
+                type_name_span,
+            );
+        } else if self.storage.generic_templates.lookup_enum(effective_type_name) is .Some(enum_template) then {
+            self.validate_template_bounds(
+                enum_template.def_id,
+                receiver_type_args,
+                type_name_span,
+            );
+        };
 
         let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(
             effective_type_name,
