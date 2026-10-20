@@ -1095,6 +1095,19 @@ extension Monomorphizer {
                 typeName: typeName,
                 elements: elements.map { substituteTypesInPattern($0, substitution: substitution) }
             )
+
+        case .listPattern(let elements, let ops):
+            return .listPattern(
+                elements: elements.map { substituteTypesInPattern($0, substitution: substitution) },
+                ops: refreshListPatternOps(
+                    ops,
+                    listType: substituteType(ops.listType, substitution: substitution),
+                    elementType: substituteType(ops.elementType, substitution: substitution)
+                )
+            )
+
+        case .restPattern:
+            return pattern
         }
     }
     

@@ -418,6 +418,17 @@ public indirect enum TypedPattern: CustomStringConvertible {
   /// - typeName: struct type name
   /// - elements: type-checked sub-patterns, ordered by field declaration order
   case structPattern(typeName: String, elements: [TypedPattern])
+  /// List destructuring pattern (type-checked). Element slots are checked
+  /// against the list's element type; a rest slot makes the length a lower
+  /// bound instead of an exact count.
+  ///
+  /// `ops` carries the std methods the MIR lowerer needs to read the subject's
+  /// length and elements. They are resolved here, where the subject's element
+  /// type is known, exactly as an ordinary `xs.count()` call resolves them.
+  case listPattern(elements: [TypedPattern], ops: ListPatternOps)
+  /// Rest slot `...`: swallows zero or more of the remaining slots. It never
+  /// binds, so it contributes no symbols and no type of its own.
+  case restPattern
 
   public var description: String {
     switch self {
@@ -462,7 +473,33 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .structPattern(let typeName, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return "\(typeName)(\(args))"
+    case .listPattern(let elements, _):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return "[\(args)]"
+    case .restPattern:
+      return "..."
     }
+  }
+}
+
+/// The std operations a list pattern needs at MIR time.
+public struct ListPatternOps {
+  /// The subject's `List` type. Monomorphization re-resolves the methods below
+  /// against this once it is concrete -- a symbol kept from the template would
+  /// name a function that is never emitted.
+  public let listType: Type
+  /// The list's element type -- what every non-rest slot is checked against.
+  public let elementType: Type
+  /// `List.count()`, returning the subject's length.
+  public let countSymbol: Symbol
+  /// `List.__index_get(UInt)`, reading one element by position.
+  public let indexSymbol: Symbol
+
+  public init(listType: Type, elementType: Type, countSymbol: Symbol, indexSymbol: Symbol) {
+    self.listType = listType
+    self.elementType = elementType
+    self.countSymbol = countSymbol
+    self.indexSymbol = indexSymbol
   }
 }
 public struct TypedMatchCase {

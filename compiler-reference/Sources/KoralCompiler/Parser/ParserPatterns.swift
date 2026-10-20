@@ -20,7 +20,29 @@ extension Parser {
 
   /// Parse a single pattern argument, which may be a named pattern (label: pattern) or positional (pattern).
   private func parsePatternArgument() throws -> PatternArg {
+    // The rest marker is a slot of its own: it is never labeled (there is no
+    // field for the swallowed slots to land on) and never a full pattern.
+    if currentToken === .ellipsis {
+      return PatternArg(label: nil, pattern: try parseRestPatternSlot())
+    }
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
+      // `label: ...` has no meaning -- the rest marker swallows unnamed slots.
+      // The labelled path below treats every failure as a failed lookahead and
+      // falls through, so reject this one before entering it.
+      let probeState = lexer.saveState()
+      let probeToken = currentToken
+      try match(.identifier(name))
+      try match(.colon)
+      let labeledRest = currentToken === .ellipsis
+      lexer.restoreState(probeState)
+      currentToken = probeToken
+      if labeledRest {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Rest pattern cannot be labeled"
+        )
+      }
+
       let savedState = lexer.saveState()
       let savedToken = currentToken
       do {
@@ -36,6 +58,21 @@ extension Parser {
     // Parse as positional pattern
     let pattern = try parsePattern()
     return PatternArg(label: nil, pattern: pattern)
+  }
+
+  /// Parse the rest marker `...` as one slot of an element list. It swallows
+  /// zero or more of the remaining slots and never binds, so anything that
+  /// looks like a name after it is a mistake worth naming.
+  private func parseRestPatternSlot() throws -> PatternNode {
+    let startSpan = currentSpan
+    try match(.ellipsis)
+    if case .identifier = currentToken {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "Rest pattern cannot bind a name"
+      )
+    }
+    return .restPattern(span: startSpan)
   }
   
   /// Parse or pattern (lowest precedence)
@@ -89,6 +126,17 @@ extension Parser {
   /// Parse primary pattern (literals, wildcards, variables, enum cases, comparison patterns)
   private func parsePrimaryPattern() throws -> PatternNode {
     let startSpan = currentSpan
+
+    // The rest marker is only ever a slot of a list / enum-case / struct /
+    // tuple element list, where it swallows the slots that were not written.
+    // Everywhere else -- a whole arm, an `is` subject, `not ...`, a lone
+    // `( ... )` -- there is no element list to swallow, so it is a mistake.
+    if currentToken === .ellipsis {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "Rest pattern must be inside a list, enum, struct, or tuple pattern"
+      )
+    }
 
     // Comparison patterns: > n, < n, >= n, <= n
     if currentToken === .greater || currentToken === .less ||
@@ -233,6 +281,7 @@ extension Parser {
           if currentToken === .comma { try match(.comma) }
         }
         try match(.rightParen)
+        try checkRestSlots(args.map { $0.pattern })
         return .structPattern(typeName: name, elements: args, span: startSpan)
       }
 
@@ -303,28 +352,77 @@ extension Parser {
         if currentToken === .comma { try match(.comma) }
       }
       try match(.rightParen)
+      try checkRestSlots(args.map { $0.pattern })
       return .enumCase(caseName: name, elements: args, span: startSpan)
     }
+    // List destructuring pattern: `[a, b]` against a `List[T]`. A rest slot
+    // turns the exact length into a lower bound.
+    if currentToken === .leftBracket {
+      try match(.leftBracket)
+      var elements: [PatternNode] = []
+      while currentToken !== .rightBracket {
+        elements.append(try parsePatternSlot())
+        if currentToken === .comma { try match(.comma) }
+      }
+      try match(.rightBracket)
+      try checkRestSlots(elements)
+      return .listPattern(elements: elements, span: startSpan)
+    }
+
     // `(p)` is a parenthesized pattern. `(p, q, ...)` is a TUPLE pattern:
     // positional destructuring of a struct with exactly that many fields, in
     // declaration order. There must be at least two slots. `Pair` is
     // destructured this way too -- it is simply a two-field struct.
     if currentToken === .leftParen {
       try match(.leftParen)
-      let first = try parsePattern()
+      let first = try parsePatternSlot()
       if currentToken === .comma {
-        var elements: [PatternArg] = [PatternArg(label: nil, pattern: first)]
+        var elements: [PatternNode] = [first]
         while currentToken === .comma {
           try match(.comma)
-          elements.append(PatternArg(label: nil, pattern: try parsePattern()))
+          elements.append(try parsePatternSlot())
         }
         try match(.rightParen)
-        return .tuplePattern(elements: elements, span: startSpan)
+        try checkRestSlots(elements)
+        return .tuplePattern(elements: elements.map { PatternArg(label: nil, pattern: $0) }, span: startSpan)
       }
       try match(.rightParen)
+      // `(...)` on its own is a parenthesized pattern, not an element list, so
+      // there is no remainder for the rest marker to swallow.
+      if case .restPattern = first {
+        throw ParserError.rejectedConstruct(
+          span: startSpan,
+          message: "Rest pattern must be inside a list, enum, struct, or tuple pattern"
+        )
+      }
       return first
     }
-    
+
     throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+  }
+
+  /// Parse one slot of an element list: a sub-pattern, or the rest marker `...`.
+  private func parsePatternSlot() throws -> PatternNode {
+    if currentToken === .ellipsis {
+      return try parseRestPatternSlot()
+    }
+    return try parsePattern()
+  }
+
+  /// A rest slot swallows the unwritten remainder of one element list, so a
+  /// second one in the same list has nothing left to say.
+  private func checkRestSlots(_ elements: [PatternNode]) throws {
+    var seen = false
+    for element in elements {
+      if case .restPattern = element {
+        if seen {
+          throw ParserError.rejectedConstruct(
+            span: element.span,
+            message: "Only one rest pattern is allowed per element list"
+          )
+        }
+        seen = true
+      }
+    }
   }
 }

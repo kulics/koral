@@ -753,6 +753,15 @@ public indirect enum PatternNode: CustomStringConvertible {
   /// parenthesized pattern. `Pair` is destructured this way too -- it is simply
   /// a two-field struct. Identity comes from the subject's declaration.
   case tuplePattern(elements: [PatternArg], span: SourceSpan)
+  /// List destructuring pattern: `[a, b]` against a `List[T]`, each slot
+  /// checked against `T`. Without a rest slot the length must match exactly;
+  /// with one it is a lower bound (see `restPattern`).
+  case listPattern(elements: [PatternNode], span: SourceSpan)
+  /// Rest pattern: `...`. Swallows zero or more of the remaining slots in a
+  /// list, enum-case, struct or tuple pattern. It never binds -- there is no
+  /// name to attach the swallowed slots to -- so it is only ever a slot of an
+  /// enclosing element list, at most one per list.
+  case restPattern(span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -817,6 +826,11 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .tuplePattern(let elements, _):
       let args = elements.map { $0.pattern.description }.joined(separator: ", ")
       return "(\(args))"
+    case .listPattern(let elements, _):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return "[\(args)]"
+    case .restPattern:
+      return "..."
     }
   }
   
@@ -841,6 +855,8 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .weakBinding(_, _, let span): return span
     case .structPattern(_, _, let span): return span
     case .tuplePattern(_, let span): return span
+    case .listPattern(_, let span): return span
+    case .restPattern(let span): return span
     }
   }
 }

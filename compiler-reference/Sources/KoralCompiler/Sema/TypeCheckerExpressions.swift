@@ -1251,12 +1251,16 @@ extension TypeChecker {
     case .structPattern(_, let elements, _),
          .tuplePattern(let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
+    case .listPattern(let elements, _):
+      return elements.contains { untypedPatternContainsBindings($0) }
     case .andPattern(let left, let right, _):
       return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
     case .orPattern(let left, let right, _):
       return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
     case .notPattern(let inner, _):
       return untypedPatternContainsBindings(inner)
+    case .restPattern:
+      return false
     }
   }
 
@@ -1268,6 +1272,8 @@ extension TypeChecker {
          .structPattern(_, let elements, _),
          .tuplePattern(let elements, _):
       return elements.contains { untypedPatternRequiresRawSubject($0.pattern) }
+    case .listPattern(let elements, _):
+      return elements.contains { untypedPatternRequiresRawSubject($0) }
     case .andPattern(let left, let right, _),
          .orPattern(let left, let right, _):
       return untypedPatternRequiresRawSubject(left) || untypedPatternRequiresRawSubject(right)
@@ -1282,7 +1288,8 @@ extension TypeChecker {
          .floatLiteral,
          .stringLiteral,
          .runeLiteral,
-         .comparisonPattern:
+         .comparisonPattern,
+         .restPattern:
       return false
     }
   }
@@ -8827,6 +8834,13 @@ extension TypeChecker {
       }
       // The SUBJECT decides which struct this is; the name here is display-only.
       return .structPattern(typeName: expectedType.description, elements: typedElements)
+    case .listPattern:
+      // Carries resolved std method symbols, so it goes through the full
+      // pattern check rather than this shallow conversion.
+      let (typedPattern, _) = try checkPattern(pattern, subjectType: expectedType)
+      return typedPattern
+    case .restPattern:
+      return .restPattern
     }
   }
 
@@ -8862,6 +8876,17 @@ extension TypeChecker {
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)
       }
+    case .listPattern(let elements, _):
+      // Slots bind elements of the subject's element type, not the list itself.
+      let elementType: Type
+      if case .list(let element) = resolveBuiltinSubscriptKind(baseType: type) {
+        elementType = element
+      } else {
+        elementType = .void
+      }
+      for element in elements {
+        try bindPatternVariables(pattern: element, type: elementType)
+      }
     case .comparisonPattern:
       break
     case .andPattern(let left, let right, _):
@@ -8870,6 +8895,8 @@ extension TypeChecker {
     case .orPattern(let left, _, _):
       try bindPatternVariables(pattern: left, type: type)
     case .notPattern:
+      break
+    case .restPattern:
       break
     }
   }

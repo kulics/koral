@@ -547,7 +547,76 @@ file_private let resolve_types_in_pattern(
         .WeakBinding(symbol) then TypedPattern.WeakBinding(
             resolve_symbol_type(mono, symbol),
         ),
+        .ListPattern(ops, elements) then {
+            let mutable new_elements = List[TypedPattern].new();
+            for element in elements then {
+                new_elements.push(resolve_types_in_pattern(mono, element));
+            };
+            TypedPattern.ListPattern(
+                refresh_list_pattern_ops(
+                    mono,
+                    ops,
+                    resolve_parameterized_type(mono, ops.list_type),
+                    resolve_parameterized_type(mono, ops.element_type),
+                ),
+                new_elements,
+            )
+        },
+        .RestPattern() then pattern,
     };
+};
+
+/// Re-resolve a list pattern's std methods against its now-concrete list type.
+///
+/// A symbol kept from the generic template names a function monomorphization
+/// never emits, so the call would not link. Once `List[T]` has a real `T`,
+/// `count` and `__index_get` are instantiated for it exactly as an ordinary
+/// `xs.count()` / `xs[i]` call instantiates them.
+public let refresh_list_pattern_ops(
+    mono Monomorphizer,
+    ops ListPatternOps,
+    list_type Type,
+    element_type Type,
+) ListPatternOps = {
+    if has_generic_parameter(list_type) then {
+        return ListPatternOps(
+            list_type,
+            element_type,
+            ops.count_symbol,
+            ops.index_symbol,
+        );
+    };
+    // Force instantiation of the methods, then re-resolve against the concrete
+    // list type -- exactly as an ordinary `xs.count()` / `xs[i]` call does.
+    instantiate_trait_placeholder_method(
+        mono,
+        list_type,
+        "count",
+        List[Type].new(),
+    );
+    instantiate_trait_placeholder_method(
+        mono,
+        list_type,
+        "__index_get",
+        List[Type].new(),
+    );
+    let count_symbol = lookup_concrete_method_for_static_call(
+        mono,
+        list_type,
+        "count",
+        List[Type].new(),
+        List[TypedExpr].new(),
+        Type.UIntType(),
+    ) or else ops.count_symbol;
+    let index_symbol = lookup_concrete_method_for_static_call(
+        mono,
+        list_type,
+        "__index_get",
+        List[Type].new(),
+        List[TypedExpr].new(),
+        element_type,
+    ) or else ops.index_symbol;
+    return ListPatternOps(list_type, element_type, count_symbol, index_symbol);
 };
 
 // ── Iterative type resolution worklist helpers ────────────────────────────────

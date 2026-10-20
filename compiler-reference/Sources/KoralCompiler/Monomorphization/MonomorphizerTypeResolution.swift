@@ -1572,7 +1572,36 @@ extension Monomorphizer {
 // MARK: - Pattern Type Resolution Extension
 
 extension Monomorphizer {
-    
+
+    /// Re-resolve a list pattern's std methods against its now-concrete list type.
+    ///
+    /// A symbol kept from the generic template names a function monomorphization
+    /// never emits, so the call would not link. Once `List[T]` has a real `T`,
+    /// `count` and `__index_get` are instantiated for it exactly as an ordinary
+    /// `xs.count()` / `xs[i]` call instantiates them.
+    internal func refreshListPatternOps(
+        _ ops: ListPatternOps,
+        listType: Type,
+        elementType: Type
+    ) -> ListPatternOps {
+        if context.containsGenericParameter(listType) {
+            return ListPatternOps(
+                listType: listType,
+                elementType: elementType,
+                countSymbol: ops.countSymbol,
+                indexSymbol: ops.indexSymbol
+            )
+        }
+        let countSymbol = (try? lookupConcreteMethodSymbol(on: listType, name: "count")) ?? ops.countSymbol
+        let indexSymbol = (try? lookupConcreteMethodSymbol(on: listType, name: "__index_get")) ?? ops.indexSymbol
+        return ListPatternOps(
+            listType: listType,
+            elementType: elementType,
+            countSymbol: countSymbol,
+            indexSymbol: indexSymbol
+        )
+    }
+
     /// Resolves types in a pattern.
     internal func resolveTypesInPattern(_ pattern: TypedPattern) -> TypedPattern {
         switch pattern {
@@ -1634,6 +1663,19 @@ extension Monomorphizer {
                 typeName: typeName,
                 elements: elements.map { resolveTypesInPattern($0) }
             )
+
+        case .listPattern(let elements, let ops):
+            return .listPattern(
+                elements: elements.map { resolveTypesInPattern($0) },
+                ops: refreshListPatternOps(
+                    ops,
+                    listType: resolveParameterizedType(ops.listType),
+                    elementType: resolveParameterizedType(ops.elementType)
+                )
+            )
+
+        case .restPattern:
+            return pattern
         }
     }
 }

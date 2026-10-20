@@ -1599,6 +1599,17 @@ private final class MIRFunctionBuilder {
         elements: elements,
         negated: negated
       )
+    case .listPattern(let elements, let ops):
+      return lowerListPatternCondition(
+        subjectPlace: matchedPlace,
+        ops: ops,
+        elements: elements,
+        negated: negated
+      )
+    case .restPattern:
+      // A rest slot never reaches the lowerer on its own: the enclosing element
+      // list expands or forwards it. Standing alone it constrains nothing.
+      return .constant(.boolean(!negated))
     }
   }
 
@@ -1803,6 +1814,183 @@ private final class MIRFunctionBuilder {
       )
     }
     return condition
+  }
+
+  /// The position a pattern slot reads in the subject list.
+  ///
+  /// Slots before the rest count forward from the front and are compile-time
+  /// constants. Slots after it count back from the end, so their position is
+  /// `count - k` -- only the last slot is at a fixed distance from the end.
+  private func listSlotIndexOperand(
+    slotIndex: Int,
+    elements: [TypedPattern],
+    countValue: MIROperand
+  ) -> MIROperand {
+    if let restIndex = elements.firstIndex(where: { $0.isRestSlot }), slotIndex > restIndex {
+      let fromEnd = elements.count - slotIndex
+      return materialize(
+        .binary(MIRBinaryOperation(
+          left: countValue,
+          operatorKind: .arithmetic(.minus, checked: false),
+          right: .constant(.integer(String(fromEnd), .uint)),
+          type: .uint
+        )),
+        type: .uint
+      )
+    }
+    return .constant(.integer(String(slotIndex), .uint))
+  }
+
+  /// The subject handle as a call receiver.
+  ///
+  /// A `type mutable` handle is refcounted, so the receiver is handed over as a
+  /// counted COPY exactly as an ordinary `xs.count()` call does. Passing the
+  /// raw handle would let the callee's drop free the list out from under the
+  /// pattern.
+  private func listSubjectArgument(_ place: MIRPlace) -> MIRValue {
+    .placeRead(place, ownership: .copy)
+  }
+
+  /// `xs.count()`, the subject's length.
+  private func listCountValue(subjectPlace: MIRPlace, ops: ListPatternOps) -> MIROperand {
+    materialize(
+      .call(MIRCall(
+        callee: .function(ops.countSymbol),
+        arguments: [listSubjectArgument(subjectPlace)],
+        argumentOwnerships: [.copy],
+        type: .uint
+      )),
+      type: .uint
+    )
+  }
+
+  /// Read one element out of the subject list into a fresh local.
+  ///
+  /// A list element sits behind a computed index, so there is no stable place
+  /// to alias; it is copied out first and everything below destructures that
+  /// value. The observable semantics is `let x = xs[i]`.
+  private func materializeListSlot(
+    subjectPlace: MIRPlace,
+    ops: ListPatternOps,
+    slotIndex: Int,
+    elements: [TypedPattern],
+    countValue: MIROperand
+  ) -> MIRPlace {
+    let indexValue = listSlotIndexOperand(slotIndex: slotIndex, elements: elements, countValue: countValue)
+    let elementValue = materialize(
+      .call(MIRCall(
+        callee: .function(ops.indexSymbol),
+        arguments: [
+          listSubjectArgument(subjectPlace),
+          .operand(indexValue)
+        ],
+        argumentOwnerships: [.copy, .move],
+        type: ops.elementType
+      )),
+      type: ops.elementType
+    )
+    let local = makeTemporary(type: ops.elementType, nameHint: "list_elem")
+    append(.declare(local.id))
+    append(.assign(.local(local.id), .operand(elementValue)))
+    return .local(local.id)
+  }
+
+  /// Compile a list pattern to a Bool: the length test first, then the slot
+  /// tests. The length test forks so a slot is never read out of bounds.
+  private func lowerListPatternCondition(
+    subjectPlace: MIRPlace?,
+    ops: ListPatternOps,
+    elements: [TypedPattern],
+    negated: Bool
+  ) -> MIROperand? {
+    guard let subjectPlace else { return nil }
+
+    let restIndex = elements.firstIndex(where: { $0.isRestSlot })
+    let fixedSlotIndices = elements.indices.filter { index in
+      if case .restPattern = elements[index] { return false }
+      return true
+    }
+    // Without a rest the length must match exactly; with one the written slots
+    // are a lower bound.
+    let bound = fixedSlotIndices.count
+    let lengthOperator: ComparisonOperator = restIndex == nil ? .equal : .greaterEqual
+
+    let countValue = listCountValue(subjectPlace: subjectPlace, ops: ops)
+    let lengthCondition = materialize(
+      .binary(MIRBinaryOperation(
+        left: countValue,
+        operatorKind: .comparison(lengthOperator),
+        right: .constant(.integer(String(bound), .uint)),
+        type: .bool
+      )),
+      type: .bool
+    )
+
+    // Nothing left to test once the length is right: `[...]`, `[_, _]`.
+    let needsSlotTests = elements.contains { !$0.isConditionlessPayloadPattern }
+    if !needsSlotTests {
+      if negated {
+        return materialize(
+          .unary(MIRUnaryOperation(operatorKind: .logicalNot, operand: lengthCondition, type: .bool)),
+          type: .bool
+        )
+      }
+      return lengthCondition
+    }
+
+    let resultLocal = makeTemporary(type: .bool, nameHint: "pattern_match")
+    append(.declare(resultLocal.id))
+
+    let branchBlock = currentBlockID
+    let slotsBlock = makeBlock()
+    let failedBlock = makeBlock()
+    let joinBlock = makeBlock()
+
+    setCurrentBlock(branchBlock)
+    terminate(.branch(condition: lengthCondition, thenBlock: slotsBlock, elseBlock: failedBlock))
+
+    setCurrentBlock(slotsBlock)
+    var slotsResult = MIROperand.constant(.boolean(true))
+    for slotIndex in fixedSlotIndices {
+      let element = elements[slotIndex]
+      let elementPlace = materializeListSlot(
+        subjectPlace: subjectPlace,
+        ops: ops,
+        slotIndex: slotIndex,
+        elements: elements,
+        countValue: countValue
+      )
+      guard let slotCondition = lowerSimplePatternCondition(
+        subjectValue: .placeRead(elementPlace, ownership: .borrow),
+        subjectPlace: elementPlace,
+        subjectType: ops.elementType,
+        pattern: element,
+        negated: false
+      ) else {
+        return nil
+      }
+      slotsResult = materialize(
+        .binary(MIRBinaryOperation(left: slotsResult, operatorKind: .logicalAnd, right: slotCondition, type: .bool)),
+        type: .bool
+      )
+    }
+    if negated {
+      slotsResult = materialize(
+        .unary(MIRUnaryOperation(operatorKind: .logicalNot, operand: slotsResult, type: .bool)),
+        type: .bool
+      )
+    }
+    if !currentBlockIsTerminated {
+      append(.assign(.local(resultLocal.id), .operand(slotsResult)))
+      terminate(.goto(joinBlock))
+    }
+
+    setCurrentBlock(failedBlock)
+    append(.assign(.local(resultLocal.id), .operand(.constant(.boolean(negated)))))
+    terminate(.goto(joinBlock))
+
+    setCurrentBlock(joinBlock)
+    return .local(resultLocal.id)
   }
 
   private func patternMatchPlace(place: MIRPlace, type: Type) -> (place: MIRPlace, type: Type) {
@@ -2252,6 +2440,13 @@ private final class MIRFunctionBuilder {
       return canLowerSimplePattern(inner, subjectType: matchedType)
     case .traitObjectTypeBinding:
       return false
+    case .listPattern(let elements, let ops):
+      return elements.allSatisfy { element in
+        if element.isRestSlot { return true }
+        return canLowerSimplePattern(element, subjectType: ops.elementType)
+      }
+    case .restPattern:
+      return true
     default:
       return false
     }
@@ -2287,6 +2482,14 @@ private final class MIRFunctionBuilder {
          .orPattern(let left, let right):
       return canLowerPatternWithBindings(left, subjectType: matchedType)
         && canLowerPatternWithBindings(right, subjectType: matchedType)
+    case .listPattern(let elements, let ops):
+      guard !context.containsGenericParameter(ops.elementType) else { return false }
+      return elements.allSatisfy { element in
+        if element.isRestSlot { return true }
+        return canLowerPatternWithBindings(element, subjectType: ops.elementType)
+      }
+    case .restPattern:
+      return true
     default:
       return false
     }
@@ -2399,6 +2602,19 @@ private final class MIRFunctionBuilder {
       bindPatternVariables(pattern: right, subjectPlace: matchedPlace, subjectType: matchedType)
     case .orPattern(let left, let right):
       bindOrPatternVariables(left: left, right: right, subjectPlace: subjectPlace, subjectType: subjectType)
+    case .listPattern(let elements, let ops):
+      let countValue = listCountValue(subjectPlace: matchedPlace, ops: ops)
+      for (slotIndex, element) in elements.enumerated() {
+        if case .restPattern = element { continue }
+        let elementPlace = materializeListSlot(
+          subjectPlace: matchedPlace,
+          ops: ops,
+          slotIndex: slotIndex,
+          elements: elements,
+          countValue: countValue
+        )
+        bindPatternVariables(pattern: element, subjectPlace: elementPlace, subjectType: ops.elementType)
+      }
     default:
       break
     }
@@ -2527,7 +2743,20 @@ private final class MIRFunctionBuilder {
       assignPatternBindingLocals(pattern: right, subjectPlace: matchedPlace, subjectType: matchedType)
     case .orPattern(let left, let right):
       bindOrPatternVariables(left: left, right: right, subjectPlace: subjectPlace, subjectType: subjectType)
-    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType:
+    case .listPattern(let elements, let ops):
+      let countValue = listCountValue(subjectPlace: matchedPlace, ops: ops)
+      for (slotIndex, element) in elements.enumerated() {
+        if case .restPattern = element { continue }
+        let elementPlace = materializeListSlot(
+          subjectPlace: matchedPlace,
+          ops: ops,
+          slotIndex: slotIndex,
+          elements: elements,
+          countValue: countValue
+        )
+        assignPatternBindingLocals(pattern: element, subjectPlace: elementPlace, subjectType: ops.elementType)
+      }
+    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType, .restPattern:
       break
     }
   }

@@ -1980,6 +1980,21 @@ given MIRFunctionBuilder {
                     not negated,
                 );
             },
+            .ListPattern(ops, elements) then {
+                // Handles negation internally (the length condition forks).
+                return self.lower_list_pattern_condition(
+                    subject_place,
+                    ops,
+                    elements,
+                    negated,
+                );
+            },
+            .RestPattern() then {
+                // A rest slot never reaches the lowerer on its own: the
+                // enclosing element list expands or forwards it. Standing
+                // alone it constrains nothing.
+                return self.pattern_bool(not negated);
+            },
             _ then {},
         };
 
@@ -2114,8 +2129,269 @@ given MIRFunctionBuilder {
             .RuneLiteral(_) then self.pattern_bool(false),
             .NotPattern(_) then self.pattern_bool(false),
             .WeakBinding(_) then self.pattern_bool(true),
+            .ListPattern(_, _) then self.pattern_bool(true),
+            .RestPattern() then self.pattern_bool(true),
         };
         return self.pattern_maybe_negate(operand, negated);
+    };
+
+    /// List patterns and rest patterns handle negation internally (the list
+    /// condition forks), so they return before `pattern_maybe_negate`.
+
+    /// The position a pattern slot reads in the subject list.
+    ///
+    /// Slots before the rest count forward from the front and are compile-time
+    /// constants. Slots after it count back from the end, so their position is
+    /// `count - k`.
+    file_private list_slot_index_operand(
+        self,
+        slot_index UInt,
+        elements List[TypedPattern],
+        count_value MIROperand,
+    ) MIROperand = {
+        let mutable rest_index = -1;
+        let mutable i UInt = 0;
+        for element in elements then {
+            if element is .RestPattern() then {
+                rest_index = Int(i);
+                break;
+            };
+            i += 1;
+        };
+        if rest_index >= 0 and Int(slot_index) > rest_index then {
+            let from_end = elements.count() - slot_index;
+            return self.materialize(
+                MIRValue.Binary(
+                    MIRBinaryOperation(
+                        count_value,
+                        MIRBinaryOperator.Arithmetic(
+                            ArithmeticOperator.Subtract(),
+                            false,
+                        ),
+                        MIROperand.Constant(
+                            MIRConstant.Integer(from_end.to_string(), Type.UIntType()),
+                        ),
+                        Type.UIntType(),
+                    ),
+                ),
+                Type.UIntType(),
+            );
+        };
+        return MIROperand.Constant(
+            MIRConstant.Integer(slot_index.to_string(), Type.UIntType()),
+        );
+    };
+
+    /// The subject handle as a call receiver. A `type mutable` handle is
+    /// refcounted, so the receiver is handed over as a counted COPY exactly as
+    /// an ordinary `xs.count()` call does.
+    file_private list_subject_argument(self, place MIRPlace) MIRValue = {
+        return MIRValue.PlaceRead(place, MIROwnershipUse.Copy());
+    };
+
+    /// `xs.count()`, the subject's length.
+    file_private list_count_value(
+        self,
+        subject_place MIRPlace,
+        ops ListPatternOps,
+    ) MIROperand = {
+        let mutable count_args = List[MIRValue].new();
+        count_args.push(self.list_subject_argument(subject_place));
+        let mutable count_owns = List[MIROwnershipUse].new();
+        count_owns.push(MIROwnershipUse.Copy());
+        return self.materialize(
+            MIRValue.Call(
+                MIRCall(
+                    MIROperand.Function(ops.count_symbol),
+                    count_args,
+                    count_owns,
+                    Type.UIntType(),
+                ),
+            ),
+            Type.UIntType(),
+        );
+    };
+
+    /// Read one element out of the subject list into a fresh local. A list
+    /// element sits behind a computed index, so there is no stable place to
+    /// alias; it is copied out first and everything below destructures that
+    /// value. The observable semantics is `let x = xs[i]`.
+    file_private materialize_list_slot(
+        self,
+        subject_place MIRPlace,
+        ops ListPatternOps,
+        slot_index UInt,
+        elements List[TypedPattern],
+        count_value MIROperand,
+    ) MIRPlace = {
+        let index_value = self.list_slot_index_operand(
+            slot_index,
+            elements,
+            count_value,
+        );
+        let mutable idx_args = List[MIRValue].new();
+        idx_args.push(self.list_subject_argument(subject_place));
+        idx_args.push(MIRValue.Operand(index_value));
+        let mutable idx_owns = List[MIROwnershipUse].new();
+        idx_owns.push(MIROwnershipUse.Copy());
+        idx_owns.push(MIROwnershipUse.Move());
+        let element_value = self.materialize(
+            MIRValue.Call(
+                MIRCall(
+                    MIROperand.Function(ops.index_symbol),
+                    idx_args,
+                    idx_owns,
+                    ops.element_type,
+                ),
+            ),
+            ops.element_type,
+        );
+        let local = self.make_temporary(ops.element_type, "list_elem");
+        self.append_statement(MIRStatement.Declare(local.id));
+        self.append_statement(
+            MIRStatement.Assign(
+                MIRPlace.Local(local.id),
+                MIRValue.Operand(element_value),
+            ),
+        );
+        return MIRPlace.Local(local.id);
+    };
+
+    /// Compile a list pattern to a Bool: the length test first, then the slot
+    /// tests. The length test FORKS so a slot is never read out of bounds.
+    file_private lower_list_pattern_condition(
+        self,
+        subject_place MIRPlace,
+        ops ListPatternOps,
+        elements List[TypedPattern],
+        negated Bool,
+    ) MIROperand = {
+        let mutable rest_index = -1;
+        let mutable fixed_slot_indices = List[UInt].new();
+        let mutable i UInt = 0;
+        for element in elements then {
+            if element is .RestPattern() then {
+                rest_index = Int(i);
+            } else {
+                fixed_slot_indices.push(i);
+            };
+            i += 1;
+        };
+        let bound = fixed_slot_indices.count();
+        let length_op = if rest_index < 0 then ComparisonOperator.Equal()
+        else ComparisonOperator.GreaterEqual();
+
+        let count_value = self.list_count_value(subject_place, ops);
+        let length_condition = self.materialize(
+            MIRValue.Binary(
+                MIRBinaryOperation(
+                    count_value,
+                    MIRBinaryOperator.Comparison(length_op),
+                    MIROperand.Constant(MIRConstant.Integer(bound.to_string(), Type.UIntType())),
+                    Type.BoolType(),
+                ),
+            ),
+            Type.BoolType(),
+        );
+
+        // Nothing left to test once the length is right: `[...]`, `[_, _]`.
+        let mutable needs_slot_tests = false;
+        for element in elements then {
+            if not typed_pattern_is_conditionless_payload(element) then {
+                needs_slot_tests = true;
+            };
+        };
+        if not needs_slot_tests then {
+            if negated then {
+                return self.materialize(
+                    MIRValue.Unary(
+                        MIRUnaryOperation(
+                            MIRUnaryOperator.LogicalNot(),
+                            length_condition,
+                            Type.BoolType(),
+                        ),
+                    ),
+                    Type.BoolType(),
+                );
+            };
+            return length_condition;
+        };
+
+        let result_local = self.make_temporary(Type.BoolType(), "pattern_match");
+        self.append_statement(MIRStatement.Declare(result_local.id));
+
+        let branch_block = self.current_block_id();
+        let slots_block = self.make_block();
+        let failed_block = self.make_block();
+        let join_block = self.make_block();
+
+        self.set_current_block(branch_block);
+        self.terminate(
+            MIRTerminator.Branch(length_condition, slots_block, failed_block),
+        );
+
+        self.set_current_block(slots_block);
+        let mutable slots_result = MIROperand.Constant(MIRConstant.Boolean(true));
+        for slot_index in fixed_slot_indices then {
+            let element = elements[slot_index];
+            let element_place = self.materialize_list_slot(
+                subject_place,
+                ops,
+                slot_index,
+                elements,
+                count_value,
+            );
+            let slot_condition = self.lower_pattern_condition(
+                element_place,
+                ops.element_type,
+                element,
+                false,
+            );
+            slots_result = self.materialize(
+                MIRValue.Binary(
+                    MIRBinaryOperation(
+                        slots_result,
+                        MIRBinaryOperator.LogicalAnd(),
+                        slot_condition,
+                        Type.BoolType(),
+                    ),
+                ),
+                Type.BoolType(),
+            );
+        };
+        if negated then {
+            slots_result = self.materialize(
+                MIRValue.Unary(
+                    MIRUnaryOperation(
+                        MIRUnaryOperator.LogicalNot(),
+                        slots_result,
+                        Type.BoolType(),
+                    ),
+                ),
+                Type.BoolType(),
+            );
+        };
+        if not self.current_block_is_terminated() then {
+            self.append_statement(
+                MIRStatement.Assign(
+                    MIRPlace.Local(result_local.id),
+                    MIRValue.Operand(slots_result),
+                ),
+            );
+            self.terminate(MIRTerminator.Goto(join_block));
+        };
+
+        self.set_current_block(failed_block);
+        self.append_statement(
+            MIRStatement.Assign(
+                MIRPlace.Local(result_local.id),
+                MIRValue.Operand(MIROperand.Constant(MIRConstant.Boolean(negated))),
+            ),
+        );
+        self.terminate(MIRTerminator.Goto(join_block));
+
+        self.set_current_block(join_block);
+        return MIROperand.Local(result_local.id);
     };
 
     file_private lower_trait_object_type_pattern_condition(
@@ -3044,6 +3320,30 @@ given MIRFunctionBuilder {
                 };
             },
             .NotPattern(_) then {},
+            .ListPattern(ops, elements) then {
+                let count_value = self.list_count_value(matched_place, ops);
+                let mutable slot_index UInt = 0;
+                for element in elements then {
+                    if element is .RestPattern() then {
+                        slot_index += 1;
+                        continue;
+                    };
+                    let element_place = self.materialize_list_slot(
+                        matched_place,
+                        ops,
+                        slot_index,
+                        elements,
+                        count_value,
+                    );
+                    self.apply_pattern_bindings(
+                        element,
+                        element_place,
+                        ops.element_type,
+                        mode,
+                    );
+                    slot_index += 1;
+                };
+            },
             _ then {},
         };
     };

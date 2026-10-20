@@ -333,7 +333,13 @@ extension TypeChecker {
       let caseDef = cases[caseIndex]
 
       let orderedPatternArgs = try reorderPatternArguments(
-        subPatternArgs,
+        try expandRestSlots(
+          subPatternArgs,
+          fieldNames: caseDef.parameters.map { $0.name },
+          fieldIsNamed: caseDef.parameters.map { $0.named },
+          patternDescription: ".\(caseName)",
+          patternSpan: span
+        ),
         fieldNames: caseDef.parameters.map { $0.name },
         fieldIsNamed: caseDef.parameters.map { $0.named },
         patternDescription: ".\(caseName)",
@@ -521,7 +527,13 @@ extension TypeChecker {
       }
       
       let orderedPatternArgs = try reorderPatternArguments(
-        subPatternArgs,
+        try expandRestSlots(
+          subPatternArgs,
+          fieldNames: members.map { $0.name },
+          fieldIsNamed: members.map { $0.named },
+          patternDescription: typeName,
+          patternSpan: span
+        ),
         fieldNames: members.map { $0.name },
         fieldIsNamed: members.map { $0.named },
         patternDescription: typeName,
@@ -567,6 +579,15 @@ extension TypeChecker {
           span: span
         )
       }
+      // Tuple destructuring is positional throughout, so a rest slot swallows
+      // the unwritten middle exactly as it does in a named struct pattern.
+      let elements = try expandRestSlots(
+        elements,
+        fieldNames: members.map { $0.name },
+        fieldIsNamed: Array(repeating: false, count: members.count),
+        patternDescription: innerType.description,
+        patternSpan: span
+      )
       guard elements.count == members.count else {
         throw SemanticError(
           .typeMismatch(
@@ -614,7 +635,108 @@ extension TypeChecker {
       // The name here is display-only (exhaustiveness messages); the match
       // itself is against the subject's declaration identity.
       return (.structPattern(typeName: innerType.description, elements: typedSubPatterns), bindings)
+
+    case .listPattern(let elements, let span):
+      // A list pattern destructures a `List[T]` by length; each slot is checked
+      // against `T`. Which std type `List` is is a question of DECLARATION
+      // identity -- a user type also spelled `List` is not one.
+      guard case .list(let elementType) = resolveBuiltinSubscriptKind(baseType: subjectType) else {
+        throw SemanticError(.generic(
+          "List pattern requires a List subject, got '\(subjectType.description)'"
+        ), span: span)
+      }
+      // The length and element reads are ordinary std method calls, resolved
+      // here the way `xs.count()` / `xs[i]` resolve them. MIR only knows how to
+      // call a Symbol, so the pattern carries them down.
+      guard let countSymbol = try lookupConcreteMethodSymbol(on: subjectType, name: "count"),
+            let indexSymbol = try lookupConcreteMethodSymbol(on: subjectType, name: "__index_get") else {
+        throw SemanticError(.generic(
+          "List pattern requires 'count' and '__index_get' on '\(subjectType.description)'"
+        ), span: span)
+      }
+      var typedElements: [TypedPattern] = []
+      for element in elements {
+        if case .restPattern = element {
+          typedElements.append(.restPattern)
+          continue
+        }
+        let (typedSub, subBindings) = try checkPattern(element, subjectType: elementType)
+        typedElements.append(typedSub)
+        bindings.append(contentsOf: subBindings)
+      }
+      return (.listPattern(
+        elements: typedElements,
+        ops: ListPatternOps(
+          listType: subjectType,
+          elementType: elementType,
+          countSymbol: countSymbol,
+          indexSymbol: indexSymbol
+        )
+      ), bindings)
+
+    case .restPattern:
+      // Only ever reached as a slot of an enclosing element list, which
+      // expands or forwards it before any field type is consulted. It swallows
+      // slots rather than matching one, so there is nothing to check.
+      return (.restPattern, [])
     }
+  }
+
+  /// Rewrite an element list containing a rest slot into one slot per field.
+  ///
+  /// The rest swallows the unwritten MIDDLE: `Point(x, ..., y)` on a
+  /// three-field struct binds x to field 0 and y to field 2. Written slots
+  /// before the rest fill fields from the front, those after it from the back,
+  /// and the rest becomes wildcards for whatever is left.
+  ///
+  /// A rest slot is only meaningful among positional slots -- it names no
+  /// field, so a named field cannot be matched by it, and a labeled slot
+  /// already says which field it wants. Both cases are refused rather than
+  /// guessed at.
+  func expandRestSlots(
+    _ args: [PatternArg],
+    fieldNames: [String],
+    fieldIsNamed: [Bool],
+    patternDescription: String,
+    patternSpan: SourceSpan
+  ) throws -> [PatternArg] {
+    var restIndex: Int? = nil
+    for (index, arg) in args.enumerated() {
+      if case .restPattern = arg.pattern {
+        restIndex = index
+        break
+      }
+    }
+    guard let restIndex else { return args }
+
+    if args.contains(where: { $0.label != nil }) {
+      throw SemanticError(.generic(
+        "Rest pattern cannot be combined with labeled pattern arguments in '\(patternDescription)'"
+      ), span: patternSpan)
+    }
+    if fieldIsNamed.contains(true) {
+      throw SemanticError(.generic(
+        "Rest pattern cannot be used with named fields in '\(patternDescription)'; match named fields by label"
+      ), span: patternSpan)
+    }
+
+    let prefix = args[..<restIndex].map { $0.pattern }
+    let suffix = args[(restIndex + 1)...].map { $0.pattern }
+    let fieldCount = fieldNames.count
+    let written = prefix.count + suffix.count
+    guard written <= fieldCount else {
+      throw SemanticError(.generic(
+        "Too many positional pattern arguments for '\(patternDescription)'"
+      ), span: patternSpan)
+    }
+
+    var expanded: [PatternArg] = []
+    expanded.append(contentsOf: prefix.map { PatternArg(label: nil, pattern: $0) })
+    for _ in 0..<(fieldCount - written) {
+      expanded.append(PatternArg(label: nil, pattern: .wildcard(span: patternSpan)))
+    }
+    expanded.append(contentsOf: suffix.map { PatternArg(label: nil, pattern: $0) })
+    return expanded
   }
 
   /// The matched value behind a positional destructuring: a reference subject
@@ -737,11 +859,13 @@ extension TypeChecker {
       return elements.contains { patternContainsBindings($0) }
     case .structPattern(_, let elements):
       return elements.contains { patternContainsBindings($0) }
+    case .listPattern(let elements, _):
+      return elements.contains { patternContainsBindings($0) }
     case .andPattern(let left, let right), .orPattern(let left, let right):
       return patternContainsBindings(left) || patternContainsBindings(right)
     case .notPattern(let inner):
       return patternContainsBindings(inner)
-    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
       return false
     }
   }
@@ -779,12 +903,16 @@ extension TypeChecker {
       for element in elements {
         collectPatternSymbols(element, into: &symbols, seenDefIds: &seenDefIds)
       }
+    case .listPattern(let elements, _):
+      for element in elements {
+        collectPatternSymbols(element, into: &symbols, seenDefIds: &seenDefIds)
+      }
     case .andPattern(let left, let right), .orPattern(let left, let right):
       collectPatternSymbols(left, into: &symbols, seenDefIds: &seenDefIds)
       collectPatternSymbols(right, into: &symbols, seenDefIds: &seenDefIds)
     case .notPattern(let pattern):
       collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
-    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
       break
     }
   }
@@ -832,6 +960,11 @@ extension TypeChecker {
         typeName: typeName,
         elements: elements.map { canonicalizePatternBindings($0, canonicalSymbolsByName: canonicalSymbolsByName) }
       )
+    case .listPattern(let elements, let ops):
+      return .listPattern(
+        elements: elements.map { canonicalizePatternBindings($0, canonicalSymbolsByName: canonicalSymbolsByName) },
+        ops: ops
+      )
     case .andPattern(let left, let right):
       return .andPattern(
         left: canonicalizePatternBindings(left, canonicalSymbolsByName: canonicalSymbolsByName),
@@ -844,7 +977,7 @@ extension TypeChecker {
       )
     case .notPattern(let inner):
       return .notPattern(pattern: canonicalizePatternBindings(inner, canonicalSymbolsByName: canonicalSymbolsByName))
-    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
       return pattern
     }
   }

@@ -11,12 +11,42 @@ public type ExhaustivenessChecker(
     span SourceSpan,
 );
 
+file_private let render_list_shape(slots Int, rest Bool) String = {
+    let mutable parts = List[String].new();
+    let mutable i = 0;
+    while i < slots then {
+        parts.push("_");
+        i += 1;
+    };
+    if rest then {
+        parts.push("...");
+    };
+    let mutable out = StringBuilder.new();
+    out.push_byte('[');
+    let mutable first = true;
+    for p in parts then {
+        if not first then {
+            out.push_string(", ");
+        };
+        out.push_string(p);
+        first = false;
+    };
+    out.push_byte(']');
+    return out.to_string();
+};
+
 file_private type PatternSpace {
     Full(type_value Type),
     Empty(),
     EnumCases(type_name String, cases Dict[String, List[PatternSpace]]),
     BoolValues(has_true Bool, has_false Bool),
     IntRange(has_min Bool, min_val Int, has_max Bool, max_val Int),
+    /// List space -- which lengths are still fully uncovered. A length counts
+    /// as covered only when EVERY list of that length matches a pattern already
+    /// seen. Partial element coverage (`[1, ...]`) is not represented: such a
+    /// length stays uncovered. That under-claims exhaustiveness, never
+    /// over-claims it.
+    ListLengths(type_value Type, covered_exact Set[Int], covered_tail_from Option[Int]),
 };
 
 // Simple integer string parser for exhaustiveness checking.
@@ -239,6 +269,49 @@ given ExhaustivenessChecker {
     };
 
     // 检查不可达模式（已被前面模式完全覆盖的分支）
+    /// Whether `subtract` can only approximate what this pattern covers.
+    ///
+    /// A weak binding always leaves the dead case behind, and a refutable list
+    /// slot (`[1, ...]`) may match nothing at a length -- in both cases the
+    /// space comes back unchanged without the pattern being unreachable.
+    file_private coverage_is_approximate(self, pattern TypedPattern) Bool = {
+        return when pattern in {
+            .WeakBinding(_) then true,
+            .ListPattern(_, elements) then {
+                for element in elements then {
+                    if not typed_pattern_is_irrefutable(element) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .EnumCase(_, _, elements) then {
+                for element in elements then {
+                    if self.coverage_is_approximate(element.pattern) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .StructPattern(_, elements) then {
+                for element in elements then {
+                    if self.coverage_is_approximate(element.pattern) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .AndPattern(left, right) then self.coverage_is_approximate(
+                left,
+            ) or self.coverage_is_approximate(right),
+            .OrPattern(left, right) then self.coverage_is_approximate(
+                left,
+            ) or self.coverage_is_approximate(right),
+            .NotPattern(inner) then self.coverage_is_approximate(inner),
+            _ then false,
+        };
+    };
+
     file_private check_unreachable_patterns(self) Result[Void] = {
         let mutable covered_trait_object_types = Set[String].new();
         let mutable has_catchall = false;
@@ -290,7 +363,12 @@ given ExhaustivenessChecker {
                 .Some(space) then {
                     let reduced = self.subtract_pattern(space, p, self.subject_type);
                     let is_catchall_pattern = (p is .Wildcard()) or (p is .Variable(_));
-                    if not is_catchall_pattern and self.can_precisely_subtract_pattern(
+                    // A weak binding or a refutable list slot has approximate
+                    // coverage: `subtract` can come back unchanged without the
+                    // pattern being unreachable. Both are exempt from the
+                    // "unchanged means covered" reading.
+                    let approximate = self.coverage_is_approximate(p);
+                    if not is_catchall_pattern and not approximate and self.can_precisely_subtract_pattern(
                         space,
                         p,
                         self.subject_type,
@@ -396,7 +474,48 @@ given ExhaustivenessChecker {
             .UInt64Type() then Option[PatternSpace].Some(
                 PatternSpace.IntRange(true, 0, false, 0),
             ),
+            .GenericStruct(_, _) then {
+                if self.is_std_list_subject(self.subject_type) then {
+                    Option[PatternSpace].Some(
+                        PatternSpace.ListLengths(
+                            self.subject_type,
+                            Set[Int].new(),
+                            Option[Int].None(),
+                        ),
+                    )
+                } else {
+                    Option[PatternSpace].None()
+                }
+            },
+            .StructureType(_) then {
+                if self.is_std_list_subject(self.subject_type) then {
+                    Option[PatternSpace].Some(
+                        PatternSpace.ListLengths(
+                            self.subject_type,
+                            Set[Int].new(),
+                            Option[Int].None(),
+                        ),
+                    )
+                } else {
+                    Option[PatternSpace].None()
+                }
+            },
             _ then Option[PatternSpace].None(),
+        };
+    };
+
+    /// Whether the subject is std's `List[T]`. Declaration identity, never the
+    /// spelling: a user type also called `List` is not one.
+    file_private is_std_list_subject(self, t Type) Bool = {
+        let want = self.context.std_type_def_id("List") or else {
+            return false;
+        };
+        return when t in {
+            .StructureType(def_id) then def_id == want or self.context.get_template_def_id(
+                def_id,
+            ) == want,
+            .GenericStruct(tplDefId, _) then tplDefId == want,
+            _ then false,
         };
     };
 
@@ -448,6 +567,21 @@ given ExhaustivenessChecker {
             .BoolValues(has_true, has_false) then not has_true and not has_false,
             .EnumCases(_, cases) then cases.is_empty(),
             .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
+            .ListLengths(_, covered_exact, covered_tail_from) then {
+                when covered_tail_from in {
+                    .Some(tail) then {
+                        let mutable length = 0;
+                        while length < tail then {
+                            if not covered_exact.contains(length) then {
+                                return false;
+                            };
+                            length += 1;
+                        };
+                        true
+                    },
+                    .None() then false,
+                }
+            },
         };
     };
 
@@ -508,6 +642,20 @@ given ExhaustivenessChecker {
                         return false;
                     };
                     return true;
+                },
+                _ then false,
+            },
+            .ListLengths(_, lhs_exact, lhs_tail) then when rhs in {
+                .ListLengths(_, rhs_exact, rhs_tail) then {
+                    if lhs_exact.count() <> rhs_exact.count() then {
+                        return false;
+                    };
+                    for v in lhs_exact.iterator() then {
+                        if not rhs_exact.contains(v) then {
+                            return false;
+                        };
+                    };
+                    return lhs_tail == rhs_tail;
                 },
                 _ then false,
             },
@@ -698,8 +846,80 @@ given ExhaustivenessChecker {
                 let after_left = self.subtract_pattern(space, left, subject_type);
                 self.subtract_pattern(after_left, right, subject_type)
             },
+            .ListPattern(_, elements) then self.subtract_list_pattern(
+                space,
+                elements,
+            ),
+            .RestPattern() then space,
             _ then space,
         };
+    };
+
+    /// Subtract the lists matched by `[p1, ..., pk]` / `[p1, ..., pk, ...]`.
+    ///
+    /// Only lengths whose slots are ALL irrefutable are claimed: a refutable
+    /// slot (`[1, ...]`) may match nothing at a length, so claiming it would
+    /// both close the space early and make a later arm look unreachable.
+    file_private subtract_list_pattern(
+        self,
+        space PatternSpace,
+        elements List[TypedPattern],
+    ) PatternSpace = {
+        let _ = self;
+        let mutable fixed = List[TypedPattern].new();
+        let mutable has_rest = false;
+        for element in elements then {
+            if element is .RestPattern() then {
+                has_rest = true;
+            } else {
+                fixed.push(element);
+            };
+        };
+        for f in fixed then {
+            if not typed_pattern_is_irrefutable(f) then {
+                return space;
+            };
+        };
+
+        let mutable covered_exact = Set[Int].new();
+        let mutable covered_tail_from = Option[Int].None();
+        let mutable space_type = Type.Unknown();
+        when space in {
+            .Full(t) then {
+                space_type = t;
+            },
+            .ListLengths(t, exact, tail) then {
+                space_type = t;
+                covered_exact = exact;
+                covered_tail_from = tail;
+            },
+            _ then {
+                return space;
+            },
+        };
+
+        if has_rest then {
+            let threshold = Int(fixed.count());
+            when covered_tail_from in {
+                .Some(existing) then {
+                    covered_tail_from = Option[Int].Some(
+                        if existing < threshold then existing else threshold,
+                    );
+                },
+                .None() then {
+                    covered_tail_from = Option[Int].Some(threshold);
+                },
+            };
+        } else {
+            covered_exact.insert(Int(fixed.count()));
+        };
+
+        let next = PatternSpace.ListLengths(
+            space_type,
+            covered_exact,
+            covered_tail_from,
+        );
+        return if self.pattern_space_is_empty(next) then PatternSpace.Empty() else next;
     };
 
     file_private can_precisely_subtract_pattern(
@@ -908,6 +1128,7 @@ given ExhaustivenessChecker {
         let _ = self;
         return when space in {
             .Full(t) then t,
+            .ListLengths(t, _, _) then t,
             .BoolValues(_, _) then Type.BoolType(),
             .EnumCases(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
@@ -995,7 +1216,58 @@ given ExhaustivenessChecker {
                 };
                 out
             },
+            .ListLengths(type_value, covered_exact, covered_tail_from) then {
+                self.render_missing_list_lengths(
+                    type_value,
+                    covered_exact,
+                    covered_tail_from,
+                )
+            },
         };
+    };
+
+    /// The uncovered list shapes, as the patterns that would cover them: one
+    /// exact-length pattern per uncovered length below the tail, and one
+    /// rest pattern for whatever runs past it.
+    file_private render_missing_list_lengths(
+        self,
+        type_value Type,
+        covered_exact Set[Int],
+        covered_tail_from Option[Int],
+    ) List[String] = {
+        let _ = self;
+        if covered_exact.is_empty() and covered_tail_from is .None() then {
+            let mutable out = List[String].new();
+            out.push(type_to_string(type_value));
+            return out;
+        };
+        let mutable tail_start = 0;
+        when covered_tail_from in {
+            .Some(t) then {
+                tail_start = t;
+            },
+            .None() then {
+                let mutable max_exact = -1;
+                for v in covered_exact.iterator() then {
+                    if v > max_exact then {
+                        max_exact = v;
+                    };
+                };
+                tail_start = max_exact + 1;
+            },
+        };
+        let mutable result = List[String].new();
+        let mutable length = 0;
+        while length < tail_start then {
+            if not covered_exact.contains(length) then {
+                result.push(render_list_shape(length, false));
+            };
+            length += 1;
+        };
+        if covered_tail_from is .None() then {
+            result.push(render_list_shape(tail_start, true));
+        };
+        return result;
     };
 
     file_private render_missing_constructor(
@@ -1096,6 +1368,13 @@ given ExhaustivenessChecker {
                     out.push("integer (any)");
                 };
                 out
+            },
+            .ListLengths(type_value, covered_exact, covered_tail_from) then {
+                self.render_missing_list_lengths(
+                    type_value,
+                    covered_exact,
+                    covered_tail_from,
+                )
             },
         };
     };
@@ -1323,6 +1602,10 @@ public let is_catchall(pattern TypedPattern) Bool = {
             all_catchall
         },
         .ComparisonPattern(_, _) then false,
+        .RestPattern() then true,
+        .ListPattern(_, elements) then elements.count() == UInt(1) and elements[
+            UInt(0)
+        ] is .RestPattern(),
         _ then false,
     };
 };
@@ -1448,6 +1731,21 @@ public let pattern_description(pattern TypedPattern, context CompilerContext) St
             msg.push_string(context.get_name(symbol.def_id) or else "<binding>");
             msg.to_string()
         },
+        .ListPattern(_, elements) then {
+            let mutable msg = StringBuilder.new();
+            msg.push_string("[");
+            let mutable first = true;
+            for elem in elements then {
+                if not first then {
+                    msg.push_string(", ");
+                };
+                msg.push_string(pattern_description(elem, context));
+                first = false;
+            };
+            msg.push_string("]");
+            msg.to_string()
+        },
+        .RestPattern() then "...",
     };
 };
 

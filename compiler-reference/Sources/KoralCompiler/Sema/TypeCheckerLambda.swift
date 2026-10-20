@@ -487,12 +487,16 @@ extension TypeChecker {
       for element in elements {
         collectPatternBindingNames(element.pattern, into: &names)
       }
+    case .listPattern(let elements, _):
+      for element in elements {
+        collectPatternBindingNames(element, into: &names)
+      }
     case .andPattern(let left, let right, _), .orPattern(let left, let right, _):
       collectPatternBindingNames(left, into: &names)
       collectPatternBindingNames(right, into: &names)
     case .notPattern(let inner, _):
       collectPatternBindingNames(inner, into: &names)
-    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType:
+    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
       break
     }
   }

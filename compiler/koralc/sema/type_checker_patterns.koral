@@ -136,6 +136,14 @@ given TypeChecker {
                 };
                 false
             },
+            .ListPattern(elements, _) then {
+                for element in elements then {
+                    if self.pattern_requires_raw_subject(element) then {
+                        return true;
+                    };
+                };
+                false
+            },
             .AndPattern(left, right, _) then self.pattern_requires_raw_subject(left) or self.pattern_requires_raw_subject(
                 right,
             ),
@@ -661,9 +669,21 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 if not struct_param_specs.is_empty() then {
+                    let mutable struct_field_is_named = List[Bool].new();
+                    for spec in struct_param_specs then {
+                        struct_field_is_named.push(spec.named);
+                    };
+                    let expanded_struct = self.expand_rest_slots(
+                        elements,
+                        struct_field_is_named,
+                        case_name,
+                        span,
+                    ) or else {
+                        return TypedPattern.Wildcard();
+                    };
                     let mutable ordered_elements = List[PatternElement].new();
                     when self.order_pattern_arguments(
-                        elements,
+                        expanded_struct,
                         struct_param_specs,
                         case_name,
                         span,
@@ -702,9 +722,21 @@ given TypeChecker {
                         subject_type,
                         case_name,
                     );
+                    let mutable enum_field_is_named = List[Bool].new();
+                    for spec in param_specs then {
+                        enum_field_is_named.push(spec.named);
+                    };
+                    let expanded_enum = self.expand_rest_slots(
+                        elements,
+                        enum_field_is_named,
+                        ".\(case_name)",
+                        span,
+                    ) or else {
+                        return TypedPattern.Wildcard();
+                    };
                     let mutable ordered_elements = List[PatternElement].new();
                     when self.order_pattern_arguments(
-                        elements,
+                        expanded_enum,
                         param_specs,
                         ".\(case_name)",
                         span,
@@ -747,8 +779,20 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
+                let mutable struct_field_is_named = List[Bool].new();
+                for spec in param_specs then {
+                    struct_field_is_named.push(spec.named);
+                };
+                let expanded_struct = self.expand_rest_slots(
+                    elements,
+                    struct_field_is_named,
+                    type_name,
+                    span,
+                ) or else {
+                    return TypedPattern.Wildcard();
+                };
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -811,14 +855,31 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                if elements.count() <> param_specs.count() then {
+                // Tuple destructuring is positional throughout, so a rest slot
+                // swallows the unwritten middle exactly as it does in a named
+                // struct pattern.
+                let mutable tuple_field_is_named = List[Bool].new();
+                let mutable ti UInt = 0;
+                while ti < param_specs.count() then {
+                    tuple_field_is_named.push(false);
+                    ti += 1;
+                };
+                let expanded_elements = self.expand_rest_slots(
+                    elements,
+                    tuple_field_is_named,
+                    type_to_string(inner_type),
+                    span,
+                ) or else {
+                    return TypedPattern.Wildcard();
+                };
+                if expanded_elements.count() <> param_specs.count() then {
                     self.push_diagnostic_at_span(
-                        "Type mismatch: expected \(param_specs.count()) pattern elements, got \(elements.count())",
+                        "Type mismatch: expected \(param_specs.count()) pattern elements, got \(expanded_elements.count())",
                         span,
                     );
                     return TypedPattern.Wildcard();
                 };
-                for elem in elements then {
+                for elem in expanded_elements then {
                     if elem.label is .Some(label) then {
                         self.push_diagnostic_at_span(
                             "Type mismatch: tuple destructuring is positional, got a named element '\(label)'",
@@ -829,7 +890,7 @@ given TypeChecker {
                 };
                 let mutable binds = List[Bool].new();
                 let mutable slot_spans = List[SourceSpan].new();
-                for elem in elements then {
+                for elem in expanded_elements then {
                     binds.push(not (elem.pattern is .Wildcard(_)));
                     slot_spans.push(pattern_span(elem.pattern));
                 };
@@ -851,7 +912,7 @@ given TypeChecker {
                 );
                 let mutable typed_elements = List[TypedPatternElement].new();
                 let mutable i UInt = 0;
-                for elem in elements then {
+                for elem in expanded_elements then {
                     let field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
@@ -870,6 +931,74 @@ given TypeChecker {
                     self.context().type_display_name(inner_type),
                     typed_elements,
                 )
+            },
+            .ListPattern(elements, span) then {
+                // A list pattern destructures a `List[T]` by length; each slot
+                // is checked against `T`. Which std type `List` is is a question
+                // of DECLARATION identity -- a user type also spelled `List` is
+                // not one.
+                let list_element_type = when self.resolve_builtin_subscript_kind(
+                    subject_type,
+                ) in {
+                    .Some(kind) then when kind in {
+                        .List(element) then Option[Type].Some(element),
+                        _ then Option[Type].None(),
+                    },
+                    .None() then Option[Type].None(),
+                };
+                let element_type = when list_element_type in {
+                    .Some(t) then t,
+                    .None() then {
+                        self.push_diagnostic_at_span(
+                            "List pattern requires a List subject, got '\(type_to_string(subject_type))'",
+                            span,
+                        );
+                        return TypedPattern.Wildcard();
+                    },
+                };
+                // The length and element reads are ordinary std method calls,
+                // resolved here the way `xs.count()` / `xs[i]` resolve them.
+                let count_symbol = self.resolve_method_signature(subject_type, "count") or else {
+                    self.push_diagnostic_at_span(
+                        "List pattern requires 'count' and '__index_get' on '\(type_to_string(subject_type))'",
+                        span,
+                    );
+                    return TypedPattern.Wildcard();
+                };
+                let index_symbol = self.resolve_method_signature(subject_type, "__index_get") or else {
+                    self.push_diagnostic_at_span(
+                        "List pattern requires 'count' and '__index_get' on '\(type_to_string(subject_type))'",
+                        span,
+                    );
+                    return TypedPattern.Wildcard();
+                };
+                let mutable typed_elements = List[TypedPattern].new();
+                for element in elements then {
+                    if element is .RestPattern(_) then {
+                        typed_elements.push(TypedPattern.RestPattern());
+                        continue;
+                    };
+                    typed_elements.push(
+                        self.lower_typed_pattern(element, element_type, scope),
+                    );
+                };
+                TypedPattern.ListPattern(
+                    ListPatternOps(
+                        subject_type,
+                        element_type,
+                        count_symbol,
+                        index_symbol,
+                    ),
+                    typed_elements,
+                )
+            },
+            .RestPattern(span) then {
+                // Only ever reached as a slot of an enclosing element list,
+                // which expands or forwards it before any field type is
+                // consulted. It swallows slots rather than matching one, so
+                // there is nothing to check.
+                let _ = span;
+                TypedPattern.RestPattern()
             },
             .WeakBinding(name, _, span) then {
                 // Handled above with early return; unreachable here.
@@ -951,8 +1080,29 @@ given TypeChecker {
             },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                when self.order_pattern_arguments(
+                let mutable enum_field_is_named = List[Bool].new();
+                for spec in param_specs then {
+                    enum_field_is_named.push(spec.named);
+                };
+                let expanded_enum = self.expand_rest_slots(
                     elements,
+                    enum_field_is_named,
+                    ".\(case_name)",
+                    span,
+                ) or else {
+                    for elem in elements then {
+                        for b in self.bind_pattern_vars(
+                            elem.pattern,
+                            Type.Unknown(),
+                            scope,
+                        ) then {
+                            bound.push(b);
+                        };
+                    };
+                    return bound;
+                };
+                when self.order_pattern_arguments(
+                    expanded_enum,
                     param_specs,
                     ".\(case_name)",
                     span,
@@ -983,7 +1133,7 @@ given TypeChecker {
                     // otherwise every one of them reads as undefined and piles
                     // on top of the real diagnostic.
                     .None() then {
-                        for elem in elements then {
+                        for elem in expanded_enum then {
                             for b in self.bind_pattern_vars(
                                 elem.pattern,
                                 Type.Unknown(),
@@ -1001,9 +1151,30 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
+                let mutable struct_field_is_named = List[Bool].new();
+                for spec in param_specs then {
+                    struct_field_is_named.push(spec.named);
+                };
+                let expanded_struct = self.expand_rest_slots(
+                    elements,
+                    struct_field_is_named,
+                    type_name,
+                    span,
+                ) or else {
+                    for elem in elements then {
+                        for b in self.bind_pattern_vars(
+                            elem.pattern,
+                            Type.Unknown(),
+                            scope,
+                        ) then {
+                            bound.push(b);
+                        };
+                    };
+                    return bound;
+                };
                 let mutable ordered_elements = List[PatternElement].new();
                 let mutable args_ok = true;
-                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -1015,7 +1186,7 @@ given TypeChecker {
                     // on top of the real diagnostic.
                     .None() then {
                         args_ok = false;
-                        for elem in elements then {
+                        for elem in expanded_struct then {
                             ordered_elements.push(elem);
                         };
                     },
@@ -1041,7 +1212,7 @@ given TypeChecker {
             },
             // `(a, b, c)` -- positional destructuring. The subject decides
             // which struct this is; identity comes from the type being matched.
-            .TuplePattern(elements, _) then {
+            .TuplePattern(elements, tuple_span) then {
                 let inner_type = when subject_type in {
                     .ReferenceType(inner) then inner,
                     .MutableReferenceType(inner) then inner,
@@ -1062,8 +1233,31 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
+                let mutable tuple_field_is_named = List[Bool].new();
+                let mutable ti UInt = 0;
+                while ti < field_types.count() then {
+                    tuple_field_is_named.push(false);
+                    ti += 1;
+                };
+                let expanded_tuple = self.expand_rest_slots(
+                    elements,
+                    tuple_field_is_named,
+                    type_to_string(inner_type),
+                    tuple_span,
+                ) or else {
+                    for elem in elements then {
+                        for b in self.bind_pattern_vars(
+                            elem.pattern,
+                            Type.Unknown(),
+                            scope,
+                        ) then {
+                            bound.push(b);
+                        };
+                    };
+                    return bound;
+                };
                 let mutable i UInt = 0;
-                for elem in elements then {
+                for elem in expanded_tuple then {
                     let field_type = when field_types.get(i) in {
                         .Some(t) then t,
                         .None() then Type.Unknown(),
@@ -1074,6 +1268,25 @@ given TypeChecker {
                     i += 1;
                 };
             },
+            .ListPattern(elements, _) then {
+                // Slots bind elements of the subject's element type, not the
+                // list itself.
+                let element_type = when self.resolve_builtin_subscript_kind(
+                    subject_type,
+                ) in {
+                    .Some(kind) then when kind in {
+                        .List(element) then element,
+                        _ then Type.Unknown(),
+                    },
+                    .None() then Type.Unknown(),
+                };
+                for element in elements then {
+                    for b in self.bind_pattern_vars(element, element_type, scope) then {
+                        bound.push(b);
+                    };
+                };
+            },
+            .RestPattern(_) then {},
             // `and` runs both sides, so a name cannot be bound by both: there
             // would be two values for one binding.
             .AndPattern(left, right, span) then {
@@ -1256,8 +1469,20 @@ given TypeChecker {
             },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                when self.order_pattern_arguments(
+                let mutable enum_field_is_named = List[Bool].new();
+                for spec in param_specs then {
+                    enum_field_is_named.push(spec.named);
+                };
+                let expanded_enum = self.expand_rest_slots(
                     elements,
+                    enum_field_is_named,
+                    ".\(case_name)",
+                    span,
+                ) or else {
+                    return;
+                };
+                when self.order_pattern_arguments(
+                    expanded_enum,
                     param_specs,
                     ".\(case_name)",
                     span,
@@ -1290,8 +1515,20 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
+                let mutable struct_field_is_named = List[Bool].new();
+                for spec in param_specs then {
+                    struct_field_is_named.push(spec.named);
+                };
+                let expanded_struct = self.expand_rest_slots(
+                    elements,
+                    struct_field_is_named,
+                    type_name,
+                    span,
+                ) or else {
+                    return;
+                };
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(elements, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -1323,6 +1560,20 @@ given TypeChecker {
                     i += 1;
                 };
             },
+            .ListPattern(elements, _) then {
+                let element_type = when self.resolve_builtin_subscript_kind(
+                    subject_type,
+                ) in {
+                    .Some(kind) then when kind in {
+                        .List(element) then element,
+                        _ then Type.Unknown(),
+                    },
+                    .None() then Type.Unknown(),
+                };
+                for element in elements then {
+                    self.ensure_pattern_bindings_present(element, element_type, scope);
+                };
+            },
             .AndPattern(left, right, span) then {
                 self.ensure_pattern_bindings_present(left, subject_type, scope);
                 self.ensure_pattern_bindings_present(right, subject_type, scope);
@@ -1335,6 +1586,101 @@ given TypeChecker {
             },
             _ then {},
         };
+    };
+
+    /// Rewrite an element list containing a rest slot into one slot per field.
+    ///
+    /// The rest swallows the unwritten MIDDLE: `Point(x, ..., y)` on a
+    /// three-field struct binds x to field 0 and y to field 2. Written slots
+    /// before the rest fill fields from the front, those after it from the back,
+    /// and the rest becomes wildcards for whatever is left.
+    ///
+    /// A rest slot is only meaningful among positional slots -- it names no
+    /// field, so a named field cannot be matched by it, and a labeled slot
+    /// already says which field it wants. Both cases are refused rather than
+    /// guessed at.
+    module_private expand_rest_slots(
+        self,
+        args List[PatternElement],
+        field_is_named List[Bool],
+        pattern_description String,
+        pattern_span SourceSpan,
+    ) Option[List[PatternElement]] = {
+        let mutable rest_index = -1;
+        let mutable i UInt = 0;
+        for arg in args then {
+            when arg.pattern in {
+                .RestPattern(_) then {
+                    rest_index = Int(i);
+                    break;
+                },
+                _ then {},
+            };
+            i += 1;
+        };
+        if rest_index < 0 then {
+            return Option[List[PatternElement]].Some(args);
+        };
+
+        for arg in args then {
+            if arg.label is .Some(_) then {
+                self.push_diagnostic_at_span(
+                    "Rest pattern cannot be combined with labeled pattern arguments in '\(pattern_description)'",
+                    pattern_span,
+                );
+                return Option[List[PatternElement]].None();
+            };
+        };
+        for named in field_is_named then {
+            if named then {
+                self.push_diagnostic_at_span(
+                    "Rest pattern cannot be used with named fields in '\(pattern_description)'; match named fields by label",
+                    pattern_span,
+                );
+                return Option[List[PatternElement]].None();
+            };
+        };
+
+        let rest_idx = UInt(rest_index);
+        let mutable prefix = List[PatternElement].new();
+        let mutable suffix = List[PatternElement].new();
+        let mutable j UInt = 0;
+        for arg in args then {
+            if j < rest_idx then {
+                prefix.push(PatternElement(Option[String].None(), arg.pattern));
+            } else if j > rest_idx then {
+                suffix.push(PatternElement(Option[String].None(), arg.pattern));
+            };
+            j += 1;
+        };
+        let field_count = field_is_named.count();
+        let written = prefix.count() + suffix.count();
+        if written > field_count then {
+            self.push_diagnostic_at_span(
+                "Too many positional pattern arguments for '\(pattern_description)'",
+                pattern_span,
+            );
+            return Option[List[PatternElement]].None();
+        };
+
+        let mutable expanded = List[PatternElement].new();
+        for p in prefix then {
+            expanded.push(p);
+        };
+        let mutable k UInt = 0;
+        while k < field_count - written then {
+            expanded.push(
+                PatternElement(
+                    Option[String].None(),
+                    PatternNode.Wildcard(pattern_span),
+                ),
+            );
+            k += 1;
+        };
+        for s in suffix then {
+            expanded.push(s);
+        };
+        return Option[List[PatternElement]].Some(expanded);
     };
 
     /// Pattern arguments follow the call rules exactly -- same shape, same

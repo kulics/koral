@@ -1,3 +1,37 @@
+/// Whether this pattern matches every value of its type. A list matches
+/// everything only as the bare rest marker `[...]`: a fixed slot -- even an
+/// irrefutable one -- still constrains the length, so `[_, ...]` misses `[]`.
+public let typed_pattern_is_irrefutable(pattern TypedPattern) Bool = {
+    return when pattern in {
+        .Wildcard() then true,
+        .Variable(_) then true,
+        .RestPattern() then true,
+        .ListPattern(_, elements) then elements.count() == UInt(1) and elements[
+            UInt(0)
+        ] is .RestPattern(),
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if not typed_pattern_is_irrefutable(element.pattern) then {
+                    return false;
+                };
+            };
+            true
+        },
+        .AndPattern(left, right) then typed_pattern_is_irrefutable(left) and typed_pattern_is_irrefutable(
+            right,
+        ),
+        .OrPattern(left, right) then typed_pattern_is_irrefutable(left) or typed_pattern_is_irrefutable(
+            right,
+        ),
+        _ then false,
+    };
+};
+
+/// Whether this pattern is the rest marker `...`.
+public let typed_pattern_is_rest_slot(pattern TypedPattern) Bool = {
+    return pattern is .RestPattern();
+};
+
 public let typed_pattern_binding_symbols(pattern TypedPattern) List[Symbol] = {
     let mutable symbols = List[Symbol].new();
     let mutable seen_def_ids = Set[UInt].new();
@@ -47,6 +81,15 @@ file_private let typed_pattern_collect_binding_symbols(
                 );
             };
         },
+        .ListPattern(_, elements) then {
+            for element in elements then {
+                typed_pattern_collect_binding_symbols(
+                    element,
+                    symbols,
+                    seen_def_ids,
+                );
+            };
+        },
         .AndPattern(left, right) then {
             typed_pattern_collect_binding_symbols(left, symbols, seen_def_ids);
             typed_pattern_collect_binding_symbols(right, symbols, seen_def_ids);
@@ -61,6 +104,7 @@ file_private let typed_pattern_collect_binding_symbols(
             seen_def_ids,
         ),
         .Wildcard() then {},
+        .RestPattern() then {},
         .BoolLiteral(_) then {},
         .IntegerLiteral(_) then {},
         .NegativeIntegerLiteral(_) then {},
@@ -93,6 +137,14 @@ public let typed_pattern_introduces_binding(pattern TypedPattern) Bool = {
             };
             false
         },
+        .ListPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_introduces_binding(element) then {
+                    return true;
+                };
+            };
+            false
+        },
         .AndPattern(left, right) then typed_pattern_introduces_binding(left) or typed_pattern_introduces_binding(
             right,
         ),
@@ -101,6 +153,7 @@ public let typed_pattern_introduces_binding(pattern TypedPattern) Bool = {
         ),
         .NotPattern(inner) then typed_pattern_introduces_binding(inner),
         .Wildcard() then false,
+        .RestPattern() then false,
         .BoolLiteral(_) then false,
         .IntegerLiteral(_) then false,
         .NegativeIntegerLiteral(_) then false,
@@ -115,6 +168,8 @@ public let typed_pattern_introduces_binding(pattern TypedPattern) Bool = {
 public let typed_pattern_is_wildcard_only(pattern TypedPattern) Bool = {
     return when pattern in {
         .Wildcard() then true,
+        .RestPattern() then true,
+        .ListPattern(_, _) then typed_pattern_is_irrefutable(pattern),
         .EnumCase(_, _, elements) then {
             for element in elements then {
                 if not typed_pattern_is_wildcard_only(element.pattern) then {
@@ -152,6 +207,8 @@ public let typed_pattern_is_conditionless_payload(pattern TypedPattern) Bool = {
     return when pattern in {
         .Wildcard() then true,
         .Variable(_) then true,
+        .RestPattern() then true,
+        .ListPattern(_, _) then typed_pattern_is_irrefutable(pattern),
         .TraitObjectType(_) then false,
         .TraitObjectTypeBinding(_, _) then false,
         .StructPattern(_, elements) then {

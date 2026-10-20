@@ -657,8 +657,26 @@ given Parser {
     };
 
     module_private parse_pattern_argument(self, stop_on_in Bool) Result[PatternElement] = {
+        // The rest marker is a slot of its own: it is never labeled and never
+        // a full pattern.
+        if self.current().kind is .Ellipsis() then {
+            let pattern = self.parse_rest_pattern_slot() or return;
+            return .Ok(PatternElement(Option[String].None(), pattern));
+        };
         when self.current_labeled_argument_name(false) in {
             .Some(label) then {
+                // `label: ...` has no meaning -- the rest marker swallows
+                // unnamed slots.
+                let probe_saved = self.save_state();
+                self.advance();
+                self.advance();
+                let labeled_rest = self.current().kind is .Ellipsis();
+                self.restore_state(probe_saved);
+                if labeled_rest then {
+                    return .Error(
+                        self.parser_error("Rest pattern cannot be labeled"),
+                    );
+                };
                 let saved = self.save_state();
                 self.advance();
                 self.advance();
@@ -676,6 +694,48 @@ given Parser {
 
         let pattern = self.parse_pattern_or(stop_on_in) or return;
         return .Ok(PatternElement(Option[String].None(), pattern));
+    };
+
+    /// Parse the rest marker `...` as one slot of an element list. It swallows
+    /// zero or more of the remaining slots and never binds, so anything that
+    /// looks like a name after it is a mistake worth naming.
+    module_private parse_rest_pattern_slot(self) Result[PatternNode] = {
+        let start = self.current();
+        self.advance();
+        if self.current().kind is .Identifier(_) then {
+            return .Error(
+                self.parser_error("Rest pattern cannot bind a name"),
+            );
+        };
+        return .Ok(PatternNode.RestPattern(self.span_from_start(start)));
+    };
+
+    /// Parse one slot of an element list: a sub-pattern, or the rest marker `...`.
+    module_private parse_pattern_slot(self, stop_on_in Bool) Result[PatternNode] = {
+        if self.current().kind is .Ellipsis() then {
+            return self.parse_rest_pattern_slot();
+        };
+        return self.parse_pattern_or(stop_on_in);
+    };
+
+    /// A rest slot swallows the unwritten remainder of one element list, so a
+    /// second one in the same list has nothing left to say.
+    module_private check_rest_slots(self, elements List[PatternNode]) Result[Void] = {
+        let mutable seen = false;
+        for element in elements then {
+            if element is .RestPattern(_) then {
+                if seen then {
+                    return .Error(
+                        self.parser_error_at_span(
+                            "Only one rest pattern is allowed per element list",
+                            pattern_span(element),
+                        ),
+                    );
+                };
+                seen = true;
+            };
+        };
+        return .Ok({});
     };
 
     module_private parse_argument_list_until_rparen(
@@ -955,6 +1015,18 @@ given Parser {
             _ then {},
         };
 
+        // The rest marker is only ever a slot of a list / enum-case / struct /
+        // tuple element list, where it swallows the slots that were not written.
+        // Everywhere else -- a whole arm, an `is` subject, `not ...`, a lone
+        // `( ... )` -- there is no element list to swallow, so it is a mistake.
+        if self.current().kind is .Ellipsis() then {
+            return .Error(
+                self.parser_error(
+                    "Rest pattern must be inside a list, enum, struct, or tuple pattern",
+                ),
+            );
+        };
+
         let mutable node = PatternNode.Wildcard(self.span_from_start(start));
         when self.current().kind in {
             .QuestionMark() then {
@@ -1132,6 +1204,11 @@ given Parser {
                                 },
                             };
                         };
+                        let mutable slot_patterns = List[PatternNode].new();
+                        for elem in elements then {
+                            slot_patterns.push(elem.pattern);
+                        };
+                        let _ = self.check_rest_slots(slot_patterns) or return;
                         parsed_pattern = PatternNode.StructPattern(
                             name,
                             elements,
@@ -1195,15 +1272,39 @@ given Parser {
                     };
                 };
 
+                let mutable slot_patterns = List[PatternNode].new();
+                for elem in elements then {
+                    slot_patterns.push(elem.pattern);
+                };
+                let _ = self.check_rest_slots(slot_patterns) or return;
                 node = PatternNode.EnumCase(
                     case_name,
                     elements,
                     self.span_from_start(start),
                 );
             },
+            .LBracket() then {
+                // List destructuring pattern: `[a, b]` against a `List[T]`.
+                // A rest slot turns the exact length into a lower bound.
+                self.advance();
+                let mutable elements = List[PatternNode].new();
+                while not (self.current().kind is .RBracket()) then {
+                    let elem = self.parse_pattern_slot(stop_on_in) or return;
+                    elements.push(elem);
+                    if self.current().kind is .Comma() then {
+                        self.advance();
+                    };
+                };
+                self.advance();
+                let _ = self.check_rest_slots(elements) or return;
+                node = PatternNode.ListPattern(
+                    elements,
+                    self.span_from_start(start),
+                );
+            },
             .LParen() then {
                 self.advance();
-                let first = self.parse_pattern_or(stop_on_in) or return;
+                let first = self.parse_pattern_slot(stop_on_in) or return;
                 // `(p)` is a parenthesized pattern. `(p, q, ...)` is a TUPLE
                 // pattern: positional destructuring of a struct with exactly
                 // that many fields, in declaration order. There must be at
@@ -1211,12 +1312,12 @@ given Parser {
                 // simply a two-field struct.
                 let mutable parsed_pattern = first;
                 if self.current().kind is .Comma() then {
-                    let mutable elements = List[PatternElement].new();
-                    elements.push(PatternElement(Option[String].None(), first));
+                    let mutable slot_elements = List[PatternNode].new();
+                    slot_elements.push(first);
                     while self.current().kind is .Comma() then {
                         self.advance();
-                        let next = self.parse_pattern_or(stop_on_in) or return;
-                        elements.push(PatternElement(Option[String].None(), next));
+                        let next = self.parse_pattern_slot(stop_on_in) or return;
+                        slot_elements.push(next);
                     };
                     when self.current().kind in {
                         .RParen() then {
@@ -1227,6 +1328,11 @@ given Parser {
                                 self.parser_error("Expected ')' in tuple pattern"),
                             );
                         },
+                    };
+                    let _ = self.check_rest_slots(slot_elements) or return;
+                    let mutable elements = List[PatternElement].new();
+                    for slot in slot_elements then {
+                        elements.push(PatternElement(Option[String].None(), slot));
                     };
                     parsed_pattern = PatternNode.TuplePattern(
                         elements,
@@ -1240,6 +1346,16 @@ given Parser {
                         _ then {
                             return .Error(self.parser_error("Expected ')' in pattern"));
                         },
+                    };
+                    // `(...)` on its own is a parenthesized pattern, not an
+                    // element list, so there is no remainder for the rest
+                    // marker to swallow.
+                    if first is .RestPattern(_) then {
+                        return .Error(
+                            self.parser_error(
+                                "Rest pattern must be inside a list, enum, struct, or tuple pattern",
+                            ),
+                        );
                     };
                 };
                 node = parsed_pattern;

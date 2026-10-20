@@ -57,8 +57,53 @@ extension ExhaustivenessChecker {
             return .enumCases(typeName: Type.spelling(tplDefId), cases: cases)
         case .bool:
             return .fullSpace(for: .bool, context: context)
+        case .structure, .genericStruct:
+            // A list is the one nominal whose shape a pattern can pin down by
+            // length, so its space tracks lengths instead of demanding a
+            // catchall outright.
+            guard isStdListSubject(subjectType) else {
+                return nil
+            }
+            return .listLengths(type: subjectType, coveredExact: [], coveredTailFrom: nil)
         default:
             return nil
+        }
+    }
+
+    /// Whether the subject is std's `List[T]`. Declaration identity, never the
+    /// spelling: a user type also called `List` is not one.
+    private func isStdListSubject(_ type: Type) -> Bool {
+        switch type {
+        case .structure(let defId):
+            return context.isStdNominal(defId, context.stdListTemplateDefId)
+        case .genericStruct(let templateDefId, _):
+            return context.isStdNominal(templateDefId, context.stdListTemplateDefId)
+        default:
+            return false
+        }
+    }
+
+    /// Whether `subtract` can only approximate what this pattern covers.
+    ///
+    /// A weak binding always leaves the dead case behind, and a refutable list
+    /// slot (`[1, ...]`) may match nothing at a length -- in both cases the
+    /// space comes back unchanged without the pattern being unreachable.
+    private func coverageIsApproximate(_ pattern: TypedPattern) -> Bool {
+        switch pattern {
+        case .weakBinding:
+            return true
+        case .listPattern(let elements, _):
+            return !elements.allSatisfy { $0.isIrrefutable }
+        case .enumCase(_, _, let elements),
+             .structPattern(_, let elements):
+            return elements.contains { coverageIsApproximate($0) }
+        case .andPattern(let left, let right),
+             .orPattern(let left, let right):
+            return coverageIsApproximate(left) || coverageIsApproximate(right)
+        case .notPattern(let inner):
+            return coverageIsApproximate(inner)
+        default:
+            return false
         }
     }
 
@@ -105,9 +150,10 @@ extension ExhaustivenessChecker {
                 // `?name` is refutable (alive/dead); it always contributes the
                 // alive case, so it is never "already covered" by earlier
                 // patterns. It does not cover the dead case, so `_` after it
-                // is reachable.
+                // is reachable. A refutable list slot has the same shape, so
+                // both are exempt from the "unchanged means covered" reading.
                 let reduced = finiteSpace.subtract(pattern, type: subjectType, context: context)
-                if case .weakBinding = pattern {
+                if coverageIsApproximate(pattern) {
                     remainingFiniteSpace = reduced
                 } else if reduced.structurallyEquals(finiteSpace) {
                     throw SemanticError(
@@ -177,6 +223,15 @@ extension ExhaustivenessChecker {
         case .structPattern(_, let elements):
             // Struct pattern is catchall if all sub-patterns are catchall
             return elements.allSatisfy { isCatchallPattern($0) }
+        case .restPattern:
+            // A rest slot constrains nothing: like a wildcard, it swallows
+            // whatever slots were not written.
+            return true
+        case .listPattern(let elements, _):
+            // Only the bare rest marker `[...]` matches every list. A fixed
+            // slot -- even an irrefutable one -- still constrains the length,
+            // so `[_, ...]` misses `[]`.
+            return elements.count == 1 && elements[0].isRestSlot
         default:
             return false
         }

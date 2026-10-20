@@ -8,6 +8,41 @@ extension TypedPattern {
     return symbols
   }
 
+  /// Whether this pattern matches every value of its type. A list matches
+  /// everything only as the bare rest marker `[...]`: a fixed slot -- even an
+  /// irrefutable one -- still constrains the length, so `[_, ...]` misses `[]`.
+  var isIrrefutable: Bool {
+    switch self {
+    case .wildcard, .variable, .restPattern:
+      return true
+    case .listPattern(let elements, _):
+      return elements.count == 1 && elements[0].isRestSlot
+    case .structPattern(_, let elements):
+      return elements.allSatisfy { $0.isIrrefutable }
+    case .andPattern(let left, let right):
+      return left.isIrrefutable && right.isIrrefutable
+    case .orPattern(let left, let right):
+      return left.isIrrefutable || right.isIrrefutable
+    case .traitObjectType,
+         .traitObjectTypeBinding,
+         .weakBinding,
+         .booleanLiteral,
+         .integerLiteral,
+         .floatLiteral,
+         .stringLiteral,
+         .comparisonPattern,
+         .notPattern,
+         .enumCase:
+      return false
+    }
+  }
+
+  /// Whether this pattern is the rest marker `...`.
+  var isRestSlot: Bool {
+    if case .restPattern = self { return true }
+    return false
+  }
+
   var introducesBinding: Bool {
     switch self {
     case .variable,
@@ -17,7 +52,8 @@ extension TypedPattern {
     case .traitObjectType:
       return false
     case .enumCase(_, _, let elements),
-         .structPattern(_, let elements):
+         .structPattern(_, let elements),
+         .listPattern(let elements, _):
       return elements.contains { $0.introducesBinding }
     case .andPattern(let left, let right),
          .orPattern(let left, let right):
@@ -29,15 +65,21 @@ extension TypedPattern {
          .integerLiteral,
          .floatLiteral,
          .stringLiteral,
-         .comparisonPattern:
+         .comparisonPattern,
+         .restPattern:
       return false
     }
   }
 
   var isWildcardOnly: Bool {
     switch self {
-    case .wildcard:
+    case .wildcard, .restPattern:
+      // A rest slot is a wildcard for the slots it swallows: it needs no test.
       return true
+    case .listPattern:
+      // Only the bare rest marker needs no test; every other list shape has a
+      // length to check.
+      return isIrrefutable
     case .enumCase(_, _, let elements),
          .structPattern(_, let elements):
       return elements.allSatisfy { $0.isWildcardOnly }
@@ -60,13 +102,16 @@ extension TypedPattern {
   var isConditionlessPayloadPattern: Bool {
     switch self {
     case .wildcard,
-         .variable:
+         .variable,
+         .restPattern:
       return true
     case .traitObjectType,
          .traitObjectTypeBinding:
       return false
     case .structPattern(_, let elements):
       return elements.allSatisfy { $0.isConditionlessPayloadPattern }
+    case .listPattern:
+      return isIrrefutable
     default:
       return false
     }
@@ -84,7 +129,8 @@ extension TypedPattern {
         symbols.append(symbol)
       }
     case .enumCase(_, _, let elements),
-         .structPattern(_, let elements):
+         .structPattern(_, let elements),
+         .listPattern(let elements, _):
       for element in elements {
         element.collectBindingSymbols(into: &symbols, seenDefIds: &seenDefIds)
       }
@@ -100,7 +146,8 @@ extension TypedPattern {
          .floatLiteral,
          .stringLiteral,
          .traitObjectType,
-         .comparisonPattern:
+         .comparisonPattern,
+         .restPattern:
       break
     }
   }

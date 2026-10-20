@@ -16,7 +16,15 @@ public indirect enum PatternSpace {
     
     /// Constructor space - a single enum case with field spaces
     case constructor(caseName: String, fields: [PatternSpace])
-    
+
+    /// List space - which lengths are still fully uncovered.
+    ///
+    /// A length counts as covered only when EVERY list of that length matches
+    /// a pattern already seen. Partial element coverage (`[1, ...]`) is not
+    /// represented: such a length stays uncovered. That under-claims
+    /// exhaustiveness, never over-claims it.
+    case listLengths(type: Type, coveredExact: Set<Int>, coveredTailFrom: Int?)
+
     /// Check if the space is empty (all values covered)
     public var isEmpty: Bool {
         switch self {
@@ -30,6 +38,16 @@ public indirect enum PatternSpace {
             return remaining.isEmpty
         case .constructor(_, let fields):
             return fields.allSatisfy { $0.isEmpty }
+        case .listLengths(_, let coveredExact, let coveredTailFrom):
+            guard let tail = coveredTailFrom else {
+                // Without a rest pattern reaching to the end, some length
+                // beyond the largest exact one stays uncovered.
+                return false
+            }
+            for length in 0..<tail where !coveredExact.contains(length) {
+                return false
+            }
+            return true
         }
     }
 
@@ -62,11 +80,14 @@ public indirect enum PatternSpace {
                 }
             }
             return true
+        case (.listLengths(let lhsType, let lhsExact, let lhsTail),
+              .listLengths(let rhsType, let rhsExact, let rhsTail)):
+            return lhsType == rhsType && lhsExact == rhsExact && lhsTail == rhsTail
         default:
             return false
         }
     }
-    
+
     /// Get descriptions of missing cases for error messages
     public func missingCases() -> [String] {
         switch self {
@@ -80,7 +101,39 @@ public indirect enum PatternSpace {
             return remaining.map { String($0) }.sorted()
         case .constructor(let caseName, let fields):
             return Self.renderConstructorMissing(caseName: caseName, fields: fields)
+        case .listLengths(let type, let coveredExact, let coveredTailFrom):
+            return Self.renderMissingListLengths(type: type, coveredExact: coveredExact, coveredTailFrom: coveredTailFrom)
         }
+    }
+
+    /// The uncovered list shapes, as the patterns that would cover them: one
+    /// exact-length pattern per uncovered length below the tail, and one
+    /// rest pattern for whatever runs past it.
+    private static func renderMissingListLengths(
+        type: Type,
+        coveredExact: Set<Int>,
+        coveredTailFrom: Int?
+    ) -> [String] {
+        if coveredExact.isEmpty && coveredTailFrom == nil {
+            return [type.description]
+        }
+        let tailStart = coveredTailFrom ?? ((coveredExact.max() ?? -1) + 1)
+        var result: [String] = []
+        for length in 0..<tailStart where !coveredExact.contains(length) {
+            result.append(Self.renderListShape(slots: length, rest: false))
+        }
+        if coveredTailFrom == nil {
+            result.append(Self.renderListShape(slots: tailStart, rest: true))
+        }
+        return result
+    }
+
+    private static func renderListShape(slots: Int, rest: Bool) -> String {
+        var parts = Array(repeating: "_", count: slots)
+        if rest {
+            parts.append("...")
+        }
+        return "[" + parts.joined(separator: ", ") + "]"
     }
 
     private func missingPatternFragments() -> [String] {
@@ -100,6 +153,8 @@ public indirect enum PatternSpace {
             return cases.keys.sorted().flatMap { caseName in
                 Self.renderConstructorMissing(caseName: caseName, fields: cases[caseName] ?? [])
             }
+        case .listLengths(let type, let coveredExact, let coveredTailFrom):
+            return Self.renderMissingListLengths(type: type, coveredExact: coveredExact, coveredTailFrom: coveredTailFrom)
         }
     }
 
@@ -187,7 +242,54 @@ extension PatternSpace {
             }
             // Otherwise, doesn't reduce the space meaningfully
             return self
+
+        case .listPattern(let elements, _):
+            return subtractListPattern(elements, type: type)
+
+        case .restPattern:
+            // A rest slot is expanded away by its enclosing element list before
+            // any space is subtracted; standing alone it covers nothing.
+            return self
         }
+    }
+
+    /// Subtract the lists matched by `[p1, ..., pk]` / `[p1, ..., pk, ...]`.
+    ///
+    /// Only lengths whose slots are ALL irrefutable are claimed: a refutable
+    /// slot (`[1, ...]`) may match nothing at a length, so claiming it would
+    /// both close the space early and make a later arm look unreachable.
+    private func subtractListPattern(_ elements: [TypedPattern], type: Type) -> PatternSpace {
+        let fixed = elements.filter { !$0.isRestSlot }
+        guard fixed.allSatisfy({ $0.isIrrefutable }) else {
+            return self
+        }
+        let hasRest = elements.contains { $0.isRestSlot }
+
+        var coveredExact: Set<Int> = []
+        var coveredTailFrom: Int? = nil
+        switch self {
+        case .full:
+            break
+        case .listLengths(_, let exact, let tail):
+            coveredExact = exact
+            coveredTailFrom = tail
+        default:
+            return self
+        }
+
+        if hasRest {
+            let threshold = fixed.count
+            if let existing = coveredTailFrom {
+                coveredTailFrom = min(existing, threshold)
+            } else {
+                coveredTailFrom = threshold
+            }
+        } else {
+            coveredExact.insert(fixed.count)
+        }
+
+        let next = PatternSpace.listLengths(type: type, coveredExact: coveredExact, coveredTailFrom: coveredTailFrom)
+        return next.isEmpty ? .empty : next
     }
     
     private func subtractBoolLiteral(_ value: Bool, type: Type) -> PatternSpace {
@@ -302,6 +404,7 @@ extension PatternSpace {
     private func extractTypeFromSpace(_ space: PatternSpace) -> Type {
         switch space {
         case .full(let t): return t
+        case .listLengths(let t, _, _): return t
         case .boolValues: return .bool
         default: return .void // Fallback
         }
@@ -397,6 +500,14 @@ extension PatternSpace {
         case .structPattern(_, let elements):
             // Struct pattern covers if all sub-patterns are wildcards/variables
             return elements.allSatisfy { isCoveredBy($0) }
+        case .restPattern:
+            // A rest slot constrains nothing: it swallows whatever was not
+            // written, exactly like a wildcard.
+            return true
+        case .listPattern(let elements, _):
+            // Only the bare rest marker `[...]` covers every list; a fixed slot
+            // still constrains the length.
+            return elements.count == 1 && elements[0].isRestSlot
         }
     }
 }

@@ -625,9 +625,16 @@ given TypeChecker {
                 let mutable result_type = Type.Unknown();
                 let mutable running_expected = expected;
                 let mutable arm_index UInt = 0;
+                let mutable any_arm_complained = false;
                 for arm in arms then {
                     let mutable arm_scope = Scope.new_child(scope);
                     let arm_pattern_ref = arm.pattern;
+                    // Captured before ANY work on this arm: the pattern's
+                    // checks are spread over the binding walk and the lowering,
+                    // and a message already pushed is deduplicated rather than
+                    // repeated -- so counting only around the lowering would
+                    // miss a rejection the binding walk reported first.
+                    let diag_before_arm = self.storage.diagnostics.count();
                     let _ = self.bind_pattern_vars(
                         arm_pattern_ref,
                         pattern_subject_type,
@@ -762,9 +769,18 @@ given TypeChecker {
                         typed_subj.expr_type,
                         arm_scope,
                     );
-                    // A guarded arm covers nothing: only unguarded arms
-                    // feed the coverage check.
-                    if typed_guard is .None() then {
+                    let arm_complained = self.storage.diagnostics.count() > diag_before_arm;
+                    if arm_complained then {
+                        any_arm_complained = true;
+                    };
+                    // A guarded arm covers nothing: only unguarded arms feed
+                    // the coverage check. Nor does an arm that already
+                    // complained -- a rejected pattern stands for no values,
+                    // and the placeholder it degrades to would claim coverage
+                    // it does not have. A rejected `[a]` beside a real `_`
+                    // reads as two `_`, and the duplicate check then piles a
+                    // second diagnostic on top of the real one.
+                    if typed_guard is .None() and not arm_complained then {
                         patterns.push(lowered_pattern_ref);
                     };
                     typed_arms.push(
@@ -777,18 +793,27 @@ given TypeChecker {
                     );
                     arm_index += 1;
                 };
-                let ex_checker = ExhaustivenessChecker.new(
-                    exhaustiveness_subject_type,
-                    patterns,
-                    self.context(),
-                    self.storage.generic_templates,
-                    span,
-                );
-                when ex_checker.check() in {
-                    .Error(e) then {
-                        self.push_diagnostic_at_span(e.message(), span);
-                    },
-                    .Ok(_) then {},
+                // Once an arm has complained the patterns no longer describe a
+                // complete picture of the subject. Running the coverage check
+                // on that partial picture would invent a second complaint
+                // (`already covered`, or `requires a wildcard`) on top of the
+                // real one -- the one cascade this recovery has to neutralise.
+                // Later arms are still checked: koralc keeps going where the
+                // seed throws, so a genuine second fault is still worth saying.
+                if not any_arm_complained then {
+                    let ex_checker = ExhaustivenessChecker.new(
+                        exhaustiveness_subject_type,
+                        patterns,
+                        self.context(),
+                        self.storage.generic_templates,
+                        span,
+                    );
+                    when ex_checker.check() in {
+                        .Error(e) then {
+                            self.push_diagnostic_at_span(e.message(), span);
+                        },
+                        .Ok(_) then {},
+                    };
                 };
                 make_typed_expr(
                     TypedExprKind.WhenExpr(typed_subj, typed_arms),
