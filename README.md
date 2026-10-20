@@ -222,6 +222,8 @@ one-shot and has only `next`; to run a pipeline over one, collect it first.
 
 - Wildcard (`_`), literal (`1`, `1.5`, `"s"`, `'a'`, `true`), variable binding, comparison (`> n`, `<= n`, `> 1.5`, `>= 'a'`)
 - Struct/Enum destructuring and tuple destructuring (including nested)
+- List destructuring by length: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`
+- Rest pattern `...` — ignores the unwritten slots of a list, enum, struct or tuple pattern; never binds
 - Logical patterns: `or`, `and`, `not`
 - Arm guards: `pat if cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness
 

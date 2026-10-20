@@ -395,7 +395,9 @@
 //               `<` 处 `<...` > `<..<` > `<..` < `<`。
 //   所以 `....` = `...` + `.`，`<....` = `<...` + `.`，`a...b` 是 `a...`
 //   后跟 `b`（错），`a<...b` 是 `a<...` 后跟 `b`（错）。
-// `...` 还预留给：模式匹配的 rest 模式（模式槽）、变长参数（声明形参槽）。
+// `...` 的两个语境互不重叠：表达式位置是开区间，模式槽位是 rest 模式
+// （见 <rest-pattern>），声明形参槽的变长参数仍预留给它。模式里没有 range
+// 语法（range pattern 已废弃并报错），所以 `...` 在模式位置无歧义。
 // **不做 spread**：变长槽类型化为 List[T] 后，调用端传列表就是摊开，运行时
 // 无须再摊一次（Java/Swift 路线）；spread 只在"调用是无类型值序列"的语言里
 // 是变长的另一半（JS/Python）。
@@ -650,6 +652,7 @@
                     | "mutable"? <identifier>                     // variable binding
                     | <struct-pattern>                        // struct destructuring pattern
                     | <tuple-pattern>                         // positional destructuring pattern
+                    | <list-pattern>                          // list destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
                     | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
@@ -672,7 +675,9 @@
                           | <type-identifier> "[" <type-list> "]"
 // Generic concrete nominal type pattern, e.g. ParseError[Int].
 
-<tuple-pattern> ::= "(" <match-pattern> ("," <match-pattern>)+ ")"
+<tuple-pattern> ::= "(" <tuple-slot> ("," <tuple-slot>)+ ")"
+<tuple-slot> ::= <rest-pattern>
+               | <match-pattern>
 // Positional destructuring against a STRUCT with exactly as many fields:
 // `(a, b, c)` matches a three-field struct in declaration order. N >= 2 -- `(p)`
 // is a parenthesized pattern. This is how `Pair` is destructured too, since
@@ -710,8 +715,37 @@
 <enum-case-pattern> ::= "." <type-identifier> "(" <pattern-arg-list>? ")"
 // 模式语法独立于构造语法；即使是零字段 enum case，模式位置也写空括号，如 .None()
 <pattern-arg> ::= <identifier> ":" <match-pattern>    // named pattern argument
+                | <rest-pattern>                      // rest slot -- ignores the unwritten slots
                 | <match-pattern>                      // positional pattern argument
 <pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
+
+<list-pattern> ::= "[" <list-slot>* "]"
+<list-slot> ::= <rest-pattern>
+              | <match-pattern>
+// 列表解构模式，主体必须是 std 的 `List[T]`（按声明身份判定，不看拼写）。
+// 每个非剩余槽位与 `T` 统一；绑定语义等同 `let name = subject[i]`。
+// 长度规则：
+//   无 `...`  -> 长度必须恰好等于槽位数
+//   有 `...`  -> 已写的槽位数是长度下界，`...` 吞掉其余
+// 例：
+//   []              只匹配空列表
+//   [a, b]          只匹配长度 2
+//   [a, ...]        长度 >= 1，首元素绑到 a
+//   [a, ..., b]     长度 >= 2，首尾各绑一个
+//   [...]           任意列表（等价于 `_`）
+
+<rest-pattern> ::= "..."
+// 剩余模式：吞掉当前位置之后未写出的零个或多个槽位。**只忽略，不绑定**——
+// `...x` 是语法错误。语义是「吞掉剩余槽位」，不是「把剩余槽位绑成一个列表」。
+// 出现位置：列表 / 枚举变体 / 结构体 / 元组模式的元素表内，每层元素表至多一个。
+// 出现在其它位置（整条 arm、`is` 主体、`not` 之下、单独的 `( ... )`）一律报错。
+// 在固定元数的模式里它是纯省写：`Point(x, ...)` 即 `Point(x, _)`，`Point(..., y)`
+// 即 `Point(_, y)`；写在前面的槽位从头取字段，写在后面的从尾取，`...` 吞中间。
+// 限制：元素表里出现具名槽位（`x: p`），或主体有具名字段（`type B(w Int, h: Int)`）
+// 时不允许用 `...`——具名字段必须按标签匹配，而 `...` 没有名字可给。
+// 穷举性：固定元数里 `...` 不改变穷举性（元数不变，就是省写了 `_`）；列表里它让
+// 长度从「恰好 k」变成「>= k」，只有当所有非剩余槽位都不可反驳时该长度才算被
+// 全覆盖。
 
 // ============================================================================
 // Literals
