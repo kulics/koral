@@ -105,7 +105,7 @@ public trait IntoPath {
 ```koral
 public type DirEntry;
 
-public type DirIterator;
+public type mutable DirIterator;
 
 public type mutable WalkDirIterator;
 
@@ -117,7 +117,7 @@ public type OpenMode {
     ReadWrite(), // O_RDWR — read-write (file must exist)
 };
 
-public type File;
+public type mutable File;
 
 public type FileType {
     RegularFile(),

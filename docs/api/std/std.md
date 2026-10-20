@@ -748,10 +748,6 @@ given String as Add[String] {
     public add(self, other String) String;
 };
 
-given[T Any] List[T] as Add[List[T]] {
-    public add(self, other Self) Self;
-};
-
 given Duration as Zero {
     public zero() Duration;
 };
@@ -1203,6 +1199,7 @@ given[T Any] List[T] {
     public reverse(self) Void;
     public slice_spec(self, range Range[UInt]) SliceSpec;
     public sublist(self, range Range[UInt]) List[T];
+    public concat(self, other List[T]) List[T];
     public retain(self, predicate (T) -> Bool) Void;
     public sort_by[K Ord](self, key (T) -> K) Void;
     public binary_search_by[K Ord](self, key (T) -> K, target K) Pair[UInt, Bool];

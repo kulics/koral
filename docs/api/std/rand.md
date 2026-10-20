@@ -25,9 +25,9 @@ public trait Randomizable {
 
 ## Types
 ```koral
-public type Random[R RandomSource];
+public type mutable Random[R RandomSource];
 
-public type DefaultRandomSource;
+public type mutable DefaultRandomSource;
 ```
 
 ## Given Implementations

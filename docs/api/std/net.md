@@ -36,11 +36,11 @@ public type Shutdown {
 
 public type SocketAddr;
 
-public type TcpListener;
+public type mutable TcpListener;
 
-public type TcpSocket;
+public type mutable TcpSocket;
 
-public type UdpSocket;
+public type mutable UdpSocket;
 ```
 
 ## Given Implementations

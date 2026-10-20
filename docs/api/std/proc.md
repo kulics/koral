@@ -39,11 +39,11 @@ public type CommandOutput(public status ExitStatus, public stdout String, public
 
 public type ExitStatus;
 
-public type StdinPipe;
+public type mutable StdinPipe;
 
-public type StdoutPipe;
+public type mutable StdoutPipe;
 
-public type StderrPipe;
+public type mutable StderrPipe;
 
 public type mutable Process;
 

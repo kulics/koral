@@ -23,23 +23,23 @@ public type mutable AtomicInt;
 
 public type mutable AtomicUInt;
 
-public type SendChannel[T Any];
+public type mutable SendChannel[T Any];
 
-public type RecvChannel[T Any];
+public type mutable RecvChannel[T Any];
 
 public type mutable LatchGate;
 
 public type mutable Lazy[T Any];
 
-public type Mutex;
+public type mutable Mutex;
 
-public type MutexCondvar;
+public type mutable MutexCondvar;
 
 public type mutable Semaphore;
 
-public type SharedMutex;
+public type mutable SharedMutex;
 
-public type SharedMutexCondvar;
+public type mutable SharedMutexCondvar;
 ```
 
 ## Given Implementations
