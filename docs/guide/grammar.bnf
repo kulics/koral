@@ -369,8 +369,18 @@
 <not-expression> ::= "not" <is-expression> | <is-expression>
 
 <is-expression> ::= <range-expression>
-                  | <range-expression> "is" <is-pattern>
-                  | <range-expression> "is" "not" <is-pattern>
+                  | <range-expression> <is-or-chain>
+<is-or-chain>  ::= <is-and-chain> ("or" <is-and-chain>)*
+<is-and-chain> ::= <is-slot> ("and" <is-slot>)*
+<is-slot>      ::= "is" "not"? <primary-pattern>
+// `is` 链：同一主体上的多个测试，用双词连接 `and is` / `or is` 串起来。
+// 整条链是**一个模式**——`x is A or is B` 即 `x is (A or B)`——所以两侧的绑定
+// 像 `when` 臂的 `or` 一样共享。`and is` 比 `or is` 紧，整条链仍坐在单独一个
+// `is` 的位置上：比表达式 `and` / `or` 紧，所以
+// `a is x or is y and b > 1` 是 `(a is x or is y) and (b > 1)`。
+// 每个槽位是 `is` `not`? <primary-pattern>，组合子只出现在槽位**之间**。
+// `and` 单独出现时是表达式算子；连接词只有在后面跟着 `is` 时才算连接词——
+// 文法在这里已经约束了：`<is-and-chain>` 以 `is` 开头。
 
 <bitwise-or-expression> ::= <bitwise-xor-expression> ("|" <bitwise-xor-expression>)*
 <bitwise-xor-expression> ::= <bitwise-and-expression> ("^" <bitwise-and-expression>)*
@@ -627,9 +637,8 @@
 // ============================================================================
 
 <is-pattern> ::= <primary-pattern>
-               | "(" <match-pattern> ")"
-// `is` / `is not` accept a single pattern directly.
-// Logical pattern combinators under `is` must be grouped explicitly with parentheses.
+// `is` takes a single pattern; combinators live between the slots of an `is`
+// chain (`or is` / `and is`), never inside a slot.
 // (<primary-pattern> already covers <comparison-pattern>; it is not repeated
 // here -- repeating it derived the same pattern two ways.)
 
@@ -655,7 +664,6 @@
                     | <list-pattern>                          // list destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
-                    | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
 
 <trait-object-type-binding-pattern> ::= "mutable"? <identifier> <concrete-type-pattern>
 // Binding exact trait-object implementation type pattern.
@@ -679,9 +687,10 @@
 <tuple-slot> ::= <rest-pattern>
                | <match-pattern>
 // Positional destructuring against a STRUCT with exactly as many fields:
-// `(a, b, c)` matches a three-field struct in declaration order. N >= 2 -- `(p)`
-// is a parenthesized pattern. This is how `Pair` is destructured too, since
-// `Pair` is simply a two-field struct.
+// `(a, b, c)` matches a three-field struct in declaration order. N >= 2 --
+// `(` in pattern position opens a tuple and never groups a single pattern.
+// This is how `Pair` is destructured too, since `Pair` is simply a
+// two-field struct.
 
 <struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.

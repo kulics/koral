@@ -1686,6 +1686,7 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 - 枚举变体模式：`.Some(v)`、`.None()`
 - trait object 精确类型模式：`IoError`、`err IoError`
 - 逻辑模式：`pattern and pattern`、`pattern or pattern`、`not pattern`
+- `is` 链：`x is A or is B`、`x is A and is not B`——同一主体上的多个测试，用连接词 `or is` / `and is` 串起
 
 字面量能匹配什么，等于它的 `==` 能接受什么：整数只对整型（`-5` 不匹配无符号类型），
 浮点只对 `Float32` / `Float64`，`true` 只对 `Bool`，字符串只对 `String`，rune 对
@@ -1914,7 +1915,9 @@ when b in {
 
 用在 `if` 或 `while` 表达式的条件中时，成功的 `is` 匹配还可以把模式中的变量绑定到当前作用域。在这些条件上下文之外，`is` 只能做布尔测试，不能引入绑定。`when ... in` 结构使用自己对匹配值的模式匹配，不通过 `is` 绑定。
 
-`is` 直接接受单个模式。如果需要在 `is` 下使用逻辑模式组合子，请显式加圆括号，以便解析器将其与表达式级的 `and` / `or` / `not` 区分开。
+`is` 直接接受单个模式。同一主体上的多个测试用双词连接 `or is` / `and is` 串起来，合成**一个**模式：`x is A or is B` 即 `x is (A or B)`，两侧的绑定像 `when` 臂的 `or` 一样共享。`and is` 比 `or is` 紧，整条链比表达式级的 `and` / `or` 紧——所以 `a is x or is y and b > 1` 读作 `(a is x or is y) and (b > 1)`。连接词只有在后面跟着 `is` 时才算连接词；裸的 `or` / `and` 是表达式算子。
+
+模式位置的 `(` 开的是元组模式（`is (a, b)`），绝不给单个模式分组。要组合请用 `or is` / `and is`。
 
 ```koral
 let opt = Option[Int].Some(42);
@@ -1930,8 +1933,17 @@ if score is >= 60 then {
     println("passed");
 };
 
-if x is (0 or 1) then {
+// `is` 链：一个主体，多个模式
+if x is 0 or is 1 then {
     println("small");
+};
+
+if argv is [] or is [_, ...] then {
+    println("没有参数，或者只有程序名");
+};
+
+if p is Point(_, _) and is not Point(0, 0) then {
+    println("是点，但不是原点");
 };
 
 // 条件中仍可使用标准布尔组合
@@ -2030,7 +2042,7 @@ when temperature in {
 在 `is` 下，请用圆括号给组合子分组：
 
 ```koral
-if x is (0 or 1) then {
+if x is 0 or is 1 then {
     println("small");
 };
 ```

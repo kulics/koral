@@ -369,9 +369,9 @@ extension Parser {
       return .listPattern(elements: elements, span: startSpan)
     }
 
-    // `(p)` is a parenthesized pattern. `(p, q, ...)` is a TUPLE pattern:
-    // positional destructuring of a struct with exactly that many fields, in
-    // declaration order. There must be at least two slots. `Pair` is
+    // `(p, q, ...)` is a TUPLE pattern: positional destructuring of a struct
+    // with exactly that many fields, in declaration order. There must be at
+    // least two slots -- `(` never groups a single pattern. `Pair` is
     // destructured this way too -- it is simply a two-field struct.
     if currentToken === .leftParen {
       try match(.leftParen)
@@ -386,16 +386,14 @@ extension Parser {
         try checkRestSlots(elements)
         return .tuplePattern(elements: elements.map { PatternArg(label: nil, pattern: $0) }, span: startSpan)
       }
-      try match(.rightParen)
-      // `(...)` on its own is a parenthesized pattern, not an element list, so
-      // there is no remainder for the rest marker to swallow.
-      if case .restPattern = first {
-        throw ParserError.rejectedConstruct(
-          span: startSpan,
-          message: "Rest pattern must be inside a list, enum, struct, or tuple pattern"
-        )
-      }
-      return first
+      // `(` in pattern position opens a tuple, which needs at least two slots.
+      // A single parenthesized pattern groups nothing to group: a `when` arm is
+      // already a full pattern, and under `is` the combinators are the
+      // connectors `or is` / `and is`, which live outside the slot.
+      throw ParserError.rejectedConstruct(
+        span: startSpan,
+        message: "A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'"
+      )
     }
 
     throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)

@@ -501,28 +501,74 @@ given Parser {
         );
     };
 
+    /// One or more `is` tests on a single subject, joined by the two-token
+    /// connectors `and is` / `or is`.
+    ///
+    /// The chain is one PATTERN, not several tests: `x is A or is B` is
+    /// `x is (A or B)`, so the two sides share bindings the way an `or`
+    /// pattern does in a `when` arm. Building it as an expression `or` of two
+    /// `is` tests would instead fall under "bindings in `is` are not allowed
+    /// in `or` branches" and reject `x is Point(a, b) or is Circle(a)`.
+    ///
+    /// Each slot is `is` `not`? `<primary-pattern>`; combinators live between
+    /// slots, never inside one. `and` alone is the expression operator, so a
+    /// connector is only one when it is followed by `is`. `and is` binds
+    /// tighter than `or is`, and the whole chain sits where a lone `is` sat --
+    /// tighter than expression `and` / `or`.
     module_private parse_is(self) Result[Expr] = {
-        let mutable expr = self.parse_range() or return;
-
-        if self.current().kind is .KwIs() then {
-            // An expression's span covers the expression, and `x is P` begins
-            // at `x`. Anchoring at the `is` token instead starts the span
-            // mid-expression, and every diagnostic about the expression --
-            // "has no effect", a type mismatch -- then points at the operator
-            // rather than at the thing.
-            self.advance();
-            if self.current().kind is .KwNot() then {
-                self.advance();
-                let pattern = self.parse_single_pattern() or return;
-                return .Ok(
-                    Expr.IsNotExpr(expr, pattern, self.span_from_expr_start(expr)),
-                );
-            };
-            let pattern = self.parse_single_pattern() or return;
-            return .Ok(Expr.IsExpr(expr, pattern, self.span_from_expr_start(expr)));
+        let subject = self.parse_range() or return;
+        if not (self.current().kind is .KwIs()) then {
+            return .Ok(subject);
         };
+        let start = self.current();
+        let pattern = self.parse_is_or_pattern() or return;
+        // A lone negated slot keeps its own node, so `x is not P` is
+        // unchanged; negations inside a chain live in the combined pattern.
+        let inner = when pattern in {
+            .NotPattern(p, _) then Option[PatternNode].Some(p),
+            _ then Option[PatternNode].None(),
+        };
+        if inner is .Some(p) then {
+            return .Ok(Expr.IsNotExpr(subject, p, self.span_from_expr_start(subject)));
+        };
+        return .Ok(Expr.IsExpr(subject, pattern, self.span_from_expr_start(subject)));
+    };
 
-        return .Ok(expr);
+    module_private parse_is_or_pattern(self) Result[PatternNode] = {
+        let mutable left = self.parse_is_and_pattern() or return;
+        while self.current().kind is .KwOr() and self.next_token_is_is() then {
+            self.advance();
+            let right = self.parse_is_and_pattern() or return;
+            left = PatternNode.OrPattern(left, right, span_across_patterns(left, right));
+        };
+        return .Ok(left);
+    };
+
+    module_private parse_is_and_pattern(self) Result[PatternNode] = {
+        let mutable left = self.parse_is_slot_pattern() or return;
+        while self.current().kind is .KwAnd() and self.next_token_is_is() then {
+            self.advance();
+            let right = self.parse_is_slot_pattern() or return;
+            left = PatternNode.AndPattern(left, right, span_across_patterns(left, right));
+        };
+        return .Ok(left);
+    };
+
+    module_private parse_is_slot_pattern(self) Result[PatternNode] = {
+        let start = self.current();
+        self.advance();
+        if self.current().kind is .KwNot() then {
+            self.advance();
+            let inner = self.parse_single_pattern() or return;
+            return .Ok(PatternNode.NotPattern(inner, self.span_from_start(start)));
+        };
+        return self.parse_single_pattern();
+    };
+
+    /// Whether the token after the current one is `is` -- the signal that this
+    /// `and` / `or` joins two `is` tests rather than two expressions.
+    module_private next_token_is_is(self) Bool = {
+        return self.peek_kind() is .Some(.KwIs());
     };
 
     module_private parse_logical_not(self) Result[Expr] = {

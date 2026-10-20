@@ -225,6 +225,7 @@ one-shot and has only `next`; to run a pipeline over one, collect it first.
 - List destructuring by length: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`
 - Rest pattern `...` — ignores the unwritten slots of a list, enum, struct or tuple pattern; never binds
 - Logical patterns: `or`, `and`, `not`
+- `is` chains: `x is A or is B`, `x is A and is not B` — one subject, several patterns, joined by `or is` / `and is`
 - Arm guards: `pat if cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness
 
 ### Traits and Generics

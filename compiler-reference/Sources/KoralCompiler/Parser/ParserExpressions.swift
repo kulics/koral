@@ -610,29 +610,79 @@ extension Parser {
 
   // MARK: - Is / Is Not Expressions
 
-  /// Parse `is`/`is not` expression layer.
-  /// Precedence: not > is/is not > range
-  /// Parses `expr is pattern` as `isExpression` and `expr is not pattern` as `isNotExpression`.
+  /// One or more `is` tests on a single subject, joined by the two-token
+  /// connectors `and is` / `or is`.
+  ///
+  /// The chain is one PATTERN, not several tests: `x is A or is B` is
+  /// `x is (A or B)`, so the two sides share bindings the way an `or` pattern
+  /// does in a `when` arm. Building it as an expression `or` of two `is` tests
+  /// would instead fall under "bindings in `is` are not allowed in `or`
+  /// branches" and reject `x is Point(a, b) or is Circle(a)`.
+  ///
+  /// Each slot is `is` `not`? `<primary-pattern>`; combinators live between
+  /// slots, never inside one. `and` alone is the expression operator, so a
+  /// connector is only one when it is followed by `is`. `and is` binds tighter
+  /// than `or is`, and the whole chain sits where a lone `is` sat -- tighter
+  /// than expression `and` / `or`.
   private func parseIsExpression() throws -> ExpressionNode {
-    let left = try parseRangeExpression()
-
-    if currentToken === .isKeyword {
-      try match(.isKeyword)
-
-      // Check for `is not`
-      if currentToken === .notKeyword {
-        try match(.notKeyword)
-          let pattern = try parseSinglePattern()
-        return .isNotExpression(subject: left, pattern: pattern,
-                                span: SourceSpan(start: left.span.start, end: pattern.span.end))
-      }
-
-      let pattern = try parseSinglePattern()
-      return .isExpression(subject: left, pattern: pattern,
-                           span: SourceSpan(start: left.span.start, end: pattern.span.end))
+    let subject = try parseRangeExpression()
+    guard currentToken === .isKeyword else { return subject }
+    let pattern = try parseIsOrPattern()
+    // A lone negated slot keeps its own node, so `x is not P` is unchanged;
+    // negations inside a chain live in the combined pattern.
+    if case .notPattern(let inner, _) = pattern {
+      return .isNotExpression(subject: subject, pattern: inner,
+                              span: SourceSpan(start: subject.span.start, end: pattern.span.end))
     }
+    return .isExpression(subject: subject, pattern: pattern,
+                         span: SourceSpan(start: subject.span.start, end: pattern.span.end))
+  }
 
+  private func parseIsOrPattern() throws -> PatternNode {
+    var left = try parseIsAndPattern()
+    while currentToken === .orKeyword, nextTokenIsIsKeyword {
+      try match(.orKeyword)
+      let right = try parseIsAndPattern()
+      left = .orPattern(left: left, right: right,
+                        span: SourceSpan(start: left.span.start, end: right.span.end))
+    }
     return left
+  }
+
+  private func parseIsAndPattern() throws -> PatternNode {
+    var left = try parseIsSlotPattern()
+    while currentToken === .andKeyword, nextTokenIsIsKeyword {
+      try match(.andKeyword)
+      let right = try parseIsSlotPattern()
+      left = .andPattern(left: left, right: right,
+                         span: SourceSpan(start: left.span.start, end: right.span.end))
+    }
+    return left
+  }
+
+  private func parseIsSlotPattern() throws -> PatternNode {
+    let startSpan = currentSpan
+    try match(.isKeyword)
+    if currentToken === .notKeyword {
+      try match(.notKeyword)
+      let inner = try parseSinglePattern()
+      return .notPattern(pattern: inner,
+                         span: SourceSpan(start: startSpan.start, end: inner.span.end))
+    }
+    return try parseSinglePattern()
+  }
+
+  /// Whether the token after the current one is `is` -- the signal that this
+  /// `and` / `or` joins two `is` tests rather than two expressions.
+  private var nextTokenIsIsKeyword: Bool {
+    let savedState = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedState)
+      currentToken = savedToken
+    }
+    guard let advanced = try? lexer.getNextToken() else { return false }
+    return advanced === .isKeyword
   }
 
   // MARK: - Bitwise Expressions

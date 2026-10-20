@@ -1735,6 +1735,7 @@ Supported patterns include:
 - Trait-object exact type patterns: `IoError`, `err IoError`
 - (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`)
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
+- `is` chains: `x is A or is B`, `x is A and is not B` — several tests on one subject, joined by the connectors `or is` / `and is`
 
 A literal matches exactly the types its `==` would accept: integers against
 integer types (`-5` never matches an unsigned type), floats against `Float32` /
@@ -1979,7 +1980,9 @@ The `is` operator checks whether a value matches a pattern, and the result is al
 
 When used in the condition of an `if` or `while` expression, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings. The `when ... in` construct uses its own pattern matching on the matched value and does not use `is` for binding.
 
-`is` accepts a single pattern directly. If you need logical pattern combinators under `is`, group them explicitly with parentheses so the parser can distinguish them from expression-level `and` / `or` / `not`.
+`is` accepts a single pattern directly. Several tests on one subject join with the two-token connectors `or is` / `and is`, forming one pattern: `x is A or is B` is `x is (A or B)`, so the two sides share bindings the way a `when` arm's `or` does. `and is` binds tighter than `or is`, and the whole chain binds tighter than the expression-level `and` / `or` — so `a is x or is y and b > 1` reads `(a is x or is y) and (b > 1)`. A connector is only one when it is followed by `is`; a bare `or` / `and` is the expression operator.
+
+`(` in pattern position opens a tuple pattern (`is (a, b)`) and never groups a single pattern. For a chain, use `or is` / `and is`.
 
 ```koral
 let opt = Option[Int].Some(42);
@@ -1995,7 +1998,17 @@ if score is >= 60 then {
     println("passed");
 };
 
-if x is (0 or 1) then {
+// `is` chain: one subject, several patterns
+if argv is [] or is [_, ...] then {
+    println("no arguments, or only the program name");
+};
+
+let p = Point(1, 2);
+if p is Point(_, _) and is not Point(0, 0) then {
+    println("a point, but not the origin");
+};
+
+if x is 0 or is 1 then {
     println("small");
 };
 
@@ -2102,7 +2115,7 @@ when temperature in {
 Under `is`, group combinators with parentheses:
 
 ```koral
-if x is (0 or 1) then {
+if x is 0 or is 1 then {
     println("small");
 };
 ```

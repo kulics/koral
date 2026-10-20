@@ -1,0 +1,55 @@
+// `is` chains: several tests on one subject, joined by the two-token
+// connectors `or is` / `and is`.
+//
+// The chain is ONE pattern, not several tests -- `x is A or is B` is
+// `x is (A or B)` -- so the two sides share bindings the way an `or` pattern
+// does in a `when` arm.
+// EXPECT: is_chain_or_ok
+// EXPECT: is_chain_and_ok
+// EXPECT: is_chain_not_ok
+// EXPECT: is_chain_binding_ok
+// EXPECT: is_chain_precedence_ok
+
+using "std";
+
+type Point(x Int, y Int);
+type Shape {
+    Circle(r Int),
+    Square(s Int),
+    Tri(),
+};
+
+let main() Int = {
+    // `or is` over two list shapes, neither of which binds.
+    let argv List[Int] = [1];
+    if argv is [] or is [_, ...] then {
+        println("is_chain_or_ok");
+    };
+
+    // `and is` narrows.
+    let p = Point(1, 2);
+    if p is Point(_, _) and is Point(_, 2) then {
+        println("is_chain_and_ok");
+    };
+
+    // `not` is per-slot: `and is not` excludes one shape.
+    if p is Point(_, _) and is not Point(0, 0) then {
+        println("is_chain_not_ok");
+    };
+
+    // The two sides of `or is` bind the same names, like a `when` arm's `or`.
+    let s = Shape.Circle(3);
+    if s is .Circle(v) or is .Square(v) then {
+        if v == 3 then {
+            println("is_chain_binding_ok");
+        };
+    };
+
+    // `and is` binds tighter than `or is`, so this reads
+    // `(s is .Tri() and is .Circle(_)) or is .Circle(_)`.
+    if s is .Tri() and is .Circle(_) or is .Circle(_) then {
+        println("is_chain_precedence_ok");
+    };
+
+    return 0;
+};

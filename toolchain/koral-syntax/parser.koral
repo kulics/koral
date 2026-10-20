@@ -1235,12 +1235,34 @@ given CstParser {
         if self.check(.KwNot()) then {
             not_kw = .Some(self.eat());
         };
-        let pattern = when self.parse_single_pattern() in {
+        let first = when self.parse_single_pattern() in {
             .Ok(p) then p,
             .Error(e) then {
                 return .Error(e);
             },
         };
+        // `or is` / `and is` continue the same pattern; `or` / `and` alone is
+        // the expression operator and ends the chain. The connector is only
+        // one when it is followed by `is`.
+        let mutable links = List[CstIsLink].new();
+        while (self.check(.KwOr()) or self.check(.KwAnd()))
+            and self.peek_at_skip_nl(1) is .KwIs()
+        then {
+            let connector = self.eat();
+            let link_is = self.eat();
+            let mutable link_not = Option[Token].None();
+            if self.check(.KwNot()) then {
+                link_not = .Some(self.eat());
+            };
+            let link_pattern = when self.parse_single_pattern() in {
+                .Ok(p) then p,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            links.push(CstIsLink(connector, link_is, link_not, link_pattern));
+        };
+        let pattern = if links.is_empty() then first else CstPattern.IsChain(first, links);
         return .Ok(.IsExpr(left, is_kw, not_kw, pattern));
     };
 

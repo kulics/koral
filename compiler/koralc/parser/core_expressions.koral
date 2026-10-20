@@ -1339,24 +1339,18 @@ given Parser {
                         self.span_from_start(start),
                     );
                 } else {
-                    when self.current().kind in {
-                        .RParen() then {
-                            self.advance();
-                        },
-                        _ then {
-                            return .Error(self.parser_error("Expected ')' in pattern"));
-                        },
-                    };
-                    // `(...)` on its own is a parenthesized pattern, not an
-                    // element list, so there is no remainder for the rest
-                    // marker to swallow.
-                    if first is .RestPattern(_) then {
-                        return .Error(
-                            self.parser_error(
-                                "Rest pattern must be inside a list, enum, struct, or tuple pattern",
-                            ),
-                        );
-                    };
+                    // `(` in pattern position opens a tuple, which needs at
+                    // least two slots. A single parenthesized pattern groups
+                    // nothing to group: a `when` arm is already a full
+                    // pattern, and under `is` the combinators are the
+                    // connectors `or is` / `and is`, which live outside the
+                    // slot.
+                    return .Error(
+                        self.parser_error_at(
+                            "A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'",
+                            start,
+                        ),
+                    );
                 };
                 node = parsed_pattern;
             },
