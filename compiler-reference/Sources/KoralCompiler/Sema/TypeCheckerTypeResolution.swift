@@ -249,7 +249,8 @@ extension TypeChecker {
 
   private func ensureGenericTemplateVisible(
     _ templateName: String,
-    templateDefId: DefId
+    templateDefId: DefId,
+    span: SourceSpan = .unknown
   ) throws {
     let modulePath = context.getModulePath(templateDefId) ?? []
     let access = context.getAccess(templateDefId) ?? .module_private
@@ -277,6 +278,10 @@ extension TypeChecker {
       return
     }
 
+    if skipImportVisibility {
+      return
+    }
+
     do {
       try visibilityChecker.checkSymbolVisibility(
         symbolModulePath: modulePath,
@@ -286,7 +291,9 @@ extension TypeChecker {
         importGraph: importGraph
       )
     } catch let error as VisibilityError {
-      throw SemanticError(.generic(error.description), span: currentSpan)
+      // Blame the type name, not the enclosing statement -- the reader has to
+      // find the name they must add a `using` for.
+      throw SemanticError(.generic(error.description), span: span.isKnown ? span : currentSpan)
     }
   }
   
@@ -326,9 +333,9 @@ extension TypeChecker {
     case .pointer(let inner, let mutable, _):
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
-    case .generic(let base, let args, _):
+    case .generic(let base, let args, let span):
       if let template = currentScope.lookupGenericStructTemplate(base) {
-        try ensureGenericTemplateVisible(base, templateDefId: template.defId)
+        try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
         // Validate type argument count
@@ -366,7 +373,7 @@ extension TypeChecker {
         // Return parameterized type instead of instantiating
         return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericEnumTemplate(base) {
-        try ensureGenericTemplateVisible(base, templateDefId: template.defId)
+        try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
         // Validate type argument count
@@ -435,6 +442,11 @@ extension TypeChecker {
   
   /// Resolves a TypeNode to a Type using the given substitution map for type parameters.
   func resolveTypeNodeWithSubstitution(_ node: TypeNode, substitution: [String: Type]) throws -> Type {
+    // Everything reached from here is spelled in the template's own signature,
+    // not by whoever is instantiating it -- so those names need not be imported.
+    let outerSkipImport = skipImportVisibility
+    skipImportVisibility = true
+    defer { skipImportVisibility = outerSkipImport }
     switch node {
     case .identifier(let name, _):
       // Check if it's a type parameter that should be substituted
@@ -451,15 +463,15 @@ extension TypeChecker {
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
       
-    case .generic(let base, let args, _):
+    case .generic(let base, let args, let span):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
       
       if let template = currentScope.lookupGenericStructTemplate(base) {
-        try ensureGenericTemplateVisible(base, templateDefId: template.defId)
+        try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
       }
       if let template = currentScope.lookupGenericEnumTemplate(base) {
-        try ensureGenericTemplateVisible(base, templateDefId: template.defId)
+        try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         return .genericEnum(templateDefId: template.defId, args: resolvedArgs)
       }
       if visibleTraitInfo(base) != nil {

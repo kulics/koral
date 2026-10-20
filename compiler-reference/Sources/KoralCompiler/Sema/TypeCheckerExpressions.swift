@@ -4611,11 +4611,16 @@ extension TypeChecker {
         substitution[param.name] = resolvedArgs[i]
       }
       
-      // Resolve parameter and return types with substitution
+      // Resolve parameter and return types with substitution. These names are
+      // spelled in the callee's signature, not by the caller -- instantiating
+      // `make_channel` must not demand `using "std/sync" { SendChannel }`.
       let (params, returnType) = try withNewScope {
         for (paramName, paramType) in substitution {
           try currentScope.defineType(paramName, type: paramType)
         }
+        let outerSkipImport = skipImportVisibility
+        skipImportVisibility = true
+        defer { skipImportVisibility = outerSkipImport }
         let resolvedParams = try template.parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
           return Parameter(type: paramType, kind: passKindForParameterType(paramType))
@@ -4872,11 +4877,15 @@ extension TypeChecker {
     try enforceGenericFunctionCallConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
     
-    // Resolve return type with substitution
+    // Resolve return type with substitution -- again a name from the callee's
+    // signature, so the caller need not have imported it.
     let returnType = try withNewScope {
       for (paramName, paramType) in substitution {
         try currentScope.defineType(paramName, type: paramType)
       }
+      let outerSkipImport = skipImportVisibility
+      skipImportVisibility = true
+      defer { skipImportVisibility = outerSkipImport }
       return try resolveTypeNode(template.returnType)
     }
 

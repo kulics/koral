@@ -211,6 +211,13 @@ public class TypeChecker {
   // This avoids order-dependent false negatives across modules/submodules.
   var deferGenericConstraintValidation: Bool = false
 
+  // When true, a type name that arrives through a template's own signature is
+  // not required to be imported here. `make_channel` returns
+  // `Pair[SendChannel[T], RecvChannel[T]]`; calling it must not demand that the
+  // caller import `SendChannel` and `RecvChannel`, since the caller never wrote
+  // those names. Names the caller DID write are resolved outside this flag.
+  var skipImportVisibility: Bool = false
+
   // Generic parameter name -> list of bounds currently in scope
   // Stores the full `Bound` (not just a name) to preserve type arguments for
   // generic traits and to keep `mutable` as an explicit shape kind.
@@ -1132,6 +1139,10 @@ public class TypeChecker {
   /// `span` is where the type is written. A message about the type belongs at
   /// the spelling, not at whatever declaration happens to carry it.
   func checkTypeVisibility(type: Type, typeName: String, span: SourceSpan = .unknown) throws {
+    // A name coming through a template's signature is not the caller's to import.
+    if skipImportVisibility {
+      return
+    }
     // 局部类型绑定（如泛型替换、Self 绑定）不需要检查模块可见性
     let isLocalBinding = currentScope.isLocalTypeBinding(typeName)
     
