@@ -134,6 +134,22 @@ For such handle types, `self` provides shared access to the handle, and methods 
 
 This pattern is inherent to `type mutable`. Do not generalize interior-mutation reasoning to `type` types such as containers, strings, or path values, which must remain semantically immutable.
 
+Two follow-on rules, added after a sweep of `std/` found a dozen handles declared `type`:
+
+- **A type implementing `Reader`, `Writer`, `Seeker`, `Iterator`, or `RandomSource`
+  must be declared `type mutable`** (or be an explicitly one-shot consuming type).
+  Those trait methods change shared underlying state — a file cursor, a socket
+  stream, a cursor position, a PRNG's progression. Putting them on a `type` claims
+  the sharing is unobservable while every call is observable through it. The traits
+  themselves carry no mutability constraint, so nothing stops the mistake at
+  compile time; this rule is what stops it.
+- **A method taking a parameter of its own `type mutable` type must tolerate that
+  parameter being `self`.** After the mutability migration a parameter is a shared
+  handle, not an independent copy, so `self.insert_list_at(i, self)` is legal and
+  the body must not assume `other` is disjoint from `self`. Snapshot what you need
+  before mutating, or state in a comment why the aliasing is harmless (appends
+  read strictly behind the write cursor).
+
 ### Borrowed Methods Implemented via Iteration
 
 Do not let an iterator implementation detail force a method to appear consuming.

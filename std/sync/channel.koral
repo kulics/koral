@@ -7,7 +7,8 @@ using "std";
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar + List.
 // Bounded channel only — forces users to think about capacity (backpressure).
-// Multi-producer multi-consumer via * counting on SendChannelStorage/RecvChannelStorage.
+// Multi-producer multi-consumer: both endpoints share one `type mutable`
+// ChannelStorage, and each endpoint's Drop marks its side closed.
 // ============================================================================
 
 // ============================================================================
@@ -25,7 +26,7 @@ file_private type mutable ChannelStorage[T Any](
     mutable receiver_closed Bool, // all RecvChannels have been dropped
 );
 
-public type SendChannel[T Any](file_private channel ChannelStorage[T]);
+public type mutable SendChannel[T Any](file_private channel ChannelStorage[T]);
 
 given[T Any] SendChannel[T] as Drop {
     drop(self) Void = {
@@ -37,7 +38,7 @@ given[T Any] SendChannel[T] as Drop {
     };
 };
 
-public type RecvChannel[T Any](file_private channel ChannelStorage[T]);
+public type mutable RecvChannel[T Any](file_private channel ChannelStorage[T]);
 
 given[T Any] RecvChannel[T] as Drop {
     drop(self) Void = {

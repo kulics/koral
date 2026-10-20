@@ -178,6 +178,11 @@ clang 直接拒绝。
 - **`Clone` 为何浅不深**：`std/traits.koral` 只有定义，无取舍记录。
 - **`Drop` 为何不设原始字段白名单**：原文只说「不要加」，没有记录谁想加过、为什么错。
 - **weak 为何用 `mutable`+`?T` 而非 marker trait**：只有一行结论，无取舍记录。
+- **`Drop` 例外覆盖到哪一层**（2026-10-20 裁定）：带 `Drop` 的 `type` 只在「析构跑几次」这个
+  轴上让共享可观察，**不**开放方法改变共享状态。所以「`type` + Drop + 方法改 OS 状态」的组合
+  （文件游标、socket 流、锁、PRNG）不被这条例外覆盖，必须声明成 `type mutable`——`Drop`
+  豁免的是内存模型里「共享可被优化掉」，不是 API 契约里「`type` 的方法天然是观察/派生」。
+  见 [`std-api-design.md`](std-api-design.md)「Handle Types and Interior Mutation」。
 
 ## 实施
 
