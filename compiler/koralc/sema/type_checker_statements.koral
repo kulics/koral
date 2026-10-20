@@ -554,7 +554,12 @@ given TypeChecker {
                         patterns.push(lowered_pattern_ref);
                     };
                     typed_arms.push(
-                        TypedWhenArm(lowered_pattern_ref, typed_guard, typed_body, typed_arm_type),
+                        TypedWhenArm(
+                            lowered_pattern_ref,
+                            typed_guard,
+                            typed_body,
+                            typed_arm_type,
+                        ),
                     );
                 };
                 let ex_checker = ExhaustivenessChecker.new(
@@ -881,45 +886,35 @@ given TypeChecker {
                                 scope,
                             );
                             when compound_op in {
-                                .AddAssign() then make_typed_expr(
-                                    TypedExprKind.ArithmeticExpr(
-                                        lvalue_expr,
-                                        ArithmeticOperator.Add(),
-                                        typed_rhs,
-                                    ),
-                                    element_type,
+                                .AddAssign() then self.combine_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Add(),
+                                    typed_rhs,
+                                    target_span,
                                 ),
-                                .SubtractAssign() then make_typed_expr(
-                                    TypedExprKind.ArithmeticExpr(
-                                        lvalue_expr,
-                                        ArithmeticOperator.Subtract(),
-                                        typed_rhs,
-                                    ),
-                                    element_type,
+                                .SubtractAssign() then self.combine_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Subtract(),
+                                    typed_rhs,
+                                    target_span,
                                 ),
-                                .MultiplyAssign() then make_typed_expr(
-                                    TypedExprKind.ArithmeticExpr(
-                                        lvalue_expr,
-                                        ArithmeticOperator.Multiply(),
-                                        typed_rhs,
-                                    ),
-                                    element_type,
+                                .MultiplyAssign() then self.combine_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Multiply(),
+                                    typed_rhs,
+                                    target_span,
                                 ),
-                                .DivideAssign() then make_typed_expr(
-                                    TypedExprKind.ArithmeticExpr(
-                                        lvalue_expr,
-                                        ArithmeticOperator.Divide(),
-                                        typed_rhs,
-                                    ),
-                                    element_type,
+                                .DivideAssign() then self.combine_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Divide(),
+                                    typed_rhs,
+                                    target_span,
                                 ),
-                                .RemainderAssign() then make_typed_expr(
-                                    TypedExprKind.ArithmeticExpr(
-                                        lvalue_expr,
-                                        ArithmeticOperator.Remainder(),
-                                        typed_rhs,
-                                    ),
-                                    element_type,
+                                .RemainderAssign() then self.combine_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Remainder(),
+                                    typed_rhs,
+                                    target_span,
                                 ),
                                 .BitAndAssign() then make_typed_expr(
                                     TypedExprKind.BitwiseExpr(
@@ -1658,63 +1653,86 @@ given TypeChecker {
                             .Some(typed_target.expr_type),
                             scope,
                         );
-                        let combined_kind = when compound_op in {
-                            .AddAssign() then TypedExprKind.ArithmeticExpr(
+                        // Arithmetic compound ops go through the trait dispatch
+                        // (`String += "x"` must call `add`, not emit a C `+`);
+                        // bitwise ops stay integer-only and lower directly.
+                        when compound_op in {
+                            .AddAssign() then self.combine_arithmetic_operands(
                                 typed_target,
                                 ArithmeticOperator.Add(),
                                 typed_rhs,
+                                span,
                             ),
-                            .SubtractAssign() then TypedExprKind.ArithmeticExpr(
+                            .SubtractAssign() then self.combine_arithmetic_operands(
                                 typed_target,
                                 ArithmeticOperator.Subtract(),
                                 typed_rhs,
+                                span,
                             ),
-                            .MultiplyAssign() then TypedExprKind.ArithmeticExpr(
+                            .MultiplyAssign() then self.combine_arithmetic_operands(
                                 typed_target,
                                 ArithmeticOperator.Multiply(),
                                 typed_rhs,
+                                span,
                             ),
-                            .DivideAssign() then TypedExprKind.ArithmeticExpr(
+                            .DivideAssign() then self.combine_arithmetic_operands(
                                 typed_target,
                                 ArithmeticOperator.Divide(),
                                 typed_rhs,
+                                span,
                             ),
-                            .RemainderAssign() then TypedExprKind.ArithmeticExpr(
+                            .RemainderAssign() then self.combine_arithmetic_operands(
                                 typed_target,
                                 ArithmeticOperator.Remainder(),
                                 typed_rhs,
+                                span,
                             ),
-                            .BitAndAssign() then TypedExprKind.BitwiseExpr(
-                                typed_target,
-                                BitwiseOperator.BitAnd(),
-                                typed_rhs,
+                            .BitAndAssign() then TypedExpr(
+                                TypedExprKind.BitwiseExpr(
+                                    typed_target,
+                                    BitwiseOperator.BitAnd(),
+                                    typed_rhs,
+                                ),
+                                typed_target.expr_type,
+                                typed_target.span,
                             ),
-                            .BitOrAssign() then TypedExprKind.BitwiseExpr(
-                                typed_target,
-                                BitwiseOperator.BitOr(),
-                                typed_rhs,
+                            .BitOrAssign() then TypedExpr(
+                                TypedExprKind.BitwiseExpr(
+                                    typed_target,
+                                    BitwiseOperator.BitOr(),
+                                    typed_rhs,
+                                ),
+                                typed_target.expr_type,
+                                typed_target.span,
                             ),
-                            .BitXorAssign() then TypedExprKind.BitwiseExpr(
-                                typed_target,
-                                BitwiseOperator.BitXor(),
-                                typed_rhs,
+                            .BitXorAssign() then TypedExpr(
+                                TypedExprKind.BitwiseExpr(
+                                    typed_target,
+                                    BitwiseOperator.BitXor(),
+                                    typed_rhs,
+                                ),
+                                typed_target.expr_type,
+                                typed_target.span,
                             ),
-                            .LeftShiftAssign() then TypedExprKind.BitwiseExpr(
-                                typed_target,
-                                BitwiseOperator.LeftShift(),
-                                typed_rhs,
+                            .LeftShiftAssign() then TypedExpr(
+                                TypedExprKind.BitwiseExpr(
+                                    typed_target,
+                                    BitwiseOperator.LeftShift(),
+                                    typed_rhs,
+                                ),
+                                typed_target.expr_type,
+                                typed_target.span,
                             ),
-                            .RightShiftAssign() then TypedExprKind.BitwiseExpr(
-                                typed_target,
-                                BitwiseOperator.RightShift(),
-                                typed_rhs,
+                            .RightShiftAssign() then TypedExpr(
+                                TypedExprKind.BitwiseExpr(
+                                    typed_target,
+                                    BitwiseOperator.RightShift(),
+                                    typed_rhs,
+                                ),
+                                typed_target.expr_type,
+                                typed_target.span,
                             ),
-                        };
-                        TypedExpr(
-                            combined_kind,
-                            typed_target.expr_type,
-                            typed_target.span,
-                        )
+                        }
                     },
                     .None() then self.check_expr_scoped_ref(
                         value,

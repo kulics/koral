@@ -259,6 +259,27 @@ given TypeChecker {
                 );
             };
         };
+        return self.combine_arithmetic_operands(
+            typed_left,
+            op,
+            typed_right,
+            expr_span(left),
+        );
+    };
+
+    /// Combine two already-typed operands with `op`. Numeric and pointer pairs
+    /// stay a plain arithmetic node; anything else dispatches through the
+    /// `Add`/`Sub`/... trait so user types work. Compound assignment (`+=`)
+    /// routes through here as well -- it used to build `ArithmeticExpr` straight
+    /// from the target, skipping this trait path and emitting a raw C operator
+    /// for types like String.
+    module_private combine_arithmetic_operands(
+        self,
+        typed_left TypedExpr,
+        op ArithmeticOperator,
+        typed_right TypedExpr,
+        blame_span SourceSpan,
+    ) TypedExpr = {
         let left_raw_t = typed_left.expr_type;
         let right_raw_t = typed_right.expr_type;
         let left_t = self.concretize_default_literal_type(left_raw_t);
@@ -319,7 +340,7 @@ given TypeChecker {
                             );
                             self.push_diagnostic(
                                 "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)",
-                                expr_span(left),
+                                blame_span,
                             );
                             return make_typed_expr(
                                 TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
@@ -341,7 +362,7 @@ given TypeChecker {
                     trait_name,
                     trait_args,
                     "operator '\(self.arithmetic_method_name(op))'",
-                    expr_span(left),
+                    blame_span,
                 ) then {
                     return make_typed_expr(
                         TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
