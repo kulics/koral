@@ -1730,7 +1730,7 @@ Supported patterns include:
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
 - List destructuring patterns: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`, `[...]` — destructures a `List[T]` by length
-- Rest pattern: `...` — ignores the slots that were not written; see below
+- Rest pattern: `...` — ignores slots (the unwritten middle in a list, the whole element list in a struct or enum case); see below
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
 - (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`)
@@ -1766,32 +1766,32 @@ length must match exactly; with one the written slots become a lower bound:
 [...]           // any list -- the same as `_`
 ```
 
-The rest pattern `...` swallows zero or more of the remaining slots. It only
-**ignores** them: it never binds, so `...x` is an error, and it is only ever a
-slot of a list, enum-case, struct or tuple element list — at most one per list.
+The rest pattern `...` only **ignores** slots: it never binds, so `...x` is an
+error, and it is only ever a slot of an element list — at most one per list.
 Everywhere else (`...` as a whole arm, under `not`, alone in `( ... )`) it is
 refused.
 
-In a struct, enum-case or tuple pattern the rest marker is arity sugar, since
-the field count is fixed. Slots written before it fill fields from the front and
-slots after it from the back, so `Point(x, ..., y)` on a three-field struct is
-`Point(x, _, y)`:
+It means different things in the two kinds of element list. In a **list**
+element list it swallows the unwritten middle and may sit alongside the written
+slots (see the table above). In a **struct or enum-case** element list it is
+whole-list elision: it must be the element list's **only** slot, and it ignores
+every field — named or not:
 
 ```koral
-Point(x, ...)       // the same as Point(x, _)
-.RGB(r, ...)        // the same as .RGB(r, _, _)
-(a, ..., c)         // the same as (a, _, c)
+Point(...)      // the same as Point(_, _, _)
+.RGB(...)       // the same as .RGB(_, _, _)
+Button(...)     // named fields too: the same as Button(_, height: _, label: _)
 ```
 
-The rest marker names no field, so it is refused when the element list carries a
-label (`x: p`) or when the subject has named fields — those must be matched by
-label.
+To ignore only some fields, write `_` for each one and do not mix it with `...`:
+`Point(x, _, y)`, not `Point(x, ..., y)`. A tuple pattern takes no rest slot at
+all (`( ... )` is the parenthesized-pattern error).
 
 List patterns take part in exhaustiveness by length. A pattern covers a length
 completely only when **every** slot is irrefutable, so `[]` and `[x, ...]`
 together cover every list, while `[1, ...]` does not (it misses a list whose
-head is not 1). In a struct, enum-case or tuple pattern the rest marker changes
-nothing: the field count is fixed, so it is just a spelling for `_`.
+head is not 1). In a struct or enum-case pattern the rest marker changes
+nothing: the field count is fixed, so it is the whole row of `_`.
 
 ```koral
 when s in {

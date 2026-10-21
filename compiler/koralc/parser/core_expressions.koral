@@ -716,12 +716,29 @@ given Parser {
         return self.parse_pattern_or(stop_on_in);
     };
 
-    /// A rest slot swallows the unwritten remainder of one element list, so a
-    /// second one in the same list has nothing left to say.
-    module_private check_rest_slots(self, elements List[PatternNode]) Result[Void] = {
+    /// Whether a rest slot may share its element list with other slots.
+    ///
+    /// In a LIST element list `...` swallows the unwritten middle, so it sits
+    /// among the written slots. In a fixed-arity element list -- struct, enum
+    /// case, tuple -- it is whole-list elision and nothing else, so it must be
+    /// the only slot: the fields it would ignore are named by the declaration,
+    /// and `...` has no per-field opinion to offer.
+    module_private check_rest_slots(
+        self,
+        elements List[PatternNode],
+        rest_must_stand_alone Bool,
+    ) Result[Void] = {
         let mutable seen = false;
         for element in elements then {
             if element is .RestPattern(_) then {
+                if rest_must_stand_alone and elements.count() > 1 then {
+                    return .Error(
+                        self.parser_error_at_span(
+                            "Rest pattern must be the only slot in a struct, enum or tuple pattern; use '_' for the other fields",
+                            pattern_span(element),
+                        ),
+                    );
+                };
                 if seen then {
                     return .Error(
                         self.parser_error_at_span(
@@ -1206,7 +1223,7 @@ given Parser {
                         for elem in elements then {
                             slot_patterns.push(elem.pattern);
                         };
-                        let _ = self.check_rest_slots(slot_patterns) or return;
+                        let _ = self.check_rest_slots(slot_patterns, true) or return;
                         parsed_pattern = PatternNode.StructPattern(
                             name,
                             elements,
@@ -1274,7 +1291,7 @@ given Parser {
                 for elem in elements then {
                     slot_patterns.push(elem.pattern);
                 };
-                let _ = self.check_rest_slots(slot_patterns) or return;
+                let _ = self.check_rest_slots(slot_patterns, true) or return;
                 node = PatternNode.EnumCase(
                     case_name,
                     elements,
@@ -1294,7 +1311,7 @@ given Parser {
                     };
                 };
                 self.advance();
-                let _ = self.check_rest_slots(elements) or return;
+                let _ = self.check_rest_slots(elements, false) or return;
                 node = PatternNode.ListPattern(
                     elements,
                     self.span_from_start(start),
@@ -1327,7 +1344,7 @@ given Parser {
                             );
                         },
                     };
-                    let _ = self.check_rest_slots(slot_elements) or return;
+                    let _ = self.check_rest_slots(slot_elements, true) or return;
                     let mutable elements = List[PatternElement].new();
                     for slot in slot_elements then {
                         elements.push(PatternElement(Option[String].None(), slot));

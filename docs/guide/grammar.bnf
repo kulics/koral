@@ -684,13 +684,13 @@
 // Generic concrete nominal type pattern, e.g. ParseError[Int].
 
 <tuple-pattern> ::= "(" <tuple-slot> ("," <tuple-slot>)+ ")"
-<tuple-slot> ::= <rest-pattern>
-               | <match-pattern>
+<tuple-slot> ::= <match-pattern>
 // Positional destructuring against a STRUCT with exactly as many fields:
 // `(a, b, c)` matches a three-field struct in declaration order. N >= 2 --
 // `(` in pattern position opens a tuple and never groups a single pattern.
 // This is how `Pair` is destructured too, since `Pair` is simply a
-// two-field struct.
+// two-field struct. No rest slot here: a whole-list elision is written
+// `Point(...)`, and `( ... )` is the parenthesized-pattern error.
 
 <struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.
@@ -724,7 +724,7 @@
 <enum-case-pattern> ::= "." <type-identifier> "(" <pattern-arg-list>? ")"
 // 模式语法独立于构造语法；即使是零字段 enum case，模式位置也写空括号，如 .None()
 <pattern-arg> ::= <identifier> ":" <match-pattern>    // named pattern argument
-                | <rest-pattern>                      // rest slot -- ignores the unwritten slots
+                | <rest-pattern>                      // rest slot -- must be the element list's only slot; ignores every field
                 | <match-pattern>                      // positional pattern argument
 <pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
 
@@ -744,17 +744,21 @@
 //   [...]           任意列表（等价于 `_`）
 
 <rest-pattern> ::= "..."
-// 剩余模式：吞掉当前位置之后未写出的零个或多个槽位。**只忽略，不绑定**——
-// `...x` 是语法错误。语义是「吞掉剩余槽位」，不是「把剩余槽位绑成一个列表」。
-// 出现位置：列表 / 枚举变体 / 结构体 / 元组模式的元素表内，每层元素表至多一个。
-// 出现在其它位置（整条 arm、`is` 主体、`not` 之下、单独的 `( ... )`）一律报错。
-// 在固定元数的模式里它是纯省写：`Point(x, ...)` 即 `Point(x, _)`，`Point(..., y)`
-// 即 `Point(_, y)`；写在前面的槽位从头取字段，写在后面的从尾取，`...` 吞中间。
-// 限制：元素表里出现具名槽位（`x: p`），或主体有具名字段（`type B(w Int, h: Int)`）
-// 时不允许用 `...`——具名字段必须按标签匹配，而 `...` 没有名字可给。
-// 穷举性：固定元数里 `...` 不改变穷举性（元数不变，就是省写了 `_`）；列表里它让
-// 长度从「恰好 k」变成「>= k」，只有当所有非剩余槽位都不可反驳时该长度才算被
-// 全覆盖。
+// 剩余模式。**只忽略，不绑定**——`...x` 是语法错误。语义是「忽略这些槽位」，
+// 不是「把剩余槽位绑成一个列表」。出现在其它位置（整条 arm、`is` 主体、`not`
+// 之下、单独的 `( ... )`）一律报错。
+//
+// 两套语义，按所在元素表分：
+//   列表元素表        吞掉未写出的中间槽位，每层至多一个，可以和已写的槽位并存。
+//   结构体 / 枚举变体 整段省略：必须是元素表的**唯一**槽位，忽略每个字段，
+//                     命名字段与位置字段一视同仁。`Point(...)` 即
+//                     `Point(_, _, _)`，`Button(...)` 在
+//                     `type Button(w Int, h: Int)` 上同样合法。要忽略的是
+//                     部分字段时逐个写 `_`，不与 `...` 并存。
+// 元组模式不收剩余槽位（`( ... )` 是括号分组错误，混排报「must be the only slot」）。
+//
+// 穷举性：固定元数里 `...` 就是整段 `_`，不改变穷举性；列表里它让长度从
+// 「恰好 k」变成「>= k」，只有当所有非剩余槽位都不可反驳时该长度才算被全覆盖。
 
 // ============================================================================
 // Literals

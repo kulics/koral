@@ -757,8 +757,9 @@ public indirect enum PatternNode: CustomStringConvertible {
   /// checked against `T`. Without a rest slot the length must match exactly;
   /// with one it is a lower bound (see `restPattern`).
   case listPattern(elements: [PatternNode], span: SourceSpan)
-  /// Rest pattern: `...`. Swallows zero or more of the remaining slots in a
-  /// list, enum-case, struct or tuple pattern. It never binds -- there is no
+  /// Rest pattern: `...`. In a list element list it swallows the unwritten
+  /// slots; in a struct or enum-case element list it must be the ONLY slot and
+  /// means "ignore every field", named or not. It never binds -- there is no
   /// name to attach the swallowed slots to -- so it is only ever a slot of an
   /// enclosing element list, at most one per list.
   case restPattern(span: SourceSpan)

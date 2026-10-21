@@ -333,11 +333,10 @@ extension TypeChecker {
       let caseDef = cases[caseIndex]
 
       let orderedPatternArgs = try reorderPatternArguments(
-        try expandRestSlots(
+        expandRestSlots(
           subPatternArgs,
           fieldNames: caseDef.parameters.map { $0.name },
           fieldIsNamed: caseDef.parameters.map { $0.named },
-          patternDescription: ".\(caseName)",
           patternSpan: span
         ),
         fieldNames: caseDef.parameters.map { $0.name },
@@ -527,11 +526,10 @@ extension TypeChecker {
       }
       
       let orderedPatternArgs = try reorderPatternArguments(
-        try expandRestSlots(
+        expandRestSlots(
           subPatternArgs,
           fieldNames: members.map { $0.name },
           fieldIsNamed: members.map { $0.named },
-          patternDescription: typeName,
           patternSpan: span
         ),
         fieldNames: members.map { $0.name },
@@ -579,15 +577,9 @@ extension TypeChecker {
           span: span
         )
       }
-      // Tuple destructuring is positional throughout, so a rest slot swallows
-      // the unwritten middle exactly as it does in a named struct pattern.
-      let elements = try expandRestSlots(
-        elements,
-        fieldNames: members.map { $0.name },
-        fieldIsNamed: Array(repeating: false, count: members.count),
-        patternDescription: innerType.description,
-        patternSpan: span
-      )
+      // Tuple destructuring is positional throughout and takes no rest slot:
+      // the parser rejects one here (a whole-list elision is written
+      // `Point(...)`, not `(...)`), so the element list arrives already final.
       guard elements.count == members.count else {
         throw SemanticError(
           .typeMismatch(
@@ -682,60 +674,39 @@ extension TypeChecker {
     }
   }
 
-  /// Rewrite an element list containing a rest slot into one slot per field.
+  /// Rewrite a whole-list elision into one wildcard per field.
   ///
-  /// The rest swallows the unwritten MIDDLE: `Point(x, ..., y)` on a
-  /// three-field struct binds x to field 0 and y to field 2. Written slots
-  /// before the rest fill fields from the front, those after it from the back,
-  /// and the rest becomes wildcards for whatever is left.
+  /// In a fixed-arity element list the parser only lets `...` stand alone, and
+  /// it means "ignore every field" -- named or not. Each field gets a wildcard
+  /// matched the way the declaration demands: a positional field is an
+  /// unlabeled slot, a named field is its own label. The unlabeled ones go
+  /// first, because a pattern argument list may not place a positional
+  /// argument after a named one; `reorderPatternArguments` then restores
+  /// declaration order.
   ///
-  /// A rest slot is only meaningful among positional slots -- it names no
-  /// field, so a named field cannot be matched by it, and a labeled slot
-  /// already says which field it wants. Both cases are refused rather than
-  /// guessed at.
+  /// Without a rest slot the element list is returned unchanged.
   func expandRestSlots(
     _ args: [PatternArg],
     fieldNames: [String],
     fieldIsNamed: [Bool],
-    patternDescription: String,
     patternSpan: SourceSpan
-  ) throws -> [PatternArg] {
-    var restIndex: Int? = nil
-    for (index, arg) in args.enumerated() {
+  ) -> [PatternArg] {
+    var hasRest = false
+    for arg in args {
       if case .restPattern = arg.pattern {
-        restIndex = index
+        hasRest = true
         break
       }
     }
-    guard let restIndex else { return args }
-
-    if args.contains(where: { $0.label != nil }) {
-      throw SemanticError(.generic(
-        "Rest pattern cannot be combined with labeled pattern arguments in '\(patternDescription)'"
-      ), span: patternSpan)
-    }
-    if fieldIsNamed.contains(true) {
-      throw SemanticError(.generic(
-        "Rest pattern cannot be used with named fields in '\(patternDescription)'; match named fields by label"
-      ), span: patternSpan)
-    }
-
-    let prefix = args[..<restIndex].map { $0.pattern }
-    let suffix = args[(restIndex + 1)...].map { $0.pattern }
-    let fieldCount = fieldNames.count
-    let written = prefix.count + suffix.count
-    guard written <= fieldCount else {
-      throw SemanticError(.generic(
-        "Too many positional pattern arguments for '\(patternDescription)'"
-      ), span: patternSpan)
-    }
+    guard hasRest else { return args }
 
     var expanded: [PatternArg] = []
-    expanded.append(contentsOf: prefix.map { PatternArg(label: nil, pattern: $0) })
-    for _ in 0..<(fieldCount - written) {
+    for (index, _) in fieldNames.enumerated() where !fieldIsNamed[index] {
       expanded.append(PatternArg(label: nil, pattern: .wildcard(span: patternSpan)))
     }
-    expanded.append(contentsOf: suffix.map { PatternArg(label: nil, pattern: $0) })
+    for (index, name) in fieldNames.enumerated() where fieldIsNamed[index] {
+      expanded.append(PatternArg(label: name, pattern: .wildcard(span: patternSpan)))
+    }
     return expanded
   }
 

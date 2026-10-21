@@ -1,9 +1,8 @@
-// The rest slot also belongs in struct, enum-case and tuple patterns, where it
-// is arity sugar: `Point(x, ...)` is `Point(x, _)`. Slots before it fill fields
-// from the front and slots after it from the back.
-// EXPECT: rest_tuple_middle_ok
-// EXPECT: rest_tuple_prefix_ok
-// EXPECT: rest_tuple_suffix_ok
+// The rest slot in a struct or enum-case pattern is whole-list elision and
+// nothing else: it must be the element list's ONLY slot, and it ignores every
+// field -- named or not. A list pattern still takes a rest slot of its own,
+// and a list pattern may sit inside a slot of an outer pattern.
+// EXPECT: rest_struct_ok
 // EXPECT: rest_enum_ok
 // EXPECT: rest_struct_nested_ok
 
@@ -19,44 +18,29 @@ type Pair2(first List[Int], second Int);
 let main() Int = {
     let p = Point(1, 2, 3);
 
-    // `(a, ..., c)` is `Point(a, _, c)`: the rest swallows the middle.
+    // `Point(...)` is `Point(_, _, _)`: match the constructor, ignore the fields.
     let ends = when p in {
-        (a, ..., c) then a + c,
+        Point(...) then 4,
     };
     if ends == 4 then {
-        println("rest_tuple_middle_ok");
-    };
-
-    // `(a, ...)` is `Point(a, _, _)`.
-    let head = when p in {
-        (a, ...) then a,
-    };
-    if head == 1 then {
-        println("rest_tuple_prefix_ok");
-    };
-
-    // `(..., z)` is `Point(_, _, z)`.
-    let tail = when p in {
-        (..., z) then z,
-    };
-    if tail == 3 then {
-        println("rest_tuple_suffix_ok");
+        println("rest_struct_ok");
     };
 
     let s = Shape.Rect(4, 5, 6);
     let width = when s in {
-        .Circle(r) then r,
-        .Rect(w, ...) then w,
+        .Circle(...) then 0,
+        .Rect(...) then 4,
     };
     if width == 4 then {
         println("rest_enum_ok");
     };
 
-    // Rest nests: an inner list pattern under an outer struct pattern. The
-    // inner list is refutable, so the struct still needs a catchall.
+    // The outer elision does not reach into a slot: the inner list pattern
+    // brings its own rest, and the second field is written out. The inner list
+    // is refutable, so the struct still needs a catchall.
     let q = Pair2([9, 8], 1);
     let nested = when q in {
-        Pair2([a, ...], ...) then a,
+        Pair2([a, ...], _) then a,
         _ then 0,
     };
     if nested == 9 then {

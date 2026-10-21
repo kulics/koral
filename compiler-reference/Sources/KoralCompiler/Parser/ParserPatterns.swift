@@ -281,7 +281,7 @@ extension Parser {
           if currentToken === .comma { try match(.comma) }
         }
         try match(.rightParen)
-        try checkRestSlots(args.map { $0.pattern })
+        try checkRestSlots(args.map { $0.pattern }, restMustStandAlone: true)
         return .structPattern(typeName: name, elements: args, span: startSpan)
       }
 
@@ -352,7 +352,7 @@ extension Parser {
         if currentToken === .comma { try match(.comma) }
       }
       try match(.rightParen)
-      try checkRestSlots(args.map { $0.pattern })
+      try checkRestSlots(args.map { $0.pattern }, restMustStandAlone: true)
       return .enumCase(caseName: name, elements: args, span: startSpan)
     }
     // List destructuring pattern: `[a, b]` against a `List[T]`. A rest slot
@@ -365,7 +365,7 @@ extension Parser {
         if currentToken === .comma { try match(.comma) }
       }
       try match(.rightBracket)
-      try checkRestSlots(elements)
+      try checkRestSlots(elements, restMustStandAlone: false)
       return .listPattern(elements: elements, span: startSpan)
     }
 
@@ -383,7 +383,7 @@ extension Parser {
           elements.append(try parsePatternSlot())
         }
         try match(.rightParen)
-        try checkRestSlots(elements)
+        try checkRestSlots(elements, restMustStandAlone: true)
         return .tuplePattern(elements: elements.map { PatternArg(label: nil, pattern: $0) }, span: startSpan)
       }
       // `(` in pattern position opens a tuple, which needs at least two slots.
@@ -407,12 +407,23 @@ extension Parser {
     return try parsePattern()
   }
 
-  /// A rest slot swallows the unwritten remainder of one element list, so a
-  /// second one in the same list has nothing left to say.
-  private func checkRestSlots(_ elements: [PatternNode]) throws {
+  /// Whether a rest slot may share its element list with other slots.
+  ///
+  /// In a LIST element list `...` swallows the unwritten middle, so it sits
+  /// among the written slots. In a fixed-arity element list -- struct, enum
+  /// case, tuple -- it is whole-list elision and nothing else, so it must be
+  /// the only slot: the fields it would ignore are named by the declaration,
+  /// and `...` has no per-field opinion to offer.
+  private func checkRestSlots(_ elements: [PatternNode], restMustStandAlone: Bool) throws {
     var seen = false
     for element in elements {
       if case .restPattern = element {
+        if restMustStandAlone, elements.count > 1 {
+          throw ParserError.rejectedConstruct(
+            span: element.span,
+            message: "Rest pattern must be the only slot in a struct, enum or tuple pattern; use '_' for the other fields"
+          )
+        }
         if seen {
           throw ParserError.rejectedConstruct(
             span: element.span,
