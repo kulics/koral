@@ -596,13 +596,13 @@ println( a % b );    // % 取模
 
 #### 比较操作符
 
-比较操作符比较两个值，结果是 `Bool` 类型。注意不等于写作 `<>`。
+比较操作符比较两个值，结果是 `Bool` 类型。
 
 ```koral
 let a = 4;
 let b = 2;
 println( a == b );     // == 等于
-println( a <> b );     // <> 不等于
+println( a != b );     // != 不等于
 println( a > b );      // > 大于
 println( a >= b );     // >= 大于等于
 println( a < b );      // < 小于
@@ -704,7 +704,7 @@ y >>= 2;     // y = y >> 2
 6. 按位与：`&`
 7. 按位异或：`^`
 8. 按位或：`|`
-9. 比较：`==`、`<>`、`<`、`>`、`<=`、`>=`
+9. 比较：`==`、`!=`、`<`、`>`、`<=`、`>=`
 10. 范围：`..`、`..<`、`<..`、`<..<`（闭）；`...`、`...<`、`<...`（开）
 11. 模式测试：`is`、`is not`
 12. 逻辑非：`not`
@@ -1691,7 +1691,7 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 字面量能匹配什么，等于它的 `==` 能接受什么：整数只对整型（`-5` 不匹配无符号类型），
 浮点只对 `Float32` / `Float64`，`true` 只对 `Bool`，字符串只对 `String`，rune 对
 `Rune`（或 ASCII 的 `UInt8`）。浮点字面量按 IEEE 等值匹配，且取主体的宽度（`Float32`
-上的 `1.1` 即 `Float32(1.1)`）：因此 NaN 不匹配任何常量模式（要用守卫 `v if v <> v`
+上的 `1.1` 即 `Float32(1.1)`）：因此 NaN 不匹配任何常量模式（要用守卫 `v if v != v`
 接住），`0.0` 与 `-0.0` 互匹配。比较模式的界遵循同一条种类规则：`> 1` 是整数界，
 `> 1.0` 是浮点界，`> 'a'` 是 rune 界（按码点比较）。比较界可以落在主体的域外
 （`UInt8` 上的 `>= -1` 匹配一切）。
@@ -2401,7 +2401,7 @@ Koral 支持基于 trait 的算术与比较运算符重载。下标是内建的�
 - `*` -> `Mul[R]`，经由 `mul(self, other R) Self`
 - `/` -> `Div[R]`，经由 `div(self, other R) Self`
 - `%` -> `Rem[R]`，经由 `rem(self, other R) Self`
-- `==` / `<>` -> `Eq`，经由 `equals(self, other Self) Bool`
+- `==` / `!=` -> `Eq`，经由 `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord`，经由 `compare(self, other Self) Int`
 
 同方向链式序比较（如 `a < b < c`）是这些既有比较运算符的语法糖。编译器把它们降级为两两比较，具备单次求值和短路语义；不会引入独立的 trait 或分发机制。
@@ -2425,7 +2425,7 @@ given Vec2 as Eq {
 
 given Vec2 as Ord {
     compare(self, other Vec2) Int =
-        if self.x <> other.x then self.x.compare(other.x) else self.y.compare(other.y);
+        if self.x != other.x then self.x.compare(other.x) else self.y.compare(other.y);
 };
 
 let sum = Vec2(1, 2) + Vec2(3, 4);

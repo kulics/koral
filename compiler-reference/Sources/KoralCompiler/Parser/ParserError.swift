@@ -5,7 +5,11 @@ public enum LexerError: Error {
   case invalidString(span: SourceSpan, String)
   case unexpectedCharacter(span: SourceSpan, String)
   case unexpectedEndOfFile(span: SourceSpan)
-  
+  /// A spelling the language has retired. The message names the replacement,
+  /// so it is taken verbatim -- the `unexpectedCharacter` wrapper would say
+  /// "Unexpected character: '<>' is not supported; use '!='".
+  case rejectedSyntax(span: SourceSpan, String)
+
   /// The source span where the error occurred
   public var span: SourceSpan {
     switch self {
@@ -14,6 +18,7 @@ public enum LexerError: Error {
     case .invalidString(let span, _): return span
     case .unexpectedCharacter(let span, _): return span
     case .unexpectedEndOfFile(let span): return span
+    case .rejectedSyntax(let span, _): return span
     }
   }
   
@@ -39,6 +44,8 @@ public enum LexerError: Error {
       return "Unexpected character: \(msg)"
     case .unexpectedEndOfFile:
       return "Unexpected end of file"
+    case .rejectedSyntax(_, let msg):
+      return msg
     }
   }
 }

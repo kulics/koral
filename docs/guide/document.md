@@ -605,13 +605,13 @@ println( a % b );    // % Modulus
 
 #### Comparison Operators
 
-Comparison operators compare two values. The result is `Bool` type. Note that not equal is represented by `<>`.
+Comparison operators compare two values. The result is `Bool` type. 
 
 ```koral
 let a = 4;
 let b = 2;
 println( a == b );     // == Equal
-println( a <> b );     // <> Not equal
+println( a != b );     // != Not equal
 println( a > b );      // > Greater than
 println( a >= b );     // >= Greater than or equal to
 println( a < b );      // < Less than
@@ -715,7 +715,7 @@ Operator precedence from high to low:
 6. Bitwise AND: `&`
 7. Bitwise XOR: `^`
 8. Bitwise OR: `|`
-9. Comparison: `==`, `<>`, `<`, `>`, `<=`, `>=`
+9. Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
 10. Range: `..`, `..<`, `<..`, `<..<` (closed); `...`, `...<`, `<...` (open)
 11. Pattern test: `is`, `is not`
 12. Logical NOT: `not`
@@ -1742,7 +1742,7 @@ integer types (`-5` never matches an unsigned type), floats against `Float32` /
 `Float64`, `true` against `Bool`, strings against `String`, runes against
 `Rune` (or an ASCII `UInt8`). A float literal matches under IEEE equality at
 the subject's width (`1.1` against `Float32` is `Float32(1.1)`), so NaN matches
-no literal -- catch it with a guard such as `v if v <> v` -- and `0.0` matches
+no literal -- catch it with a guard such as `v if v != v` -- and `0.0` matches
 `-0.0`. A comparison bound follows the same kind rule: `> 1` is an integer
 bound, `> 1.0` a float one, `> 'a'` a rune one (compared by code point). A
 bound may lie outside the subject's domain (`>= -1` on `UInt8` matches
@@ -2474,7 +2474,7 @@ The built-in operator mappings are:
 - `*` -> `Mul[R]` via `mul(self, other R) Self`
 - `/` -> `Div[R]` via `div(self, other R) Self`
 - `%` -> `Rem[R]` via `rem(self, other R) Self`
-- `==` / `<>` -> `Eq` via `equals(self, other Self) Bool`
+- `==` / `!=` -> `Eq` via `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other Self) Int`
 
 Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
@@ -2498,7 +2498,7 @@ given Vec2 as Eq {
 
 given Vec2 as Ord {
     compare(self, other Vec2) Int =
-        if self.x <> other.x then self.x.compare(other.x) else self.y.compare(other.y);
+        if self.x != other.x then self.x.compare(other.x) else self.y.compare(other.y);
 };
 
 let sum = Vec2(1, 2) + Vec2(3, 4);

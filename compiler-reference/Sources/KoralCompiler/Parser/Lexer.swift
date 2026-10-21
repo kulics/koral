@@ -42,7 +42,7 @@ public enum Token: CustomStringConvertible {
   case remainder  // Remainder operator '%'
   case equal  // Equal sign '='
   case equalEqual  // Equals operator '=='
-  case notEqual  // Not equals operator '<>'
+  case notEqual  // Not equals operator '!='
   case greater  // Greater than operator '>'
   case less  // Less than operator '<'
   case greaterEqual  // Greater than or equal operator '>='
@@ -236,7 +236,7 @@ public enum Token: CustomStringConvertible {
     case .equalEqual:
       return "=="
     case .notEqual:
-      return "<>"
+      return "!="
     case .greater:
       return ">"
     case .less:
@@ -1472,7 +1472,12 @@ public class Lexer {
       }
       return .equal
     case "!":
-      // Koral does not use '!' (use `not expr`) and does not use '!=' (use '<>').
+      // Logical negation is the keyword `not`; `!` only forms the not-equal
+      // operator `!=`. A bare `!` is still an error, just not at lex time.
+      if let nextChar = getNextChar() {
+        if nextChar == "=" { return .notEqual }
+        unreadChar(nextChar)
+      }
       return .bang
     case "&":
       if let nextChar = getNextChar() {
@@ -1513,7 +1518,8 @@ public class Lexer {
           return .leftShift
         }
         if nextChar == ">" {
-          return .notEqual
+          throw LexerError.rejectedSyntax(
+            span: tokenSpan, "'<>' is not supported; use '!='")
         }
         if nextChar == "=" {
           return .lessEqual

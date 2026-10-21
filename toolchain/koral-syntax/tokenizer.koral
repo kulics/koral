@@ -191,7 +191,7 @@ given Token {
         .Slash() then "/",
         .Percent() then "%",
         .EqEq() then "==",
-        .NotEq() then "<>",
+        .NotEq() then "!=",
         .Gt() then ">",
         .Lt() then "<",
         .GtEq() then ">=",
@@ -240,7 +240,7 @@ given Token {
     };
 
     public is_keyword(self) Bool = when self in {
-        .KwLet() or .KwMut() or .KwIf() or .KwThen() or .KwElse() or .KwWhile() or .KwFor() or .KwUnsafe() or .KwWhen() or .KwIn() or .KwIs() or .KwAnd() or .KwOr() or .KwNot() or .KwType() or .KwTrait() or .KwGiven() or .KwAs() or .KwUsing() or .KwForeign() or .KwIntrinsic() or .KwSelf() or .KwSelfType() or .KwReturn() or .KwBreak() or .KwContinue() or .KwDefer() or .KwIt() or .KwPtr() or .Bang() or .KwWeakref() or .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then true,
+        .KwLet() or .KwMut() or .KwIf() or .KwThen() or .KwElse() or .KwWhile() or .KwFor() or .KwUnsafe() or .KwWhen() or .KwIn() or .KwIs() or .KwAnd() or .KwOr() or .KwNot() or .KwType() or .KwTrait() or .KwGiven() or .KwAs() or .KwUsing() or .KwForeign() or .KwIntrinsic() or .KwSelf() or .KwSelfType() or .KwReturn() or .KwBreak() or .KwContinue() or .KwDefer() or .KwIt() or .KwPtr() or .KwWeakref() or .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then true,
         _ then false,
     };
 
@@ -477,6 +477,16 @@ given Tokenizer {
             if r.is_identifier_start() then {
                 tokens.push(self.scan_identifier());
                 continue;
+            };
+
+            // The retired not-equal spelling. `scan_operator` returns an
+            // `Option` and cannot complain, and leaving `<>` to munch as `<`
+            // then `>` would report "expected expression, got '>'" -- true but
+            // nowhere near the mistake. Caught here, where it can name the
+            // replacement, the way the compiler does.
+            if Tokenizer.rune_eq(r, '<') and self.peek_at(1) is .Some(n)
+                and Tokenizer.rune_eq(n, '>') then {
+                return .Error("'<>' is not supported; use '!='");
             };
 
             // Operators and punctuation
@@ -1000,7 +1010,12 @@ given Tokenizer {
             self.pos += 1;
             return .Some(.Tilde());
         };
+        // ! !=   (a bare `!` is not an operator; logical negation is `not`)
         if cp == 33 then {
+            if self.peek_at(1) is .Some(n) and Tokenizer.rune_eq(n, '=') then {
+                self.pos += 2;
+                return .Some(.NotEq());
+            };
             self.pos += 1;
             return .Some(.Bang());
         };
@@ -1085,17 +1100,13 @@ given Tokenizer {
             return .Some(.Eq());
         };
 
-        // < <= << <<= <> <.. <..<
+        // < <= << <<= <.. <..<   (`<>` is rejected before we get here)
         if cp == 60 then {
             self.pos += 1;
             if self.peek() is .Some(n) then {
                 if Tokenizer.rune_eq(n, '=') then {
                     self.pos += 1;
                     return .Some(.LtEq());
-                };
-                if Tokenizer.rune_eq(n, '>') then {
-                    self.pos += 1;
-                    return .Some(.NotEq());
                 };
                 if Tokenizer.rune_eq(n, '<') then {
                     self.pos += 1;

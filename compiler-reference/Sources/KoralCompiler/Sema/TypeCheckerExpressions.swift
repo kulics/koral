@@ -2344,7 +2344,7 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let (typedLeft, typedRight) = try normalizeComparisonOperands(lhs: initialLeft, rhs: initialRight)
 
-    // Operator sugar for Eq: lower `==`/`<>` to `equals(self, other)`
+    // Operator sugar for Eq: lower `==`/`!=` to `equals(self, other)`
     // for non-builtin scalar types (struct/enum/String/generic parameters).
     if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
       !isBuiltinEqualityComparable(typedLeft.type)
