@@ -307,22 +307,30 @@
 
 <if-expression> ::= "if" <expression> "then" <expression> ("else" <expression>)?
 <while-expression> ::= "while" <expression> "then" <expression>
-<for-expression> ::= "for" <for-binding-pattern> "in" <expression> "then" <expression>
+<for-expression> ::= "for" <match-pattern> "in" <expression> ("where" <expression>)? "then" <expression>
 <when-expression> ::= "when" <expression> "in" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
-<match-arm> ::= <match-pattern> ("if" <expression>)? "then" <expression>
-// 分支守卫（arm guard）：`pat if cond then body`。规则：
-//   1. 守卫在 arm 级，不进子模式：`a or b if c` 是 `(a or b) if c`，
+<match-arm> ::= <match-pattern> ("where" <expression>)? "then" <expression>
+// 守卫（guard）：`pat where cond then body`。`when` 与 `for` 同一套：
+// 都用 `in` 做间隔字，都用 `where` 做守卫，都收全模式。规则：
+//   1. 守卫在 arm / 循环级，不进子模式：`a or b where c` 是 `(a or b) where c`，
 //      要给分支各挂条件就写两个 arm。
-//   2. 模式绑定在守卫里可见（`Some(n) if n > 0`），守卫先于分支体求值；
-//      守卫为假则落到下一个 arm，绑定丢弃。
+//   2. 模式绑定在守卫里可见（`.Some(n) where n > 0`），守卫先于分支体求值。
 //   3. 守卫必须是 Bool。
-//   4. **带守卫的分支不贡献穷尽性覆盖**（保守规则）：
-//      `{ Some(n) if n > 0 then a, None() then b }` 仍判非穷尽。
-//   5. `is` 表达式没有守卫（`x is pat` 是表达式，守卫要跟 `and`/`or`
+//   4. `when`：守卫为假则落到下一个 arm，绑定丢弃；**带守卫的分支不贡献
+//      穷尽性覆盖**（保守规则）：`{ .Some(n) where n > 0 then a, .None() then b }`
+//      仍判非穷尽。
+//   5. `for`：守卫为假则跳过该元素，进入下一轮迭代（不结束循环）。位置在
+//      iterable 之后、`then` 之前，与 `when` arm 里「模式之后、`then` 之前」
+//      是同一个槽位。
+//   6. `is` 表达式没有守卫（`x is pat` 是表达式，守卫要跟 `and`/`or`
 //      拼优先级、绑定还要跨界）；要守卫就用 `when`。
-<for-binding-pattern> ::= <binding-element>
-                        | <tuple-binding>
+//   7. 旧拼法 `if` 一律报错并指路（`Pattern guards use 'where', not 'if'`）；
+//      `if` 本身仍是表达式/语句关键字。
+// `for` 的绑定是全模式（与 `when` arm 同一套语法），但**必须不可失败**：
+// 循环没法跳过模式拒绝的元素。`_` / `x` / `mutable x` / `Point(x, y)` /
+// `(a, b)` 都不可反驳；`.Some(x)` / `42` / `?v` / `[a, b]` 会报
+// `For binding cannot fail; use 'when' to match`。
 
 // ============================================================================
 // Flow layer / logical layer
@@ -881,7 +889,7 @@
 // Reserved keywords:
 //   let, mutable, type, trait, given, intrinsic, foreign
 //   using, self, Self, as
-//   if, then, else, while, for, when, is, in, it
+//   if, then, else, while, for, when, is, in, it, where
 //   and, or, not
 //   return, break, continue, defer
 //   true, false

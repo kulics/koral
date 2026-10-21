@@ -1768,36 +1768,35 @@ extension Parser {
     return .whileExpression(condition: condition, body: body, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
-  /// Parse for expression: for <pattern> in <iterable> then <body>
+  /// Parse for expression: `for <match-pattern> in <expression> ("where" <expression>)? then <body>`
+  ///
+  /// The binding is a full match pattern -- the same one a `when` arm takes.
+  /// It must be irrefutable; that is the checker's business, not the parser's.
+  /// The optional `where` guard sits after the iterable, right before `then`,
+  /// the same slot a `when` arm guard takes before its `then`.
   private func forExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.forKeyword)
-    let pattern = try parseForBindingPattern()
-    let extras = forBindingExtras
-    forBindingExtras = []
+    let pattern = try parsePattern()
     try match(.inKeyword)
     let iterable = try expression()
+    var guardExpr: ExpressionNode? = nil
+    if currentToken === .whereKeyword {
+      try match(.whereKeyword)
+      guardExpr = try expression()
+    } else if currentToken === .ifKeyword {
+      // The retired guard spelling, and the one a reader coming from `when`
+      // arms reaches for first. Falling through would say "expected 'then'" --
+      // true, but nowhere near the mistake.
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "Pattern guards use 'where', not 'if'"
+      )
+    }
     try match(.thenKeyword)
     let body = try expression()
-    var loopBody = body
-    if !extras.isEmpty {
-      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-      var lets: [StatementNode] = []
-      for (extraBindings, tempName) in extras {
-        lets.append(
-          .tupleVariableDeclaration(
-            bindings: extraBindings,
-            value: .identifier(tempName, span: span),
-            span: span
-          )
-        )
-      }
-      loopBody = .blockExpression(
-        statements: lets, tailExpression: body,
-        span: span)
-    }
     return .forExpression(
-      pattern: pattern, iterable: iterable, body: loopBody,
+      pattern: pattern, iterable: iterable, body: body, guardExpr: guardExpr,
       span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
@@ -1814,12 +1813,20 @@ extension Parser {
     while currentToken !== .rightBrace {
       let pattern = try parsePattern()
 
-      // Arm guard: `pat if cond then body`. The condition parses like an `if`
-      // condition and stops before `then`.
+      // Arm guard: `pat where cond then body`. The condition parses like an
+      // `if` condition and stops before `then`.
       var guardExpr: ExpressionNode? = nil
-      if currentToken === .ifKeyword {
-        try match(.ifKeyword)
+      if currentToken === .whereKeyword {
+        try match(.whereKeyword)
         guardExpr = try expression()
+      } else if currentToken === .ifKeyword {
+        // The retired guard spelling. Letting it fall through would say
+        // "expected 'then'" -- true, but nowhere near the mistake, so it names
+        // the replacement here the way the lexer names `<>`.
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Pattern guards use 'where', not 'if'"
+        )
       }
 
       try match(.thenKeyword)

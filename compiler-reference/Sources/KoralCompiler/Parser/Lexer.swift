@@ -119,6 +119,7 @@ public enum Token: CustomStringConvertible {
   case deferKeyword // 'defer' keyword
   case itKeyword // 'it' keyword
   case unsafeKeyword // 'unsafe' keyword
+  case whereKeyword // 'where' keyword
 
 
   // Add static operator function to compare if the same item
@@ -195,6 +196,8 @@ public enum Token: CustomStringConvertible {
     case (.itKeyword, .itKeyword):
       return true
     case (.unsafeKeyword, .unsafeKeyword):
+      return true
+    case (.whereKeyword, .whereKeyword):
       return true
     case (.bof, .bof), (.eof, .eof):
       return true
@@ -386,6 +389,8 @@ public enum Token: CustomStringConvertible {
       return "it"
     case .unsafeKeyword:
       return "unsafe"
+    case .whereKeyword:
+      return "where"
     }
   }
 }
@@ -1647,6 +1652,7 @@ public class Lexer {
       case "defer": .deferKeyword
       case "it": .itKeyword
       case "unsafe": .unsafeKeyword
+      case "where": .whereKeyword
       default: .identifier(id)
       }
     default:

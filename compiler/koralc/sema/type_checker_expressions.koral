@@ -222,9 +222,20 @@ given TypeChecker {
             .WhileExpr(condition, body, _) then self.expr_contains_or_return(condition) or self.expr_contains_or_return(
                 body,
             ),
-            .ForExpr(_, iterable, body, _) then self.expr_contains_or_return(iterable) or self.expr_contains_or_return(
-                body,
-            ),
+            .ForExpr(_, iterable, body, guard, _) then {
+                if self.expr_contains_or_return(iterable) then {
+                    return true;
+                };
+                when guard in {
+                    .Some(g) then {
+                        if self.expr_contains_or_return(g) then {
+                            return true;
+                        };
+                    },
+                    .None() then {},
+                };
+                self.expr_contains_or_return(body)
+            },
             .WhenExpr(subject, arms, _) then {
                 if self.expr_contains_or_return(subject) then {
                     return true;
@@ -256,24 +267,24 @@ given TypeChecker {
         // catchall and the next statement.
         for stmt in statements then {
             when stmt in {
-                .LetStmt(_, _, _, value, _) if self.expr_contains_or_return(value) then {
+                .LetStmt(_, _, _, value, _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
-                .TupleLetStmt(_, value, _) if self.expr_contains_or_return(value) then {
+                .TupleLetStmt(_, value, _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
-                .AssignmentStmt(target, _, value, _) if self.expr_contains_or_return(target) or self.expr_contains_or_return(
+                .AssignmentStmt(target, _, value, _) where self.expr_contains_or_return(target) or self.expr_contains_or_return(
                     value,
                 ) then {
                     return true;
                 },
-                .ExprStmt(value, _) if self.expr_contains_or_return(value) then {
+                .ExprStmt(value, _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
-                .ReturnStmt(.Some(value), _) if self.expr_contains_or_return(value) then {
+                .ReturnStmt(.Some(value), _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
-                .DeferStmt(value, _) if self.expr_contains_or_return(value) then {
+                .DeferStmt(value, _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
                 _ then {},

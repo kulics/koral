@@ -414,30 +414,6 @@ private func bindingElementDescription(_ binding: PairBindingElement) -> String 
   return parts.joined(separator: " ")
 }
 
-/// A let-style binding pattern used by `for ... in ...`.
-public enum BindingPatternNode: CustomStringConvertible {
-  case binding(PairBindingElement)
-  /// `(a, b, c)` -- positional destructuring of a struct with exactly that many
-  /// fields, in declaration order. N >= 2; `(x)` is a parenthesized binding.
-  case tuple(bindings: [PairBindingElement], span: SourceSpan)
-
-  public var span: SourceSpan {
-    switch self {
-    case .binding(let binding): return binding.span
-    case .tuple(_, let span): return span
-    }
-  }
-
-  public var description: String {
-    switch self {
-    case .binding(let binding):
-      return bindingElementDescription(binding)
-    case .tuple(let bindings, _):
-      return "(\(bindings.map(bindingElementDescription).joined(separator: ", ")))"
-    }
-  }
-}
-
 public indirect enum StatementNode {
   case variableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
@@ -641,8 +617,12 @@ public indirect enum ExpressionNode {
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
   case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
-  /// For loop expression: for <binding-pattern> in <iterable> then <body>
-  case forExpression(pattern: BindingPatternNode, iterable: ExpressionNode, body: ExpressionNode, span: SourceSpan)
+  /// For loop expression: `for <match-pattern> in <iterable> ("where" <guard>)? then <body>`.
+  /// The binding is a full match pattern and must be irrefutable; the guard
+  /// filters -- a false guard skips the element and moves on.
+  case forExpression(
+    pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode,
+    guardExpr: ExpressionNode?, span: SourceSpan)
   /// Range expression with operator and operands
   /// - operator: The range operator type
   /// - left: Left operand (nil for To, Until, Full)
@@ -968,7 +948,7 @@ extension ExpressionNode {
       return span
     case .staticMethodCall(_, _, _, _, let span):
       return span
-    case .forExpression(_, _, _, let span):
+    case .forExpression(_, _, _, _, let span):
       return span
     case .rangeExpression(_, _, _, let span):
       return span

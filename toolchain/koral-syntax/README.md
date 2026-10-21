@@ -49,6 +49,8 @@ verbatim, so a toolchain error and a compiler error say the same thing:
 |---|---|
 | `*T`, `*mutable T` | `managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'` |
 | `?*T` | `Weak reference syntax is '?T', not legacy '?*T'` |
+| `<>` | `'<>' is not supported; use '!='` |
+| `pat if cond then` (guard) | `Pattern guards use 'where', not 'if'` |
 | `*self`, `*self mutable` | `Invalid receiver parameter syntax: use 'self' only` |
 | default on a positional param/field | `Default values are only allowed for named parameters (use 'name: Type = value' syntax)` |
 | `type mutable` on an alias / enum | `Type alias cannot be marked mutable` / `Enum type cannot be marked mutable` |

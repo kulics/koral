@@ -626,13 +626,21 @@ public func printAST(_ node: ASTNode) {
         }
       }
     
-    case .forExpression(let pattern, let iterable, let body, _):
+    case .forExpression(let pattern, let iterable, let body, let guardExpr, _):
       print("\(indent)ForExpression:")
       print("\(indent)  Pattern: \(pattern.description)")
       print("\(indent)  Iterable:")
       withIndent {
         withIndent {
           printExpression(iterable)
+        }
+      }
+      if let guardExpr {
+        print("\(indent)  Guard:")
+        withIndent {
+          withIndent {
+            printExpression(guardExpr)
+          }
         }
       }
       print("\(indent)  Body:")

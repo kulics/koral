@@ -92,7 +92,7 @@ public type CstExpr {
     IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
     While(kw Token, cond CstExpr, then_kw Token, body CstExpr),
     WhilePattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, body CstExpr),
-    For(kw Token, binding CstForBinding, eq Token, iterable CstExpr, then_kw Token, body CstExpr),
+    For(kw Token, binding CstPattern, eq Token, iterable CstExpr, where_kw Option[Token], guard Option[CstExpr], then_kw Token, body CstExpr),
     When(kw Token, subject CstExpr, is_kw Token, lbrace Token, arms List[CstWhenArm], rbrace Token),
 
     // Chaining
@@ -218,13 +218,13 @@ public type CstIsLink(connector Token, is_kw Token, not_kw Option[Token], patter
 // CST When Arm
 // ============================================================================
 
-// One `when` arm. `guard_if` / `guard` are the arm guard (`pat if cond then
+// One `when` arm. `guard_kw` / `guard` are the arm guard (`pat where cond then
 // body`) between the pattern and `then`; they travel together. The guard is
 // arm-level -- never on a sub-pattern.
 public type CstWhenArm(
     leading_comments List[Token],
     pattern CstPattern,
-    guard_if Option[Token],
+    guard_kw Option[Token],
     guard Option[CstExpr],
     then_kw Token,
     body CstExpr,
@@ -264,10 +264,10 @@ public type CstStmt {
     Continue(kw Token),
 };
 
-/// One slot of a `let`/`for` binding: a leaf (`_`, `name`, `mutable name`,
+/// One slot of a `let` binding: a leaf (`_`, `name`, `mutable name`,
 /// `name Type`) or a nested tuple binding `(a, (b, c))`. The grammar is
 /// `<binding-element> ::= "_" | "mutable"? <identifier> <type-annotation>?
-/// | <tuple-binding>` -- the same shapes `let` and `for` both accept.
+/// | <tuple-binding>`. A `for` binding is a match pattern instead.
 public type CstPairBinding {
     Leaf(mut_kw Option[Token], name Token, binding_type Option[CstType], is_discard Bool),
     Nested(lparen Token, items List[CstTupleBindingItem], rparen Token),
@@ -276,16 +276,6 @@ public type CstPairBinding {
 // One slot of a `let (a, _, c) = ...` tuple binding: a binding and the comma
 // that follows it, if any.
 public type CstTupleBindingItem(binding CstPairBinding, comma Option[CstComma]);
-
-/// The `for` binding: a single binding element, or a tuple binding `(a, b, c)`.
-/// Matches `<for-binding-pattern> ::= <binding-element> | <tuple-binding>` --
-/// a binding, not a general match pattern. `?v`, `.Case(x)`, `a or b` and the
-/// rest of the pattern grammar are refused here the way the compilers refuse
-/// them.
-public type CstForBinding {
-    Single(binding CstPairBinding),
-    Tuple(lparen Token, items List[CstTupleBindingItem], rparen Token),
-};
 
 // ============================================================================
 // CST Type Body (for type declarations)

@@ -375,10 +375,13 @@ extension TypeChecker {
         }
       }
       
-    case .forExpression(let pattern, let iterable, let body, _):
+    case .forExpression(let pattern, let iterable, let body, let guardExpr, _):
       try collectCapturedVariables(expr: iterable, localNames: localNames, captures: &captures)
       var bodyLocalNames = localNames
-      collectBindingPatternNames(pattern, into: &bodyLocalNames)
+      collectPatternBindingNames(pattern, into: &bodyLocalNames)
+      if let guardExpr {
+        try collectCapturedVariables(expr: guardExpr, localNames: bodyLocalNames, captures: &captures)
+      }
       try collectCapturedVariables(expr: body, localNames: bodyLocalNames, captures: &captures)
       
     case .rangeExpression(_, let left, let right, _):
@@ -457,17 +460,6 @@ extension TypeChecker {
   private func collectBindingElementName(_ binding: PairBindingElement, into names: inout Set<String>) {
     guard !binding.isDiscard, binding.name != "_" else { return }
     names.insert(binding.name)
-  }
-
-  private func collectBindingPatternNames(_ pattern: BindingPatternNode, into names: inout Set<String>) {
-    switch pattern {
-    case .binding(let binding):
-      collectBindingElementName(binding, into: &names)
-    case .tuple(let bindings, _):
-      for binding in bindings {
-        collectBindingElementName(binding, into: &names)
-      }
-    }
   }
 
   private func collectPatternBindingNames(_ pattern: PatternNode, into names: inout Set<String>) {

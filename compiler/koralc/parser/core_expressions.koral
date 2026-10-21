@@ -877,13 +877,25 @@ given Parser {
         );
         let pattern = self.parse_pattern_or(false) or return;
 
-        // Arm guard: `pat if cond then body`. The condition parses like an `if`
-        // condition and stops before `then`.
+        // Arm guard: `pat where cond then body`. The condition parses like an
+        // `if` condition and stops before `then`.
         let mutable arm_guard = Option[Expr].None();
-        if self.current().kind is .KwIf() then {
-            self.advance();
-            let guard_expr = self.parse_expression_checked("when arm guard") or return;
-            arm_guard = .Some(guard_expr);
+        when self.current().kind in {
+            .KwWhere() then {
+                self.advance();
+                let guard_expr = self.parse_expression_checked("when arm guard") or return;
+                arm_guard = .Some(guard_expr);
+            },
+            .KwIf() then {
+                // The retired guard spelling. Letting it fall through would say
+                // "Expected 'then' in when arm" -- true, but nowhere near the
+                // mistake, so it names the replacement here the way the lexer
+                // names `<>`.
+                return .Error(
+                    self.parser_error("Pattern guards use 'where', not 'if'"),
+                );
+            },
+            _ then {},
         };
 
         let _ = self.expect_kw_then("when arm") or return;
@@ -1606,74 +1618,47 @@ given Parser {
         return .Ok(Expr.WhileExpr(condition, body, span));
     };
 
-    module_private parse_for_binding_pattern(self) Result[ForBindingPattern] = {
-        let start = self.current();
-
-        // `(a, b, c)` destructures a struct by position -- the same rule as a
-        // tuple binding. At least two slots. Slots may nest: `(a, (b, c))`.
-        if self.current().kind is .LParen() then {
-            self.advance();
-            let mutable bindings = List[PairBindingElement].new();
-            bindings.push(self.parse_pair_binding_element() or return);
-            if self.current().kind is not .Comma() then {
-                return .Error(self.parser_error("Expected ',' in tuple binding"));
-            };
-            while self.current().kind is .Comma() then {
-                self.advance();
-                bindings.push(self.parse_pair_binding_element() or return);
-            };
-            if self.current().kind is not .RParen() then {
-                return .Error(self.parser_error("Expected ')' in tuple binding"));
-            };
-            self.advance();
-            return .Ok(ForBindingPattern.Tuple(bindings, self.span_from_start(start)));
-        };
-
-        let binding = self.parse_pair_binding_element() or return;
-        return .Ok(ForBindingPattern.Single(binding));
-    };
-
+    /// `for <match-pattern> "in" <expression> ("where" <expression>)? "then" <body>`
+    ///
+    /// The binding is a full match pattern -- the same one a `when` arm takes.
+    /// It must be IRREFUTABLE; that is the checker's business, not the
+    /// parser's. The optional `where` guard sits after the iterable, right
+    /// before `then`, the same slot a `when` arm guard takes before its `then`.
     module_private parse_for_expression(self) Result[Expr] = {
         let start = self.current();
         self.advance();
-        let raw_pattern = self.parse_for_binding_pattern() or return;
+        let pattern = self.parse_pattern_or(false) or return;
 
         let _ = self.expect_kw_in("for expression") or return;
 
         let iterable = self.parse_expression_checked("for iterable") or return;
 
+        let mutable guard = Option[Expr].None();
+        when self.current().kind in {
+            .KwWhere() then {
+                self.advance();
+                let guard_expr = self.parse_expression_checked("for guard") or return;
+                guard = .Some(guard_expr);
+            },
+            .KwIf() then {
+                // The retired guard spelling, and the one a reader coming from
+                // `when` arms reaches for first. Falling through would say
+                // "Expected 'then' in for expression" -- true, but nowhere near
+                // the mistake.
+                return .Error(
+                    self.parser_error("Pattern guards use 'where', not 'if'"),
+                );
+            },
+            _ then {},
+        };
+
         let _ = self.expect_kw_then("for expression") or return;
 
         let body = self.parse_control_flow_body() or return;
 
-        // Nested slots expand into flat temps at the loop binding plus
-        // `let (..) = temp;` destructurings leading the body.
-        let span = self.span_from_start(start);
-        let mutable pattern = raw_pattern;
-        let mutable extras = List[Pair[List[PairBindingElement], String]].new();
-        when raw_pattern in {
-            .Single(binding) then {
-                let mut_one = List[PairBindingElement].new();
-                mut_one.push(binding);
-                let flattened = self.flatten_nested_bindings(mut_one);
-                pattern = ForBindingPattern.Single(flattened.first[UInt(0)]);
-                extras = flattened.second;
-            },
-            .Tuple(bindings, tuple_span) then {
-                let flattened = self.flatten_nested_bindings(bindings);
-                pattern = ForBindingPattern.Tuple(flattened.first, tuple_span);
-                extras = flattened.second;
-            },
-        };
-
-        let mut_body = if extras.is_empty() then body
-        else Expr.Block(
-            self.nested_binding_extra_lets(extras, span),
-            Option[Expr].Some(body),
-            span,
+        return .Ok(
+            Expr.ForExpr(pattern, iterable, body, guard, self.span_from_start(start)),
         );
-
-        return .Ok(Expr.ForExpr(pattern, iterable, mut_body, span));
     };
 
     module_private parse_postfix_generic_application(self, base Expr) Result[Expr] = {

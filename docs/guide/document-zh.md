@@ -1068,7 +1068,8 @@ while i < 10 then {
 
 `for` 循环用于遍历任何实现了迭代器接口的对象（如列表、映射、集合、范围等）。
 
-每次迭代中，迭代器产出的下一个值被绑定到循环绑定上，然后执行 `then` 后的语句 body。循环绑定位置接受与 `let` 相同的形态——它是绑定，不是通用 pattern——每个元素都必须能赋给该形态。元素类型不匹配时在编译期报错，运行时不会跳过该次迭代。`for` 是产生 `Void` 的表达式。
+每次迭代中，迭代器产出的下一个值被绑定到循环绑定上，然后执行 `then` 后的语句 body。循环绑定位置接受**全模式**——与 `when` 分支完全同一套 pattern 语法——但**必须不可失败**：循环没法跳过模式拒绝的元素，所以可反驳的模式在编译期就报
+`For binding cannot fail; use 'when' to match`。`for` 是产生 `Void` 的表达式。
 
 ```koral
 let nums List[Int] = [10, 20, 30];
@@ -1089,13 +1090,28 @@ let for_value = for x in nums then {
 };
 ```
 
-绑定可使用 `_`、`mutable` 和可选类型标注，也可以是 `Pair` 解构：
+绑定就是模式：`_`、`x`、`mutable x`、结构体解构、元组解构、嵌套解构都可以，
+只要不可反驳：
 
 ```koral
 let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)];
 
 for (left, right) in pairs then {
     println((left + right).to_string());
+};
+
+for Point(x, y, z) in points then {
+    println(x);
+};
+```
+
+`for` 也可以带 `where` 守卫，位置在 iterable 之后、`then` 之前——与 `when`
+分支里「模式之后、`then` 之前」是同一个槽位。守卫为假就跳过该元素，进入下一轮
+迭代（不结束循环）。模式绑定在守卫里可见：
+
+```koral
+for p in points where p.x > 0 then {
+    println(p.x);
 };
 ```
 
@@ -1669,7 +1685,7 @@ for h in xs then {             // 可以：`h` 是 `?Node`
 
 ## 4. 模式匹配
 
-Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件里的绑定形态。（`for` 循环改用普通的 `let` 形态绑定，见 [for 循环](#for-循环)。）
+Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件里的绑定形态，以及 `for` 循环的绑定形态（见 [for 循环](#for-循环)）。
 
 ### 模式形态
 
@@ -1691,7 +1707,7 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 字面量能匹配什么，等于它的 `==` 能接受什么：整数只对整型（`-5` 不匹配无符号类型），
 浮点只对 `Float32` / `Float64`，`true` 只对 `Bool`，字符串只对 `String`，rune 对
 `Rune`（或 ASCII 的 `UInt8`）。浮点字面量按 IEEE 等值匹配，且取主体的宽度（`Float32`
-上的 `1.1` 即 `Float32(1.1)`）：因此 NaN 不匹配任何常量模式（要用守卫 `v if v != v`
+上的 `1.1` 即 `Float32(1.1)`）：因此 NaN 不匹配任何常量模式（要用守卫 `v where v != v`
 接住），`0.0` 与 `-0.0` 互匹配。比较模式的界遵循同一条种类规则：`> 1` 是整数界，
 `> 1.0` 是浮点界，`> 'a'` 是 rune 界（按码点比较）。比较界可以落在主体的域外
 （`UInt8` 上的 `>= -1` 匹配一切）。
@@ -1777,14 +1793,16 @@ let result = when x in {
 };
 ```
 
-分支可以带守卫：`pat if cond then body`。模式绑定在 `cond` 里可见，守卫先于
-分支体求值，为假则落到下一个分支。守卫是 arm 级的，不进子模式——`a or b if c`
-读作 `(a or b) if c`，要给分支各挂条件就写两个 arm。守卫必须是 `Bool`。
+分支可以带守卫：`pat where cond then body`。模式绑定在 `cond` 里可见，守卫先于
+分支体求值，为假则落到下一个分支。守卫是 arm 级的，不进子模式——`a or b where c`
+读作 `(a or b) where c`，要给分支各挂条件就写两个 arm。守卫必须是 `Bool`。
+`for` 用的是同一个关键字、同一个槽位（见 [for 循环](#for-循环)）。旧拼法 `if`
+会报错并指路。
 
 ```koral
 let kind = when v in {
-    .Some(n) if n > 0 then "positive",
-    .Some(n) if n < 0 then "negative",
+    .Some(n) where n > 0 then "positive",
+    .Some(n) where n < 0 then "negative",
     .Some(n) then "zero",
     .None() then "empty",
 };
@@ -2057,7 +2075,7 @@ if x is 0 or is 1 then {
 - 对结构体类型，所有字段均为通配符的 `StructName(_, _)` 形式视为穷尽。
 - 重复模式在编译期被拒绝。
 - 不可达模式（已被前面分支覆盖的模式）在编译期被拒绝。通配符和变量绑定模式豁免此检查。
-- 带守卫的分支（`pat if cond then ...`）不覆盖任何东西：守卫可能为假，穷尽性不依赖它。同一个模式要么补一个不带守卫的分支，要么用通配符。
+- 带守卫的分支（`pat where cond then ...`）不覆盖任何东西：守卫可能为假，穷尽性不依赖它。同一个模式要么补一个不带守卫的分支，要么用通配符。
 
 ```koral
 // 通过比较模式穷尽

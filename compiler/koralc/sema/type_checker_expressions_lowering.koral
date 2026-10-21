@@ -1212,91 +1212,38 @@ given TypeChecker {
         return self.empty_typed_block(Type.Unknown());
     };
 
-    module_private lower_for_binding_pattern_shape(
+    /// The loop body under the optional `for` guard.
+    ///
+    /// The guard is checked here -- the pattern's bindings are already in
+    /// scope -- and must be `Bool`, the same rule a `when` arm guard gets.
+    /// `if` itself does not ask, so this is the only place that does. A false
+    /// guard skips the element and moves on to the next iteration, which is
+    /// exactly the body under an `if`.
+    module_private check_for_body_with_guard(
         self,
-        pattern ForBindingPattern,
-    ) PatternNode = {
-        return when pattern in {
-            .Single(binding) then self.lower_for_binding_element_shape(binding),
-            .Tuple(bindings, span) then {
-                let mutable elements = List[PatternElement].new();
-                for binding in bindings then {
-                    elements.push(
-                        PatternElement(
-                            Option[String].None(),
-                            self.lower_for_binding_element_shape(binding),
-                        ),
-                    );
-                };
-                PatternNode.TuplePattern(elements, span)
-            },
-        };
-    };
-
-    module_private lower_for_binding_element_shape(
-        self,
-        binding PairBindingElement,
-    ) PatternNode = {
-        let _ = self;
-        if binding.is_discard then {
-            return PatternNode.Wildcard(binding.span);
-        };
-        return PatternNode.Variable(binding.name, binding.is_mutable, binding.span);
-    };
-
-    module_private for_pair_binding_types(
-        self,
-        element_type Type,
-        span SourceSpan,
-    ) Pair[Type, Type] = {
-        let mutable first_type = self.get_pair_binding_type(element_type, "first");
-        let mutable second_type = self.get_pair_binding_type(element_type, "second");
-        return when first_type in {
-            .Some(first) then when second_type in {
-                .Some(second) then Pair[Type, Type](first, second),
-                .None() then {
-                    self.push_diagnostic_at_span(
-                        "Type mismatch: expected Pair, got \(type_to_string(element_type))",
-                        span,
-                    );
-                    Pair[Type, Type](Type.Unknown(), Type.Unknown())
-                },
-            },
-            .None() then {
-                self.push_diagnostic_at_span(
-                    "Type mismatch: expected Pair, got \(type_to_string(element_type))",
-                    span,
-                );
-                Pair[Type, Type](Type.Unknown(), Type.Unknown())
-            },
-        };
-    };
-
-    module_private bind_for_binding_pattern(
-        self,
-        pattern ForBindingPattern,
-        element_type Type,
+        body Expr,
+        guard Option[Expr],
         scope Scope,
-    ) Void = {
-        when pattern in {
-            .Single(binding) then {
-                let _ = self.bind_pair_let_symbol(binding, element_type, scope);
-            },
-            .Tuple(bindings, span) then {
-                let field_types = self.for_tuple_binding_types(
-                    element_type,
-                    bindings,
-                    span,
+    ) TypedExpr = {
+        return when guard in {
+            .None() then self.check_statement_body_expr(body, scope),
+            .Some(g) then {
+                let raw_guard = self.check_expr_core_ref(
+                    g,
+                    Option[Type].Some(Type.BoolType()),
+                    scope,
                 );
-                let mutable i UInt = 0;
-                while i < bindings.count() then {
-                    let field_type = when field_types.get(i) in {
-                        .Some(t) then t,
-                        .None() then Type.Unknown(),
-                    };
-                    let _ = self.bind_pair_let_symbol(bindings[i], field_type, scope);
-                    i += 1;
+                if raw_guard.expr_type is not .BoolType() then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected Bool, got \(self.display_type_name(raw_guard.expr_type))",
+                        expr_span(g),
+                    );
                 };
+                let inner = self.check_statement_body_expr(body, scope);
+                make_typed_expr(
+                    TypedExprKind.IfExpr(raw_guard, inner, Option[TypedExpr].None()),
+                    Type.VoidType(),
+                )
             },
         };
     };
@@ -1431,9 +1378,10 @@ given TypeChecker {
     /// 与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
     module_private maybe_desugar_range_for_loop(
         self,
-        pattern ForBindingPattern,
+        pattern PatternNode,
         typed_iter TypedExpr,
         body Expr,
+        guard Option[Expr],
         scope Scope,
     ) Option[TypedExpr] = {
         // 只做 `a..<b`：类型检查阶段产出的是 Range 的 ClosedOpen 枚举构造。
@@ -1451,14 +1399,23 @@ given TypeChecker {
         if start_expr is .None() or end_expr is .None() then {
             return Option[TypedExpr].None();
         };
-        // 只做简单绑定；`(a, b)` 解构仍走通用路径。
+        // 只做简单绑定（`x` / `mutable x` / `_`）；其余模式仍走通用路径。
+        let no_type = Option[TypeNode].None();
+        let no_nested = Option[List[PairBindingElement]].None();
         let mutable binding_opt Option[PairBindingElement] = Option[PairBindingElement].None(
         );
         when pattern in {
-            .Single(binding) then {
-                binding_opt = Option[PairBindingElement].Some(binding);
+            .Variable(name, is_mutable, span) then {
+                binding_opt = Option[PairBindingElement].Some(
+                    PairBindingElement(name, is_mutable, no_type, false, span, no_nested),
+                );
             },
-            .Tuple(_, _) then {},
+            .Wildcard(span) then {
+                binding_opt = Option[PairBindingElement].Some(
+                    PairBindingElement("_", false, no_type, true, span, no_nested),
+                );
+            },
+            _ then {},
         };
         if binding_opt is .None() then {
             return Option[TypedExpr].None();
@@ -1526,7 +1483,7 @@ given TypeChecker {
 
         let prev_in_loop = self.storage.in_loop;
         self.storage.in_loop = true;
-        let typed_body = self.check_statement_body_expr(body, for_scope);
+        let typed_body = self.check_for_body_with_guard(body, guard, for_scope);
         self.storage.in_loop = prev_in_loop;
         inner_statements.push(TypedStatement.ExprStmt(typed_body, span));
 
@@ -1550,16 +1507,17 @@ given TypeChecker {
 
     module_private lower_for_expr(
         self,
-        pattern ForBindingPattern,
+        pattern PatternNode,
         iterable Expr,
         body Expr,
+        guard Option[Expr],
         scope Scope,
     ) TypedExpr = {
         let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope);
 
         // ── 区间循环专用降低 ────────────────────────────────────────────────
         // `for x in a..<b` 走这里，不经过迭代器协议。
-        when self.maybe_desugar_range_for_loop(pattern, typed_iter, body, scope) in {
+        when self.maybe_desugar_range_for_loop(pattern, typed_iter, body, guard, scope) in {
             .Some(lowered) then {
                 return lowered;
             },
@@ -1625,10 +1583,22 @@ given TypeChecker {
                 );
             };
         };
-        self.bind_for_binding_pattern(pattern, iter_item_type, for_scope);
+        let _ = self.bind_pattern_vars(pattern, iter_item_type, for_scope);
+        // A loop cannot skip an element the pattern refuses, so the binding
+        // must be irrefutable. Judged on the LOWERED pattern: a tuple pattern
+        // only becomes total once the subject's arity is known.
+        let probe = self.lower_typed_pattern(pattern, iter_item_type, for_scope);
+        let mutable user_pattern = pattern;
+        if not typed_pattern_is_irrefutable(probe) then {
+            self.push_pattern_diagnostic(
+                pattern,
+                "For binding cannot fail; use 'when' to match",
+            );
+            user_pattern = PatternNode.Wildcard(pattern_span(pattern));
+        };
         let prev_in_loop = self.storage.in_loop;
         self.storage.in_loop = true;
-        let typed_body = self.check_statement_body_expr(body, for_scope);
+        let typed_body = self.check_for_body_with_guard(body, guard, for_scope);
         self.storage.in_loop = prev_in_loop;
 
         let iterator_init = if uses_iterator_method then {
@@ -1654,7 +1624,6 @@ given TypeChecker {
             "next",
             List[TypedExpr].new(),
         );
-        let user_pattern = self.lower_for_binding_pattern_shape(pattern);
         let loop_pattern = if self.extract_option_result_inner(next_call.expr_type) is not .Unknown() then {
             let mutable wrapped = List[PatternElement].new();
             wrapped.push(PatternElement(Option[String].None(), user_pattern));

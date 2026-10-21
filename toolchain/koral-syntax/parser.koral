@@ -2576,6 +2576,11 @@ given CstParser {
         return .Ok(.While(kw, cond, then_kw, body));
     };
 
+    /// `for <match-pattern> "in" <expression> ("where" <expression>)? "then" <body>`
+    ///
+    /// The binding is a full match pattern -- the same one a `when` arm takes.
+    /// The CST records what was written; whether the pattern can fail is the
+    /// compiler's call, not this parser's.
     file_private parse_for_expr(self) Result[CstExpr] = {
         let kw = when self.expect(.KwFor(), "'for'") in {
             .Ok(t) then t,
@@ -2583,7 +2588,7 @@ given CstParser {
                 return .Error(e);
             },
         };
-        let binding = when self.parse_for_binding() in {
+        let binding = when self.parse_pattern_node() in {
             .Ok(p) then p,
             .Error(e) then {
                 return .Error(e);
@@ -2601,6 +2606,26 @@ given CstParser {
                 return .Error(e);
             },
         };
+        // Optional guard: `for p in xs where cond then body`. It sits after the
+        // iterable, right before `then`, the same slot a `when` arm guard takes
+        // before its `then`.
+        let mutable where_kw = Option[Token].None();
+        let mutable guard = Option[CstExpr].None();
+        if self.check(.KwWhere()) then {
+            where_kw = .Some(self.eat());
+            let guard_expr = when self.parse_expr_node() in {
+                .Ok(e) then e,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            guard = .Some(guard_expr);
+        } else if self.check(.KwIf()) then {
+            // The retired guard spelling, and the one a reader coming from
+            // `when` arms reaches for first. Falling through would report
+            // "expected 'then'", which is true but never names the mistake.
+            return .Error("Pattern guards use 'where', not 'if'");
+        };
         let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2613,7 +2638,7 @@ given CstParser {
                 return .Error(e);
             },
         };
-        return .Ok(.For(kw, binding, in_kw, iterable, then_kw, body));
+        return .Ok(.For(kw, binding, in_kw, iterable, where_kw, guard, then_kw, body));
     };
 
     file_private parse_when_expr(self) Result[CstExpr] = {
@@ -2665,7 +2690,7 @@ given CstParser {
                         CstWhenArm(
                             leading_comments,
                             arm.pattern,
-                            arm.guard_if,
+                            arm.guard_kw,
                             arm.guard,
                             arm.then_kw,
                             arm.body,
@@ -2695,12 +2720,12 @@ given CstParser {
                 return .Error(e);
             },
         };
-        // Optional arm guard: `pat if cond then body`. The condition parses
+        // Optional arm guard: `pat where cond then body`. The condition parses
         // like an `if` condition and stops before `then`.
-        let mutable guard_if = Option[Token].None();
+        let mutable guard_kw = Option[Token].None();
         let mutable guard = Option[CstExpr].None();
-        if self.check(.KwIf()) then {
-            guard_if = .Some(self.eat());
+        if self.check(.KwWhere()) then {
+            guard_kw = .Some(self.eat());
             let guard_expr = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then {
@@ -2708,6 +2733,10 @@ given CstParser {
                 },
             };
             guard = .Some(guard_expr);
+        } else if self.check(.KwIf()) then {
+            // The retired guard spelling. Falling through would report
+            // "expected 'then'", which is true but never names the mistake.
+            return .Error("Pattern guards use 'where', not 'if'");
         };
         let then_kw = when self.expect(.KwThen(), "'then'") in {
             .Ok(t) then t,
@@ -2743,7 +2772,7 @@ given CstParser {
             CstWhenArm(
                 List[Token].new(),
                 pattern,
-                guard_if,
+                guard_kw,
                 guard,
                 then_kw,
                 body,
@@ -3476,58 +3505,6 @@ given CstParser {
             },
         };
         return .Ok(.Nested(lp, items, rp));
-    };
-
-    /// A `for` binding: `<binding-element> | <tuple-binding>`. This is a
-    /// BINDING, not a match pattern -- `?v`, `.Case(x)`, `a or b` and friends
-    /// belong to `is`/`when` and are refused here, the way the compilers'
-    /// `parse_for_binding_pattern` refuses them.
-    file_private parse_for_binding(self) Result[CstForBinding] = {
-        if self.check(.LParen()) then {
-            let lp = self.eat();
-            let first = when self.parse_pair_binding() in {
-                .Ok(binding) then binding,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            // At least two slots: `for (x) in ...` is not a tuple binding.
-            if self.peek_past_comments() is not .Comma() then {
-                return .Error("Parse error: expected ',' in tuple binding");
-            };
-            let mutable items = List[CstTupleBindingItem].new();
-            let mutable current = first;
-            let mutable more = true;
-            while more then {
-                let sep = self.eat_comma();
-                items.push(CstTupleBindingItem(current, sep));
-                if not self.sep_has_comma(sep) then {
-                    more = false;
-                } else {
-                    let next = when self.parse_pair_binding() in {
-                        .Ok(binding) then binding,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    current = next;
-                };
-            };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            return .Ok(.Tuple(lp, items, rp));
-        };
-        let binding = when self.parse_pair_binding() in {
-            .Ok(binding) then binding,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        return .Ok(.Single(binding));
     };
 
     // ========================================================================

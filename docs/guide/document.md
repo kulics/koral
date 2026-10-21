@@ -1087,7 +1087,7 @@ while i < 10 then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator is bound and the body following `then` runs. The loop binding position accepts the same shapes as `let` — it is a binding, not a general pattern — and every element must be assignable to that shape. If the element type does not fit, the error is raised at compile time; the iteration is never skipped at runtime. `for` is an expression that produces `Void`.
+In each iteration, the next value produced by the iterator is bound and the body following `then` runs. The loop binding position takes the **full match pattern** grammar — exactly what a `when` arm takes — but it must be **irrefutable**: a loop cannot skip an element the pattern refuses, so a refutable pattern is rejected at compile time with `For binding cannot fail; use 'when' to match`. `for` is an expression that produces `Void`.
 
 ```koral
 let nums List[Int] = [10, 20, 30];
@@ -1108,13 +1108,25 @@ let for_value = for x in nums then {
 };
 ```
 
-The binding may use `_`, `mutable`, and an optional type annotation, and it may be a `Pair` destructuring:
+The binding is a pattern: `_`, `x`, `mutable x`, struct destructuring, tuple destructuring and nested destructuring all qualify, as long as the result is irrefutable:
 
 ```koral
 let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)];
 
 for (left, right) in pairs then {
     println((left + right).to_string());
+};
+
+for Point(x, y, z) in points then {
+    println(x);
+};
+```
+
+`for` also takes a `where` guard, after the iterable and before `then` — the same slot a `when` arm guard takes before its `then`. A false guard skips the element and moves on to the next iteration; it does not end the loop. The pattern's bindings are visible in the guard:
+
+```koral
+for p in points where p.x > 0 then {
+    println(p.x);
 };
 ```
 
@@ -1717,7 +1729,7 @@ for h in xs then {             // ok: `h` is `?Node`
 
 ## 4. Pattern Matching
 
-Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions. (`for` loops take a plain `let`-shaped binding instead — see [for Loop](#for-loop).)
+Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions, and the binding a `for` loop takes (see [for Loop](#for-loop)).
 
 ### Pattern Forms
 
@@ -1742,7 +1754,7 @@ integer types (`-5` never matches an unsigned type), floats against `Float32` /
 `Float64`, `true` against `Bool`, strings against `String`, runes against
 `Rune` (or an ASCII `UInt8`). A float literal matches under IEEE equality at
 the subject's width (`1.1` against `Float32` is `Float32(1.1)`), so NaN matches
-no literal -- catch it with a guard such as `v if v != v` -- and `0.0` matches
+no literal -- catch it with a guard such as `v where v != v` -- and `0.0` matches
 `-0.0`. A comparison bound follows the same kind rule: `> 1` is an integer
 bound, `> 1.0` a float one, `> 'a'` a rune one (compared by code point). A
 bound may lie outside the subject's domain (`>= -1` on `UInt8` matches
@@ -1837,16 +1849,18 @@ let result = when x in {
 };
 ```
 
-An arm may carry a guard: `pat if cond then body`. The pattern's bindings are
+An arm may carry a guard: `pat where cond then body`. The pattern's bindings are
 visible in `cond`, the guard is evaluated before the branch body, and a false
 guard falls through to the next arm. The guard is part of the arm, never of a
-sub-pattern -- `a or b if c` reads `(a or b) if c`; give the branches separate
-arms for separate conditions. A guard must be `Bool`.
+sub-pattern -- `a or b where c` reads `(a or b) where c`; give the branches
+separate arms for separate conditions. A guard must be `Bool`. `for` uses the
+same keyword in the same slot (see [for Loop](#for-loop)); the retired `if`
+spelling is rejected with a message naming `where`.
 
 ```koral
 let kind = when v in {
-    .Some(n) if n > 0 then "positive",
-    .Some(n) if n < 0 then "negative",
+    .Some(n) where n > 0 then "positive",
+    .Some(n) where n < 0 then "negative",
     .Some(n) then "zero",
     .None() then "empty",
 };
@@ -2131,7 +2145,7 @@ The `when` expression checks that patterns are exhaustive:
 - For struct types, `StructName(_, _)`-style patterns with wildcards for every field are treated as exhaustive.
 - Duplicate patterns are rejected at compile time.
 - Unreachable patterns (patterns already covered by earlier arms) are rejected at compile time. Wildcard and variable binding patterns are exempt from this check.
-- A guarded arm (`pat if cond then ...`) covers nothing: the guard may fail, so the arm is never relied on for exhaustiveness. Cover the same pattern with an unguarded arm, or use a wildcard.
+- A guarded arm (`pat where cond then ...`) covers nothing: the guard may fail, so the arm is never relied on for exhaustiveness. Cover the same pattern with an unguarded arm, or use a wildcard.
 
 ```koral
 // Exhaustive via comparison patterns

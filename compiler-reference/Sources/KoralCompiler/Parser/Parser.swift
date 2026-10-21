@@ -24,9 +24,6 @@ public class Parser {
   /// the statement that produced them.
   var pendingStatements: [StatementNode] = []
 
-  /// Extra `let (..) = temp;` destructurings implied by a nested `for`
-  /// binding. Consumed by `forExpression` to lead the loop body.
-  var forBindingExtras: [([PairBindingElement], String)] = []
   nonisolated(unsafe) public static var allImplDeclaredParameterDefaults: Set<String> = []
 
   public init(lexer: Lexer) {
@@ -349,77 +346,6 @@ public class Parser {
 
     return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
   }
-
-  func parseForBindingPattern() throws -> BindingPatternNode {
-    let startSpan = currentSpan
-
-    // `(a, b, c)` destructures a struct by position -- the same rule as a
-    // tuple binding. At least two slots. Slots may nest: `(a, (b, c))`.
-    if currentToken === .leftParen {
-      try match(.leftParen)
-      var bindings: [PairBindingElement] = [try parsePairBindingElement()]
-      try match(.comma)
-      while true {
-        bindings.append(try parsePairBindingElement())
-        if currentToken === .comma {
-          try match(.comma)
-        } else {
-          break
-        }
-      }
-      try match(.rightParen)
-      let (flat, extras) = flattenNestedBindings(bindings)
-      forBindingExtras = extras
-      return .tuple(bindings: flat, span: startSpan)
-    }
-
-    let binding = try parsePairBindingElement()
-    if let children = binding.nested {
-      let tempName = "__koral_nslot_\(binding.span.start.line)_\(binding.span.start.column)"
-      let (flat, extras) = flattenNestedBindings(children)
-      forBindingExtras = [(flat, tempName)]
-      forBindingExtras.append(contentsOf: extras)
-      return .binding(
-        PairBindingElement(
-          name: tempName, type: nil, mutable: false, isDiscard: false, span: binding.span)
-      )
-    }
-    forBindingExtras = []
-    return .binding(binding)
-  }
-
-  private func parseForBindingElement() throws -> PairBindingElement {
-    let elemSpan = currentSpan
-
-    if case .identifier("_") = currentToken {
-      try match(.identifier("_"))
-      return PairBindingElement(name: "_", type: nil, mutable: false, isDiscard: true, span: elemSpan)
-    }
-
-    var mutable = false
-    if currentToken === .mutableKeyword {
-      try match(.mutableKeyword)
-      mutable = true
-    }
-
-    guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "for binding")
-    }
-
-    if !isValidVariableName(name) {
-      throw ParserError.invalidVariableName(span: currentSpan, name: name)
-    }
-
-    try match(.identifier(name))
-
-    var type: TypeNode? = nil
-    if currentToken !== .inKeyword {
-      type = try parseType()
-    }
-
-    return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
-  }
-
 
   // MARK: - Default Value Parsing
 

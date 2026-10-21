@@ -222,11 +222,12 @@ one-shot and has only `next`; to run a pipeline over one, collect it first.
 
 - Wildcard (`_`), literal (`1`, `1.5`, `"s"`, `'a'`, `true`), variable binding, comparison (`> n`, `<= n`, `> 1.5`, `>= 'a'`)
 - Struct/Enum destructuring and tuple destructuring (including nested)
-- List destructuring by length: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`
-- Rest pattern `...` — ignores the unwritten slots of a list, enum, struct or tuple pattern; never binds
+- List destructuring by length: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`, `[...]`
+- Rest pattern `...` — never binds. In a list pattern it swallows the unwritten middle and may sit alongside the written slots; in a struct or enum-case pattern it must be the element list's only slot and ignores every field, named or not (`Point(...)` is `Point(_, _, _)`)
 - Logical patterns: `or`, `and`, `not`
 - `is` chains: `x is A or is B`, `x is A and is not B` — one subject, several patterns, joined by `or is` / `and is`
-- Arm guards: `pat if cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness
+- Arm guards: `pat where cond then body` — the pattern's bindings are visible in the guard; a guarded arm covers nothing for exhaustiveness. `for` uses the same keyword in the same slot (after the iterable, before `then`), where a false guard skips the element. The retired `if` spelling is rejected with a message naming `where`
+- `for` bindings take the same pattern grammar as a `when` arm — `_`, `x`, `mutable x`, struct, tuple, nested — and must be irrefutable: a loop cannot skip an element the pattern refuses
 
 ### Traits and Generics
 

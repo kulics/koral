@@ -686,14 +686,22 @@ given Printer {
             self.write_space();
             self.print_expr(body);
         },
-        .For(kw, binding, eq, iterable, then_kw, body) then {
+        .For(kw, binding, eq, iterable, where_kw, guard, then_kw, body) then {
             self.write_token(kw);
             self.write_space();
-            self.print_for_binding(binding);
+            self.print_pattern(binding);
             self.write_space();
             self.write_token(eq);
             self.write_space();
             self.print_expr(iterable);
+            if where_kw is .Some(wk) then {
+                self.write_space();
+                self.write_token(wk);
+                self.write_space();
+                if guard is .Some(gexpr) then {
+                    self.print_expr(gexpr);
+                };
+            };
             self.write_space();
             self.write_token(then_kw);
             self.write_space();
@@ -1139,9 +1147,9 @@ given Printer {
                 self.write_newline();
             };
             self.print_pattern(arm.pattern);
-            if arm.guard_if is .Some(gif) then {
+            if arm.guard_kw is .Some(gkw) then {
                 self.write_space();
-                self.write_token(gif);
+                self.write_token(gkw);
                 self.write_space();
                 if arm.guard is .Some(gexpr) then {
                     self.print_expr(gexpr);
@@ -1247,20 +1255,6 @@ given Printer {
             };
         },
         .Nested(lparen, items, rparen) then {
-            self.write_token(lparen);
-            for item in items then {
-                self.print_pair_binding(item.binding);
-                if item.comma is .Some(comma) then {
-                    self.print_sep(comma);
-                };
-            };
-            self.write_token(rparen);
-        },
-    };
-
-    file_private print_for_binding(self, binding CstForBinding) Void = when binding in {
-        .Single(binding) then self.print_pair_binding(binding),
-        .Tuple(lparen, items, rparen) then {
             self.write_token(lparen);
             for item in items then {
                 self.print_pair_binding(item.binding);
@@ -3087,8 +3081,11 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
         validate_expr_usage(subject, false) or return;
         return validate_expr_usage(body, true);
     },
-    .For(_, _, _, iterable, _, body) then {
+    .For(_, _, _, iterable, _, guard, _, body) then {
         validate_expr_usage(iterable, false) or return;
+        if guard is .Some(gexpr) then {
+            validate_expr_usage(gexpr, false) or return;
+        };
         return validate_expr_usage(body, true);
     },
     .When(_, subject, _, _, arms, _) then {

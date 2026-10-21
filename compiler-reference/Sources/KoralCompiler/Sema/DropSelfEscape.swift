@@ -182,8 +182,11 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     }
     return dropSelfEscapeSpanIn(body, inLambda: inLambda)
 
-  case .forExpression(_, let iterable, let body, _):
+  case .forExpression(_, let iterable, let body, let guardExpr, _):
     if let span = dropSelfEscapeSpanIn(iterable, inLambda: inLambda) {
+      return span
+    }
+    if let guardExpr, let span = dropSelfEscapeSpanIn(guardExpr, inLambda: inLambda) {
       return span
     }
     return dropSelfEscapeSpanIn(body, inLambda: inLambda)

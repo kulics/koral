@@ -2162,8 +2162,9 @@ extension TypeChecker {
         callArgs: arguments
       )
 
-    case .forExpression(let pattern, let iterable, let body, _):
-      return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
+    case .forExpression(let pattern, let iterable, let body, let guardExpr, _):
+      return try inferForExpression(
+        pattern: pattern, iterable: iterable, body: body, guardExpr: guardExpr)
 
     case .rangeExpression(let op, let left, let right, _):
       return try inferRangeExpression(
@@ -8272,9 +8273,10 @@ extension TypeChecker {
   ///       .None then break
   ///     }
   func inferForExpression(
-    pattern: BindingPatternNode,
+    pattern: PatternNode,
     iterable: ExpressionNode,
-    body: ExpressionNode
+    body: ExpressionNode,
+    guardExpr: ExpressionNode?
   ) throws -> TypedExpressionNode {
     // 1. Type check the iterable expression
     let typedIterable = try inferTypedExpression(iterable)
@@ -8282,7 +8284,7 @@ extension TypeChecker {
     // ── 区间循环专用降低 ────────────────────────────────────────────────────
     // `for x in a..<b` 走这里，不经过迭代器协议。
     if let rangeLoop = try maybeDesugarRangeForLoop(
-      pattern: pattern, typedIterable: typedIterable, body: body) {
+      pattern: pattern, typedIterable: typedIterable, body: body, guardExpr: guardExpr) {
       return rangeLoop
     }
 
@@ -8292,7 +8294,7 @@ extension TypeChecker {
     if let (inner, _) = referenceTypeComponents(iterableType) {
       iterableType = inner
     }
-    
+
     // 2. First check if the expression type itself is an iterator
     //    (has a next(mutable self) -> [T]Option method)
     if let elementType = try? extractIteratorElementType(iterableType) {
@@ -8302,29 +8304,30 @@ extension TypeChecker {
         traitTypeArgs: [elementType],
         context: "for-in iterator check"
       )
-      let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
+      let typedPattern = try typeCheckForBinding(pattern, elementType: elementType)
       return try desugarForLoop(
         pattern: typedPattern,
         typedIterable: typedIterable,
         iteratorType: iterableType,
         elementType: elementType,
         body: body,
+        guardExpr: guardExpr,
         needsIteratorCall: false  // Don't call iterator(), use expression directly
       )
     }
-    
+
     // 3. Look up the iterator() method on the iterable type
     guard let iteratorMethod = try lookupConcreteMethodSymbol(on: iterableType, name: "iterator") else {
       throw SemanticError(.generic(
         "Type \(iterableType) is not iterable: missing iterator() method and does not implement Iterator"
       ), span: currentSpan)
     }
-    
+
     // 4. Get the iterator type from the method's return type
     guard case .function(_, let iteratorType) = iteratorMethod.type else {
       throw SemanticError(.generic("iterator() must be a function"), span: currentSpan)
     }
-    
+
     // 5. Extract the element type from the iterator
     let elementType = try extractIteratorElementType(iteratorType)
 
@@ -8341,8 +8344,8 @@ extension TypeChecker {
       traitTypeArgs: [elementType, iteratorType],
       context: "for-in iterable check"
     )
-    let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
-    
+    let typedPattern = try typeCheckForBinding(pattern, elementType: elementType)
+
     // 7. Desugar the for loop
     return try desugarForLoop(
       pattern: typedPattern,
@@ -8350,6 +8353,7 @@ extension TypeChecker {
       iteratorType: iteratorType,
       elementType: elementType,
       body: body,
+      guardExpr: guardExpr,
       needsIteratorCall: true  // Need to call iterator()
     )
   }
@@ -8376,12 +8380,13 @@ extension TypeChecker {
   /// 一个 `T`，故 `end <= max_value`，于是 `i <= max_value - 1`），所以 `unwrap()` 不会触发。
   ///
   /// 只处理**有界闭开区间 `a..<b`**（`for i in 0..<n` 是压倒性的常见写法）和**简单绑定**
-  /// （含丢弃 `_`）。其余区间形态（`a..=b` 的末元自增会碰到 `max_value`、半开区间、无界区间）
-  /// 与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
+  /// （`x` / `mutable x` / `_`）。其余区间形态（`a..=b` 的末元自增会碰到 `max_value`、半开区间、
+  /// 无界区间）与解构绑定、非区间可迭代对象仍走通用迭代器路径，语义不变。
   private func maybeDesugarRangeForLoop(
-    pattern: BindingPatternNode,
+    pattern: PatternNode,
     typedIterable: TypedExpressionNode,
-    body: ExpressionNode
+    body: ExpressionNode,
+    guardExpr: ExpressionNode?
   ) throws -> TypedExpressionNode? {
     // 只做 `a..<b`：类型检查阶段产出的是 Range 的 ClosedOpen 枚举构造。
     guard case .enumConstruction(_, let caseName, let boundArgs) = typedIterable,
@@ -8389,7 +8394,16 @@ extension TypeChecker {
       return nil
     }
     // 只做简单绑定；`(a, b)` 解构仍走通用路径。
-    guard case .binding(let binding) = pattern else {
+    let bindName: String
+    let bindMutable: Bool
+    switch pattern {
+    case .variable(let name, let isMutable, _):
+      bindName = name
+      bindMutable = isMutable
+    case .wildcard:
+      bindName = "_"
+      bindMutable = false
+    default:
       return nil
     }
     let typedLeft = boundArgs[0]
@@ -8430,7 +8444,7 @@ extension TypeChecker {
     let advance = TypedStatementNode.assignment(
       target: iterVarExpr, operator: nil, value: advanceValue)
 
-    let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
+    let typedPattern = try typeCheckForBinding(pattern, elementType: elementType)
 
     return try withNewScope {
       currentScope.define(iterName, defId: iterMutSymbol.defId)
@@ -8439,7 +8453,7 @@ extension TypeChecker {
       var bodyStatements: [TypedStatementNode] = []
       if case .variable(let bindSymbol) = typedPattern {
         bodyStatements.append(.variableDeclaration(
-          identifier: bindSymbol, value: iterVarExpr, mutable: binding.mutable))
+          identifier: bindSymbol, value: iterVarExpr, mutable: bindMutable))
       }
       // 自增先于 body，`continue` 才会正确前进。
       bodyStatements.append(advance)
@@ -8453,7 +8467,8 @@ extension TypeChecker {
         let savedInLoop = inLoop
         inLoop = true
         defer { inLoop = savedInLoop }
-        return try inferCheckedStatementBodyExpression(body)
+        return try underForGuard(
+          inferCheckedStatementBodyExpression(body), guardExpr: guardExpr)
       }
       bodyStatements.append(.expression(typedBody))
 
@@ -8510,75 +8525,44 @@ extension TypeChecker {
     ), span: currentSpan)
   }
 
-  private func typeCheckForBindingPattern(
-    _ pattern: BindingPatternNode,
+  /// The `for` binding is a full match pattern, and a loop cannot skip an
+  /// element the pattern refuses: it must be irrefutable. Judged on the
+  /// lowered pattern -- a tuple pattern only becomes total once the subject's
+  /// arity is known.
+  private func typeCheckForBinding(
+    _ pattern: PatternNode,
     elementType: Type
   ) throws -> TypedPattern {
-    switch pattern {
-    case .binding(let binding):
-      return try typeCheckForBindingElement(binding, expectedType: elementType)
-    case .tuple(let bindings, let span):
-      // `(a, b, c)` -- positional destructuring of a struct with exactly that
-      // many fields, in declaration order. Field types come from the subject's
-      // DECLARATION, never from a name.
-      //
-      // A weak handle has no fields to destructure: it is opaque until
-      // `upgrade`d. Binding the handle whole (`for w in ws`) is fine.
-      try rejectWeakPatternSubject(elementType, span: span)
-      let innerType = unwrapTupleSubjectType(elementType)
-      guard let members = try tupleDestructuringMembers(of: innerType),
-            members.count == bindings.count else {
-        throw SemanticError(
-          .typeMismatch(
-            expected: "a struct with \(bindings.count) fields",
-            got: innerType.description
-          ),
-          span: span
-        )
-      }
-      try checkPositionalDestructuring(
-        members: members,
-        owner: tupleDestructuringOwner(of: innerType),
-        typeName: innerType.description,
-        binds: bindings.map { !$0.isDiscard },
-        slotSpans: bindings.map { $0.span },
-        span: span
+    let (typed, _) = try checkPattern(pattern, subjectType: elementType)
+    guard typed.isIrrefutable else {
+      throw SemanticError(
+        .generic("For binding cannot fail; use 'when' to match"),
+        span: pattern.span
       )
-
-      var elements: [TypedPattern] = []
-      for (index, binding) in bindings.enumerated() {
-        elements.append(try typeCheckForBindingElement(binding, expectedType: members[index].type))
-      }
-      // Display-only name for exhaustiveness messages; the match itself is
-      // against the subject's declaration identity.
-      return .structPattern(typeName: innerType.description, elements: elements)
     }
+    return typed
   }
 
-  private func typeCheckForBindingElement(
-    _ binding: PairBindingElement,
-    expectedType: Type
-  ) throws -> TypedPattern {
-    var bindingType = expectedType
-
-    if let typeNode = binding.type {
-      let annotatedType = try resolveTypeNode(typeNode)
-      if annotatedType != expectedType {
-        throw SemanticError(.typeMismatch(
-          expected: annotatedType.description,
-          got: expectedType.description
-        ), span: binding.span)
-      }
-      bindingType = annotatedType
+  /// The loop body under the optional `for` guard.
+  ///
+  /// The guard is checked here -- the pattern's bindings are already in scope
+  /// -- and must be `Bool`, the same rule a `when` arm guard gets. A false
+  /// guard skips the element and moves on to the next iteration, which is
+  /// exactly the body under an `if`.
+  private func underForGuard(
+    _ typedBody: TypedExpressionNode,
+    guardExpr: ExpressionNode?
+  ) throws -> TypedExpressionNode {
+    guard let guardExpr else { return typedBody }
+    let typedGuard = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
+    if typedGuard.type != .bool {
+      throw SemanticError(
+        .typeMismatch(expected: "Bool", got: typedGuard.type.description),
+        span: guardExpr.span
+      )
     }
-
-    if binding.isDiscard {
-      return .wildcard
-    }
-
-    let kind: VariableKind = binding.mutable ? .MutableValue : .Value
-    let symbol = makeLocalSymbol(name: binding.name, type: bindingType, kind: .variable(kind))
-    return .variable(symbol: symbol)
+    return .ifExpression(
+      condition: typedGuard, thenBranch: typedBody, elseBranch: nil, type: .void)
   }
 
   /// Desugars a for loop into let + while + match.
@@ -8588,6 +8572,7 @@ extension TypeChecker {
     iteratorType: Type,
     elementType: Type,
     body: ExpressionNode,
+    guardExpr: ExpressionNode?,
     needsIteratorCall: Bool
   ) throws -> TypedExpressionNode {
     // Generate unique iterator variable name
@@ -8626,7 +8611,8 @@ extension TypeChecker {
       let whenExpr = try buildForLoopWhenExpression(
         nextCall: nextCall,
         pattern: pattern,
-        body: body
+        body: body,
+        guardExpr: guardExpr
       )
       
       let whileStmt = TypedStatementNode.whileStatement(
@@ -8718,11 +8704,12 @@ extension TypeChecker {
   func buildForLoopWhenExpression(
     nextCall: TypedExpressionNode,
     pattern: TypedPattern,
-    body: ExpressionNode
+    body: ExpressionNode,
+    guardExpr: ExpressionNode?
   ) throws -> TypedExpressionNode {
     // Build Some case pattern with the user's pattern
     let somePattern = buildSomePattern(userPattern: pattern)
-    
+
     // Type check the body in a new scope with pattern bindings
     let typedBody = try withNewScope {
       // Bind pattern variables using the typed pattern symbols
@@ -8736,7 +8723,8 @@ extension TypeChecker {
       let savedInLoop = inLoop
       inLoop = true
       defer { inLoop = savedInLoop }
-      return try inferCheckedStatementBodyExpression(body)
+      return try underForGuard(
+        inferCheckedStatementBodyExpression(body), guardExpr: guardExpr)
     }
     
     // Build None case with break
