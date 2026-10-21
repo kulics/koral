@@ -22,7 +22,7 @@ type MIRFunctionEmitPlan(
 
 file_private let is_borrowed_reference_like_type(t Type) Bool = {
     return when t.indirection_info() in {
-        .Some(info) then info.family is .ManagedReference() or info.family is .WeakReference(),
+        .Some(info) then info.family is .ManagedReference() or is .WeakReference(),
         .None() then false,
     };
 };
@@ -884,7 +884,7 @@ given MIRFunctionCodeEmitter {
 
     module_private emit_local_declarations(self) Void = {
         for local in self.function.locals then {
-            if local.storage is not .Parameter() and local.storage is not .Capture() then {
+            if local.storage is not .Parameter() and is not .Capture() then {
                 let mutable c_type = self.codegen.c_type_name(local.local_type);
                 // Skip void/unknown locals — C does not allow void variables.
                 // Use a placeholder name that will be replaced with "(void)0" when referenced.
@@ -1170,7 +1170,7 @@ given MIRFunctionCodeEmitter {
         let mutable target_type = self.type_of_place(assignment.target);
         // Use checked shift for integer types to avoid C undefined behavior
         // when shift amount >= bit width.
-        if (assignment.operator_kind is .LeftShiftAssign() or assignment.operator_kind is .RightShiftAssign()) and self.codegen.is_integer_type(
+        if (assignment.operator_kind is .LeftShiftAssign() or is .RightShiftAssign()) and self.codegen.is_integer_type(
             target_type,
         ) then {
             let shift_op = if assignment.operator_kind is .LeftShiftAssign() then BitwiseOperator.LeftShift(
@@ -1519,7 +1519,7 @@ given MIRFunctionCodeEmitter {
         constant_type Type,
     ) String = {
         let base = self.codegen.sanitize_c_numeric_literal(value);
-        if not (constant_type is .Float32Type()) then {
+        if constant_type is not .Float32Type() then {
             return base;
         };
         if base.contains(".") or base.contains("e") or base.contains("E") then {
@@ -1619,7 +1619,7 @@ given MIRFunctionCodeEmitter {
             .Bitwise(op, checked_shift) then {
                 let expr = if checked_shift and self.codegen.is_integer_type(
                     result_type,
-                ) and (op is .LeftShift() or op is .RightShift()) then self.codegen.next_temp_with_call_2(
+                ) and (op is .LeftShift() or is .RightShift()) then self.codegen.next_temp_with_call_2(
                     c_type,
                     self.codegen.checked_shift_func_name(op, result_type),
                     left,
@@ -1771,7 +1771,7 @@ given MIRFunctionCodeEmitter {
                         final_emission.expression,
                         call.result_type,
                     );
-                    if ownership is .Move() or ownership is .Take() then {
+                    if ownership is .Move() or is .Take() then {
                         self.consume_moved_source(call.arguments[UInt(0)]);
                     };
                     self.emit_residual_cleanups(
@@ -1841,10 +1841,10 @@ given MIRFunctionCodeEmitter {
                         second.expression,
                         call.result_type,
                     );
-                    if first_ownership is .Move() or first_ownership is .Take() then {
+                    if first_ownership is .Move() or is .Take() then {
                         self.consume_moved_source(call.arguments[UInt(0)]);
                     };
-                    if second_ownership is .Move() or second_ownership is .Take() then {
+                    if second_ownership is .Move() or is .Take() then {
                         self.consume_moved_source(call.arguments[UInt(1)]);
                     };
                     self.emit_residual_cleanups(
@@ -1933,7 +1933,7 @@ given MIRFunctionCodeEmitter {
         let mutable consume_i UInt = 0;
         while consume_i < call.arguments.count() then {
             let ownership = ownerships[consume_i];
-            if ownership is .Move() or ownership is .Take() then {
+            if ownership is .Move() or is .Take() then {
                 self.consume_moved_source(call.arguments[consume_i]);
             };
             consume_i += 1;
@@ -2550,7 +2550,7 @@ given MIRFunctionCodeEmitter {
     ) MIRValueEmission = {
         let inner = self.emit_value_source(conversion.inner);
         let mutable inner_type = self.type_of_value(conversion.inner);
-        let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow();
+        let should_retain = conversion.source_ownership is .Copy() or is .Borrow();
         // If inner is a scalar type mutable (not a ref), we need to heap-allocate it first
         let is_ref_type = when inner_type in {
             .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(...) then true,
@@ -2838,7 +2838,7 @@ given MIRFunctionCodeEmitter {
             "struct __koral_Ref",
             "(struct __koral_Ref){ .ptr = \(receiver_result).ptr }",
         );
-        if receiver_ownership is .Copy() or receiver_ownership is .Borrow() then {
+        if receiver_ownership is .Copy() or is .Borrow() then {
             self.codegen.add_indent();
             self.codegen.buffer.push_string("__koral_retain_value(");
             self.codegen.buffer.push_string(ref_var);
@@ -3983,11 +3983,11 @@ given MIRFunctionCodeEmitter {
         target_type Type,
     ) Bool = {
         return when source_type in {
-            .ReferenceType(_) then target_type is .ReferenceType(_) or target_type is .MutableReferenceType(_),
-            .MutableReferenceType(_) then target_type is .ReferenceType(_) or target_type is .MutableReferenceType(_),
-            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or target_type is .MutableWeakReferenceType(_),
-            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or target_type is .MutableWeakReferenceType(_),
-            .MutablePointerType(_) then target_type is .PointerType(_) or target_type is .MutablePointerType(_),
+            .ReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            .MutablePointerType(_) then target_type is .PointerType(_) or is .MutablePointerType(_),
             _ then source_type == target_type,
         };
     };
@@ -4448,7 +4448,7 @@ file_private let build_mir_lifetime_plan(
     if not has_tracked_drop_locals then {
         let mutable hoisted_declaration_locals = List[MIRLocalID].new();
         for local in function.locals then {
-            if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(
+            if local.storage is not .Parameter() and is not .Capture() and not codegen.type_is_void_or_never(
                 local.local_type,
             ) then {
                 hoisted_declaration_locals.push(local.id);
@@ -4681,7 +4681,7 @@ file_private let build_mir_lifetime_plan(
         };
     };
     for local in function.locals then {
-        if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(
+        if local.storage is not .Parameter() and is not .Capture() and not codegen.type_is_void_or_never(
             local.local_type,
         ) then {
             let has_init_flag = tracked_init_locals.get(local.id.raw_value) or else false;

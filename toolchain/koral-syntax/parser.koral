@@ -333,7 +333,7 @@ given CstParser {
                     return false;
                 };
                 i = after_type;
-            } else if (self.tokens[i] is not .Comma()) and (self.tokens[i] is not .RParen()) then {
+            } else if self.tokens[i] is not .Comma() and is not .RParen() then {
                 let after_type = self.scan_type_shape_at(i) or else {
                     return false;
                 };
@@ -491,7 +491,7 @@ given CstParser {
     /// wrap it. A line comment before the `;` pushes the `;` to its own line.
     file_private finish_decl_item(self, d CstDecl) Result[CstItem] = {
         let mutable comments = List[Token].new();
-        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+        while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
         };
         when self.eat_decl_semi() in {
@@ -513,7 +513,7 @@ given CstParser {
     /// A formatter may not drop them.
     file_private eat_comma(self) Option[CstComma] = {
         let mutable comments = List[Token].new();
-        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+        while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
         };
         if self.check(Token.Comma()) then {
@@ -573,8 +573,7 @@ given CstParser {
     };
 
     file_private is_access_mod(self) Bool =
-        self.peek() is .KwPublic() or self.peek() is .KwPrivate() or self.peek() is .KwProtected() or self.peek(
-        ) is .KwProtectedPublic();
+        self.peek() is .KwPublic() or is .KwPrivate() or is .KwProtected() or is .KwProtectedPublic();
 
     /// Eats one access modifier. Each of the four is a single token, so there is
     /// nothing to merge here -- an older spelling treated `module_private public`
@@ -1099,7 +1098,7 @@ given CstParser {
     file_private starts_flow_chain(self) Bool = {
         return when self.peek() in {
             .KwAnd() then self.peek_at_skip_nl(1) is .KwThen(),
-            .KwOr() then self.peek_at_skip_nl(1) is .KwElse() or self.peek_at_skip_nl(1) is .KwReturn(),
+            .KwOr() then self.peek_at_skip_nl(1) is .KwElse() or is .KwReturn(),
             _ then false,
         };
     };
@@ -1107,10 +1106,8 @@ given CstParser {
     /// Whether the operator at the cursor is a logical operator.
     file_private starts_logical_chain(self) Bool = {
         return when self.peek() in {
-            .KwAnd() then not self.peek_at_skip_nl(1) is .KwThen(),
-            .KwOr() then not self.peek_at_skip_nl(1) is .KwElse() and not self.peek_at_skip_nl(
-                1,
-            ) is .KwReturn(),
+            .KwAnd() then self.peek_at_skip_nl(1) is not .KwThen(),
+            .KwOr() then self.peek_at_skip_nl(1) is not .KwElse() and is not .KwReturn(),
             _ then false,
         };
     };
@@ -1156,7 +1153,7 @@ given CstParser {
 
     file_private parse_logical_and_chain(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = operand;
-        while self.check(.KwAnd()) and not self.peek_at_skip_nl(1) is .KwThen() then {
+        while self.check(.KwAnd()) and self.peek_at_skip_nl(1) is not .KwThen() then {
             let op = self.eat();
             let right = self.parse_not() or return;
             left = .BinaryOp(left, op, right);
@@ -1166,9 +1163,7 @@ given CstParser {
 
     file_private parse_logical_tail(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = self.parse_logical_and_chain(operand) or return;
-        while self.check(.KwOr()) and not self.peek_at_skip_nl(1) is .KwElse() and not self.peek_at_skip_nl(
-            1,
-        ) is .KwReturn() then {
+        while self.check(.KwOr()) and self.peek_at_skip_nl(1) is not .KwElse() and is not .KwReturn() then {
             let op = self.eat();
             let rhs_operand = self.parse_not() or return;
             let right = self.parse_logical_and_chain(rhs_operand) or return;
@@ -1179,14 +1174,12 @@ given CstParser {
 
     /// A logical operator arriving after a flow chain.
     file_private reject_logical_at_flow_layer(self, expr CstExpr) Result[CstExpr] = {
-        if self.peek() is .KwAnd() and not self.peek_at_skip_nl(1) is .KwThen() then {
+        if self.peek() is .KwAnd() and self.peek_at_skip_nl(1) is not .KwThen() then {
             return .Error(
                 "Parse error: 'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
             );
         };
-        if self.peek() is .KwOr() and not self.peek_at_skip_nl(1) is .KwElse() and not self.peek_at_skip_nl(
-            1,
-        ) is .KwReturn() then {
+        if self.peek() is .KwOr() and self.peek_at_skip_nl(1) is not .KwElse() and is not .KwReturn() then {
             return .Error(
                 "Parse error: 'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
             );
@@ -1581,8 +1574,7 @@ given CstParser {
 
     file_private parse_prefix(self) Result[CstExpr] = {
         let mutable leading_comments = List[Token].new();
-        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) or self.peek(
-        ) is .Semi() then {
+        while self.peek() is .LineComment(_) or is .BlockComment(_) or is .Semi() then {
             if self.peek() is .Semi() then {
                 let ignored_semi = self.eat();
             } else {
@@ -2013,7 +2005,7 @@ given CstParser {
                 continue;
             };
             let mutable leading_comments = List[Token].new();
-            while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 leading_comments.push(self.eat());
             };
             let before = self.pos;
@@ -2292,7 +2284,7 @@ given CstParser {
             if self.check(.RBrace()) or self.is_eof() then {
                 break;
             };
-            if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 let c = self.eat();
                 let prev_is_code = self.last_item_is_code(items);
                 if nl_count == 0 and prev_is_code then {
@@ -2657,7 +2649,7 @@ given CstParser {
                 break;
             };
             let mutable leading_comments = List[Token].new();
-            while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 leading_comments.push(self.eat());
                 self.skip_newlines();
                 if self.check(.RBrace()) or self.is_eof() then {
@@ -2740,7 +2732,7 @@ given CstParser {
         };
         let comma = self.eat_comma();
         let mutable trailing_comments = List[Token].new();
-        while self.peek_raw() is .LineComment(_) or self.peek_raw() is .BlockComment(_) then {
+        while self.peek_raw() is .LineComment(_) or is .BlockComment(_) then {
             trailing_comments.push(self.advance());
         };
         // Skip semicolons too
@@ -3156,7 +3148,7 @@ given CstParser {
     /// source wrote one.
     file_private eat_stmt_terminator(self) CstComma = {
         let mutable comments = List[Token].new();
-        while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+        while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
         };
         if self.check(.Semi()) then {
@@ -3210,7 +3202,7 @@ given CstParser {
                 // has none. Comments here trail the statement; comments before
                 // a VALUE lead it and the value parse collects them.
                 let next = self.peek_past_comments();
-                if next is .Semi() or next is .RBrace() then {
+                if next is .Semi() or is .RBrace() then {
                     let term = self.eat_stmt_terminator();
                     return .Ok(self.stmt_item(term, .Return(kw, .None())));
                 };
@@ -3561,7 +3553,7 @@ given CstParser {
                 self.eat();
                 continue;
             };
-            if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 let c = self.eat();
                 let prev_is_code = self.last_item_is_code(items);
                 if nl_count == 0 and prev_is_code then {
@@ -4142,7 +4134,7 @@ given CstParser {
                 if self.check(.RParen()) or self.is_eof() then {
                     break;
                 };
-                if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+                if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                     let c = self.eat();
                     let prev_is_field = if items.count() > 0 then {
                         when items[items.count() - 1] in {
@@ -4242,7 +4234,7 @@ given CstParser {
                 if self.check(.RBrace()) or self.is_eof() then {
                     break;
                 };
-                if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+                if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                     let c = self.eat();
                     let prev_is_code = self.last_item_is_code(cases);
                     if nl_count == 0 and prev_is_code then {
@@ -4337,7 +4329,7 @@ given CstParser {
             // A comment between payload fields is documentation on the
             // field that follows it, not a field name. Keep it.
             let mutable comments = List[Token].new();
-            while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 comments.push(self.eat());
             };
             let field_name = when self.expect_ident("enum field name") in {
@@ -4487,7 +4479,7 @@ given CstParser {
                 self.eat();
                 continue;
             };
-            if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 let c = self.eat();
                 let prev_is_code = self.last_item_is_code(members);
                 if nl_count == 0 and prev_is_code then {
@@ -4710,7 +4702,7 @@ given CstParser {
                 self.eat();
                 continue;
             };
-            if self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
+            if self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 let c = self.eat();
                 let prev_is_code = self.last_item_is_code(members);
                 if nl_count == 0 and prev_is_code then {

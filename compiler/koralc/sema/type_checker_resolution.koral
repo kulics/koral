@@ -975,6 +975,34 @@ given TypeChecker {
     module_private is_rune_type(self, t Type) Bool =
         self.is_std_type(self.canonicalize_alias_type(t), "Rune");
 
+    /// Reference / weak-reference / raw-pointer shapes, mutable or not.
+    /// Borrowed references are deliberately absent: this is the cast-TARGET
+    /// set, and it is not the same family as the MIR builder's
+    /// `is_ref_like_type` -- that one also covers borrowed references and
+    /// excludes raw pointers.
+    module_private is_ref_or_pointer_type(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_)
+                or .MutableReferenceType(_)
+                or .WeakReferenceType(_)
+                or .MutableWeakReferenceType(_)
+                or .PointerType(_)
+                or .MutablePointerType(_)
+            then true,
+            _ then false,
+        };
+    };
+
+    /// A user-declared aggregate: struct or enum, generic or concrete.
+    /// `Unknown` is deliberately absent -- it is unresolved, not nominal.
+    module_private is_nominal_type(self, t Type) Bool = {
+        return when t in {
+            .StructureType(_) or .GenericStruct(...) or .EnumType(_) or .GenericEnum(...)
+            then true,
+            _ then false,
+        };
+    };
+
     module_private type_module_path(self, t Type) Option[List[String]] = {
         return when t in {
             .StructureType(def_id) then self.context().get_module_path(def_id),

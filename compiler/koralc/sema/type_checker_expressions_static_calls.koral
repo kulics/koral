@@ -1429,7 +1429,7 @@ given TypeChecker {
                 .CastExpr(type_node, inner, _) then {
                     let target = self.resolve_type_in_scope(type_node, scope);
                     // `?T(expr)` is weak-reference construction.
-                    if target is .WeakReferenceType(_) or target is .MutableWeakReferenceType(_) then {
+                    if target is .WeakReferenceType(_) or is .MutableWeakReferenceType(_) then {
                         let weak_typed_inner = self.check_expr_scoped_ref(
                             inner,
                             .None(),
@@ -1493,7 +1493,7 @@ given TypeChecker {
                                 or .MutableReferenceType(inner_ref)
                                 or .WeakReferenceType(inner_ref)
                                 or .MutableWeakReferenceType(inner_ref)
-                            if target is not .ReferenceType(_) and target is not .MutableReferenceType(_) and target is not .WeakReferenceType(_) and target is not .MutableWeakReferenceType(_) and target is not .PointerType(_) and target is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+                            if not self.is_ref_or_pointer_type(target) then self.adapt_expr_to_expected_type_at(
                                 adapted_inner,
                                 .Some(inner_ref),
                                 Option[SourceSpan].Some(expr_span(inner)),
@@ -2073,18 +2073,18 @@ given TypeChecker {
         };
         when from in {
             .PointerType(_) then {
-                if to is .PointerType(_) or to is .MutablePointerType(_) then {
+                if to is .PointerType(_) or is .MutablePointerType(_) then {
                     return true;
                 };
-                if to is .IntType() or to is .UIntType() then {
+                if to is .IntType() or is .UIntType() then {
                     return true;
                 };
             },
             .MutablePointerType(_) then {
-                if to is .PointerType(_) or to is .MutablePointerType(_) then {
+                if to is .PointerType(_) or is .MutablePointerType(_) then {
                     return true;
                 };
-                if to is .IntType() or to is .UIntType() then {
+                if to is .IntType() or is .UIntType() then {
                     return true;
                 };
             },
@@ -2092,12 +2092,12 @@ given TypeChecker {
         };
         when to in {
             .PointerType(_) then {
-                if from is .IntType() or from is .UIntType() then {
+                if from is .IntType() or is .UIntType() then {
                     return true;
                 };
             },
             .MutablePointerType(_) then {
-                if from is .IntType() or from is .UIntType() then {
+                if from is .IntType() or is .UIntType() then {
                     return true;
                 };
             },
@@ -2177,7 +2177,7 @@ given TypeChecker {
                 or .MutableReferenceType(inner_ref)
                 or .WeakReferenceType(inner_ref)
                 or .MutableWeakReferenceType(inner_ref)
-            if target_type is not .ReferenceType(_) and target_type is not .MutableReferenceType(_) and target_type is not .WeakReferenceType(_) and target_type is not .MutableWeakReferenceType(_) and target_type is not .PointerType(_) and target_type is not .MutablePointerType(_) then self.adapt_expr_to_expected_type_at(
+            if not self.is_ref_or_pointer_type(target_type) then self.adapt_expr_to_expected_type_at(
                 adapted_inner,
                 .Some(inner_ref),
                 Option[SourceSpan].Some(expr_span(arg)),
@@ -2243,7 +2243,7 @@ given TypeChecker {
                             );
                         };
                         // Non-constructible, non-castable types error.
-                        if resolved_type is not .StructureType(_) and resolved_type is not .GenericStruct(...) and resolved_type is not .EnumType(_) and resolved_type is not .GenericEnum(...) and resolved_type is not .Unknown() then {
+                        if not self.is_nominal_type(resolved_type) and resolved_type is not .Unknown() then {
                             self.push_diagnostic_at_span(
                                 "Type '\(name)' does not support cast: only numeric and pointer types can be cast",
                                 name_span,
@@ -2256,7 +2256,7 @@ given TypeChecker {
             },
             _ then {},
         };
-        let probe_is_constructor_type = constructor_type_probe is .StructureType(_) or constructor_type_probe is .GenericStruct(...);
+        let probe_is_constructor_type = constructor_type_probe is .StructureType(_) or is .GenericStruct(...);
         let constructor_plan_type = when expected in {
             .Some(expected_t) then when expected_t in {
                 .StructureType(_) then if probe_is_constructor_type then expected_t
@@ -2268,7 +2268,7 @@ given TypeChecker {
             .None() then constructor_type_probe,
         };
         let mutable constructor_already_normalized = false;
-        if constructor_plan_type is .StructureType(_) or constructor_plan_type is .GenericStruct(...) then {
+        if constructor_plan_type is .StructureType(_) or is .GenericStruct(...) then {
             let constructor_param_specs = self.struct_constructor_param_specs(
                 constructor_plan_type,
             );
@@ -2419,7 +2419,7 @@ given TypeChecker {
                                         ),
                                         _ then Type.Unknown(),
                                     };
-                                    if not (enum_type is .Unknown()) then {
+                                    if enum_type is not .Unknown() then {
                                         if self.static_member_is_enum_case(
                                             enum_type,
                                             member_name,
@@ -2861,7 +2861,7 @@ given TypeChecker {
             },
             _ then {},
         };
-        if not has_method_call_bindings and not (typed_callee.expr_type is .FunctionType(...)) then {
+        if not has_method_call_bindings and typed_callee.expr_type is not .FunctionType(...) then {
             when callee in {
                 .MemberPath(base_expr, path, _) then if not path.is_empty() then {
                     let method_name = path[path.count() - 1];
@@ -3514,7 +3514,7 @@ given TypeChecker {
         };
         when typed_callee.expr_kind in {
             .GenericInstantiation(base_type, type_args) then {
-                if ret_type is .GenericStruct(...) or ret_type is .StructureType(_) or ret_type is .GenericEnum(...) or ret_type is .EnumType(_) then {
+                if self.is_nominal_type(ret_type) then {
                     let identifier = self.type_construction_symbol_for_type(
                         base_type,
                         ret_type,
@@ -3551,7 +3551,7 @@ given TypeChecker {
             },
             .Variable(sym) then {
                 if sym.kind is .TypeSymbol() then {
-                    if ret_type is .StructureType(_) or ret_type is .GenericStruct(...) or ret_type is .EnumType(_) or ret_type is .GenericEnum(...) then {
+                    if self.is_nominal_type(ret_type) then {
                         let identifier = Symbol(
                             sym.def_id,
                             ret_type,
