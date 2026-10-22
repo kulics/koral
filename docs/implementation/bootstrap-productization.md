@@ -86,6 +86,8 @@ oracle 侧曾有 `uniqueCIdentifier`（冲突就加后缀）与 `detectCIdentifi
 - **prelude 的边界是包身份**（`package_id_for_kind(.Std())` /
   `Driver.packageID(for:packageName:)` 铸的那一个），不是模块路径拼写。
   根模块是「该包里的单段模块」——结构属性，不是拼写。
+  （设计侧的「prelude 是显式绑定」见 [`../design/name-resolution.md`](../design/name-resolution.md)
+  「prelude 是一条显式绑定」，此处只记实现边界。）
 - **`substitute_type` 不展开名义类型。** 替换是**类型表达式**上的遍历；声明图可以有环
   （一个 nominal 的成员转一圈指回它自己），展开声明就会不返回，还会让一个纯外观的函数
   改到它碰到的每个 nominal。实例化成员的具体化在 monomorphization 里做。

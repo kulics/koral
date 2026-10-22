@@ -115,6 +115,9 @@ public type MethodInstanceKey(
 两问是不同的问题：**物化决策**要「将来可能成立」，**调用点**要「现在成立」。
 合并它们会让其中一侧静默出错。
 
+「现在成立」的检查点不只函数调用：泛型**类型**实例化时也要检查
+（裸类型结点、`GenericInstantiation`、静态方法调用），调用点实参的具体类型此时已知。
+
 ### 新增一个 `Type` 的契约
 
 出处：`../implementation/developer-guide.md`「Adding a New Type」。原文只给了清单：

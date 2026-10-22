@@ -95,13 +95,17 @@ rustc 把 inherent impl 与 trait impl 都按 **`DefId`** 索引（`inherent_imp
 - **enum variant 的模式不是字符串字面量**：`when x in { .Ok(v) then ... }` 是模式，
   不能拿字符串比。
 - `Dict` 的键类型必须有 `Eq` 与 `Hash`，否则编译期就报。
-- **位置构造实参不带标签**：`Foo(1, 2)`，不是 `Foo(a: 1, b: 2)`。
+- **位置构造实参不带标签，命名构造实参必须带标签**：`Foo(1, 2)` 对 positional 字段；
+  命名字段的构造器必须写成 `Foo(a: 1, b: 2)`——「一律不带标签」是错的，规则是
+  「声明决定了每个参数的调用形状」（见 `../guide/document.md`「Parameters」）。
 
 ## 6. Koral 语法备忘
 
-- `type` 值语义、`type mutable` 引用语义；受管集合赋值**别名**，不拷贝。
-- 小写标识符是值名/参数名，大写是类型名。
-- `given X { ... }` 给已有类型加方法；`given X as Trait { ... }` 声明遵循。
+仅存指针（正本在别处，此处不复述）：
+
+- `type` / `type mutable` 语义与集合赋值别名 → [`../design/type-semantics.md`](../design/type-semantics.md)、
+  [`../guide/document.md`](../guide/document.md)。
+- 标识符大小写、`given` 语法 → [`../guide/grammar.bnf`](../guide/grammar.bnf)、guide。
 
 ## 7. 演进：方法表重键
 
@@ -131,7 +135,8 @@ rustc 把 inherent impl 与 trait impl 都按 **`DefId`** 索引（`inherent_imp
 
 ## 12. `Type` 去名字字段
 
-**教训**：Koral 的 `when` / `is` 分支是**绑定**，`is` 不允许再绑名字。
+**教训**：Koral 的 `when` / `is` 分支是**绑定**——`is` 在 `if`/`while` 条件里按模式绑名字
+（`is .Some(v)` 绑 `v`），但没有 `as` 式的额外改名/再绑定。
 盲改正则必须按语言分别处理，不能拿一套脚本跨语言跑。
 
 ## 14. 显示上下文与 niche
@@ -241,15 +246,18 @@ niche 判定必须读**实例化后**的 case 列表，不是模板的。「查�
 
 ## 28.2 未限定回退 = prelude
 
-prelude 是一条**显式绑定**（std 根模块的 public trait 绑进每个模块的键空间），
-不是一个回退。解析只走限定键。正本：
+prelude 是一条**显式绑定**（std 根模块的 public 符号——trait、函数、类型——绑进每个模块
+的键空间），不是一个回退。解析只走限定键。正本：
 [`../design/name-resolution.md`](../design/name-resolution.md)。
 
 ## 28.4 未决
 
 1. **裸名索引仍在**，且与空模块路径的限定键共用一个槽（`qualified_symbol_key([],
    name) == name`）。真正的键拆分未做。
-2. **prelude 边界是「模块路径 == `["Std"]`」**。std 一拆包这条要改成按包身份。
+2. ~~prelude 边界是「模块路径 == `["Std"]`」~~ ——**已解决（2026-10）**：边界已按**包身份**
+   （`package_id_for_kind(.Std())`，`compiler/koralc/module/module_resolver.koral`；
+   seed 侧 `isStdPackageID`），不是模块路径。与
+   [`bootstrap-productization.md`](bootstrap-productization.md) 的记录一致。
 
 ## 28.5 验证口径
 

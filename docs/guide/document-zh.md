@@ -303,7 +303,7 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-指针类型与类型标注同拼写：`* Int(p)`、`*mutable T(q)`。
+指针类型与类型标注同拼写：`*Int(p)`、`*mutable T(q)`。
 只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
 #### 字符串 ↔ 数值
@@ -1505,7 +1505,7 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
-let read_bytes[T foreign](buf List[T]) * T = buf.borrow_ptr();
+let read_bytes[T foreign](buf List[T]) *T = buf.borrow_ptr();
 ```
 
 泛型参数把自己的约束带进调用：在 `f[T Any]` 里调用要求 `T mutable` 的函数会被拒绝，因为裸 `T` 并未声明为 `mutable`；在 `g[T mutable]` 里同样的调用可以通过。
@@ -1568,7 +1568,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 - **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察，这里按 `type mutable` 对待。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
-- **raw pointer**：指针类型是 `* T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
+- **raw pointer**：指针类型是 `*T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
 - **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
 
 #### `Drop`
@@ -2453,10 +2453,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### 内建下标规则
 
-- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`* T` 与 `*mutable T`。
+- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`*T` 与 `*mutable T`。
 - `String[key]` 返回 `UInt8` 字节值。只读且不可取址。
 - `List[T]` 与 `Deque[T]`（均为 `type mutable`）支持值读取、赋值与嵌套 place 更新。
-- `* T` 只支持 `*expr` 读取。`*mutable T` 同时支持 `*expr` 读写。
+- `*T` 只支持 `*expr` 读取。`*mutable T` 同时支持 `*expr` 读写。
 - 用户自定义类型不能通过 trait 实现 `[]`，泛型约束也不能增加下标能力。
 
 ```koral
@@ -2583,7 +2583,8 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 ```
 
 1. `{ ... }` 省略即「全部可见成员」；出现则不能为空（`{ .. }` / `{ * }` 不再是写法）；
-2. 列表项是 `符号名` 或 `符号名 as 新名`，允许尾逗号。符号可以是 trait：
+2. 列表项是 `符号名` 或 `符号名 as 新名`，允许尾逗号。别名必须与被引标识符的大小写类一致：
+   `Reader as IoReader` 合法，`Reader as reader` 报错。符号可以是 trait：
    `Tag as AlphaTag` 绑出的 `AlphaTag` 是一个 trait 名，可以当泛型约束或 trait object
    类型用。别名是拼写——它指向的还是同一个声明。不改名的 `Tag` 同样是绑定，
    用的就是这里写的名字，所以本文件里的约束 `[T Tag]` 指的是这次导入的那个 trait；
@@ -2721,16 +2722,16 @@ public let main() Void = {
 
 raw pointer 是面向 FFI 与系统编程的低层内存访问：
 
-- `* T` —— 只读指针。支持 `*expr` 解引用读取，但**不**支持 `*expr` 赋值或 `p[i]` 赋值。
+- `*T` —— 只读指针。支持 `*expr` 解引用读取，但**不**支持 `*expr` 赋值或 `p[i]` 赋值。
 - `*mutable T` —— 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取与 `p[i] = value` 赋值。
-- `*mutable T` 可隐式转换为 `* T`。反向不允许。
+- `*mutable T` 可隐式转换为 `*T`。反向不允许。
 
 ### 不安全取址与解引用
 
 `&` / `&mutable` 是 raw 取址操作符。它们要求可取地址的存储；字面量和临时值会被拒绝。
 
 ```koral
-let p * Int = & value;
+let p *Int = &value;
 let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw 解引用读取
@@ -2741,9 +2742,9 @@ let x = *p;       // raw 解引用读取
 
 规则：
 
-- `&` 产生 `* T`；`&mutable` 产生 `*mutable T`。
+- `&` 产生 `*T`；`&mutable` 产生 `*mutable T`。
 - `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
-- raw pointer 不是「任意类型到 `* T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
+- raw pointer 不是「任意类型到 `*T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
 
 ### 外部函数接口
 

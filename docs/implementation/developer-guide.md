@@ -166,6 +166,7 @@ Common options:
 - `--compiler-bin <path>`: explicit compiler executable path when `--compiler custom`
 - `--bootstrap-koralc <path>`: explicit path of the self-hosting compiler (built from `compiler/`)
 - `--swift-koralc <path>`: explicit Swift compiler executable path
+- `--compare-diagnostics`: accepted for compatibility — diagnostic comparison is now always on (see below)
 - `--report-file <path>`: write stable summary log (default: `tests/compiler-cases_output/_reports/latest-summary.log`)
 - `--verbose`: print per-case command lines
 - `-h`, `--help`: print usage
@@ -187,6 +188,7 @@ Current expectations syntax in case files:
 
 - `// EXPECT: <substring>`: output line sequence must contain each substring in order
 - `// EXPECT-EXACT: <line>`: normalized non-empty output must exactly match the listed lines
+- `// EXPECT-UNORDERED: <substring>`: output must contain each substring, in any order
 - `// EXPECT-ERROR: <substring>`: case must exit non-zero and contain each error substring in order
 - `// EXIT: <code>`: require an explicit process exit code
 
@@ -261,9 +263,11 @@ exist does it fall back to `PATH`. So a fresh clone resolves to the seed until y
 
 CLI shape in current implementation:
 
-- `koralc [build|check|run|emit-c] --package-config <koral.json> [--target-module <module>] [options]`
+- `koralc [build|check|run|emit-c] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]`
 - If no command is given, the first argument must be an option such as `--package-config`.
-- Top-level manifest `entry` is the default target module name, not a source file path.
+- The default build target is the **main module** — the `"."` key in the manifest's `modules`.
+  There is no top-level `entry` key (it was removed); a manifest has `package`, `version`,
+  `modules`, and optionally `dependencies`.
 
 Output behavior:
 
@@ -433,7 +437,9 @@ shared suite did not catch, so check them directly when stage2 stops compiling:
 
 Operational rules:
 
-- Keep per-case runner timeout enabled (`--timeout 120` is the current stable baseline).
+- Keep per-case runner timeout enabled. The runner's default is `--timeout 120`; the full
+  chain in `scripts/verify.sh` runs at `--timeout 60`, so a case that only passes at 120
+  will fail the chain — target 60.
 - Wrap long self-host or suite runs in an outer memory / CPU cap. On this macOS setup, a CPU cap remains useful, but Python's `resource.setrlimit` for `RLIMIT_AS` / `RLIMIT_DATA` may reject updates even when the shell reports unlimited limits. If that happens, keep `--timeout` enabled, apply the CPU cap, and reduce runner parallelism instead of assuming address/data limits can always be enforced from Python.
 - Prefer ASan over ad hoc logging once a failure is reproducible. In this repair, ASan was decisive for identifying UAFs in `CodeGen`, `MIRFunctionCodeEmitter`, and `RecursiveTypeChecker` working-state handling.
 
@@ -493,6 +499,15 @@ text; this guide does not restate it. Use its "Review Checklist" when adding or 
 `std` API.
 
 ## Adding a New Type
+
+> **Scope of the recipes below**: the file names and steps in this cluster
+> ("Adding a New Type" through "Code Generation Development") are **seed-side**
+> (`compiler-reference/Sources/KoralCompiler/…`, Swift). Ordinary feature work lands in
+> `compiler/` (Koral) first — the counterparts there are `compiler/koralc/sema/type_handler.koral`,
+> `sema/compiler_context.koral`, `sema/type_checker_*.koral`, `parser/core_precedence.koral`,
+> `codegen/c_identifier_utils.koral`, and the `Type`/`TypeHandler` equivalents in
+> `compiler/koralc/typed/` and `compiler/koralc/sema/`. Touch the seed when the change is to
+> the oracle/build seed itself or to close a differential gap on both sides in lockstep.
 
 ### 1) Add a New `Type` Case
 
@@ -715,12 +730,13 @@ let debug = context.getDebugName(.genericStruct(template: "List", args: [.int]))
 // my_feature.koral
 // EXPECT: test passed
 
-using std { .. }
-
 let main() Void = {
-    println("test passed")
-}
+    println("test passed");
+};
 ```
+
+(`println` comes from the prelude — no `using` needed. If the case needs another module,
+spell the import the current way: `using "std/io";` or `using "std/os" { Path };`.)
 
 2. Nothing else. The shared runner **discovers cases by walking `tests/compiler-cases/`** — there is
    no registry to update. Rebuild nothing; rerun the runner.
@@ -742,9 +758,8 @@ compiler-reference/.build/release/koralc build --package-config tests/compiler-r
 ./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc bin/compiler/koralc -j=8
 ```
 
-- Output assertions are comment-based and order-sensitive:
-    - `// EXPECT: <substring>`
-    - `// EXPECT-ERROR: <substring>`
+- Output assertions are comment-based — see "Current expectations syntax in case files" above
+  (`EXPECT`, `EXPECT-EXACT`, `EXPECT-UNORDERED`, `EXPECT-ERROR`, `EXIT`).
 - Each run uses an isolated output directory under `tests/compiler-cases_output/<caseName>/`.
 - **Output is auto-cleaned at the start of each run**: everything under `tests/compiler-cases_output/` is removed except `_reports/`. So the directory only ever holds the most recent run's artifacts (for debugging a failure) and cannot accumulate — left unchecked it grew to 110 GB.
 
@@ -753,33 +768,42 @@ compiler-reference/.build/release/koralc build --package-config tests/compiler-r
 ```text
 tests/compiler-cases/my_module_test/
 ├── koral.json              # explicit module table
-├── my_module_test.koral    # root module entry
-├── helper.koral            # merged file (using "helper")
+├── my_module_test.koral    # root module entry (main module key ".")
+├── helper.koral            # merged file (using "./helper.koral";)
 └── child/
     └── child.koral         # separate module entry declared in manifest
 ```
 
 ```json
 {
-  "name": "MyModuleTest",
+  "package": "my_module_test",
   "version": "0.1.0",
-  "entry": "my_module_test",
   "modules": {
-    "my_module_test": {
+    ".": {
       "entry": "my_module_test.koral",
-      "requires": ["my_module_test::child"],
       "links": []
     },
-    "my_module_test::child": {
+    "child": {
       "entry": "child/child.koral",
-      "requires": [],
       "links": []
     }
   }
 }
 ```
 
+Notes: the manifest key is `package` (not `name`); there is **no top-level `entry`** and
+**no `requires`** — the module graph is derived from each file's `using` statements. Module
+keys are package-internal names: `"."` for the main module, `child` for a submodule (never
+`pkg::child` — `::` is not a spelling). File merge is spelled `using "./helper.koral";`
+(a bare `using "helper";` would be a **module import**, not a merge).
+
 ## Debugging Tips
+
+> **These recipes are for the seed compiler** (`compiler-reference/`, Swift). Ordinary
+> development lands in `compiler/` (Koral) first — its counterparts live in
+> `compiler/koralc/` (`sema/type_handler.koral`, `sema/compiler_context.koral`,
+> `parser/core_precedence.koral`, `codegen/c_identifier_utils.koral`, …). Use the seed
+> recipes when debugging the oracle, the build seed, or a differential mismatch.
 
 ### Print AST
 
@@ -810,7 +834,11 @@ print(diagnosticError.renderForCLI())
 ### Inspect Generated C
 
 ```bash
+# from inside compiler-reference/ (where Package.swift lives):
 swift run koralc emit-c --package-config path/to/koral.json --target-module app/main -o output/
+
+# or, from the repo root, with either compiler binary:
+bin/compiler/koralc emit-c --package-config path/to/koral.json --target-module app/main -o output/
 ```
 
 ## FAQ
@@ -835,6 +863,8 @@ Design ruling — see [`../design/name-resolution.md`](../design/name-resolution
 4. `Monomorphizer` handles generic trait-constraint instantiation
 
 ### How do I add a new intrinsic function?
+
+File names below are seed-side (`compiler-reference/`); mirror the change in `compiler/koralc/`.
 
 1. Add a new intrinsic case in `AST.swift`
 2. Add type checking in `TypeCheckerExpressions.swift`

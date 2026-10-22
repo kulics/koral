@@ -72,9 +72,10 @@ opt and then it == 1 and false   拒绝
 ### 诊断
 
 两向各一句，span 落在**闯入的那个运算符**上（`and then` 取 `and`），读者一眼看到该给谁
-加括号：
+加括号。下表是**模板**——实现按闯入的运算符展开成 5 条文案（`'and'` / `'or'` / `'and then'` /
+`'or else'` / `'or return'` 各一条，见 `core_precedence.koral` 的 `cannot be mixed` 系列）：
 
-| 情形 | 文本 |
+| 情形 | 模板 |
 |---|---|
 | 逻辑运算符到流程层 | `'and' / 'or' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses` |
 | 流程运算符到逻辑层 | `'and then' / 'or else' / 'or return' cannot be mixed with logical 'and' / 'or' without parentheses` |

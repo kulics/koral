@@ -61,8 +61,10 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 拆开写：
 
-- **prelude**：std 根模块的 public trait 绑进每个模块的 (模块, 拼写) 键空间。
-  它是一条导入，只是语言替你写的。
+- **prelude**：std 根模块的 public **符号**（trait、函数、类型——`Eq`、`println`、
+  `List`…）绑进每个模块的 (模块, 拼写) 键空间。它是一条导入，只是语言替你写的。
+  **它也占名字**：import 与 prelude 的不同声明撞同一拼写是错误，不是遮蔽
+  （撞名矩阵见 [`module-design.md`](module-design.md) §3.3）。
 - **解析只走限定键**：`get_in_module` / `lookup_trait_in_module` 不读未限定索引。
   那个索引只留给「Import it explicitly」，用来**说出声明在哪个模块**——
   与 `unimportedTemplateDefId` 同一用途，永远不得反过来赢过解析。
