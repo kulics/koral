@@ -46,6 +46,7 @@ public struct RequirementSlotParameter {
 
 public struct RequirementSlot {
     public let declaringTraitRef: CanonicalTraitRef
+    public let traitMethodDefId: DefId
     public let methodName: String
     public let parameters: [RequirementSlotParameter]
     public let returnType: Type
@@ -53,12 +54,14 @@ public struct RequirementSlot {
 
     public init(
         declaringTraitRef: CanonicalTraitRef,
+        traitMethodDefId: DefId,
         methodName: String,
         parameters: [RequirementSlotParameter],
         returnType: Type,
         index: Int
     ) {
         self.declaringTraitRef = declaringTraitRef
+        self.traitMethodDefId = traitMethodDefId
         self.methodName = methodName
         self.parameters = parameters
         self.returnType = returnType
@@ -71,20 +74,20 @@ public struct ConformanceWitness {
     public let traitRef: CanonicalTraitRef
     public let directParentTraitRefs: [CanonicalTraitRef]
     public let requirementSlots: [RequirementSlot]
-    public let localImplementationDefIdsByMethodName: [String: DefId]
+    public let localImplementationDefIdsByTraitMethodDefId: [DefId: DefId]
 
     public init(
         selfType: Type,
         traitRef: CanonicalTraitRef,
         directParentTraitRefs: [CanonicalTraitRef],
         requirementSlots: [RequirementSlot],
-        localImplementationDefIdsByMethodName: [String: DefId]
+        localImplementationDefIdsByTraitMethodDefId: [DefId: DefId]
     ) {
         self.selfType = selfType
         self.traitRef = traitRef
         self.directParentTraitRefs = directParentTraitRefs
         self.requirementSlots = requirementSlots
-        self.localImplementationDefIdsByMethodName = localImplementationDefIdsByMethodName
+        self.localImplementationDefIdsByTraitMethodDefId = localImplementationDefIdsByTraitMethodDefId
     }
 
     public static func key(selfType: Type, traitRef: CanonicalTraitRef) -> String {

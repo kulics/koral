@@ -1961,8 +1961,19 @@ given MIRFunctionCodeEmitter {
         return when ownership in {
             .Copy() then {
                 let emission = self.emit_value(value);
+                // A bare function operand has to be boxed into a `__koral_Closure`
+                // before it lands in one: `emit_value` hands back the C function
+                // name, and assigning that straight to a closure temp is a type
+                // error. Lambda values are already boxed by the lambda emitter.
+                let source_expr = self.adapt_expression_for_target_type(
+                    emission.expression,
+                    value_type,
+                    value_type,
+                    false,
+                    value is .Operand(.Function(_)),
+                );
                 if not self.codegen.needs_drop(value_type) then {
-                    return emission;
+                    return MIRValueEmission(source_expr, emission.cleanup);
                 };
                 when value in {
                     .PlaceRead(_, place_ownership) then {
@@ -1974,7 +1985,7 @@ given MIRFunctionCodeEmitter {
                             );
                             self.codegen.append_copy_or_move_assignment(
                                 value_type,
-                                emission.expression,
+                                source_expr,
                                 temp,
                                 true,
                             );
@@ -1991,7 +2002,7 @@ given MIRFunctionCodeEmitter {
                         );
                         self.codegen.append_copy_or_move_assignment(
                             value_type,
-                            emission.expression,
+                            source_expr,
                             temp,
                             true,
                         );
@@ -2003,7 +2014,19 @@ given MIRFunctionCodeEmitter {
                     },
                 }
             },
-            .Borrow() then self.emit_value_source(value),
+            .Borrow() then {
+                let emission = self.emit_value_source(value);
+                MIRValueEmission(
+                    self.adapt_expression_for_target_type(
+                        emission.expression,
+                        value_type,
+                        value_type,
+                        false,
+                        value is .Operand(.Function(_)),
+                    ),
+                    emission.cleanup,
+                )
+            },
             .Move() then {
                 let emission = self.emit_value_source(value);
                 // When passing a managed nominal value that was read from another
@@ -2017,7 +2040,13 @@ given MIRFunctionCodeEmitter {
                     );
                     self.codegen.append_copy_or_move_assignment(
                         field_type,
-                        emission.expression,
+                        self.adapt_expression_for_target_type(
+                            emission.expression,
+                            field_type,
+                            field_type,
+                            false,
+                            value is .Operand(.Function(_)),
+                        ),
                         temp,
                         true,
                     );
@@ -2027,7 +2056,16 @@ given MIRFunctionCodeEmitter {
                         self.cleanup_for_temporary_result(temp, field_type),
                     )
                 } else {
-                    emission
+                    MIRValueEmission(
+                        self.adapt_expression_for_target_type(
+                            emission.expression,
+                            value_type,
+                            value_type,
+                            false,
+                            value is .Operand(.Function(_)),
+                        ),
+                        emission.cleanup,
+                    )
                 }
             },
             .Take() then {
@@ -2039,7 +2077,13 @@ given MIRFunctionCodeEmitter {
                     );
                     self.codegen.append_copy_or_move_assignment(
                         field_type,
-                        emission.expression,
+                        self.adapt_expression_for_target_type(
+                            emission.expression,
+                            field_type,
+                            field_type,
+                            false,
+                            value is .Operand(.Function(_)),
+                        ),
                         temp,
                         true,
                     );
@@ -2049,7 +2093,16 @@ given MIRFunctionCodeEmitter {
                         self.cleanup_for_temporary_result(temp, field_type),
                     )
                 } else {
-                    emission
+                    MIRValueEmission(
+                        self.adapt_expression_for_target_type(
+                            emission.expression,
+                            value_type,
+                            value_type,
+                            false,
+                            value is .Operand(.Function(_)),
+                        ),
+                        emission.cleanup,
+                    )
                 }
             },
         };

@@ -90,6 +90,7 @@ public type TraitDeclInfo(
     parent_traits List[ParentTraitConstraint],
     raw_members List[TraitMember],
     members List[TypedTraitMember],
+    method_def_ids_by_name Dict[String, DefId],
     module_path List[String],
 );
 
@@ -159,6 +160,11 @@ public type ReceiverMethodDispatchInfo(
     // matched by DefId, not by name — name matching is what forces the
     // `ends_with(".Drop")` suffix guessing and collapses two same-named traits.
     conformance_trait_def_id Option[DefId],
+    // The trait METHOD's DefId that this method implements (rustc's
+    // `trait_item_def_id`). `conformance_trait_def_id` is the trait DECLARATION's
+    // DefId; this is the individual method's DefId. Set only for methods
+    // defined in `given`/`impl` blocks that implement a trait method.
+    trait_method_def_id Option[DefId],
 );
 
 // ── Generic template types ────────────────────────────────────────────────────
@@ -595,6 +601,59 @@ given GenericTemplateRegistry {
         };
     };
 
+    /// The trait METHOD's DefId (rustc's `trait_item_def_id`) for `method_name`
+    /// declared in the trait at `trait_def_id`, walking parent traits. Pure
+    /// identity: the trait is named by its declaration, never by spelling, so
+    /// two same-named traits cannot answer for each other.
+    public trait_method_def_id(
+        self,
+        trait_def_id DefId,
+        method_name String,
+    ) Option[DefId] = {
+        let mutable visited = Set[UInt].new();
+        return self.trait_method_def_id_inner(
+            trait_def_id,
+            method_name,
+            visited,
+        );
+    };
+
+    file_private trait_method_def_id_inner(
+        self,
+        trait_def_id DefId,
+        method_name String,
+        visited Set[UInt],
+    ) Option[DefId] = {
+        if not trait_def_id.is_valid() or visited.contains(trait_def_id.id) then {
+            return Option[DefId].None();
+        };
+        visited.insert(trait_def_id.id);
+        when self.lookup_trait_by_def_id(trait_def_id) in {
+            .Some(trait_info) then {
+                when trait_info.method_def_ids_by_name.get(method_name) in {
+                    .Some(def_id) then {
+                        return Option[DefId].Some(def_id);
+                    },
+                    .None() then {},
+                };
+                for parent in trait_info.parent_traits then {
+                    when self.trait_method_def_id_inner(
+                        parent.def_id,
+                        method_name,
+                        visited,
+                    ) in {
+                        .Some(def_id) then {
+                            return Option[DefId].Some(def_id);
+                        },
+                        .None() then {},
+                    };
+                };
+            },
+            .None() then {},
+        };
+        return Option[DefId].None();
+    };
+
     // Look up all generic extension method templates for an owner identity.
     public lookup_extension_methods(
         self,
@@ -630,6 +689,54 @@ given GenericTemplateRegistry {
             .None() then {},
         };
         // Exact key only — see lookup_extension_methods.
+        return Option[GenericExtensionMethodTemplate].None();
+    };
+
+    /// The extension method template whose DECLARATION DefId is `def_id`.
+    /// Pure identity — never matches by name (Swift's
+    /// `extensionMethodTemplate(byDefId:owner:)`). Also matches by
+    /// `trait_method_def_id` so trait-method references find the impl's
+    /// template. Trait owners only match their own declaration: an impl
+    /// template under a trait owner would be a different method.
+    public lookup_extension_method_by_def_id(
+        self,
+        owner MethodOwner,
+        def_id DefId,
+    ) Option[GenericExtensionMethodTemplate] = {
+        if not def_id.is_valid() then {
+            return Option[GenericExtensionMethodTemplate].None();
+        };
+        when self.extension_methods.get(owner) in {
+            .Some(templates) then {
+                for template in templates then {
+                    if template.method.def_id == def_id then {
+                        return Option[GenericExtensionMethodTemplate].Some(template);
+                    };
+                };
+                if self.is_trait_owner(owner) then {
+                    return Option[GenericExtensionMethodTemplate].None();
+                };
+                for template in templates then {
+                    when self.receiver_method_dispatch.get(template.method.def_id) in {
+                        .Some(dispatch_info) then {
+                            when dispatch_info.trait_method_def_id in {
+                                .Some(trait_item_def_id) then {
+                                    if trait_item_def_id == def_id then {
+                                        return Option[GenericExtensionMethodTemplate].Some(
+                                            template,
+                                        );
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
+            },
+            .None() then {
+            },
+        };
         return Option[GenericExtensionMethodTemplate].None();
     };
 };

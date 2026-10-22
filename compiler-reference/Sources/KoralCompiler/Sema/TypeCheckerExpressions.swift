@@ -3495,6 +3495,7 @@ extension TypeChecker {
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
         traitDefId: resolvedTraitDefId,
+        traitMethodDefId: traitMethodDefId(traitDefId: resolvedTraitDefId, methodName: methodName) ?? .invalid,
         methodName: methodName,
         base: receiver,
         methodTypeArgs: resolvedMethodTypeArgs ?? [],
@@ -4142,7 +4143,7 @@ extension TypeChecker {
     }
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
-    if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _) = typedCallee,
+    if case .traitMethodPlaceholder(let traitName, let traitDefId, _, let methodName, _, _, _) = typedCallee,
        isStdDropTrait(traitDefId) && methodName == "drop" {
       throw SemanticError(
         .generic("compiler protocol method drop cannot be called explicitly"),
@@ -4167,7 +4168,7 @@ extension TypeChecker {
     }
 
     // Trait method placeholder call (for trait methods on generic parameters)
-    if case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
+    if case .traitMethodPlaceholder(let traitName, let traitDefId, let traitMethodDefId, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
       // For trait method placeholders, we need to handle the call similarly to method calls
       // The base is already included in the placeholder, so we just need to type-check the arguments
       guard case .function(let params, let returns) = methodType else {
@@ -4247,6 +4248,7 @@ extension TypeChecker {
       let adjustedCallee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
         traitDefId: traitDefId,
+        traitMethodDefId: traitMethodDefId,
         methodName: methodName,
         base: adjustedBase,
         methodTypeArgs: methodTypeArgs,
@@ -5166,8 +5168,7 @@ extension TypeChecker {
         let methodLevelParamNames = paramNames.filter { !baseTypeParamNames.contains($0) }
         let collectedMethodTypeArgs = methodLevelParamNames.compactMap { methodTypeParamBindings[$0] }
         if !methodLevelParamNames.isEmpty
-            && collectedMethodTypeArgs.count == methodLevelParamNames.count
-            && !collectedMethodTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+            && collectedMethodTypeArgs.count == methodLevelParamNames.count {
           inferredMethodTypeArgs = collectedMethodTypeArgs
         } else {
           inferredMethodTypeArgs = nil
@@ -5373,6 +5374,9 @@ extension TypeChecker {
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
         traitDefId: methodResult.traitDefId ?? .invalid,
+        traitMethodDefId: methodResult.traitDefId.flatMap {
+          traitMethodDefId(traitDefId: $0, methodName: methodName)
+        } ?? methodResult.methodSymbol.defId,
         methodName: methodName,
         base: finalBase,
         methodTypeArgs: resolvedMethodTypeArgs,
@@ -6053,6 +6057,7 @@ extension TypeChecker {
           return .traitMethodPlaceholder(
             traitName: traitName,
             traitDefId: traitDefId,
+            traitMethodDefId: traitMethodDefId(traitDefId: traitDefId, methodName: memberName) ?? .invalid,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -6077,6 +6082,7 @@ extension TypeChecker {
           return .traitMethodPlaceholder(
             traitName: traitName,
             traitDefId: traitDefId,
+            traitMethodDefId: traitMethodDefId(traitDefId: traitDefId, methodName: memberName) ?? entityMethod.defId,
             methodName: memberName,
             base: base,
             methodTypeArgs: [],
@@ -7091,6 +7097,7 @@ extension TypeChecker {
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
         traitDefId: traitDefId,
+        traitMethodDefId: traitMethodDefId(traitDefId: traitDefId, methodName: methodName) ?? .invalid,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -7177,6 +7184,7 @@ extension TypeChecker {
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
         traitName: traitName,
         traitDefId: traitDefId,
+        traitMethodDefId: traitMethodDefId(traitDefId: traitDefId, methodName: methodName) ?? .invalid,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -7475,6 +7483,7 @@ extension TypeChecker {
     let callee: TypedExpressionNode = .traitMethodPlaceholder(
       traitName: traitName,
       traitDefId: traitDefId,
+      traitMethodDefId: traitMethodDefId(traitDefId: traitDefId, methodName: methodName) ?? .invalid,
       methodName: methodName,
       base: base,
       methodTypeArgs: [],

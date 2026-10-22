@@ -182,6 +182,7 @@ public type RequirementSlotParameter(
 
 public type RequirementSlot(
     declaring_trait_ref CanonicalTraitRef,
+    trait_method_def_id DefId,
     method_name String,
     parameters List[RequirementSlotParameter],
     return_type Type,
@@ -194,6 +195,7 @@ public type ConformanceWitness(
     direct_parent_trait_refs List[CanonicalTraitRef],
     requirement_slots List[RequirementSlot],
     local_implementation_def_ids_by_method_name Dict[String, DefId],
+    local_implementation_def_ids_by_trait_method_def_id Dict[DefId, DefId],
 );
 
 given ConformanceWitness {
@@ -314,6 +316,25 @@ given TypeChecker {
                 UInt(0)
             ].name == "self";
             if is_receiver_style then {
+                // rustc's `trait_item_def_id`: the trait METHOD this given
+                // member implements. Looked up by declaration identity so two
+                // same-named traits cannot answer for each other.
+                let trait_method_def_id = when trait_def_id in {
+                    .Some(trait_def_id) then self.storage.generic_templates.trait_method_def_id(
+                        trait_def_id,
+                        member_ref.name,
+                    ),
+                    .None() then Option[DefId].None(),
+                };
+                let resolved_trait_method_def_id = when trait_method_def_id in {
+                    .Some(_) then trait_method_def_id,
+                    // Swift TypeChecker.registerReceiverStyleMethod: with a
+                    // conformance trait but no separate trait-method lookup hit,
+                    // the impl method IS the trait method's identity.
+                    .None() then if trait_name is .Some(_) then Option[DefId].Some(
+                        member_ref.def_id,
+                    ) else Option[DefId].None(),
+                };
                 self.storage.generic_templates.receiver_method_dispatch.insert(
                     member_ref.def_id,
                     ReceiverMethodDispatchInfo(
@@ -322,6 +343,7 @@ given TypeChecker {
                         owner,
                         trait_name,
                         trait_def_id,
+                        resolved_trait_method_def_id,
                     ),
                 );
             } else {
@@ -756,6 +778,13 @@ given TypeChecker {
             typed_members,
             self.storage.module_path,
         );
+        let mutable method_def_ids_by_name = Dict[String, DefId].new();
+        for member in typed_members then {
+            method_def_ids_by_name.insert(
+                member.name,
+                member.def_id,
+            );
+        };
         self.storage.trait_registry.register(info);
         self.storage.generic_templates.traits.insert(
             name,
@@ -766,6 +795,7 @@ given TypeChecker {
                 parent_constraints,
                 raw_members,
                 typed_members,
+                method_def_ids_by_name,
                 self.storage.module_path,
             ),
         );
@@ -778,6 +808,7 @@ given TypeChecker {
                 parent_constraints,
                 raw_members,
                 typed_members,
+                method_def_ids_by_name,
                 self.storage.module_path,
             ),
         );
@@ -789,6 +820,7 @@ given TypeChecker {
                 parent_constraints,
                 raw_members,
                 typed_members,
+                method_def_ids_by_name,
                 self.storage.module_path,
             ),
         );
@@ -1003,6 +1035,7 @@ given TypeChecker {
                     slots.push(
                         RequirementSlot(
                             trait_ref,
+                            trait_info.method_def_ids_by_name.get(method.name) or else def_id_invalid(),
                             method.name,
                             parameters,
                             self.resolve_type_with_self_and_bindings(
@@ -1031,12 +1064,30 @@ given TypeChecker {
         for member in members then {
             implementations.insert(member.name, member.def_id);
         };
+        let mutable implementations_by_trait_method_def_id = Dict[DefId, DefId].new();
+        when self.storage.generic_templates.lookup_trait_by_def_id(trait_ref.trait_def_id) in {
+            .Some(trait_info) then {
+                for member in members then {
+                    when trait_info.method_def_ids_by_name.get(member.name) in {
+                        .Some(trait_method_def_id) then {
+                            implementations_by_trait_method_def_id.insert(
+                                trait_method_def_id,
+                                member.def_id,
+                            );
+                        },
+                        .None() then {},
+                    };
+                };
+            },
+            .None() then {},
+        };
         let witness = ConformanceWitness(
             self_type,
             trait_ref,
             self.direct_parent_trait_refs(trait_ref, self_type),
             self.requirement_slots(trait_ref, self_type),
             implementations,
+            implementations_by_trait_method_def_id,
         );
         self.storage.conformance_witnesses.insert(witness.key(), witness);
     };
@@ -2958,6 +3009,7 @@ given TypeChecker {
                         linked,
                         decl.raw_members,
                         decl.members,
+                        decl.method_def_ids_by_name,
                         decl.module_path,
                     ),
                 );
@@ -2971,6 +3023,7 @@ given TypeChecker {
                         linked,
                         decl.raw_members,
                         decl.members,
+                        decl.method_def_ids_by_name,
                         decl.module_path,
                     ),
                 ),

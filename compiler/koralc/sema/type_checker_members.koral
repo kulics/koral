@@ -76,6 +76,58 @@ given TypeChecker {
         context.set_access(symbol.def_id, access);
     };
 
+    module_private make_method_callable_symbol_with_def_id(
+        self,
+        method_name String,
+        params List[TypedParam],
+        return_type Type,
+        preferred_def_id DefId,
+    ) Symbol = {
+        let mutable param_types = List[Type].new();
+        for param in params then {
+            param_types.push(param.param_type);
+        };
+        let def_id = if preferred_def_id.is_valid() then preferred_def_id
+        else self.allocate_unindexed_def_id(method_name, DefKind.Function());
+        let method_symbol = Symbol(
+            def_id,
+            make_function_type(param_types, return_type),
+            SymbolKind.Function(),
+        );
+        self.register_function_symbol_metadata(
+            method_symbol,
+            self.function_param_specs_from_typed_params(params),
+        );
+        return method_symbol;
+    };
+
+    module_private make_method_callable_symbol_with_visibility_and_def_id(
+        self,
+        method_name String,
+        params List[TypedParam],
+        return_type Type,
+        access AccessModifier,
+        module_path List[String],
+        source_file String,
+        package_id String,
+        preferred_def_id DefId,
+    ) Symbol = {
+        let method_symbol = self.make_method_callable_symbol_with_def_id(
+            method_name,
+            params,
+            return_type,
+            preferred_def_id,
+        );
+        self.stamp_method_symbol_visibility_metadata(
+            method_symbol,
+            access,
+            module_path,
+            source_file,
+            package_id,
+        );
+        return method_symbol;
+    };
+
     module_private make_method_callable_symbol(
         self,
         method_name String,
@@ -902,6 +954,10 @@ given TypeChecker {
             };
             out.push(
                 TypedTraitMember(
+                    // ONE declaration identity for this member. Call sites and
+                    // later registration share it; minting a fresh one per lookup
+                    // is what made one method look like several.
+                    self.allocate_unindexed_def_id(m.name, DefKind.Function()),
                     m.name,
                     not m.type_params.is_empty(),
                     typed_params,

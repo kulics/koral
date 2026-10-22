@@ -103,19 +103,26 @@ public struct ReceiverMethodDispatchInfo: Hashable {
     public let owner: ReceiverMethodOwner?
     public let conformanceTraitName: String?
     public let conformanceTraitDefId: DefId?
+    /// The trait METHOD's DefId that this method implements (rustc's
+    /// `trait_item_def_id`). `conformanceTraitDefId` is the trait DECLARATION's
+    /// DefId; this is the individual method's DefId. Set only for methods
+    /// defined in `given`/`impl` blocks that implement a trait method.
+    public let traitMethodDefId: DefId?
 
     public init(
         methodDefId: DefId,
         methodName: String,
         owner: ReceiverMethodOwner?,
         conformanceTraitName: String? = nil,
-        conformanceTraitDefId: DefId? = nil
+        conformanceTraitDefId: DefId? = nil,
+        traitMethodDefId: DefId? = nil
     ) {
         self.methodDefId = methodDefId
         self.methodName = methodName
         self.owner = owner
         self.conformanceTraitName = conformanceTraitName
         self.conformanceTraitDefId = conformanceTraitDefId
+        self.traitMethodDefId = traitMethodDefId
     }
 }
 

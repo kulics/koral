@@ -1204,6 +1204,13 @@ extension TypeChecker {
         access: access,
         modulePath: currentModulePath
       )
+      // Allocate DefIds for each trait method so that `given`/`impl` blocks
+      // can link their implementation methods to the trait method's DefId
+      // (rustc's `trait_item_def_id`). Without this, the trait method DefId
+      // is never allocated and the link is always nil.
+      for traitMethod in methods {
+        _ = methodSymbolDefId(ownerKey: name, name: traitMethod.name, access: traitMethod.access)
+      }
       traits[name] = traitInfo
       qualifiedTraits[qualifiedTraitKey(name, modulePath: currentModulePath)] = traitInfo
       // By DECLARATION as well: the two name keys above both collide when two
@@ -1846,8 +1853,6 @@ extension TypeChecker {
 
     case .givenTraitDeclaration(let typeParams, let typeNode, let traitNode, let methods, let span):
       self.currentSpan = span
-      if "\(typeNode)".contains("Holder") || "\(typeNode)".contains("Box") {
-      }
       let traitConstraint = try SemaUtils.resolveTraitConstraint(from: traitNode)
       let traitName = traitConstraint.baseName
       try validateTraitName(traitName)
@@ -3151,13 +3156,24 @@ extension TypeChecker {
           if genericExtensionMethods[methodOwnerKey] == nil {
             genericExtensionMethods[methodOwnerKey] = []
           }
-
+          // Use the SYMBOL's DefId (from `makeMethodSymbol`) as the template's
+          // `method.defId` — that's the identity call sites resolve to. The AST
+          // `info.method.defId` may be a different (parser-allocated) DefId.
+          let tmplMethod = MethodDeclaration(
+            name: info.method.name,
+            typeParameters: info.method.typeParameters,
+            parameters: info.method.parameters,
+            returnType: info.method.returnType,
+            body: info.method.body,
+            access: info.method.access,
+            defId: info.symbol.defId
+          )
           if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
-            $0.method.name == info.method.name && $0.typeParams.isEmpty
+            $0.method.defId == info.symbol.defId || ($0.method.name == info.method.name && $0.typeParams.isEmpty)
           }) {
             genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
-              method: info.method,
+              method: tmplMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
               modulePath: currentModulePath,
@@ -3169,7 +3185,7 @@ extension TypeChecker {
           } else {
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
-              method: info.method,
+              method: tmplMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
               modulePath: currentModulePath,
@@ -3540,6 +3556,14 @@ extension TypeChecker {
           continue
         }
 
+        // Use the REGISTERED DefId (from `methodDefIdsByOwner`), not the raw AST
+        // DefId — the AST node's `defId` is often invalid (id=0) and the template
+        // must carry the same identity the call site resolves to.
+        let registeredVisibleDefId = methodSymbolDefId(
+          ownerKey: methodOwnerKey(nil, traitName: traitName),
+          name: method.name,
+          access: requirement.access
+        )
         let visibleMethod = MethodDeclaration(
           name: method.name,
           typeParameters: method.typeParameters,
@@ -3547,30 +3571,12 @@ extension TypeChecker {
           returnType: method.returnType,
           body: method.body,
           access: requirement.access,
-          defId: method.defId
+          defId: registeredVisibleDefId
         )
 
         let (functionType, params, returnType) = try buildImplMethodInfo(method)
 
-        // For Drop trait's drop(self): wrap self parameter type as *mutable Self
-        // in the params used for MIR/codegen (checkedParameters), while keeping the
-        // functionType (used for conformance checking) unchanged.
-        let mirParams: [Symbol]
-        if isStdDropTrait(traitDefId) && method.name == "drop",
-           let first = params.first, context.getName(first.defId) == "self" {
-          switch first.type {
-          case .mutablePointer:
-            mirParams = params
-          default:
-            mirParams = [Symbol(
-              defId: first.defId,
-              type: .mutablePointer(element: first.type),
-              kind: first.kind
-            )] + Array(params.dropFirst())
-          }
-        } else {
-          mirParams = params
-        }
+        let mirParams = params
 
         var substitution: [String: Type] = [:]
         for (index, traitParam) in traitInfo.typeParameters.enumerated() {
@@ -3584,26 +3590,9 @@ extension TypeChecker {
           substitution: substitution
         )
         if functionType != expectedType {
-          // For Drop trait: accept both drop(self) and drop(*mutable Self) signatures.
-          // The trait defines drop(self), but implementations may use either form.
-          var typeMatches = false
-          if isStdDropTrait(traitDefId) && method.name == "drop" {
-            // Try building the expected type with self wrapped as *mutable Self
-            let pointerExpectedType = try expectedFunctionTypeForGenericTraitMethod(
-              requirement,
-              selfType: selfType,
-              substitution: substitution,
-              dropSelfAsPointer: true
-            )
-            if functionType == pointerExpectedType {
-              typeMatches = true
-            }
-          }
-          if !typeMatches {
-            throw SemanticError(.generic(
-              "Implementation 'given \(selfType) \(traitName)' is invalid: method \(method.name) has type \(functionType), expected \(expectedType)"
-            ), span: span)
-          }
+          throw SemanticError(.generic(
+            "Implementation 'given \(selfType) \(traitName)' is invalid: method \(method.name) has type \(functionType), expected \(expectedType)"
+          ), span: span)
         }
 
         // Check named parameter consistency between trait method and implementation
@@ -3665,14 +3654,32 @@ extension TypeChecker {
           ownerKey: methodOwnerKey(nil, traitName: traitName),
           typeParameters: method.typeParameters
         )
+        // Record which trait METHOD this implementation provides (rustc's
+        // `trait_item_def_id`). The trait method's DefId is keyed by
+        // `(traitName, methodName)` in `methodDefIdsByOwner`.
+        let traitMethodDefId = methodDefIdsByOwner[traitName]?[method.name]
         registerReceiverStyleMethod(
           methodSymbol,
           parameters: method.parameters,
           declaredName: method.name,
           owner: nil,
           conformanceTraitName: traitName,
-          conformanceTraitDefId: traitDefId
+          conformanceTraitDefId: traitDefId,
+          traitMethodDefId: traitMethodDefId
         )
+        // Also link the TEMPLATE method DefId (from the MethodDeclaration) to
+        // the trait method DefId, so that methodReference nodes carrying the
+        // template DefId can find the link.
+        if let traitMethodDefId, method.defId.isValid {
+            receiverMethodDispatchByDefId[method.defId] = ReceiverMethodDispatchInfo(
+                methodDefId: method.defId,
+                methodName: method.name,
+                owner: nil,
+                conformanceTraitName: traitName,
+                conformanceTraitDefId: traitDefId,
+                traitMethodDefId: traitMethodDefId
+            )
+        }
 
         methodInfos.append(
           ImplMethodInfo(
@@ -3714,13 +3721,15 @@ extension TypeChecker {
           preferredDefId: toolMethod.defId,
           typeParameters: toolMethod.typeParameters
         )
+        let toolTraitMethodDefId = methodDefIdsByOwner[traitName]?[toolMethod.name]
         registerReceiverStyleMethod(
           toolSymbol,
           parameters: toolMethod.parameters,
           declaredName: toolMethod.name,
           owner: nil,
           conformanceTraitName: traitName,
-          conformanceTraitDefId: traitDefId
+          conformanceTraitDefId: traitDefId,
+          traitMethodDefId: toolTraitMethodDefId
         )
 
         methodInfos.append(
@@ -3844,16 +3853,24 @@ extension TypeChecker {
       let traitRef = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitArgTypes)
       let parentTraitRefs = try directParentTraitRefs(for: traitRef, selfType: selfType)
       let slots = try requirementSlots(for: traitRef, selfType: selfType)
-      var localImplementationDefIdsByMethodName: [String: DefId] = [:]
+      var implDefIdsByName: [String: DefId] = [:]
       for info in methodInfos {
-        localImplementationDefIdsByMethodName[info.method.name] = info.symbol.defId
+        implDefIdsByName[info.method.name] = info.symbol.defId
+      }
+      var localImplementationDefIdsByTraitMethodDefId: [DefId: DefId] = [:]
+      for slot in slots {
+        guard slot.traitMethodDefId.isValid,
+              let implDefId = implDefIdsByName[slot.methodName] else {
+          continue
+        }
+        localImplementationDefIdsByTraitMethodDefId[slot.traitMethodDefId] = implDefId
       }
       let witness = ConformanceWitness(
         selfType: selfType,
         traitRef: traitRef,
         directParentTraitRefs: parentTraitRefs,
         requirementSlots: slots,
-        localImplementationDefIdsByMethodName: localImplementationDefIdsByMethodName
+        localImplementationDefIdsByTraitMethodDefId: localImplementationDefIdsByTraitMethodDefId
       )
       conformanceWitnesses[witness.key] = witness
 

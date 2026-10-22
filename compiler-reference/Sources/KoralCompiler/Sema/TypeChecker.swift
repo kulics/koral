@@ -472,7 +472,8 @@ public class TypeChecker {
     declaredName: String? = nil,
     owner: ReceiverMethodOwner? = nil,
     conformanceTraitName: String? = nil,
-    conformanceTraitDefId: DefId? = nil
+    conformanceTraitDefId: DefId? = nil,
+    traitMethodDefId: DefId? = nil
   ) {
     // Store named parameter info for call-site validation
     functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
@@ -502,12 +503,22 @@ public class TypeChecker {
       } else {
         resolvedName = context.getName(symbol.defId) ?? ""
       }
+      // For trait implementations, the impl method's DefId IS the trait method's
+      // DefId (both come from `methodSymbolDefId(traitName, methodName)`). If
+      // `traitMethodDefId` wasn't passed, default it to the symbol's own DefId
+      // so the dual-key registration works.
+      let resolvedTraitMethodDefId: DefId? = {
+        if let traitMethodDefId { return traitMethodDefId }
+        if conformanceTraitName != nil { return symbol.defId }
+        return nil
+      }()
       receiverMethodDispatchByDefId[symbol.defId] = ReceiverMethodDispatchInfo(
         methodDefId: symbol.defId,
         methodName: resolvedName,
         owner: owner,
         conformanceTraitName: conformanceTraitName,
-        conformanceTraitDefId: conformanceTraitDefId
+        conformanceTraitDefId: conformanceTraitDefId,
+        traitMethodDefId: resolvedTraitMethodDefId
       )
     } else {
       receiverStyleMethodDefIds.remove(symbol.defId.id)
@@ -1642,21 +1653,9 @@ public class TypeChecker {
     methodName: String,
     methodTypeArgs: [Type]
   ) {
-    if context.containsGenericParameter(baseType) {
-      return
-    }
-    if methodTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
-      return
-    }
-    recordInstantiation(InstantiationRequest(
-      kind: .traitMethod(
-        baseType: baseType,
-        methodName: methodName,
-        methodTypeArgs: methodTypeArgs
-      ),
-      sourceLine: currentLine,
-      sourceFileName: currentFileName
-    ))
+    _ = baseType
+    _ = methodName
+    _ = methodTypeArgs
   }
 
   func checkFunctionBody(

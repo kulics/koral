@@ -860,8 +860,7 @@ extension TypeChecker {
   func expectedFunctionTypeForGenericTraitMethod(
     _ method: TraitMethodSignature,
     selfType: Type,
-    substitution: [String: Type],
-    dropSelfAsPointer: Bool = false
+    substitution: [String: Type]
   ) throws -> Type {
     return try withNewScope {
       // Bind Self type
@@ -878,26 +877,16 @@ extension TypeChecker {
       }
 
       let params: [Parameter] = try method.parameters.map { param in
-        var resolvedType = try resolveTypeNode(param.type)
-        // For Drop trait: optionally wrap self as *mutable Self
-        if dropSelfAsPointer && param.name == "self" {
-          resolvedType = .mutablePointer(element: resolvedType)
-        }
+        let resolvedType = try resolveTypeNode(param.type)
         let t = adjustReceiverParameterType(
           paramName: param.name,
           resolvedType: resolvedType,
           receiverMutable: isMutableNominalReceiverType(selfType)
         )
-        // When dropSelfAsPointer, self is a raw pointer, not a receiver reference
-        let passKind: PassKind
-        if dropSelfAsPointer && param.name == "self" {
-          passKind = .byVal
-        } else {
-          passKind = passKindForResolvedParameter(
-            paramName: param.name,
-            type: t,
-            receiverMutable: isMutableNominalReceiverType(selfType))
-        }
+        let passKind = passKindForResolvedParameter(
+          paramName: param.name,
+          type: t,
+          receiverMutable: isMutableNominalReceiverType(selfType))
         return Parameter(type: t, kind: passKind)
       }
       let ret = try resolveTypeNode(method.returnType)

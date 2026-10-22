@@ -39,7 +39,30 @@ public enum MethodOwner: Hashable, Equatable {
 /// share the owner `List` and differ here, exactly as rustc's `Instance` is
 /// `(DefId, GenericArgs)` and not `DefId` alone. Keying an instance table by the
 /// owner alone makes those two one entry.
+///
+/// The method dimension is identified by `methodDefId` (the declaration's
+/// `DefId`), NOT by name — matching rustc's `Instance { def: InstanceDef::Item(def_id), substs }`.
+/// Names are for resolution and C mangling only; once resolved, only identity is compared.
 public struct MethodInstanceKey: Hashable, Equatable {
+  public let owner: MethodOwner
+  public let ownerArgs: [Type]
+  public let methodDefId: DefId
+  public let methodTypeArgs: [Type]
+
+  public init(owner: MethodOwner, ownerArgs: [Type], methodDefId: DefId, methodTypeArgs: [Type]) {
+    self.owner = owner
+    self.ownerArgs = ownerArgs
+    self.methodDefId = methodDefId
+    self.methodTypeArgs = methodTypeArgs
+  }
+}
+
+/// Legacy name-based key for the `extensionMethods` map used by
+/// `lookupConcreteMethodSymbol`. This is the ONLY remaining name-keyed method
+/// table — it serves `traitMethodPlaceholder` resolution (which carries a name
+/// but no DefId). Phase C adds `traitMethodDefId` to `traitMethodPlaceholder`,
+/// after which this key and its map are deleted.
+public struct MethodLookupKey: Hashable, Equatable {
   public let owner: MethodOwner
   public let ownerArgs: [Type]
   public let methodName: String
@@ -261,11 +284,20 @@ extension CompilerContext {
   /// Key of a method instantiated for a concrete receiver: the receiver's owner
   /// identity AND its instantiation arguments, so `List[String].new` and
   /// `List[Rune].new` are two entries.
-  public func receiverMethodKey(_ receiverType: Type, _ methodName: String, methodTypeArgs: [Type] = [])
+  public func receiverMethodKey(_ receiverType: Type, _ methodDefId: DefId, methodTypeArgs: [Type] = [])
     -> MethodInstanceKey
   {
     let pair = methodOwnerAndArgs(of: receiverType)
     return MethodInstanceKey(
+      owner: pair.owner, ownerArgs: pair.args, methodDefId: methodDefId, methodTypeArgs: methodTypeArgs)
+  }
+
+  /// Legacy name-based key for `extensionMethods` (used by `lookupConcreteMethodSymbol`).
+  public func receiverMethodLookupKey(_ receiverType: Type, _ methodName: String, methodTypeArgs: [Type] = [])
+    -> MethodLookupKey
+  {
+    let pair = methodOwnerAndArgs(of: receiverType)
+    return MethodLookupKey(
       owner: pair.owner, ownerArgs: pair.args, methodName: methodName, methodTypeArgs: methodTypeArgs)
   }
 }

@@ -86,7 +86,7 @@ extension TypeChecker {
          .traitObjectConversion:
       return true
      case .methodReference(let base, _, _, _, _),
-        .traitMethodPlaceholder(_, _, _, let base, _, _):
+        .traitMethodPlaceholder(_, _, _, _, let base, _, _):
       return typedExpressionHasObservableStatementEffect(base)
     case .castExpression(let inner, _),
          .notExpression(let inner, _),

@@ -1742,6 +1742,1193 @@ public let instantiate_extension_method(
     );
 };
 
+// ── resolve_method_instance_by_identity ──────────────────────────────────────
+
+// The unique owner of the template declaring `def_id`, or None when ambiguous.
+// Pure identity: matched on the declaration's DefId, never its name.
+file_private let exact_template_owner_for_method_def_id(
+    mono Monomorphizer,
+    def_id DefId,
+) Option[MethodOwner] = {
+    if not def_id.is_valid() then {
+        return Option[MethodOwner].None();
+    };
+    let mutable owners = List[MethodOwner].new();
+    let mutable seen = Set[MethodOwner].new();
+    for entry in mono.storage.extension_methods.iterator() then {
+        let key = entry.first;
+        let method_entry = entry.second;
+        if method_entry.symbol.def_id == def_id then {
+            if not seen.contains(key.owner) then {
+                seen.insert(key.owner);
+                owners.push(key.owner);
+            };
+        };
+    };
+    for entry in mono.storage.generic_templates.extension_methods.iterator() then {
+        let owner = entry.first;
+        let templates = entry.second;
+        for template in templates then {
+            if template.method.def_id == def_id then {
+                if not seen.contains(owner) then {
+                    seen.insert(owner);
+                    owners.push(owner);
+                };
+            };
+        };
+    };
+    if owners.count() == UInt(1) then {
+        return Option[MethodOwner].Some(owners[UInt(0)]);
+    };
+    return Option[MethodOwner].None();
+};
+
+// Generic parameter names in a type, in order of first appearance.
+file_private let collect_generic_parameter_names_from_type(t Type) List[String] = {
+    let mutable names = List[String].new();
+    let mutable seen = Set[String].new();
+    let mutable stack = List[Type].new();
+    stack.push(t);
+    let mutable index UInt = UInt(0);
+    while index < stack.count() then {
+        let current = stack[index];
+        index += UInt(1);
+        when current in {
+            .GenericParameter(name) then {
+                if not seen.contains(name) then {
+                    seen.insert(name);
+                    names.push(name);
+                };
+            },
+            .ReferenceType(inner) then stack.push(inner),
+            .MutableReferenceType(inner) then stack.push(inner),
+            .BorrowedReferenceType(inner) then stack.push(inner),
+            .MutableBorrowedReferenceType(inner) then stack.push(inner),
+            .WeakReferenceType(inner) then stack.push(inner),
+            .MutableWeakReferenceType(inner) then stack.push(inner),
+            .PointerType(inner) then stack.push(inner),
+            .MutablePointerType(inner) then stack.push(inner),
+            .FunctionType(params, ret) then {
+                for param in params then {
+                    stack.push(param.param_type);
+                };
+                stack.push(ret);
+            },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    stack.push(arg);
+                };
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then {
+                    stack.push(arg);
+                };
+            },
+            _ then {},
+        };
+    };
+    return names;
+};
+
+// Infer method-level type args by unifying the template's checked signature
+// against the substituted method type (Swift's `inferMethodTypeArgsBySignature`).
+file_private let infer_method_type_args_by_signature(
+    mono Monomorphizer,
+    template GenericExtensionMethodTemplate,
+    substituted_type Type,
+) List[Type] = {
+    let mutable out = List[Type].new();
+    if template.method.type_params.is_empty() then {
+        return out;
+    };
+    let mutable resolved_substituted = resolve_parameterized_type(mono, substituted_type);
+    let (checked_params_opt, checked_returns) = when template.checked_parameters is .Some(_) in {
+        true then Pair(template.checked_parameters, template.checked_return_type),
+        false then Pair(Option[List[Symbol]].None(), Option[Type].None()),
+    };
+    when checked_params_opt in {
+        .Some(checked_params) then {
+            when checked_returns in {
+                .Some(checked_return) then {
+                    when resolved_substituted in {
+                        .FunctionType(expected_params, expected_returns) then {
+                            let expected_types = param_entry_types(expected_params);
+                            let mutable bindings = Dict[String, Type].new();
+                            let mutable i UInt = UInt(1);
+                            while i < checked_params.count() and i < expected_types.count() then {
+                                let _ = unify_generic_type_pattern(
+                                    mono,
+                                    (checked_params[i]).symbol_type,
+                                    expected_types[i],
+                                    collect_generic_parameter_names_from_type(
+                                        (checked_params[i]).symbol_type,
+                                    ),
+                                    bindings,
+                                );
+                                i += UInt(1);
+                            };
+                            let _ = unify_generic_type_pattern(
+                                mono,
+                                checked_return,
+                                expected_returns,
+                                collect_generic_parameter_names_from_type(
+                                    checked_return,
+                                ),
+                                bindings,
+                            );
+                            for type_param in template.method.type_params then {
+                                out.push(
+                                    when bindings.get(type_param.name) in {
+                                        .Some(bound) then bound,
+                                        .None() then Type.GenericParameter(type_param.name),
+                                    }
+                                );
+                            };
+                        },
+                        _ then {},
+                    }
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    };
+    return out;
+};
+
+// Infer the CONFORMANCE's type arguments by unifying the template's checked
+// signature against the expected method type (Swift's
+// `inferTraitExtensionTypeArgs`). Returns None when the shape does not fit.
+public let infer_trait_extension_type_args_by_method_type(
+    mono Monomorphizer,
+    base_type Type,
+    method_info GenericExtensionMethodTemplate,
+    expected_method_type Type,
+    method_type_args List[Type],
+) Option[List[Type]] = {
+    let (actual_params, actual_return) = when expected_method_type in {
+        .FunctionType(params, ret) then Pair(params, ret),
+        _ then {
+            return Option[List[Type]].None();
+        },
+    };
+    let mutable substitution = Dict[String, Type].new();
+    substitution.insert("Self", resolve_parameterized_type(mono, base_type));
+    let method_type_params = method_info.method.type_params;
+    if not method_type_args.is_empty() then {
+        if method_type_params.count() != method_type_args.count() then {
+            return Option[List[Type]].None();
+        };
+        let mutable i UInt = UInt(0);
+        while i < method_type_params.count() then {
+            substitution.insert(
+                (method_type_params[i]).name,
+                method_type_args[i],
+            );
+            i += UInt(1);
+        };
+    };
+    let (pattern_params, pattern_return) = when method_info.checked_parameters is .Some(_) in {
+        true then {
+            when method_info.checked_return_type in {
+                .Some(checked_return) then {
+                    let mutable params_out = List[Type].new();
+                    let checked = when method_info.checked_parameters in {
+                        .Some(checked_ref) then checked_ref,
+                        .None() then List[Symbol].new(),
+                    };
+                    for param in checked then {
+                        params_out.push(
+                            substitute_type(mono, param.symbol_type, substitution),
+                        );
+                    };
+                    Pair(
+                        params_out,
+                        substitute_type(mono, checked_return, substitution),
+                    )
+                },
+                .None() then Pair(List[Type].new(), Type.Unknown()),
+            }
+        },
+        false then Pair(List[Type].new(), Type.Unknown()),
+    };
+    if pattern_params.is_empty() then {
+        return Option[List[Type]].None();
+    };
+    let actual_types = param_entry_types(actual_params);
+    if pattern_params.count() != actual_types.count() then {
+        return Option[List[Type]].None();
+    };
+    let mutable type_param_names = List[String].new();
+    let mutable type_param_set = Set[String].new();
+    for type_param in method_info.type_params then {
+        type_param_names.push(type_param.name);
+        type_param_set.insert(type_param.name);
+    };
+    if method_type_args.is_empty() then {
+        for method_type_param in method_type_params then {
+            if not type_param_set.contains(method_type_param.name) then {
+                type_param_names.push(method_type_param.name);
+                type_param_set.insert(method_type_param.name);
+            };
+        };
+    };
+    let mutable inferred = Dict[String, Type].new();
+    let mutable i UInt = UInt(0);
+    while i < pattern_params.count() then {
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_params[i],
+            actual_types[i],
+            type_param_names,
+            inferred,
+        ) then {
+            return Option[List[Type]].None();
+        };
+        i += UInt(1);
+    };
+    if not unify_generic_type_pattern(
+        mono,
+        pattern_return,
+        actual_return,
+        type_param_names,
+        inferred,
+    ) then {
+        return Option[List[Type]].None();
+    };
+    let mutable ordered = List[Type].new();
+    for type_param in method_info.type_params then {
+        when inferred.get(type_param.name) in {
+            .Some(bound) then ordered.push(bound),
+            .None() then {
+                return Option[List[Type]].None();
+            },
+        };
+    };
+    return Option[List[Type]].Some(ordered);
+};
+//
+// rustc's `Instance::resolve`. The definition-time DefId is authoritative:
+// this never re-decides which method via name lookup. All monomorphization
+// method-instance lookup funnels here.
+//
+// Lookup chain:
+//   L0: already-instantiated → the DefId IS the emitted identity.
+//   L1: direct hash lookup in `extension_method_def_ids_by_identity` by
+//       `MethodInstanceKey` (DefId + GenericArgs). No type matching — the key
+//       is exact identity. Dual-keyed under the trait method DefId.
+//   L2: materialize the template's specialization, then retry L1.
+//   L3: keepDefinitionTime (concrete given / built-in only).
+
+// Receiver candidates for identity lookup: the receiver itself, and the pointee
+// of a reference-like receiver (Swift's `identityReceiverLookupCandidates`).
+public let identity_receiver_lookup_candidates(
+    mono Monomorphizer,
+    receiver_type Type,
+) List[Type] = {
+    let mutable candidates = List[Type].new();
+    let mutable seen = Set[Type].new();
+    let append = Type.Unknown();
+    let _ = append;
+    let resolved = resolve_parameterized_type(mono, receiver_type);
+    if not seen.contains(resolved) then {
+        seen.insert(resolved);
+        candidates.push(resolved);
+    };
+    let inner = when resolved in {
+        .ReferenceType(inner) then Option[Type].Some(inner),
+        .MutableReferenceType(inner) then Option[Type].Some(inner),
+        .BorrowedReferenceType(inner) then Option[Type].Some(inner),
+        .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
+        .WeakReferenceType(inner) then Option[Type].Some(inner),
+        .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
+        _ then Option[Type].None(),
+    };
+    when inner in {
+        .Some(inner_ref) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner_ref);
+            if not seen.contains(resolved_inner) then {
+                seen.insert(resolved_inner);
+                candidates.push(resolved_inner);
+            };
+        },
+        .None() then {},
+    };
+    return candidates;
+};
+
+// Does the instantiated symbol's signature match the expected method type?
+// Signature equality, not candidate scanning — the key already named the
+// method; this only rejects a mismatched specialization.
+file_private let symbol_matches_full_method_type(
+    mono Monomorphizer,
+    hit_def_id DefId,
+    full_method_type Type,
+) Bool = {
+    return when mono.storage.context.get_symbol_type(hit_def_id) in {
+        .Some(hit_type) then {
+            let resolved_hit_type = resolve_parameterized_type(mono, hit_type);
+            if mono.storage.context.get_layout_key(resolved_hit_type) == mono.storage.context.get_layout_key(
+                full_method_type,
+            ) then true
+            else when resolved_hit_type in {
+                .FunctionType(hit_params, hit_returns) then {
+                    when full_method_type in {
+                        .FunctionType(expected_params, expected_returns) then {
+                            let hit_types = param_entry_types(hit_params);
+                            let expected_types = param_entry_types(expected_params);
+                            if hit_types.count() != expected_types.count() then false
+                            else if mono.storage.context.get_layout_key(
+                                resolve_parameterized_type(mono, hit_returns),
+                            ) != mono.storage.context.get_layout_key(
+                                resolve_parameterized_type(mono, expected_returns),
+                            ) then false
+                            else {
+                                let mutable ok = true;
+                                let mutable i UInt = UInt(0);
+                                while i < hit_types.count() then {
+                                    if mono.storage.context.get_layout_key(
+                                        resolve_parameterized_type(mono, hit_types[i]),
+                                    ) != mono.storage.context.get_layout_key(
+                                        resolve_parameterized_type(mono, expected_types[i]),
+                                    ) then {
+                                        ok = false;
+                                    };
+                                    i += UInt(1);
+                                };
+                                ok
+                            }
+                        },
+                        _ then false,
+                    }
+                },
+                _ then false,
+            }
+        },
+        .None() then true,
+    };
+};
+
+file_private let symbol_matches_full_method_type_via_trait_receiver(
+    mono Monomorphizer,
+    hit_def_id DefId,
+    full_method_type Type,
+    trait_def_id DefId,
+) Bool = {
+    return when mono.storage.context.get_symbol_type(hit_def_id) in {
+        .Some(hit_type) then when resolve_parameterized_type(mono, hit_type) in {
+            .FunctionType(hit_params, hit_returns) then when full_method_type in {
+                .FunctionType(expected_params, expected_returns) then {
+                    let hit_types = param_entry_types(hit_params);
+                    let expected_types = param_entry_types(expected_params);
+                    if hit_types.count() != expected_types.count() or hit_types.is_empty() then {
+                        return false;
+                    };
+                    if mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, hit_returns),
+                    ) != mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, expected_returns),
+                    ) then {
+                        return false;
+                    };
+                    let hit_first = resolve_parameterized_type(mono, hit_types[UInt(0)]);
+                    let first_is_trait_receiver = when hit_first in {
+                        .TraitObject(hit_trait_def_id, _) then hit_trait_def_id == trait_def_id,
+                        _ then false,
+                    };
+                    if not first_is_trait_receiver then {
+                        return false;
+                    };
+                    let mutable i UInt = UInt(1);
+                    while i < hit_types.count() then {
+                        if mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, hit_types[i]),
+                        ) != mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, expected_types[i]),
+                        ) then {
+                            return false;
+                        };
+                        i += UInt(1);
+                    };
+                    true
+                },
+                _ then false,
+            },
+            _ then false,
+        },
+        .None() then false,
+    };
+};
+
+file_private let symbol_matches_expected_or_trait_receiver(
+    mono Monomorphizer,
+    hit_def_id DefId,
+    full_method_type Type,
+    trait_def_id_opt Option[DefId],
+) Bool = {
+    if symbol_matches_full_method_type(mono, hit_def_id, full_method_type) then {
+        return true;
+    };
+    return when trait_def_id_opt in {
+        .Some(trait_def_id) then symbol_matches_full_method_type_via_trait_receiver(
+            mono,
+            hit_def_id,
+            full_method_type,
+            trait_def_id,
+        ),
+        .None() then false,
+    };
+};
+
+/// Finds (or materializes) the specialization of the SAME method the
+/// definition-time symbol named. The definition-time DefId is authoritative.
+/// Identity lookup that NEVER instantiates -- a pure read of the tables.
+///
+/// `resolve_method_instance_by_identity`'s L2 materializes a specialization,
+/// which mutates the monomorphizer. That is right at a call site and wrong in
+/// the middle of type resolution: `refresh_list_pattern_ops` runs while the
+/// resolution worklist is still draining, and an instantiation there perturbs
+/// state that later makes codegen emit a payloadless init for a tagged enum
+/// (`Type`, `InterpolatedStringTokenPart`). This variant answers only from what
+/// is already registered (L0/L1) and leaves the tables untouched.
+///
+/// Read-only is not a weaker identity check: the key is still owner + DefId +
+/// type args. It only declines to CREATE anything.
+public let lookup_method_instance_identity_readonly(
+    mono Monomorphizer,
+    definition_method Symbol,
+    receiver_type Type,
+    method_type_args List[Type],
+) Option[Symbol] = {
+    let def_id = definition_method.def_id;
+    if not def_id.is_valid() then {
+        return Option[Symbol].None();
+    };
+    // L0: the DefId is already the emitted identity.
+    if mono.storage.instantiated_method_def_ids.contains(def_id.id) then {
+        return Option[Symbol].Some(definition_method);
+    };
+    let identity_def_id = when mono.storage.receiver_method_dispatch.get(def_id) in {
+        .Some(dispatch_info) then when dispatch_info.method_def_id.is_valid() in {
+            true then dispatch_info.method_def_id,
+            false then def_id,
+        },
+        .None() then def_id,
+    };
+    let mutable lookup_def_ids = List[DefId].new();
+    lookup_def_ids.push(identity_def_id);
+    if not (identity_def_id == def_id) then {
+        lookup_def_ids.push(def_id);
+    };
+    // Dual-key: trait-method references carry the trait METHOD's DefId
+    // (rustc's `trait_item_def_id`), not the impl's.
+    when mono.storage.receiver_method_dispatch.get(def_id) in {
+        .Some(dispatch_info) then when dispatch_info.trait_method_def_id in {
+            .Some(trait_item_def_id) then {
+                if not lookup_def_ids.contains(trait_item_def_id) then {
+                    lookup_def_ids.push(trait_item_def_id);
+                };
+            },
+            .None() then {},
+        },
+        .None() then {},
+    };
+    for lookup_def_id in lookup_def_ids then {
+        let lookup_key = make_receiver_method_identity_key(
+            mono,
+            receiver_type,
+            lookup_def_id,
+            method_type_args,
+        );
+        when mono.storage.extension_method_def_ids_by_identity.get(lookup_key) in {
+            .Some(hit) then {
+                let hit_type = when mono.storage.context.get_function_type(hit) in {
+                    .Some(function_type) then function_type,
+                    .None() then definition_method.symbol_type,
+                };
+                return Option[Symbol].Some(
+                    Symbol(hit, hit_type, SymbolKind.Function()),
+                );
+            },
+            .None() then {},
+        };
+        // Swift `remappedFunctionDefIds[oldDefId]` -- the GivenDecl remapping
+        // maps the declaration DefId to the per-conforming-type instance DefId.
+        when mono.storage.remapped_function_def_ids.get(lookup_def_id.id) in {
+            .Some(remapped_list) then {
+                if not remapped_list.is_empty() then {
+                    let hit = (remapped_list[UInt(0)]).first;
+                    let hit_type = when mono.storage.context.get_function_type(hit) in {
+                        .Some(function_type) then function_type,
+                        .None() then definition_method.symbol_type,
+                    };
+                    return Option[Symbol].Some(
+                        Symbol(hit, hit_type, SymbolKind.Function()),
+                    );
+                };
+            },
+            .None() then {},
+        };
+    };
+    return Option[Symbol].None();
+};
+
+
+public let resolve_method_instance_by_identity(
+    mono Monomorphizer,
+    definition_method Symbol,
+    substituted_method_type Type,
+    substituted_method_type_args List[Type],
+    receiver_type Type,
+) MethodInstanceResolution = {
+    let def_id = definition_method.def_id;
+    let identity_def_id = when mono.storage.receiver_method_dispatch.get(def_id) in {
+        .Some(dispatch_info) then when dispatch_info.method_def_id.is_valid() in {
+            true then dispatch_info.method_def_id,
+            false then def_id,
+        },
+        .None() then def_id,
+    };
+    let trait_def_id_opt = when mono.storage.receiver_method_dispatch.get(identity_def_id) in {
+        .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
+        .None() then when mono.storage.receiver_method_dispatch.get(def_id) in {
+            .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
+            .None() then Option[DefId].None(),
+        },
+    };
+
+    // Substitute method-level type parameters into the method type so the
+    // expected type is fully concrete.
+    let mutable full_method_type = substituted_method_type;
+    let owner = mono.storage.context.method_owner_of(receiver_type);
+    let dispatch_owner = when mono.storage.receiver_method_dispatch.get(identity_def_id) in {
+        .Some(dispatch_info) then when dispatch_info.owner in {
+            .Some(owner_ref) then when owner_ref in {
+                .ExtensionTemplate(owner_def_id) then Option[MethodOwner].Some(
+                    MethodOwner.Decl(owner_def_id),
+                ),
+                .ConcreteType(_) then Option[MethodOwner].None(),
+            },
+            .None() then Option[MethodOwner].None(),
+        },
+        .None() then when mono.storage.receiver_method_dispatch.get(def_id) in {
+            .Some(dispatch_info) then when dispatch_info.owner in {
+                .Some(owner_ref) then when owner_ref in {
+                    .ExtensionTemplate(owner_def_id) then Option[MethodOwner].Some(
+                        MethodOwner.Decl(owner_def_id),
+                    ),
+                    .ConcreteType(_) then Option[MethodOwner].None(),
+                },
+                .None() then Option[MethodOwner].None(),
+            },
+            .None() then Option[MethodOwner].None(),
+        },
+    };
+    let exact_owner = exact_template_owner_for_method_def_id(mono, identity_def_id);
+
+    // Template lookup by DECLARATION identity — never by name. Tries the
+    // owner, then the exact owner, then the dispatch owner, each first under
+    // the identity DefId and then the raw DefId (they differ when a trait
+    // method link is present).
+    let mutable template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+        owner,
+        identity_def_id,
+    );
+    if template is .None() then {
+        when exact_owner in {
+            .Some(exact_owner_ref) then {
+                template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+                    exact_owner_ref,
+                    identity_def_id,
+                );
+            },
+            .None() then {},
+        };
+    };
+    if template is .None() then {
+        when dispatch_owner in {
+            .Some(dispatch_owner_ref) then {
+                template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+                    dispatch_owner_ref,
+                    identity_def_id,
+                );
+            },
+            .None() then {},
+        };
+    };
+    if template is .None() and identity_def_id == def_id then {
+        template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+            owner,
+            def_id,
+        );
+        if template is .None() then {
+            when exact_owner in {
+                .Some(exact_owner_ref) then {
+                    template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+                        exact_owner_ref,
+                        def_id,
+                    );
+                },
+                .None() then {},
+            };
+            if template is .None() then {
+                when dispatch_owner in {
+                    .Some(dispatch_owner_ref) then {
+                        template = mono.storage.generic_templates.lookup_extension_method_by_def_id(
+                            dispatch_owner_ref,
+                            def_id,
+                        );
+                    },
+                    .None() then {},
+                };
+            };
+        };
+    };
+
+    let template_ref = when template in {
+        .Some(template_ref) then Option[GenericExtensionMethodTemplate].Some(template_ref),
+        .None() then Option[GenericExtensionMethodTemplate].None(),
+    };
+
+    if not substituted_method_type_args.is_empty() and has_generic_parameter(
+        substituted_method_type,
+    ) then {
+        let mutable m_subst = Dict[String, Type].new();
+        when template_ref in {
+            .Some(template_ref) then {
+                if not template_ref.method.type_params.is_empty() then {
+                    let mutable i UInt = UInt(0);
+                    while i < template_ref.method.type_params.count() and i < substituted_method_type_args.count() then {
+                        m_subst.insert(
+                            (template_ref.method.type_params[i]).name,
+                            substituted_method_type_args[i],
+                        );
+                        i += UInt(1);
+                    };
+                } else {
+                    let param_names = collect_generic_parameter_names_from_type(
+                        substituted_method_type,
+                    );
+                    let mutable i UInt = UInt(0);
+                    while i < param_names.count() and i < substituted_method_type_args.count() then {
+                        m_subst.insert(
+                            param_names[i],
+                            substituted_method_type_args[i],
+                        );
+                        i += UInt(1);
+                    };
+                };
+            },
+            .None() then {
+                let param_names = collect_generic_parameter_names_from_type(
+                    substituted_method_type,
+                );
+                let mutable i UInt = UInt(0);
+                while i < param_names.count() and i < substituted_method_type_args.count() then {
+                    m_subst.insert(
+                        param_names[i],
+                        substituted_method_type_args[i],
+                    );
+                    i += UInt(1);
+                };
+            },
+        };
+        if not m_subst.is_empty() then {
+            full_method_type = substitute_type(mono, substituted_method_type, m_subst);
+        };
+    };
+
+    // L0: already-instantiated — the DefId IS the emitted identity.
+    if mono.storage.instantiated_method_def_ids.contains(def_id.id) then {
+        return MethodInstanceResolution.Instantiated(
+            Symbol(def_id, full_method_type, definition_method.kind),
+        );
+    };
+    // L1: direct hash lookup by identity key (DefId + GenericArgs). Check both
+    // the definition-time DefId and the trait method DefId (for methods that
+    // implement a trait method via `trait_item_def_id`).
+    let pair = mono.storage.context.method_owner_and_args(receiver_type);
+    let owner_args = pair.second;
+    let mutable lookup_def_ids = List[DefId].new();
+    lookup_def_ids.push(identity_def_id);
+    if not (identity_def_id == def_id) then {
+        lookup_def_ids.push(def_id);
+    };
+    for lookup_def_id in lookup_def_ids then {
+        let lookup_key = make_receiver_method_identity_key(
+            mono,
+            receiver_type,
+            lookup_def_id,
+            substituted_method_type_args,
+        );
+        when mono.storage.extension_method_def_ids_by_identity.get(lookup_key) in {
+            .Some(hit) then {
+                if symbol_matches_expected_or_trait_receiver(
+                    mono,
+                    hit,
+                    full_method_type,
+                    trait_def_id_opt,
+                ) then {
+                    return MethodInstanceResolution.Instantiated(
+                        Symbol(hit, full_method_type, SymbolKind.Function()),
+                    );
+                };
+            },
+            .None() then {},
+        };
+        // Swift `remappedFunctionDefIds[oldDefId]` — the GivenDecl remapping
+        // (register_given_decl_method_identities) maps the declaration DefId to
+        // the per-conforming-type instance DefId.
+        when mono.storage.remapped_function_def_ids.get(lookup_def_id.id) in {
+            .Some(remapped_list) then {
+                for remapped in remapped_list then {
+                    if symbol_matches_expected_or_trait_receiver(
+                        mono,
+                        remapped.first,
+                        full_method_type,
+                        trait_def_id_opt,
+                    ) then {
+                        return MethodInstanceResolution.Instantiated(
+                            Symbol(remapped.first, full_method_type, SymbolKind.Function()),
+                        );
+                    };
+                };
+            },
+            .None() then {},
+        };
+        // Dual-key: also check under the trait method DefId.
+        let trait_method_def_id = when mono.storage.receiver_method_dispatch.get(
+            lookup_def_id,
+        ) in {
+            .Some(dispatch_info) then dispatch_info.trait_method_def_id,
+            .None() then when mono.storage.receiver_method_dispatch.get(def_id) in {
+                .Some(dispatch_info) then dispatch_info.trait_method_def_id,
+                .None() then Option[DefId].None(),
+            },
+        };
+        when trait_method_def_id in {
+            .Some(trait_item_def_id) then {
+                let trait_key = make_receiver_method_identity_key(
+                    mono,
+                    receiver_type,
+                    trait_item_def_id,
+                    substituted_method_type_args,
+                );
+                when mono.storage.extension_method_def_ids_by_identity.get(trait_key) in {
+                    .Some(hit) then {
+                        if symbol_matches_expected_or_trait_receiver(
+                            mono,
+                            hit,
+                            full_method_type,
+                            trait_def_id_opt,
+                        ) then {
+                            return MethodInstanceResolution.Instantiated(
+                                Symbol(hit, full_method_type, SymbolKind.Function()),
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    // L2: materialize this declaration's specialization, then retry L1.
+    when template_ref in {
+        .Some(template_ref) then {
+            let resolved_base = resolve_parameterized_type(mono, receiver_type);
+            let receiver_owner_args = if not owner_args.is_empty() then owner_args
+            else when resolved_base in {
+                .GenericStruct(_, args) then args,
+                .GenericEnum(_, args) then args,
+                .StructureType(s_def_id) then mono.storage.context.get_type_arguments(
+                    s_def_id,
+                ) or else List[Type].new(),
+                .EnumType(s_def_id) then mono.storage.context.get_type_arguments(
+                    s_def_id,
+                ) or else List[Type].new(),
+                _ then List[Type].new(),
+            };
+            let m_args = if not substituted_method_type_args.is_empty() then substituted_method_type_args
+            else if not template_ref.method.type_params.is_empty() then infer_method_type_args_by_signature(
+                mono,
+                template_ref,
+                full_method_type,
+            )
+            else List[Type].new();
+            let resolved_owner_args = if template_ref.type_params.count() == receiver_owner_args.count() then receiver_owner_args
+            else when infer_trait_extension_type_args_by_method_type(
+                mono,
+                resolved_base,
+                template_ref,
+                full_method_type,
+                m_args,
+            ) in {
+                .Some(inferred) then inferred,
+                .None() then receiver_owner_args,
+            };
+            if m_args.count() == template_ref.method.type_params.count() and template_ref.type_params.count() == resolved_owner_args.count() then {
+                let inst_sym = instantiate_extension_method(
+                    mono,
+                    resolved_base,
+                    owner,
+                    template_ref,
+                    resolved_owner_args,
+                    m_args,
+                );
+                if inst_sym.def_id.is_valid() then {
+                    // Retry L1 after instantiation.
+                    for lookup_def_id in lookup_def_ids then {
+                        let retry_key = make_receiver_method_identity_key(
+                            mono,
+                            receiver_type,
+                            lookup_def_id,
+                            m_args,
+                        );
+                        when mono.storage.extension_method_def_ids_by_identity.get(
+                            retry_key,
+                        ) in {
+                            .Some(hit) then {
+                                if symbol_matches_expected_or_trait_receiver(
+                                    mono,
+                                    hit,
+                                    full_method_type,
+                                    trait_def_id_opt,
+                                ) then {
+                                    return MethodInstanceResolution.Instantiated(
+                                        Symbol(
+                                            hit,
+                                            full_method_type,
+                                            SymbolKind.Function(),
+                                        ),
+                                    );
+                                };
+                            },
+                            .None() then {},
+                        };
+                    };
+                    // The freshly instantiated symbol IS the answer.
+                    if symbol_matches_expected_or_trait_receiver(
+                        mono,
+                        inst_sym.def_id,
+                        full_method_type,
+                        trait_def_id_opt,
+                    ) then {
+                        return MethodInstanceResolution.Instantiated(
+                            Symbol(
+                                inst_sym.def_id,
+                                full_method_type,
+                                SymbolKind.Function(),
+                            ),
+                        );
+                    };
+                };
+            };
+        },
+        .None() then {
+        },
+    };
+
+    // L3: keep the definition-time DefId ONLY if it's already an emitted
+    // function (concrete given / built-in). Otherwise the C name would be the
+    // template's name.
+    if mono.storage.instantiated_method_def_ids.contains(def_id.id) then {
+        return MethodInstanceResolution.Instantiated(
+            Symbol(def_id, full_method_type, definition_method.kind),
+        );
+    };
+    return MethodInstanceResolution.KeepDefinitionTime(full_method_type);
+};
+
+/// Tries each receiver candidate (the receiver and its pointee) and returns the
+/// first instantiated result. Falls back to the first keepDefinitionTime.
+public let resolve_method_instance_by_identity_for_receiver(
+    mono Monomorphizer,
+    definition_method Symbol,
+    substituted_method_type Type,
+    substituted_method_type_args List[Type],
+    receiver_type Type,
+) MethodInstanceResolution = {
+    let mutable keep_definition_time = Option[Type].None();
+    let candidates = identity_receiver_lookup_candidates(mono, receiver_type);
+    for candidate in candidates then {
+        if has_generic_parameter(candidate) then {
+            continue;
+        };
+        let resolution = resolve_method_instance_by_identity(
+            mono,
+            definition_method,
+            substituted_method_type,
+            substituted_method_type_args,
+            candidate,
+        );
+        when resolution in {
+            .Instantiated(_) then {
+                return resolution;
+            },
+            .KeepDefinitionTime(method_type) then {
+                if keep_definition_time is .None() then {
+                    keep_definition_time = Option[Type].Some(method_type);
+                };
+            },
+        };
+    };
+    when keep_definition_time in {
+        .Some(method_type) then MethodInstanceResolution.KeepDefinitionTime(
+            method_type,
+        ),
+        .None() then MethodInstanceResolution.KeepDefinitionTime(
+            substituted_method_type,
+        ),
+    }
+};
+
+/// Resolve a standalone method reference (`.variable` / `.call` callee) to its
+/// concrete instance (Swift's `resolveStandaloneMethodFunctionReference`).
+/// Receiver candidates come from the function type's first parameter, the
+/// return type, and the template owner — never from a name lookup. Returns
+/// None when no instance has been materialized; the caller then keeps the
+/// definition-time symbol.
+public let resolve_standalone_method_function_reference(
+    mono Monomorphizer,
+    definition_method Symbol,
+    substituted_function_type Type,
+    substituted_method_type_args List[Type],
+) Option[Symbol] = {
+    let resolved_function_type = resolve_parameterized_type(
+        mono,
+        substituted_function_type,
+    );
+    let (fn_params, fn_returns) = when resolved_function_type in {
+        .FunctionType(params, ret) then Pair(params, ret),
+        _ then {
+            return Option[Symbol].None();
+        },
+    };
+    let mutable receiver_candidates = List[Type].new();
+    let mutable seen = Set[Type].new();
+    let param_types = param_entry_types(fn_params);
+    if not param_types.is_empty() then {
+        for candidate in identity_receiver_lookup_candidates(mono, param_types[UInt(0)]) then {
+            if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                seen.insert(candidate);
+                receiver_candidates.push(candidate);
+            };
+        };
+    };
+    for candidate in identity_receiver_lookup_candidates(mono, fn_returns) then {
+        if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+            seen.insert(candidate);
+            receiver_candidates.push(candidate);
+        };
+    };
+    when resolve_parameterized_type(mono, fn_returns) in {
+        .GenericStruct(_, args) then {
+            for arg in args then {
+                for candidate in identity_receiver_lookup_candidates(mono, arg) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                        seen.insert(candidate);
+                        receiver_candidates.push(candidate);
+                    };
+                };
+            };
+        },
+        .GenericEnum(_, args) then {
+            for arg in args then {
+                for candidate in identity_receiver_lookup_candidates(mono, arg) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                        seen.insert(candidate);
+                        receiver_candidates.push(candidate);
+                    };
+                };
+            };
+        },
+        .StructureType(s_def_id) then {
+            when mono.storage.context.get_type_arguments(s_def_id) in {
+                .Some(args) then {
+                    for arg in args then {
+                        for candidate in identity_receiver_lookup_candidates(mono, arg) then {
+                            if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                                seen.insert(candidate);
+                                receiver_candidates.push(candidate);
+                            };
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        },
+        .EnumType(s_def_id) then {
+            when mono.storage.context.get_type_arguments(s_def_id) in {
+                .Some(args) then {
+                    for arg in args then {
+                        for candidate in identity_receiver_lookup_candidates(mono, arg) then {
+                            if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                                seen.insert(candidate);
+                                receiver_candidates.push(candidate);
+                            };
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        },
+        _ then {},
+    };
+    // The definition's own owner: methods declared on a type whose instance is
+    // only visible through the dispatch table still need a candidate.
+    when mono.storage.receiver_method_dispatch.get(definition_method.def_id) in {
+        .Some(dispatch_info) then {
+            when dispatch_info.owner in {
+                .Some(owner_ref) then {
+                    when owner_ref in {
+                        .ConcreteType(owner_type) then {
+                            for candidate in identity_receiver_lookup_candidates(
+                                mono,
+                                owner_type,
+                            ) then {
+                                if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                                    seen.insert(candidate);
+                                    receiver_candidates.push(candidate);
+                                };
+                            };
+                        },
+                        .ExtensionTemplate(_) then {},
+                    }
+                },
+                .None() then {},
+            }
+        },
+        .None() then {},
+    };
+    when exact_template_owner_for_method_def_id(mono, definition_method.def_id) in {
+        .Some(owner) then {
+            let owner_type = when owner in {
+                .Decl(owner_def_id) then when mono.storage.context.lookup_type(
+                    owner_def_id,
+                ) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                },
+                .Builtin(name) then builtin_type_for_owner_name(name),
+            };
+            if not (owner_type is .Unknown()) then {
+                for candidate in identity_receiver_lookup_candidates(
+                    mono,
+                    owner_type,
+                ) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                        seen.insert(candidate);
+                        receiver_candidates.push(candidate);
+                    };
+                };
+            };
+        },
+        .None() then {},
+    };
+    for receiver_type in receiver_candidates then {
+        let resolution = resolve_method_instance_by_identity_for_receiver(
+            mono,
+            definition_method,
+            resolved_function_type,
+            substituted_method_type_args,
+            receiver_type,
+        );
+        when resolution in {
+            .Instantiated(symbol) then {
+                return Option[Symbol].Some(
+                    Symbol(
+                        symbol.def_id,
+                        resolve_parameterized_type(mono, symbol.symbol_type),
+                        symbol.kind,
+                    ),
+                );
+            },
+            .KeepDefinitionTime(_) then {},
+        };
+    };
+    return Option[Symbol].None();
+};
+
+// Built-in scalar/modifier type for an owner name in the closed `builtin`
+// space. Only used to recover a candidate receiver type from an owner that
+// has no declaration to carry one.
+file_private let builtin_type_for_owner_name(name String) Type = {
+    return when name in {
+        "Int" then Type.IntType(),
+        "Int8" then Type.Int8Type(),
+        "Int16" then Type.Int16Type(),
+        "Int32" then Type.Int32Type(),
+        "Int64" then Type.Int64Type(),
+        "UInt" then Type.UIntType(),
+        "UInt8" then Type.UInt8Type(),
+        "UInt16" then Type.UInt16Type(),
+        "UInt32" then Type.UInt32Type(),
+        "UInt64" then Type.UInt64Type(),
+        "Float32" then Type.Float32Type(),
+        "Float64" then Type.Float64Type(),
+        "Bool" then Type.BoolType(),
+        _ then Type.Unknown(),
+    };
+};
+
+/// The trait METHOD's DefId (rustc's `trait_item_def_id`) for a placeholder,
+/// recovered from the trait object type + method name. A placeholder's
+/// `method Symbol.def_id` is not the trait method's DefId; this recovers the
+/// real identity so identity lookup can find the implementation.
+public let trait_method_def_id_for_placeholder(
+    mono Monomorphizer,
+    trait_type Type,
+    method_name String,
+) Option[DefId] = {
+    return when resolve_parameterized_type(mono, trait_type) in {
+        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+            trait_def_id,
+            method_name,
+        ),
+        _ then Option[DefId].None(),
+    };
+};
+
+/// Resolve a trait-method placeholder to the concrete implementation by the
+/// trait METHOD's DefId (Swift's `resolveTraitPlaceholderMethodByIdentity`).
+/// Pure identity: no name lookup. Returns None when nothing has been
+/// instantiated for this identity yet.
+public let resolve_trait_placeholder_method_by_identity(
+    mono Monomorphizer,
+    trait_method_def_id DefId,
+    expected_method_type Type,
+    method_type_args List[Type],
+    receiver_type Type,
+) Option[Symbol] = {
+    if not trait_method_def_id.is_valid() then {
+        return Option[Symbol].None();
+    };
+    let definition_method = Symbol(
+        trait_method_def_id,
+        expected_method_type,
+        SymbolKind.Function(),
+    );
+    let resolution = resolve_method_instance_by_identity_for_receiver(
+        mono,
+        definition_method,
+        expected_method_type,
+        method_type_args,
+        receiver_type,
+    );
+    return when resolution in {
+        .Instantiated(symbol) then Option[Symbol].Some(
+            Symbol(
+                symbol.def_id,
+                resolve_parameterized_type(mono, symbol.symbol_type),
+                symbol.kind,
+            ),
+        ),
+        .KeepDefinitionTime(_) then Option[Symbol].None(),
+    };
+};
+
 // ── instantiate_extension_method_from_entry ──────────────────────────────────
 
 file_private let normalize_borrowed_extension_base_type(
@@ -1973,7 +3160,7 @@ public let instantiate_extension_method_from_entry(
     );
     // Keyed by the INSTANTIATION: the owner plus the type arguments this method
     // was instantiated with. `List[String]` and `List[Rune]` are two entries.
-    let lookup_key = MethodInstanceKey(
+    let lookup_key = MethodLookupKey(
         effective_owner,
         instance_type_args,
         resolved_template.method.name,
@@ -2060,10 +3247,6 @@ public let instantiate_extension_method_from_entry(
                     mono,
                     substituted_type,
                 );
-                if resolved_template.method.name == "drop" and resolved_template.method.params.count(
-                ) == 1 and resolved_template.method.params[UInt(0)].name == "self" then {
-                    resolved_type = Type.MutablePointerType(base_type);
-                };
                 concrete_params.push(
                     TypedParam(
                         mono.storage.context.symbol_name(sym),
@@ -2085,15 +3268,6 @@ public let instantiate_extension_method_from_entry(
                     mono,
                     mono.resolve_type_node_impl(p.param_type, node_subst),
                 );
-                // `drop(self)` has a special receiver ABI -- `*mutable Self` --
-                // matching `register_conformance_method_signatures_for_concrete_type`
-                // in sema and the drop glue's `void <name>(struct <type>*)` prototype.
-                // Without it the instantiated `drop` was emitted by-value and
-                // collided with the glue's pointer-ABI declaration of the same name.
-                if resolved_template.method.name == "drop" and resolved_template.method.params.count(
-                ) == 1 and resolved_template.method.params[UInt(0)].name == "self" then {
-                    resolved_type = Type.MutablePointerType(base_type);
-                };
                 concrete_params.push(
                     TypedParam(p.name, p.is_mutable, resolved_type, p.named),
                 );
@@ -2125,16 +3299,9 @@ public let instantiate_extension_method_from_entry(
     let mutable method_param_entries = List[FunctionParamEntry].new();
     let mutable method_param_index = UInt(0);
 
-    let is_drop_method = resolved_template.method.name == "drop" and concrete_params.count(
-    ) == 1 and concrete_params[UInt(0)].name == "self";
     while method_param_index < concrete_params.count() then {
         let declared_param = resolved_template.method.params[method_param_index];
-        let mutable param_type = concrete_params[method_param_index].param_type;
-        // For Drop trait's drop(self): wrap self parameter type as
-        // *mutable Self for MIR/codegen, matching Swift behavior.
-        if is_drop_method and method_param_index == UInt(0) then {
-            param_type = Type.MutablePointerType(param_type);
-        };
+        let param_type = concrete_params[method_param_index].param_type;
         method_param_entries.push(
             FunctionParamEntry(
                 param_type,
@@ -2176,7 +3343,8 @@ public let instantiate_extension_method_from_entry(
     // any method type arguments separately.
     let logical_name_with_args = resolved_template.method.name;
     // Only set owner_type mutable for actual instance methods (first param is self/source).
-    // Standalone functions like  should not get method-style C naming.
+    // Standalone functions (no `self`/`source` first parameter) must not get
+    // method-style C naming.
     let mutable has_receiver = false;
     if not resolved_template.method.params.is_empty() then {
         let first_name = resolved_template.method.params[UInt(0)].name;
@@ -2193,8 +3361,27 @@ public let instantiate_extension_method_from_entry(
             resolved_template.conformance_trait_def_id,
         ),
     );
+    // rustc's `trait_item_def_id`: the trait METHOD this instance implements,
+    // so trait-method references can find it by the trait item's DefId rather
+    // than by name. Also used as the dual identity key below.
+    let trait_method_def_id = when resolved_template.conformance_trait_def_id in {
+        .Some(trait_def_id) then mono.storage.generic_templates.trait_method_def_id(
+            trait_def_id,
+            resolved_template.method.name,
+        ),
+        .None() then Option[DefId].None(),
+    };
     when effective_owner_type in {
         .Some(owner_type) then {
+            let resolved_trait_method_def_id = when trait_method_def_id in {
+                .Some(_) then trait_method_def_id,
+                // Swift TypeChecker.registerReceiverStyleMethod: with a
+                // conformance trait but no separate trait-method lookup hit,
+                // the impl method IS the trait method's identity.
+                .None() then if resolved_template.conformance_trait_name is .Some(_) then Option[DefId].Some(
+                    def_id,
+                ) else Option[DefId].None(),
+            };
             mono.set_receiver_method_dispatch_if_absent(
                 def_id,
                 ReceiverMethodDispatchInfo(
@@ -2205,6 +3392,7 @@ public let instantiate_extension_method_from_entry(
                     ),
                     resolved_template.conformance_trait_name,
                     resolved_template.conformance_trait_def_id,
+                    resolved_trait_method_def_id,
                 ),
             );
         },
@@ -2260,6 +3448,37 @@ public let instantiate_extension_method_from_entry(
     //    method has one key; the old second "alias" key existed only because the
     //    key was a mangle string and a type could have two of those.
     mono.storage.extension_method_def_ids.insert(lookup_key, def_id);
+    // The emitted DefId IS the final identity (Swift
+    // `instantiatedMethodDefIds.insert`): resolve_method_instance_by_identity's
+    // L0 short-circuit.
+    mono.storage.instantiated_method_def_ids.insert(def_id.id);
+    let identity_lookup_key = make_extension_method_identity_key(
+        mono,
+        effective_owner,
+        instance_type_args,
+        resolved_template.method.def_id,
+        method_type_args,
+    );
+    mono.storage.extension_method_def_ids_by_identity.insert(identity_lookup_key, def_id);
+    // Dual-key: trait-method references carry the trait METHOD's DefId
+    // (rustc's `trait_item_def_id`), not the impl's. Register the instance
+    // under that identity too so identity lookup finds it either way.
+    when trait_method_def_id in {
+        .Some(trait_item_def_id) then {
+            let trait_identity_key = make_extension_method_identity_key(
+                mono,
+                effective_owner,
+                instance_type_args,
+                trait_item_def_id,
+                method_type_args,
+            );
+            mono.storage.extension_method_def_ids_by_identity.insert(
+                trait_identity_key,
+                def_id,
+            );
+        },
+        .None() then {},
+    };
 
     // g. Register in extension_methods map for the type.
     if method_type_args.is_empty() then {
@@ -2276,6 +3495,17 @@ public let instantiate_extension_method_from_entry(
         InstantiatedFunction(mangled_name, function_type),
     );
     mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol);
+
+    // Skip code generation if the instantiated function type still contains
+    // generic parameters. Mirrors Swift `instantiateExtensionMethodFromEntry`'s
+    // post-substitution guard: a template body whose type params did not fully
+    // substitute must never be emitted, or MIR verification sees an unresolved
+    // generic (e.g. `Pair[T,U].hash`) and fails. The symbol is still returned so
+    // identity lookup can reference it.
+    if has_generic_parameter(function_type) then {
+        mono.storage.current_self_type = saved_self_type;
+        return result_symbol;
+    };
 
     // h. Emit the declaration node.
     when lookup_extension_template_checked_body(mono, resolved_template) in {
@@ -2298,6 +3528,7 @@ public let instantiate_extension_method_from_entry(
                 ) then {
                     mono.storage.pending_request_keys.insert(deferred_key);
                     mono.storage.pending_requests.push(deferred_req);
+                } else {
                 };
                 mono.storage.current_self_type = saved_self_type;
                 return result_symbol;

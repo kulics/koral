@@ -232,9 +232,9 @@ public let make_extension_method_key(
     owner_args List[Type],
     method_name String,
     method_type_args List[Type],
-) MethodInstanceKey = {
+) MethodLookupKey = {
     let _ = mono;
-    return MethodInstanceKey(owner, owner_args, method_name, method_type_args);
+    return MethodLookupKey(owner, owner_args, method_name, method_type_args);
 };
 
 /// Same key, built from a `CompilerContext` alone -- MIR and codegen do not
@@ -243,9 +243,9 @@ public let make_receiver_method_key_from_context(
     context CompilerContext,
     receiver_type Type,
     method_name String,
-) MethodInstanceKey = {
+) MethodLookupKey = {
     let pair = context.method_owner_and_args(receiver_type);
-    return MethodInstanceKey(pair.first, pair.second, method_name, List[Type].new());
+    return MethodLookupKey(pair.first, pair.second, method_name, List[Type].new());
 };
 
 /// Key of a method instantiated for a concrete receiver: the receiver's owner
@@ -256,9 +256,44 @@ public let make_receiver_method_key(
     receiver_type Type,
     method_name String,
     method_type_args List[Type],
+) MethodLookupKey = {
+    let pair = mono.storage.context.method_owner_and_args(receiver_type);
+    return MethodLookupKey(pair.first, pair.second, method_name, method_type_args);
+};
+
+/// DefId-keyed identity key for one instantiated extension method. This is the
+/// migration target for instance lookup; the name-keyed helpers above remain
+/// only for declaration-time/name bridge tables.
+public let make_extension_method_identity_key(
+    mono Monomorphizer,
+    owner MethodOwner,
+    owner_args List[Type],
+    method_def_id DefId,
+    method_type_args List[Type],
+) MethodInstanceKey = {
+    let _ = mono;
+    return MethodInstanceKey(owner, owner_args, method_def_id, method_type_args);
+};
+
+/// Same identity key, built from a `CompilerContext` alone.
+public let make_receiver_method_identity_key_from_context(
+    context CompilerContext,
+    receiver_type Type,
+    method_def_id DefId,
+) MethodInstanceKey = {
+    let pair = context.method_owner_and_args(receiver_type);
+    return MethodInstanceKey(pair.first, pair.second, method_def_id, List[Type].new());
+};
+
+/// Identity key of a method instantiated for a concrete receiver.
+public let make_receiver_method_identity_key(
+    mono Monomorphizer,
+    receiver_type Type,
+    method_def_id DefId,
+    method_type_args List[Type],
 ) MethodInstanceKey = {
     let pair = mono.storage.context.method_owner_and_args(receiver_type);
-    return MethodInstanceKey(pair.first, pair.second, method_name, method_type_args);
+    return MethodInstanceKey(pair.first, pair.second, method_def_id, method_type_args);
 };
 
 // ── has_generic_parameter ─────────────────────────────────────────────────────
@@ -310,6 +345,58 @@ public let has_generic_parameter(t Type) Bool = {
         .TraitObject(_, args) then {
             for a in args then {
                 if has_generic_parameter(a) then {
+                    return true;
+                };
+            };
+            false
+        },
+        _ then false,
+    };
+};
+
+// Like `has_generic_parameter` but treats `Self` as already bound (to the
+// target type at registration time), matching Swift's
+// `extensionMethods[methodOwnerKey]` registration which files every concrete
+// method including ones whose params mention `Self`.
+public let has_generic_parameter_excluding_self(t Type) Bool = {
+    return when t in {
+        .GenericParameter(name) then name != "Self",
+        .TypeVar(_) then true,
+        .ReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .MutableReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .BorrowedReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .MutableBorrowedReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .PointerType(inner) then has_generic_parameter_excluding_self(inner),
+        .MutablePointerType(inner) then has_generic_parameter_excluding_self(inner),
+        .WeakReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .MutableWeakReferenceType(inner) then has_generic_parameter_excluding_self(inner),
+        .FunctionType(fn_params, return_type) then {
+            for pt in param_entry_types(fn_params) then {
+                if has_generic_parameter_excluding_self(pt) then {
+                    return true;
+                };
+            };
+            has_generic_parameter_excluding_self(return_type)
+        },
+        .GenericStruct(_, args) then {
+            for a in args then {
+                if has_generic_parameter_excluding_self(a) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .GenericEnum(_, args) then {
+            for a in args then {
+                if has_generic_parameter_excluding_self(a) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .TraitObject(_, args) then {
+            for a in args then {
+                if has_generic_parameter_excluding_self(a) then {
                     return true;
                 };
             };

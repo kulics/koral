@@ -516,7 +516,38 @@ given TypeChecker {
                         let should_replace = if template.checked_body is .Some(_) then true
                         else current_ref.checked_body is .None();
                         if should_replace then {
-                            updated[index] = template;
+                            // Preserve the DECLARATION identity: the first
+                            // registration is what call-site symbols are built
+                            // against (Swift `makeExtensionTemplateMethodSymbol`
+                            // passes `preferredDefId: method.defId`). Replacing
+                            // with a freshly-minted DefId breaks the identity
+                            // chain's L2 lookup.
+                            let preserved_def_id = if current_ref.method.def_id.is_valid() then current_ref.method.def_id
+                            else template.method.def_id;
+                            updated[index] = self.copied_extension_method_template(
+                                template.type_params,
+                                MethodDeclaration(
+                                    template.method.name,
+                                    template.method.access,
+                                    template.method.type_params,
+                                    template.method.params,
+                                    template.method.return_type,
+                                    template.method.span,
+                                    preserved_def_id,
+                                ),
+                                template.conformance_trait_name,
+                                template.conformance_trait_def_id,
+                                template.conformance_target_type,
+                                template.conformance_trait_args,
+                                template.uses_trait_type_params,
+                                template.source_file,
+                                template.module_path,
+                                template.package_id,
+                                template.checked_body,
+                                template.checked_parameters,
+                                template.checked_return_type,
+                                template.tool_type_params,
+                            );
                         };
                         replaced = true;
                         break;
@@ -618,6 +649,12 @@ given TypeChecker {
         let copied_method_type_params = self.to_template_type_params(method_type_params);
         let copied_method_params = self.to_template_params(method_params);
         let copied_method_return_type = self.copy_type_node(method_return_type);
+        // Definition-time identity: the method declaration MUST carry a DefId.
+        // The parser leaves `GivenMember.def_id` invalid (it cannot allocate);
+        // assign it once here so identity lookup can find this template by
+        // declaration rather than by name (rustc's `Item::def_id`).
+        let effective_source_def_id = if source_def_id.is_valid() then source_def_id
+        else self.allocate_unindexed_def_id(method_name, DefKind.Function());
         let method_decl = MethodDeclaration(
             method_name,
             method_access,
@@ -625,7 +662,7 @@ given TypeChecker {
             copied_method_params,
             copied_method_return_type,
             unknown_span(),
-            source_def_id,
+            effective_source_def_id,
         );
         let template_checked_return_type = when checked_return_type in {
             .Some(t) then Option[Type].Some(t),
@@ -726,14 +763,7 @@ given TypeChecker {
             let member = member_ref;
             let mutable param_types = List[Type].new();
             for param in member.params then {
-                // For Drop trait's drop(self): wrap self parameter type as
-                // *mutable Self for MIR/codegen, matching Swift behavior.
-                if member.name == "drop" and param.name == "self" and member.params.count(
-                ) == 1 then {
-                    param_types.push(Type.MutablePointerType(target_type));
-                } else {
-                    param_types.push(param.param_type);
-                };
+                param_types.push(param.param_type);
             };
             let method_symbol = Symbol(
                 member.def_id,
@@ -944,10 +974,11 @@ given TypeChecker {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
                     };
-                    let method_symbol = self.make_method_callable_symbol(
+                    let method_symbol = self.make_method_callable_symbol_with_def_id(
                         method_name,
                         typed_params,
                         return_type,
+                        template.method.def_id,
                     );
                     self.register_method_symbol_type_params(
                         method_symbol,
@@ -1020,10 +1051,11 @@ given TypeChecker {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
                     };
-                    let method_symbol = self.make_method_callable_symbol(
+                    let method_symbol = self.make_method_callable_symbol_with_def_id(
                         method_name,
                         typed_params,
                         return_type,
+                        template.method.def_id,
                     );
                     self.register_method_symbol_type_params(
                         method_symbol,

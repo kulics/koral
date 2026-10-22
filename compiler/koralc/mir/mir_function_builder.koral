@@ -3590,6 +3590,9 @@ given MIRFunctionBuilder {
         );
     };
 
+    // Mirrors Swift `MIRLowerer.lowerCall(callee:arguments:type:original:)`.
+    // MethodReference callee → `concreteMethodSymbol` (4 trust steps).
+    // NO name-keyed lookup, NO type matching, NO shape fallback.
     file_private lower_call(
         self,
         callee TypedExpr,
@@ -3598,209 +3601,131 @@ given MIRFunctionBuilder {
     ) Option[MIRExprResult] = {
         when callee.expr_kind in {
             .MethodReference(base, _, method, _, _, _) then {
-                let receiver_borrow_override = self.stack_borrow_method_receiver(
-                    base,
-                    method,
-                );
-                let mutable expected_param_types = List[Type].new();
-                expected_param_types.push(
-                    self.concrete_call_receiver_type(base.expr_type, method.symbol_type),
-                );
-                for arg in args then {
-                    expected_param_types.push(arg.expr_type);
-                };
-                let mutable expected_call_type = Type.FunctionType(
-                    types_to_param_entries(expected_param_types),
-                    result_type,
-                );
-                when self.concrete_method_symbol(
-                    method,
-                    base.expr_type,
-                    callee.expr_type,
-                    args,
-                    result_type,
-                ) in {
-                    .Some(callable_method) then {
-                        let mutable callable_type = self.context.get_function_type(
-                            callable_method.def_id,
-                        ) or else callable_method.symbol_type;
-                        if not self.method_signature_matches_call(
-                            callable_type,
-                            expected_call_type,
-                        ) then {
-                            when self.lookup_concrete_method_symbol(
-                                self.normalized_method_lookup_receiver_type(
-                                    base.expr_type,
-                                ),
-                                self.semantic_method_name(method),
-                                expected_call_type,
-                            ) in {
-                                .Some(rebound_method) then {
-                                    let mutable values = List[MIRValue].new();
-                                    let mutable ownerships = List[MIROwnershipUse].new();
-                                    values.push(
-                                        when receiver_borrow_override in {
-                                            .Some(value) then value,
-                                            .None() then self.lower_method_receiver_argument(
-                                                base,
-                                                rebound_method,
-                                            ),
-                                        },
-                                    );
-                                    ownerships.push(self.ownership_use(base));
-                                    for arg in args then {
-                                        values.push(self.lower_value(arg));
-                                        ownerships.push(self.ownership_use(arg));
-                                    };
-                                    return self.finish_call(
-                                        MIROperand.Function(rebound_method),
-                                        values,
-                                        ownerships,
-                                        result_type,
-                                    );
+                if not has_generic_parameter(callee.expr_type) then {
+                    when self.concrete_method_symbol(
+                        method,
+                        base.expr_type,
+                        callee.expr_type,
+                        args,
+                        result_type,
+                    ) in {
+                        .Some(callable_method) then {
+                            let receiver_borrow_override = self.stack_borrow_method_receiver(
+                                base,
+                                method,
+                            );
+                            // Swift `lowerCall` derives expected arg types from
+                            // `preferredFunctionType(for: callableMethod)`.
+                            let method_type = when callable_method.symbol_type in {
+                                .FunctionType(_, _) then {
+                                    if not self.context.contains_generic_parameter(
+                                        callable_method.symbol_type,
+                                    ) then {
+                                        callable_method.symbol_type
+                                    } else {
+                                        self.preferred_function_type(callable_method)
+                                    }
                                 },
-                                .None() then {},
+                                _ then self.preferred_function_type(callable_method),
                             };
-                        };
-                        let mutable values = List[MIRValue].new();
-                        let mutable ownerships = List[MIROwnershipUse].new();
-                        values.push(
-                            when receiver_borrow_override in {
-                                .Some(value) then value,
-                                .None() then self.lower_method_receiver_argument(
-                                    base,
-                                    callable_method,
-                                ),
-                            },
-                        );
-                        ownerships.push(self.ownership_use(base));
-                        for arg in args then {
-                            values.push(self.lower_value(arg));
-                            ownerships.push(self.ownership_use(arg));
-                        };
-                        return self.finish_call(
-                            MIROperand.Function(callable_method),
-                            values,
-                            ownerships,
-                            result_type,
-                        );
-                    },
-                    .None() then {
-                        // Fallback: construct a concrete method symbol from arg/result types.
-                        // This handles cases where callee_type is not FunctionType but the
-                        // method can still be called (e.g., extension methods on concrete types).
-                        let mutable param_types = List[Type].new();
-                        let mutable method_type = self.context.get_function_type(
-                            method.def_id,
-                        ) or else method.symbol_type;
-                        param_types.push(
-                            self.concrete_call_receiver_type(base.expr_type, method_type),
-                        );
-                        for arg in args then {
-                            param_types.push(arg.expr_type);
-                        };
-                        let mutable concrete_type = Type.FunctionType(
-                            types_to_param_entries(param_types),
-                            result_type,
-                        );
-                        when self.lookup_concrete_method_symbol(
-                            self.normalized_method_lookup_receiver_type(base.expr_type),
-                            self.semantic_method_name(method),
-                            concrete_type,
-                        ) in {
-                            .Some(rebound_method) then {
-                                let mutable values = List[MIRValue].new();
-                                let mutable ownerships = List[MIROwnershipUse].new();
-                                values.push(
-                                    when receiver_borrow_override in {
-                                        .Some(value) then value,
-                                        .None() then self.lower_method_receiver_argument(
-                                            base,
-                                            rebound_method,
-                                        ),
-                                    },
-                                );
-                                ownerships.push(self.ownership_use(base));
-                                for arg in args then {
-                                    values.push(self.lower_value(arg));
-                                    ownerships.push(self.ownership_use(arg));
-                                };
-                                return self.finish_call(
-                                    MIROperand.Function(rebound_method),
-                                    values,
-                                    ownerships,
-                                    result_type,
-                                );
-                            },
-                            .None() then {},
-                        };
-                        let method_name = self.semantic_method_name(method);
-                        let owner_mismatch_for_receiver = when self.program.concrete_callables_by_def_id.get(
-                            method.def_id,
-                        ) in {
-                            .Some(info) then when info.owner_type in {
-                                .Some(owner_type) then not self.method_owner_matches_receiver(
-                                    owner_type,
-                                    base.expr_type,
-                                ),
-                                .None() then false,
-                            },
-                            .None() then false,
-                        };
-                        if owner_mismatch_for_receiver and method_name == "hash" and args.is_empty(
-                        ) and result_type is .UIntType() then {
-                            return Option[MIRExprResult].Some(
-                                MIRExprResult(
-                                    result_type,
-                                    ValueCategory.RValue(),
-                                    Option[MIROperand].Some(
-                                        MIROperand.Constant(
-                                            MIRConstant.Integer("0", result_type),
-                                        ),
-                                    ),
-                                    Option[MIRPlace].None(),
-                                ),
-                            );
-                        };
-                        if not self.context.contains_generic_parameter(concrete_type) then {
-                            let fallback_method = Symbol(
-                                method.def_id,
-                                concrete_type,
-                                method.kind,
-                            );
+                            let method_params = when method_type in {
+                                .FunctionType(params, _) then params,
+                                _ then List[FunctionParamEntry].new(),
+                            };
                             let mutable values = List[MIRValue].new();
                             let mutable ownerships = List[MIROwnershipUse].new();
                             values.push(
                                 when receiver_borrow_override in {
                                     .Some(value) then value,
-                                    .None() then self.lower_method_receiver_argument(
-                                        base,
-                                        fallback_method,
-                                    ),
+                                    .None() then {
+                                        let expected_receiver_type = if method_params.is_empty(
+                                        ) then Option[Type].None()
+                                        else Option[Type].Some(
+                                            (method_params[UInt(0)]).param_type,
+                                        );
+                                        self.lower_call_argument(
+                                            base,
+                                            expected_receiver_type,
+                                        )
+                                    },
                                 },
                             );
                             ownerships.push(self.ownership_use(base));
-                            for arg in args then {
-                                values.push(self.lower_value(arg));
-                                ownerships.push(self.ownership_use(arg));
+                            let mutable arg_idx UInt = UInt(0);
+                            while arg_idx < args.count() then {
+                                let _expected = if (arg_idx + UInt(1)) < method_params.count()
+                                then Option[Type].Some((method_params[arg_idx + UInt(1)]).param_type)
+                                else Option[Type].None();
+                                values.push(self.lower_call_argument(args[arg_idx], _expected));
+                                ownerships.push(self.ownership_use(args[arg_idx]));
+                                arg_idx += UInt(1);
                             };
                             return self.finish_call(
-                                MIROperand.Function(fallback_method),
+                                MIROperand.Function(callable_method),
                                 values,
                                 ownerships,
                                 result_type,
                             );
-                        };
-                    },
+                        },
+                        .None() then {},
+                    };
+                };
+                // Swift: `concreteMethodSymbol` returning nil for a
+                // non-generic MethodReference is an invariant violation —
+                // `lowerExpression` fatalErrors on bare MethodReference.
+                // Koral keeps the definition-time symbol as a last resort
+                // rather than crashing, but ONLY with the caller-built
+                // concrete type (never a name-keyed rebind).
+                let mutable param_types = List[Type].new();
+                param_types.push(
+                    self.concrete_call_receiver_type(
+                        base.expr_type,
+                        method.symbol_type,
+                    ),
+                );
+                for arg in args then {
+                    param_types.push(arg.expr_type);
+                };
+                let concrete_type = Type.FunctionType(
+                    types_to_param_entries(param_types),
+                    result_type,
+                );
+                if not self.context.contains_generic_parameter(concrete_type) then {
+                    let fallback_method = Symbol(
+                        method.def_id,
+                        concrete_type,
+                        method.kind,
+                    );
+                    let mutable values = List[MIRValue].new();
+                    let mutable ownerships = List[MIROwnershipUse].new();
+                    values.push(
+                        self.lower_method_receiver_argument(base, fallback_method),
+                    );
+                    ownerships.push(self.ownership_use(base));
+                    for arg in args then {
+                        values.push(self.lower_value(arg));
+                        ownerships.push(self.ownership_use(arg));
+                    };
+                    return self.finish_call(
+                        MIROperand.Function(fallback_method),
+                        values,
+                        ownerships,
+                        result_type,
+                    );
                 };
             },
             .Variable(symbol) then when symbol.kind in {
                 .Function() then {
+                    // Only a callee whose identity is still unresolved may be
+                    // rebound here. A concrete symbol already carries the DefId
+                    // the type checker bound at definition time, and MIR lowers
+                    // it as-is -- re-deriving "which method" from `args[0]`'s
+                    // type answers for a same-named free function (a call to
+                    // `classify(l, r)` landed in `Left.classify`).
                     if args.count() > UInt(0) and self.context.contains_generic_parameter(
                         symbol.symbol_type,
                     ) then {
                         let mutable receiver_type = args[UInt(0)].expr_type;
-                        let method_name = self.semantic_method_name(symbol);
                         let mutable concrete_param_types = List[Type].new();
                         for arg in args then {
                             concrete_param_types.push(arg.expr_type);
@@ -3810,6 +3735,23 @@ given MIRFunctionBuilder {
                             result_type,
                         );
                         if not self.context.contains_generic_parameter(concrete_type) then {
+                            // Identity first; the name bridge below only speaks
+                            // when identity cannot resolve yet.
+                            when self.resolve_method_symbol_by_dispatch_identity(
+                                symbol,
+                                receiver_type,
+                                concrete_type,
+                            ) in {
+                                .Some(callable_method) then {
+                                    return self.finish_call_from_typed_args(
+                                        MIROperand.Function(callable_method),
+                                        args,
+                                        result_type,
+                                    );
+                                },
+                                .None() then {},
+                            };
+                            let method_name = self.semantic_method_name(symbol);
                             when self.lookup_concrete_method_symbol(
                                 receiver_type,
                                 method_name,
@@ -4259,6 +4201,72 @@ given MIRFunctionBuilder {
             .None() then {},
         };
 
+        // Trait-tool receiver adaptation: calls like `h.combine_hash(x)` pass a
+        // concrete receiver, while the instantiated default-tool body is keyed
+        // under the trait receiver (`TraitObject`). Match by trait declaration
+        // identity + logical method name, then let `lower_call_argument` adapt
+        // the first argument to the trait object ABI.
+        when self.program.receiver_method_dispatch.get(method.def_id) in {
+            .Some(dispatch_info) then {
+                when dispatch_info.conformance_trait_def_id in {
+                    .Some(trait_def_id) then {
+                        let mutable matched = List[DefId].new();
+                        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+                            let def_id = entry.first;
+                            let info = entry.second;
+                            if info.logical_name != method_name then {
+                                continue;
+                            };
+                            let same_trait_owner = when info.trait_conformance_def_id in {
+                                .Some(info_trait_def_id) then info_trait_def_id == trait_def_id,
+                                .None() then false,
+                            };
+                            let owner_is_trait_receiver = when info.owner_type in {
+                                .Some(owner_type) then self.method_owner_matches_receiver(
+                                    owner_type,
+                                    Type.TraitObject(trait_def_id, List[Type].new()),
+                                ),
+                                .None() then false,
+                            };
+                            if not same_trait_owner and not owner_is_trait_receiver then {
+                                continue;
+                            };
+                            when self.context.get_function_type(def_id) in {
+                                .Some(function_type) then {
+                                    if self.static_method_signature_matches_call(
+                                        function_type,
+                                        concrete_type,
+                                    ) or self.static_method_signature_matches_call_via_trait_receiver(
+                                        function_type,
+                                        concrete_type,
+                                        trait_def_id,
+                                    ) then {
+                                        matched.push(def_id);
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        };
+                        if matched.count() == UInt(1) then {
+                            let resolved_def_id = matched[UInt(0)];
+                            when self.context.get_function_type(resolved_def_id) in {
+                                .Some(function_type) then {
+                                    return Symbol(
+                                        resolved_def_id,
+                                        function_type,
+                                        SymbolKind.Function(),
+                                    );
+                                },
+                                .None() then {},
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            .None() then {},
+        };
+
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let def_id = entry.first;
             let info = entry.second;
@@ -4293,6 +4301,179 @@ given MIRFunctionBuilder {
         return Symbol(method.def_id, concrete_type, method.kind);
     };
 
+    file_private resolve_method_symbol_by_dispatch_identity(
+        self,
+        method Symbol,
+        receiver_type Type,
+        expected_type Type,
+    ) Option[Symbol] = {
+        let method_name = self.semantic_method_name(method);
+        let receiver_lookup_type = self.normalized_method_lookup_receiver_type(
+            receiver_type,
+        );
+        let mutable trait_def_id_opt = when self.program.receiver_method_dispatch.get(method.def_id) in {
+            .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
+            .None() then when self.program.concrete_callables_by_def_id.get(
+                method.def_id,
+            ) in {
+                .Some(callable_info) then callable_info.trait_conformance_def_id,
+                .None() then Option[DefId].None(),
+            },
+        };
+        when trait_def_id_opt in {
+            .None() then {
+                let mutable inferred_trait_def_id = def_id_invalid();
+                let mutable trait_ambiguous = false;
+                for entry in self.program.concrete_callables_by_def_id.iterator() then {
+                    let def_id = entry.first;
+                    let info = entry.second;
+                    if info.logical_name != method_name then {
+                        continue;
+                    };
+                    when self.context.get_function_type(def_id) in {
+                        .Some(function_type) then when function_type in {
+                            .FunctionType(params, _) then {
+                                if params.is_empty() then {
+                                    continue;
+                                };
+                                let first_param_type = self.normalized_method_lookup_receiver_type(
+                                    (params[UInt(0)]).param_type,
+                                );
+                                let candidate_trait_def_id = when first_param_type in {
+                                    .TraitObject(candidate_trait, _) then candidate_trait,
+                                    _ then def_id_invalid(),
+                                };
+                                if not candidate_trait_def_id.is_valid() then {
+                                    continue;
+                                };
+                                if not self.static_method_signature_matches_call_via_trait_receiver(
+                                    function_type,
+                                    expected_type,
+                                    candidate_trait_def_id,
+                                ) then {
+                                    continue;
+                                };
+                                if not inferred_trait_def_id.is_valid() then {
+                                    inferred_trait_def_id = candidate_trait_def_id;
+                                } else if inferred_trait_def_id != candidate_trait_def_id then {
+                                    trait_ambiguous = true;
+                                    break;
+                                };
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    };
+                };
+                if inferred_trait_def_id.is_valid() and not trait_ambiguous then {
+                    trait_def_id_opt = Option[DefId].Some(inferred_trait_def_id);
+                };
+            },
+            .Some(_) then {},
+        };
+        let mutable direct_matched = List[DefId].new();
+        let mutable trait_receiver_matched = List[DefId].new();
+        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+            let def_id = entry.first;
+            let info = entry.second;
+            if info.logical_name != method_name then {
+                continue;
+            };
+            when trait_def_id_opt in {
+                .Some(trait_def_id) then {
+                    let same_trait = when info.trait_conformance_def_id in {
+                        .Some(info_trait_def_id) then info_trait_def_id == trait_def_id,
+                        .None() then false,
+                    };
+                    let owner_is_trait_receiver = when info.owner_type in {
+                        .Some(owner_type) then self.method_owner_matches_receiver(
+                            owner_type,
+                            Type.TraitObject(trait_def_id, List[Type].new()),
+                        ),
+                        .None() then false,
+                    };
+                    if not same_trait and not owner_is_trait_receiver then {
+                        continue;
+                    };
+                },
+                .None() then {},
+            };
+            when self.context.get_function_type(def_id) in {
+                .Some(function_type) then {
+                    let signature_matches_direct = self.static_method_signature_matches_call(
+                        function_type,
+                        expected_type,
+                    );
+                    let signature_matches_via_trait = when trait_def_id_opt in {
+                        .Some(trait_def_id) then self.static_method_signature_matches_call_via_trait_receiver(
+                            function_type,
+                            expected_type,
+                            trait_def_id,
+                        ),
+                        .None() then false,
+                    };
+                    let signature_matches = signature_matches_direct or signature_matches_via_trait;
+                    if not signature_matches then {
+                        continue;
+                    };
+                    let owner_matches_receiver = when info.owner_type in {
+                        .Some(owner_type) then self.method_owner_matches_receiver(
+                            owner_type,
+                            receiver_lookup_type,
+                        ),
+                        .None() then false,
+                    };
+                    if signature_matches_direct and owner_matches_receiver then {
+                        direct_matched.push(def_id);
+                        continue;
+                    };
+                    let owner_matches_trait_receiver = when trait_def_id_opt in {
+                        .Some(trait_def_id) then when info.owner_type in {
+                            .Some(owner_type) then self.method_owner_matches_receiver(
+                                owner_type,
+                                Type.TraitObject(trait_def_id, List[Type].new()),
+                            ),
+                            .None() then false,
+                        },
+                        .None() then false,
+                    };
+                    if signature_matches_via_trait and owner_matches_trait_receiver then {
+                        trait_receiver_matched.push(def_id);
+                    };
+                },
+                .None() then {},
+            };
+        };
+        if direct_matched.count() == UInt(1) then {
+            let resolved_def_id = direct_matched[UInt(0)];
+            return when self.context.get_function_type(resolved_def_id) in {
+                .Some(function_type) then Option[Symbol].Some(
+                    Symbol(resolved_def_id, function_type, SymbolKind.Function()),
+                ),
+                .None() then Option[Symbol].None(),
+            };
+        };
+        if direct_matched.count() > UInt(1) then {
+            return Option[Symbol].None();
+        };
+        if trait_receiver_matched.count() == UInt(1) then {
+            let resolved_def_id = trait_receiver_matched[UInt(0)];
+            return when self.context.get_function_type(resolved_def_id) in {
+                .Some(function_type) then Option[Symbol].Some(
+                    Symbol(resolved_def_id, function_type, SymbolKind.Function()),
+                ),
+                .None() then Option[Symbol].None(),
+            };
+        };
+        return Option[Symbol].None();
+    };
+
+    // Mirrors Swift `MIRLowerer.concreteMethodSymbol(method:calleeType:resultType:)`.
+    // Four trust steps, NO name-keyed lookup, NO type matching:
+    //   1. method.type already concrete → trust it
+    //   2. programFunctionType(for: defId) → trust it
+    //   3. preferredFunctionType(for: method) → trust it
+    //   4. build concreteType from calleeType params + resultType
     file_private concrete_method_symbol(
         self,
         method Symbol,
@@ -4301,82 +4482,156 @@ given MIRFunctionBuilder {
         args List[TypedExpr],
         result_type Type,
     ) Option[Symbol] = {
-        let method_name = self.semantic_method_name(method);
-        let raw_receiver_type = when receiver_type in {
-            .Unknown() then when callee_type in {
-                .FunctionType(params, _) then if not params.is_empty() then params[
-                    UInt(0)
-                ].param_type else Type.Unknown(),
-                _ then Type.Unknown(),
+        let _ = args;
+        let mutable expected_method_type = method.symbol_type;
+        when callee_type in {
+            .FunctionType(params, _) then {
+                expected_method_type = Type.FunctionType(params, result_type);
             },
-            _ then receiver_type,
+            _ then {},
         };
-        let mutable effective_receiver_type = self.normalized_method_lookup_receiver_type(
-            raw_receiver_type,
-        );
+        when self.resolve_method_symbol_by_dispatch_identity(
+            method,
+            receiver_type,
+            expected_method_type,
+        ) in {
+            .Some(resolved_symbol) then {
+                return Option[Symbol].Some(resolved_symbol);
+            },
+            .None() then {},
+        };
+        // 1. method.type already concrete — the monomorphizer substituted it.
+        when method.symbol_type in {
+            .FunctionType(_, _) then {
+                if not self.context.contains_generic_parameter(
+                    method.symbol_type,
+                ) then {
+                    return Option[Symbol].Some(
+                        Symbol(method.def_id, method.symbol_type, method.kind),
+                    );
+                };
+            },
+            _ then {},
+        };
+        // 2. programFunctionType(for: defId)
+        when self.program_function_type(method.def_id) in {
+            .Some(program_type) then {
+                return Option[Symbol].Some(
+                    Symbol(method.def_id, program_type, method.kind),
+                );
+            },
+            .None() then {},
+        };
+        // 3. preferredFunctionType(for: method)
+        let preferred_type = self.preferred_function_type(method);
+        when preferred_type in {
+            .FunctionType(_, _) then {
+                if not self.context.contains_generic_parameter(
+                    preferred_type,
+                ) then {
+                    return Option[Symbol].Some(
+                        Symbol(method.def_id, preferred_type, method.kind),
+                    );
+                };
+            },
+            _ then {},
+        };
+        // 4. Build concreteType from calleeType params + resultType.
+        when callee_type in {
+            .FunctionType(params, _) then {
+                let concrete_type = Type.FunctionType(params, result_type);
+                if self.context.contains_generic_parameter(concrete_type) then {
+                    return Option[Symbol].None();
+                };
+                return Option[Symbol].Some(
+                    Symbol(method.def_id, concrete_type, method.kind),
+                );
+            },
+            _ then {},
+        };
+        return Option[Symbol].None();
+    };
 
-        let mutable concrete_param_types = List[Type].new();
-        let mutable expected_receiver_type = self.concrete_call_receiver_type(
-            raw_receiver_type,
-            method.symbol_type,
-        );
-        concrete_param_types.push(expected_receiver_type);
-        for arg in args then {
-            concrete_param_types.push(arg.expr_type);
+    // Mirrors Swift `preferredFunctionType(for:)`.
+    file_private preferred_function_type(self, symbol Symbol) Type = {
+        let symbol_type = symbol.symbol_type;
+        let context_type = self.context.get_symbol_type(symbol.def_id);
+        when symbol_type in {
+            .FunctionType(_, _) then {
+                if not self.context.contains_generic_parameter(symbol_type) then {
+                    return symbol_type;
+                };
+            },
+            _ then {},
         };
-        let mutable concrete_type = Type.FunctionType(
-            types_to_param_entries(concrete_param_types),
-            result_type,
-        );
-        if self.context.contains_generic_parameter(concrete_type) then {
-            return when callee_type in {
-                .FunctionType(params, _) then {
-                    let mutable fallback_type = Type.FunctionType(params, result_type);
-                    if self.context.contains_generic_parameter(fallback_type) then Option[Symbol].None(
-                    )
-                    else Option[Symbol].Some(
-                        Symbol(method.def_id, fallback_type, method.kind),
-                    )
-                },
-                _ then Option[Symbol].None(),
-            };
-        };
-
-        when self.program.concrete_callables_by_def_id.get(method.def_id) in {
-            .Some(_) then {
-                when self.context.get_function_type(method.def_id) in {
-                    .Some(function_type) then {
-                        if not self.context.contains_generic_parameter(function_type) and self.method_signature_matches_call(
-                            function_type,
-                            concrete_type,
-                        ) then {
-                            return Option[Symbol].Some(
-                                Symbol(method.def_id, function_type, method.kind),
-                            );
+        when context_type in {
+            .Some(ctx_t) then {
+                when ctx_t in {
+                    .FunctionType(_, _) then {
+                        if not self.context.contains_generic_parameter(ctx_t)
+                            or not self.context.contains_generic_parameter(symbol_type)
+                        then {
+                            return ctx_t;
                         };
                     },
-                    .None() then {},
+                    _ then {},
                 };
             },
             .None() then {},
         };
+        return symbol_type;
+    };
 
-        return when self.lookup_concrete_method_symbol(
-            effective_receiver_type,
-            method_name,
-            concrete_type,
-        ) in {
-            .Some(symbol) then Option[Symbol].Some(symbol),
-            .None() then if method.def_id.id == 0 or method_name.is_empty() then when self.lookup_concrete_method_symbol_by_shape(
-                effective_receiver_type,
-                concrete_type,
-            ) in {
-                .Some(symbol) then Option[Symbol].Some(symbol),
-                .None() then Option[Symbol].None(),
-            } else Option[Symbol].Some(
-                Symbol(method.def_id, concrete_type, method.kind),
-            ),
+    // Mirrors Swift `programFunctionType(for:)` — checks both globalFunction
+    // and givenDeclaration methods.
+    file_private program_function_type(self, def_id DefId) Option[Type] = {
+        for node in self.program.global_nodes then {
+            when node in {
+                .FunctionDecl(_, _, params, _, _, _, id) then {
+                    if id.def_id.id == def_id.id then {
+                        let mutable param_entries = List[FunctionParamEntry].new();
+                        for p in params then {
+                            param_entries.push(
+                                FunctionParamEntry(
+                                    p.param_type,
+                                    pass_kind_from_type(p.param_type),
+                                ),
+                            );
+                        };
+                        let return_type = when id.symbol_type in {
+                            .FunctionType(_, ret) then ret,
+                            _ then Type.VoidType(),
+                        };
+                        return Option[Type].Some(
+                            Type.FunctionType(param_entries, return_type),
+                        );
+                    };
+                },
+                .GivenDecl(_, members, _) then {
+                    for member in members then {
+                        if member.def_id.id == def_id.id then {
+                            let mutable param_entries = List[FunctionParamEntry].new();
+                            for p in member.params then {
+                                param_entries.push(
+                                    FunctionParamEntry(
+                                        p.param_type,
+                                        pass_kind_from_type(p.param_type),
+                                    ),
+                                );
+                            };
+                            return Option[Type].Some(
+                                Type.FunctionType(
+                                    param_entries,
+                                    member.return_type,
+                                ),
+                            );
+                        };
+                    };
+                },
+                _ then {},
+            };
         };
+        return Option[Type].None();
     };
 
     file_private lookup_concrete_method_symbol(
@@ -4726,6 +4981,63 @@ given MIRFunctionBuilder {
         };
     };
 
+    file_private static_method_signature_matches_call_via_trait_receiver(
+        self,
+        function_type Type,
+        expected_type Type,
+        trait_def_id DefId,
+    ) Bool = {
+        return when function_type in {
+            .FunctionType(actual_params, actual_return) then when expected_type in {
+                .FunctionType(expected_params, expected_return) then {
+                    if actual_params.count() != expected_params.count() or actual_params.is_empty() then {
+                        return false;
+                    };
+                    if self.concrete_layout_key_for_type(actual_return) != self.concrete_layout_key_for_type(
+                        expected_return,
+                    ) then {
+                        return false;
+                    };
+
+                    let actual_first = self.normalized_method_lookup_receiver_type(
+                        (actual_params[UInt(0)]).param_type,
+                    );
+                    let expected_first = self.normalized_method_lookup_receiver_type(
+                        (expected_params[UInt(0)]).param_type,
+                    );
+
+                    let first_matches_via_trait = when actual_first in {
+                        .TraitObject(actual_trait_def_id, _) then actual_trait_def_id == trait_def_id,
+                        _ then false,
+                    };
+                    if not first_matches_via_trait then {
+                        return false;
+                    };
+                    // A concrete receiver calling a trait-tool method should
+                    // not be rejected here; argument lowering will insert the
+                    // trait-object conversion.
+                    let _ = expected_first;
+
+                    let mutable idx UInt = UInt(1);
+                    while idx < actual_params.count() then {
+                        let actual_param_type = (actual_params[idx]).param_type;
+                        let expected_param_type = (expected_params[idx]).param_type;
+                        if not self.call_param_types_match(
+                            actual_param_type,
+                            expected_param_type,
+                        ) then {
+                            return false;
+                        };
+                        idx += UInt(1);
+                    };
+                    true
+                },
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
     file_private lower_call_arguments(
         self,
         callee MIROperand,
@@ -4747,6 +5059,13 @@ given MIRFunctionBuilder {
         return Pair[List[MIRValue], List[MIROwnershipUse]](values, ownerships);
     };
 
+    // Mirrors Swift `MIRLowerer.lowerCallArgument`. It adapts borrowed
+    // references and otherwise lowers the value as-is. It never synthesizes a
+    // trait-object conversion: those are pre-existing typed-AST nodes built by
+    // the monomorphizer (which also collects the matching vtable request), and
+    // are lowered through `lower_trait_object_conversion` on the `.TraitObject`
+    // expression kind. Fabricating one here would bypass vtable registration and
+    // trip `trait object conversion has no matching vtable`.
     file_private lower_call_argument(
         self,
         arg TypedExpr,
@@ -5448,6 +5767,11 @@ given MIRFunctionBuilder {
         ownerships List[MIROwnershipUse],
         result_type Type,
     ) Option[MIRExprResult] = {
+        when callee in {
+            .Function(sym) then {
+            },
+            _ then {},
+        };
         let value = MIRValue.Call(MIRCall(callee, values, ownerships, result_type));
         if self.type_is_never(result_type) then {
             self.append_statement(MIRStatement.Evaluate(value));

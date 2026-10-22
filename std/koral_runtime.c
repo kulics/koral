@@ -3893,29 +3893,37 @@ typedef struct {
 
 #if defined(_WIN32) || defined(_WIN64)
 
+// SRWLOCK, not CRITICAL_SECTION: a CRITICAL_SECTION is recursive, so the same
+// thread that already holds it can TryEnter it again and the call succeeds.
+// That contradicts `Mutex.try_lock`, whose documented contract is "succeeds on
+// an unheld lock, false when the lock is occupied" -- and it contradicts the
+// POSIX side of this file, where a default `pthread_mutex_t` is non-recursive.
+// `std_handle_types_are_mutable` asserts exactly this: after `m.lock()`, an
+// alias's `try_lock()` must fail. SharedMutex already used SRWLOCK; Mutex now
+// matches it (and so do the condvar waits below).
 void* __koral_mutex_create(void) {
-    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
-    if (!cs) return NULL;
-    InitializeCriticalSection(cs);
-    return (void*)cs;
+    SRWLOCK* lock = (SRWLOCK*)malloc(sizeof(SRWLOCK));
+    if (!lock) return NULL;
+    InitializeSRWLock(lock);
+    return (void*)lock;
 }
 
 void __koral_mutex_destroy(void* mutex) {
     if (!mutex) return;
-    DeleteCriticalSection((CRITICAL_SECTION*)mutex);
+    // SRWLOCK needs no destroy
     free(mutex);
 }
 
 void __koral_mutex_lock(void* mutex) {
-    EnterCriticalSection((CRITICAL_SECTION*)mutex);
+    AcquireSRWLockExclusive((SRWLOCK*)mutex);
 }
 
 int32_t __koral_mutex_try_lock(void* mutex) {
-    return TryEnterCriticalSection((CRITICAL_SECTION*)mutex) ? 1 : 0;
+    return TryAcquireSRWLockExclusive((SRWLOCK*)mutex) ? 1 : 0;
 }
 
 void __koral_mutex_unlock(void* mutex) {
-    LeaveCriticalSection((CRITICAL_SECTION*)mutex);
+    ReleaseSRWLockExclusive((SRWLOCK*)mutex);
 }
 
 #else
@@ -4067,7 +4075,8 @@ void __koral_condvar_destroy(void* raw) {
 
 void __koral_condvar_wait(void* raw, void* mutex) {
     KoralCondvar* cv = (KoralCondvar*)raw;
-    SleepConditionVariableCS(&cv->cv, (CRITICAL_SECTION*)mutex, INFINITE);
+    // Mutex is an SRWLOCK (see __koral_mutex_create); 0 = exclusive mode.
+    SleepConditionVariableSRW(&cv->cv, (SRWLOCK*)mutex, INFINITE, 0);
 }
 
 void __koral_condvar_signal(void* raw) {

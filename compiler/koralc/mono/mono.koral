@@ -256,7 +256,7 @@ file_private let concrete_receiver_method_lookup_key(
     context CompilerContext,
     receiver_type Type,
     method_name String,
-) MethodInstanceKey = {
+) MethodLookupKey = {
     let normalized = mono_receiver_lookup_type(context, receiver_type);
     return make_receiver_method_key_from_context(context, normalized, method_name);
 };
@@ -369,7 +369,7 @@ public type mutable MonomorphizedProgram(
     vtable_requests List[VtableRequest],
     mutable receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mutable concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    mutable static_method_by_key Dict[MethodInstanceKey, DefId],
+    mutable static_method_by_key Dict[MethodLookupKey, DefId],
     generic_templates GenericTemplateRegistry,
     global_scope Scope,
     import_graph ImportGraph,
@@ -377,8 +377,9 @@ public type mutable MonomorphizedProgram(
     trait_registry TraitRegistry,
     conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     conformance_witnesses Dict[String, ConformanceWitness],
-    mutable extension_methods Dict[MethodInstanceKey, ConcreteMethodEntry],
-    mutable extension_method_def_ids Dict[MethodInstanceKey, DefId],
+    mutable extension_methods Dict[MethodLookupKey, ConcreteMethodEntry],
+    mutable extension_method_def_ids Dict[MethodLookupKey, DefId],
+    mutable extension_method_def_ids_by_identity Dict[MethodInstanceKey, DefId],
     mutable remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
 );
 
@@ -407,14 +408,22 @@ given MonomorphizedProgram {
 
     public merge_extension_method_map(
         self,
-        key MethodInstanceKey,
+        key MethodLookupKey,
         value ConcreteMethodEntry,
     ) Void = {
         self.extension_methods.insert(key, value);
     };
 
-    public merge_extension_method_def_id(self, key MethodInstanceKey, def_id DefId) Void = {
+    public merge_extension_method_def_id(self, key MethodLookupKey, def_id DefId) Void = {
         self.extension_method_def_ids.insert(key, def_id);
+    };
+
+    public merge_extension_method_def_id_by_identity(
+        self,
+        key MethodInstanceKey,
+        def_id DefId,
+    ) Void = {
+        self.extension_method_def_ids_by_identity.insert(key, def_id);
     };
 
     public merge_remapped_function_def_ids(
@@ -427,7 +436,7 @@ given MonomorphizedProgram {
 
     public merge_static_method_lookup_entry(
         self,
-        key MethodInstanceKey,
+        key MethodLookupKey,
         def_id DefId,
     ) Void = {
         self.static_method_by_key.insert(key, def_id);
@@ -498,10 +507,15 @@ module_private type mutable MonomorphizerStorage(
 
     // ── State ────────────────────────────────────────────────────────────────
     mutable layout_to_template_info Dict[String, TemplateInfo],
-    mutable extension_methods Dict[MethodInstanceKey, ConcreteMethodEntry],
-    mutable extension_method_def_ids Dict[MethodInstanceKey, DefId],
+    mutable extension_methods Dict[MethodLookupKey, ConcreteMethodEntry],
+    mutable extension_method_def_ids Dict[MethodLookupKey, DefId],
+    mutable extension_method_def_ids_by_identity Dict[MethodInstanceKey, DefId],
+    // DefIds of already-instantiated (emitted) methods. A definition-time DefId
+    // in this set IS the final identity — resolve_method_instance_by_identity's
+    // L0 short-circuit. Never derived from names.
+    mutable instantiated_method_def_ids Set[UInt],
     mutable concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    mutable concrete_callable_name_index Dict[MethodInstanceKey, List[DefId]],
+    mutable concrete_callable_name_index Dict[MethodLookupKey, List[DefId]],
     mutable remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
     mutable receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mutable vtable_requests List[VtableRequest],
@@ -583,12 +597,16 @@ file_private let is_non_generic_decl(decl TypedDecl) Bool = {
 };
 
 file_private let given_member_has_generic_parameter(member TypedGivenMember) Bool = {
+    // `Self` is bound to the target type at registration time — it is not an
+    // unresolved generic parameter. Swift's `extensionMethods[methodOwnerKey]`
+    // registration (TypeCheckerPasses.swift:3970) files every concrete method,
+    // including ones whose params mention `Self`.
     for param in member.params then {
-        if has_generic_parameter(param.param_type) then {
+        if has_generic_parameter_excluding_self(param.param_type) then {
             return true;
         };
     };
-    return has_generic_parameter(member.return_type);
+    return has_generic_parameter_excluding_self(member.return_type);
 };
 
 file_private let given_members_have_generic_parameter(members List[TypedGivenMember]) Bool = {
@@ -626,6 +644,18 @@ file_private let instantiation_kind_profile_name(kind InstantiationKind) String 
         .Function(_, _) then "function",
         .ExtensionMethod(_, _, _, _, _) then "extension-method",
         .TraitMethod(_, _, _) then "trait-method",
+    };
+};
+
+// Sort key: given declarations (GivenDecl/GivenTraitDecl/IntrinsicGivenDecl)
+// get priority 0 so they are processed first in the fixpoint loop.  They
+// populate `remappedFunctionDefIds` which other nodes need for method lookup.
+file_private let mono_decl_given_priority(decl TypedDecl) UInt = {
+    return when decl in {
+        .GivenDecl(_, _, _) then UInt(0),
+        .GivenTraitDecl(_, _, _, _, _, _) then UInt(0),
+        .IntrinsicGivenDecl(_, _, _) then UInt(0),
+        _ then UInt(1),
     };
 };
 
@@ -900,10 +930,12 @@ given Monomorphizer {
             initial_nodes.count(),
             // state
             Dict[String, TemplateInfo].new(),
-            Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+            Dict[MethodLookupKey, ConcreteMethodEntry].new(),
+            Dict[MethodLookupKey, DefId].new(),
             Dict[MethodInstanceKey, DefId].new(),
+            Set[UInt].new(),
             Dict[DefId, ConcreteCallableInfo].new(),
-            Dict[MethodInstanceKey, List[DefId]].new(),
+            Dict[MethodLookupKey, List[DefId]].new(),
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
@@ -1026,6 +1058,47 @@ given Monomorphizer {
             if not self.storage.extension_method_def_ids.contains_key(instance_key) then {
                 self.storage.extension_method_def_ids.insert(instance_key, m_ref.def_id);
             };
+            let identity_instance_key = make_receiver_method_identity_key_from_context(
+                self.storage.context,
+                resolved_type,
+                m_ref.def_id,
+            );
+            // rustc's `trait_item_def_id`: the trait METHOD this given member
+            // implements. The instance is keyed under both it and the impl
+            // method's DefId, so identity lookup finds it either way.
+            let trait_method_def_id = when trait_conformance_def_id in {
+                .Some(trait_def_id) then self.storage.generic_templates.trait_method_def_id(
+                    trait_def_id,
+                    m_ref.name,
+                ),
+                .None() then Option[DefId].None(),
+            };
+            if not self.storage.extension_method_def_ids_by_identity.contains_key(
+                identity_instance_key,
+            ) then {
+                self.storage.extension_method_def_ids_by_identity.insert(
+                    identity_instance_key,
+                    m_ref.def_id,
+                );
+            };
+            when trait_method_def_id in {
+                .Some(trait_item_def_id) then {
+                    let trait_identity_key = make_receiver_method_identity_key_from_context(
+                        self.storage.context,
+                        resolved_type,
+                        trait_item_def_id,
+                    );
+                    if not self.storage.extension_method_def_ids_by_identity.contains_key(
+                        trait_identity_key,
+                    ) then {
+                        self.storage.extension_method_def_ids_by_identity.insert(
+                            trait_identity_key,
+                            m_ref.def_id,
+                        );
+                    };
+                },
+                .None() then {},
+            };
             self.storage.extension_methods.insert(
                 instance_key,
                 ConcreteMethodEntry(method_symbol, trait_conformance),
@@ -1036,6 +1109,15 @@ given Monomorphizer {
                 // The trait's declaration identity arrived as a parameter.
                 // Re-deriving it from the spelling would round-trip an identity
                 // back through a name table and lose same-named traits.
+                let resolved_trait_method_def_id = when trait_method_def_id in {
+                    .Some(_) then trait_method_def_id,
+                    // Swift TypeChecker.registerReceiverStyleMethod: with a
+                    // conformance trait but no separate trait-method lookup hit,
+                    // the impl method IS the trait method's identity.
+                    .None() then if trait_conformance is .Some(_) then Option[DefId].Some(
+                        m_ref.def_id,
+                    ) else Option[DefId].None(),
+                };
                 self.set_receiver_method_dispatch_if_absent(
                     m_ref.def_id,
                     ReceiverMethodDispatchInfo(
@@ -1046,6 +1128,7 @@ given Monomorphizer {
                         ),
                         trait_conformance,
                         trait_conformance_def_id,
+                        resolved_trait_method_def_id,
                     ),
                 );
             };
@@ -1247,6 +1330,35 @@ given Monomorphizer {
         // removed noisy phase logging
         for node_ref in self.storage.generated_nodes then {
             self.seed_given_method_def_ids(node_ref);
+        };
+        // ── Pre-register given method remaps (Swift `predeclareGivenMethodRemaps`
+        // + pre-resolve `.givenDeclaration` nodes) ─────────────────────────────
+        // Swift populates `remappedFunctionDefIds` from `.givenDeclaration` nodes
+        // BEFORE processing instantiation requests. Instantiation calls
+        // `substituteTypesInExpression` which resolves method references — those
+        // need `remappedFunctionDefIds` populated to find the right instance.
+        for node_ref in self.storage.generated_nodes then {
+            when node_ref in {
+                .GivenDecl(target_type, members, _) then {
+                    let _ = register_given_decl_method_identities(
+                        self,
+                        target_type,
+                        members,
+                        Option[String].None(),
+                        Option[DefId].None(),
+                    );
+                },
+                .GivenTraitDecl(target_type, trait_name, _, members, _, decl_trait_id) then {
+                    let _ = register_given_decl_method_identities(
+                        self,
+                        target_type,
+                        members,
+                        Option[String].Some(trait_name),
+                        Option[DefId].Some(decl_trait_id),
+                    );
+                },
+                _ then {},
+            };
         };
         // removed noisy phase logging
 
@@ -1479,7 +1591,16 @@ given Monomorphizer {
             fixpoint_rounds += UInt(1);
             self.storage.expression_resolve_total_steps = UInt(0);
             self.storage.expression_resolve_total_limited = false;
-            // removed noisy phase logging
+            // Swift clears `resolvedStructEnumDefIds` each round so nodes whose
+            // types were updated by new instantiations get re-resolved.  Clear
+            // the body caches for the same reason: a body first resolved before
+            // `remappedFunctionDefIds` was populated must be re-resolved after.
+            self.storage.resolved_function_body_ids = Set[UInt].new();
+            self.storage.resolved_given_member_body_ids = Set[UInt].new();
+            // Swift sorts `allNodes` so `.givenDeclaration` nodes are processed
+            // first — they populate `remappedFunctionDefIds` which other nodes
+            // need to resolve method references.
+            self.storage.generated_nodes.sort_by(mono_decl_given_priority);
             // Process by index — resolve_parameterized_type may push new nodes into
             // generated_nodes; keep resolving until all appended nodes are processed.
             let mutable resolved_nodes = List[TypedDecl].new();
@@ -1606,6 +1727,7 @@ given Monomorphizer {
             remapped_witnesses,
             self.storage.extension_methods,
             self.storage.extension_method_def_ids,
+            self.storage.extension_method_def_ids_by_identity,
             self.storage.remapped_function_def_ids,
         );
     };
@@ -1618,6 +1740,7 @@ given Monomorphizer {
         for entry in witnesses then {
             let witness = entry.second;
             let mutable implementations = Dict[String, DefId].new();
+            let mutable implementations_by_trait_method_def_id = Dict[DefId, DefId].new();
             for method_entry in witness.local_implementation_def_ids_by_method_name then {
                 let original_def_id = method_entry.second;
                 let mutable selected_def_id = original_def_id;
@@ -1656,6 +1779,45 @@ given Monomorphizer {
                 };
                 implementations.insert(method_entry.first, selected_def_id);
             };
+            for method_entry in witness.local_implementation_def_ids_by_trait_method_def_id then {
+                let original_def_id = method_entry.second;
+                let mutable selected_def_id = original_def_id;
+                when self.storage.remapped_function_def_ids.get(original_def_id.id) in {
+                    .Some(candidates) then {
+                        if not candidates.is_empty() then {
+                            let self_type_key = stable_type_key(witness.self_type);
+                            let mutable matched = Option[DefId].None();
+                            for candidate in candidates then {
+                                when candidate.second in {
+                                    .FunctionType(params, _) then {
+                                        if not params.is_empty() then {
+                                            let param_key = stable_type_key(
+                                                (params[UInt(0)]).param_type,
+                                            );
+                                            if param_key == self_type_key or param_key.contains(
+                                                self_type_key,
+                                            ) then {
+                                                matched = Option[DefId].Some(candidate.first);
+                                                break;
+                                            };
+                                        };
+                                    },
+                                    _ then {},
+                                };
+                            };
+                            selected_def_id = when matched in {
+                                .Some(def_id) then def_id,
+                                .None() then (candidates[UInt(0)]).first,
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+                implementations_by_trait_method_def_id.insert(
+                    method_entry.first,
+                    selected_def_id,
+                );
+            };
             remapped.insert(
                 entry.first,
                 ConformanceWitness(
@@ -1664,6 +1826,7 @@ given Monomorphizer {
                     witness.direct_parent_trait_refs,
                     witness.requirement_slots,
                     implementations,
+                    implementations_by_trait_method_def_id,
                 ),
             );
         };
@@ -1710,8 +1873,10 @@ given Monomorphizer {
             Dict[String, TemplateInfo].new(),
             program.extension_methods,
             program.extension_method_def_ids,
+            program.extension_method_def_ids_by_identity,
+            Set[UInt].new(),
             program.concrete_callables_by_def_id,
-            Dict[MethodInstanceKey, List[DefId]].new(),
+            Dict[MethodLookupKey, List[DefId]].new(),
             program.remapped_function_def_ids,
             program.receiver_method_dispatch,
             List[VtableRequest].new(),
@@ -1758,6 +1923,9 @@ given Monomorphizer {
         };
         for entry in mono.storage.extension_method_def_ids.iterator() then {
             program.merge_extension_method_def_id(entry.first, entry.second);
+        };
+        for entry in mono.storage.extension_method_def_ids_by_identity.iterator() then {
+            program.merge_extension_method_def_id_by_identity(entry.first, entry.second);
         };
         for entry in mono.storage.remapped_function_def_ids.iterator() then {
             program.merge_remapped_function_def_ids(entry.first, entry.second);
@@ -1886,9 +2054,9 @@ given Monomorphizer {
     // Key format: concrete receiver layout key + method name, preserving
     // ref/mutref/ptr wrappers so blanket impls do not overwrite value impls.
     // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
-    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[MethodInstanceKey, DefId] = {
+    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[MethodLookupKey, DefId] = {
         let materialized = self.build_materialized_def_ids();
-        let mutable lookup = Dict[MethodInstanceKey, DefId].new();
+        let mutable lookup = Dict[MethodLookupKey, DefId].new();
 
         // Step 1: Merge extension_method_def_ids (populated during instantiation).
         for entry in self.storage.extension_method_def_ids.iterator() then {
@@ -2374,16 +2542,21 @@ given Monomorphizer {
                         target_type,
                     );
                     for m_ref in members then {
-                        let method_name = when self.storage.receiver_method_dispatch.get(
-                            m_ref.def_id,
-                        ) in {
-                            .Some(info) then info.method_name,
-                            .None() then m_ref.name,
+                        // Do NOT overwrite a cname already set by
+                        // `register_given_decl_method_identities` (which uses
+                        // Swift's `semanticMethodModulePath`).
+                        if self.storage.context.get_cname(m_ref.def_id) is .None() then {
+                            let method_name = when self.storage.receiver_method_dispatch.get(
+                                m_ref.def_id,
+                            ) in {
+                                .Some(info) then info.method_name,
+                                .None() then m_ref.name,
+                            };
+                            c_identifier_by_def_id.insert(
+                                m_ref.def_id.id,
+                                self.codegen_compose_method_c_name(type_c_name, method_name),
+                            );
                         };
-                        c_identifier_by_def_id.insert(
-                            m_ref.def_id.id,
-                            self.codegen_compose_method_c_name(type_c_name, method_name),
-                        );
                     };
                 },
                 .GivenTraitDecl(target_type, _, _, members, _, _) then {
@@ -2393,16 +2566,18 @@ given Monomorphizer {
                         target_type,
                     );
                     for m_ref in members then {
-                        let method_name = when self.storage.receiver_method_dispatch.get(
-                            m_ref.def_id,
-                        ) in {
-                            .Some(info) then info.method_name,
-                            .None() then m_ref.name,
+                        if self.storage.context.get_cname(m_ref.def_id) is .None() then {
+                            let method_name = when self.storage.receiver_method_dispatch.get(
+                                m_ref.def_id,
+                            ) in {
+                                .Some(info) then info.method_name,
+                                .None() then m_ref.name,
+                            };
+                            c_identifier_by_def_id.insert(
+                                m_ref.def_id.id,
+                                self.codegen_compose_method_c_name(type_c_name, method_name),
+                            );
                         };
-                        c_identifier_by_def_id.insert(
-                            m_ref.def_id.id,
-                            self.codegen_compose_method_c_name(type_c_name, method_name),
-                        );
                     };
                 },
                 _ then {},

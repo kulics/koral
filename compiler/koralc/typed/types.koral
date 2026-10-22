@@ -1588,7 +1588,7 @@ given MethodOwner {
     };
 };
 
-// ── MethodInstanceKey ────────────────────────────────────────────────────────
+// ── MethodLookupKey ────────────────────────────────────────────────────────
 
 /// Key of one INSTANTIATED method: which declaration, which instantiation of it,
 /// which method, and which method-level type arguments.
@@ -1599,20 +1599,20 @@ given MethodOwner {
 /// differ here, exactly as rustc's `Instance` is `(DefId, GenericArgs)` and not
 /// `DefId` alone. Method type arguments are kept as `Type`s too, so nothing is
 /// folded into a name string. See `docs/design/generics-and-monomorphization.md`.
-public type MethodInstanceKey(
+public type MethodLookupKey(
     owner MethodOwner,
     owner_args List[Type],
     method_name String,
     method_type_args List[Type],
 );
 
-given MethodInstanceKey as Eq {
-    public equals(self, other MethodInstanceKey) Bool = {
+given MethodLookupKey as Eq {
+    public equals(self, other MethodLookupKey) Bool = {
         return self.owner == other.owner and self.owner_args == other.owner_args and self.method_name == other.method_name and self.method_type_args == other.method_type_args;
     };
 };
 
-given MethodInstanceKey as Hash {
+given MethodLookupKey as Hash {
     public hash(self) UInt = {
         let mutable h = UInt(14695981039346656037);
         h = stable_hash_combine_value(h, self.owner.hash());
@@ -1627,13 +1627,56 @@ given MethodInstanceKey as Hash {
     };
 };
 
+// DefId-keyed method instance identity. This is the Phase-B migration target:
+// existing `MethodLookupKey` remains name-keyed temporarily because it still
+// serves parser/type-checker bridge tables whose inputs are names. New identity
+// tables must use this key and never round-trip through a method name.
+public type MethodInstanceKey(
+    owner MethodOwner,
+    owner_args List[Type],
+    method_def_id DefId,
+    method_type_args List[Type],
+);
+
+given MethodInstanceKey as Eq {
+    public equals(self, other MethodInstanceKey) Bool = {
+        return self.owner == other.owner and self.owner_args == other.owner_args and self.method_def_id == other.method_def_id and self.method_type_args == other.method_type_args;
+    };
+};
+
+given MethodInstanceKey as Hash {
+    public hash(self) UInt = {
+        let mutable h = UInt(14695981039346656037);
+        h = stable_hash_combine_value(h, self.owner.hash());
+        for arg in self.owner_args then {
+            h = stable_hash_combine_value(h, stable_type_hash(arg));
+        };
+        h = stable_hash_combine_value(h, self.method_def_id.id);
+        for arg in self.method_type_args then {
+            h = stable_hash_combine_value(h, stable_type_hash(arg));
+        };
+        return h;
+    };
+};
+
 public let method_instance_key(
     owner MethodOwner,
     owner_args List[Type],
-    method_name String,
+    method_def_id DefId,
     method_type_args List[Type],
 ) MethodInstanceKey = {
-    return MethodInstanceKey(owner, owner_args, method_name, method_type_args);
+    return MethodInstanceKey(owner, owner_args, method_def_id, method_type_args);
+};
+
+/// Outcome of `resolve_method_instance_by_identity` (Swift's
+/// `MethodInstanceResolution`). `Instantiated` is an emitted function whose
+/// DefId IS the answer. `KeepDefinitionTime` means the definition-time DefId
+/// stays authoritative — only legal for concrete given / built-in methods that
+/// are already emitted functions. A generic template can never fake success
+/// here; otherwise C would reference the template's return type.
+public type MethodInstanceResolution {
+    Instantiated(symbol Symbol),
+    KeepDefinitionTime(method_type Type),
 };
 
 public type IndirectionFamily {

@@ -41,7 +41,7 @@ extension CodeGen {
     traitName: String,
     traitDefId: DefId,
     traitTypeArgs: [Type],
-    methodName: String
+    traitMethodDefId: DefId
   ) -> DefId? {
     let traitRef = CanonicalTraitRef(
       traitName: traitName,
@@ -53,7 +53,7 @@ extension CodeGen {
       return nil
     }
 
-    if let direct = witness.localImplementationDefIdsByMethodName[methodName] {
+    if let direct = witness.localImplementationDefIdsByTraitMethodDefId[traitMethodDefId] {
       return direct
     }
 
@@ -63,7 +63,7 @@ extension CodeGen {
         traitName: parentTraitRef.traitName,
         traitDefId: parentTraitRef.traitDefId,
         traitTypeArgs: parentTraitRef.traitTypeArgs,
-        methodName: methodName
+        traitMethodDefId: traitMethodDefId
       ) {
         return defId
       }
@@ -88,14 +88,14 @@ extension CodeGen {
     traitName: String,
     traitDefId: DefId,
     traitTypeArgs: [Type],
-    methodName: String
+    traitMethodDefId: DefId
   ) -> String? {
     if let witnessDefId = resolveMethodDefIdFromWitness(
       concreteType: concreteType,
       traitName: traitName,
       traitDefId: traitDefId,
       traitTypeArgs: traitTypeArgs,
-      methodName: methodName
+      traitMethodDefId: traitMethodDefId
     ) {
       if let method = emittedMethodSymbol(defId: witnessDefId) {
         return cIdentifier(for: method)
@@ -178,7 +178,7 @@ extension CodeGen {
           traitName: traitName,
           traitDefId: request.traitDefId,
           traitTypeArgs: request.traitTypeArguments,
-          methodName: methodName
+          traitMethodDefId: method.traitMethodDefId
         ) else {
           continue
         }

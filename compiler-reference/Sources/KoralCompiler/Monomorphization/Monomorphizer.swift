@@ -106,10 +106,10 @@ public class Monomorphizer {
     /// Mapping from Layout Name to Template Info (Base Name + Args)
     internal var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
     
-    /// INSTANTIATED extension methods. Keyed by the full instantiation (owner +
-    /// type arguments), so `Set[Pair[Int,Int]]` and `Set[Pair[String,Int]]` are
-    /// two entries rather than one bucket keyed by `Set`.
-    internal var extensionMethods: [MethodInstanceKey: ConcreteMethodEntry] = [:]
+    /// Name-keyed bridge for declaration-time surfaces that still carry only a
+    /// logical method name (notably `staticMethodCall`). Instance dispatch uses
+    /// `extensionMethodDefIds` keyed by `MethodInstanceKey` (DefId-based).
+    internal var extensionMethods: [MethodLookupKey: ConcreteMethodEntry] = [:]
 
     /// Inherent given method names indexed by receiver type stableKey.
     /// Used to detect name conflicts with `given Type as Trait` methods and
@@ -138,6 +138,10 @@ public class Monomorphizer {
     /// Structured extension method lookup: instantiated method -> its DefId.
     /// Populated during instantiation so lookup stays DefId-driven.
     internal var extensionMethodDefIds: [MethodInstanceKey: DefId] = [:]
+
+    /// DefIds of already-instantiated (emitted) methods. A definition-time
+    /// DefId in this set is the final identity — no further lookup needed.
+    internal var instantiatedMethodDefIds: Set<DefId> = []
 
     /// Conformance witnesses this phase adds on top of type checking's.
     ///
@@ -245,7 +249,8 @@ public class Monomorphizer {
                 methodName: dispatchInfo.methodName,
                 owner: dispatchInfo.owner,
                 conformanceTraitName: dispatchInfo.conformanceTraitName,
-                conformanceTraitDefId: dispatchInfo.conformanceTraitDefId
+                conformanceTraitDefId: dispatchInfo.conformanceTraitDefId,
+                traitMethodDefId: dispatchInfo.traitMethodDefId
             )
         }
         return copied
@@ -401,8 +406,8 @@ public class Monomorphizer {
 
                     // Per INSTANTIATION: `Set[Pair[Int,Int]]` and
                     // `Set[Pair[String,Int]]` are two entries, not one bucket.
-                    let instanceKey = context.receiverMethodKey(receiverType, methodName)
-                    extensionMethods[instanceKey] = ConcreteMethodEntry(symbol: methodSymbol, trait: trait)
+                    let lookupKey = context.receiverMethodLookupKey(receiverType, methodName)
+                    extensionMethods[lookupKey] = ConcreteMethodEntry(symbol: methodSymbol, trait: trait)
                 }
 
                 guard trait == nil else { continue }
@@ -627,16 +632,31 @@ public class Monomorphizer {
         
         // Initialize pending requests with all collected instantiation requests
         pendingRequests = Array(input.instantiationRequests)
-        
+
+        // Pre-populate `remappedFunctionDefIds` from `.givenDeclaration` nodes
+        // BEFORE processing instantiation requests. Instantiation calls
+        // `substituteTypesInExpression` which resolves method references — those
+        // need `remappedFunctionDefIds` populated to find the right instance.
+        predeclareGivenMethodRemaps(in: resultNodes)
+        var preResolvedGivenNodes: [TypedGlobalNode] = []
+        var remainingResultNodes: [TypedGlobalNode] = []
+        for node in resultNodes {
+            if case .givenDeclaration = node {
+                let resolved = try resolveTypesInGlobalNode(node)
+                preResolvedGivenNodes.append(resolved)
+            } else {
+                remainingResultNodes.append(node)
+            }
+        }
+
         // Process all instantiation requests (including transitive ones)
         while let request = popNextPendingRequest() {
             try processRequest(request)
         }
-        
-        // Resolve genericStruct/genericEnum types in all result nodes
-        var resolvedResultNodes: [TypedGlobalNode] = []
-        predeclareGivenMethodRemaps(in: resultNodes)
-        for node in resultNodes {
+
+        // Resolve genericStruct/genericEnum types in remaining result nodes
+        var resolvedResultNodes: [TypedGlobalNode] = preResolvedGivenNodes
+        for node in remainingResultNodes {
             let resolvedNode = try resolveTypesInGlobalNode(node)
             resolvedResultNodes.append(resolvedNode)
         }
@@ -667,13 +687,25 @@ public class Monomorphizer {
         var allNodes = resolvedGeneratedNodes + resolvedResultNodes
 
         // Finalize trait placeholder resolution after all instantiations.
+        // Process `.givenDeclaration` nodes FIRST so `remappedFunctionDefIds`
+        // is populated before other nodes resolve method references.
         var processedCount = processedRequestKeys.count
+        var iteration = 0
         var didProcess = true
-        while didProcess {
+        while didProcess || iteration < 3 {
             while let request = popNextPendingRequest() {
                 try processRequest(request)
             }
 
+            // Sort so `.givenDeclaration` nodes are processed first — they
+            // populate `remappedFunctionDefIds` which other nodes need.
+            allNodes.sort { a, b in
+                let aIsGiven: Bool
+                if case .givenDeclaration = a { aIsGiven = true } else { aIsGiven = false }
+                let bIsGiven: Bool
+                if case .givenDeclaration = b { bIsGiven = true } else { bIsGiven = false }
+                return aIsGiven && !bIsGiven
+            }
             var reResolved: [TypedGlobalNode] = []
             // Clear resolution cache so types updated by new instantiations get re-resolved
             resolvedStructEnumDefIds.removeAll()
@@ -685,6 +717,7 @@ public class Monomorphizer {
 
             didProcess = processedRequestKeys.count != processedCount
             processedCount = processedRequestKeys.count
+            iteration += 1
         }
 
         // 构建静态方法查找表
@@ -736,6 +769,7 @@ public class Monomorphizer {
             )
             return RequirementSlot(
                 declaringTraitRef: declaring,
+                traitMethodDefId: slot.traitMethodDefId,
                 methodName: slot.methodName,
                 parameters: slot.parameters.map {
                     RequirementSlotParameter(
@@ -755,15 +789,30 @@ public class Monomorphizer {
         // materializes the template's own generic form instead of this
         // receiver's. Resolve each slot by receiver identity; only fall back to
         // the declaration's id when nothing has been instantiated for it yet.
-        var implementations: [String: DefId] = [:]
+        var implementations: [DefId: DefId] = [:]
         for slot in slots {
-            if let symbol = lookupInstantiatedExtensionMethodSymbol(
-                baseType: concreteType,
-                methodName: slot.methodName
+            guard slot.traitMethodDefId.isValid else {
+                continue
+            }
+            let originalDefId = witness.localImplementationDefIdsByTraitMethodDefId[slot.traitMethodDefId]
+                ?? slot.traitMethodDefId
+            let functionType = Type.function(
+                parameters: slot.parameters.map { Parameter(type: $0.type, kind: .byVal) },
+                returns: slot.returnType
+            )
+            let definition = Symbol(defId: originalDefId, type: functionType, kind: .function)
+            if let resolved = try? resolveMethodInstanceByIdentityForReceiver(
+                definitionMethod: definition,
+                substitutedMethodType: functionType,
+                substitutedMethodTypeArgs: [],
+                receiverType: concreteType
             ) {
-                implementations[slot.methodName] = symbol.defId
-            } else if let defId = witness.localImplementationDefIdsByMethodName[slot.methodName] {
-                implementations[slot.methodName] = defId
+                switch resolved {
+                case .instantiated(let symbol):
+                    implementations[slot.traitMethodDefId] = symbol.defId
+                case .keepDefinitionTime:
+                    implementations[slot.traitMethodDefId] = originalDefId
+                }
             }
         }
 
@@ -772,7 +821,7 @@ public class Monomorphizer {
             traitRef: instanceTraitRef,
             directParentTraitRefs: parentRefs,
             requirementSlots: slots,
-            localImplementationDefIdsByMethodName: implementations
+            localImplementationDefIdsByTraitMethodDefId: implementations
         )
     }
 
@@ -826,19 +875,6 @@ public class Monomorphizer {
             }
             guard matched else { continue }
 
-            // A conformance `X: Child` implies `X: Parent`, and the erasure
-            // reaches every method the vtable declares -- including inherited
-            // ones. Instantiate them all for this receiver before the witness
-            // points at them, or the vtable is left with a requirement nothing
-            // implements (`Refusing to emit partial vtable`).
-            for slot in witness.requirementSlots {
-                _ = try? instantiateTraitPlaceholderMethod(
-                    baseType: concreteType,
-                    name: slot.methodName,
-                    methodTypeArgs: []
-                )
-            }
-
             conformanceWitnesses[instanceKey] = specializeConformanceWitness(
                 witness,
                 instanceTraitRef: instanceTraitRef,
@@ -856,9 +892,9 @@ public class Monomorphizer {
         var remapped: [String: ConformanceWitness] = [:]
         
         for (key, witness) in witnesses {
-            var newImplMap: [String: DefId] = [:]
+            var newImplMap: [DefId: DefId] = [:]
             
-            for (methodName, originalDefId) in witness.localImplementationDefIdsByMethodName {
+            for (traitMethodDefId, originalDefId) in witness.localImplementationDefIdsByTraitMethodDefId {
                 // Try to find the remapped defId
                 if let candidates = remappedFunctionDefIds[originalDefId], !candidates.isEmpty {
                     // Find the candidate that matches the witness's selfType
@@ -879,10 +915,10 @@ public class Monomorphizer {
                     }
                     
                     // If no match found, use the first candidate as fallback
-                    newImplMap[methodName] = matchedDefId ?? candidates[0].defId
+                    newImplMap[traitMethodDefId] = matchedDefId ?? candidates[0].defId
                 } else {
                     // Keep the original defId if no remapping found
-                    newImplMap[methodName] = originalDefId
+                    newImplMap[traitMethodDefId] = originalDefId
                 }
             }
             
@@ -891,7 +927,7 @@ public class Monomorphizer {
                 traitRef: witness.traitRef,
                 directParentTraitRefs: witness.directParentTraitRefs,
                 requirementSlots: witness.requirementSlots,
-                localImplementationDefIdsByMethodName: newImplMap
+                localImplementationDefIdsByTraitMethodDefId: newImplMap
             )
             remapped[key] = newWitness
         }
@@ -929,7 +965,7 @@ public class Monomorphizer {
                 // 注册每个方法
                 for method in methods {
                     if let dispatchInfo = receiverMethodDispatch[method.identifier.defId] {
-                        let key = context.receiverMethodKey(type, dispatchInfo.methodName)
+                        let key = context.receiverMethodKey(type, dispatchInfo.methodDefId)
                         if trait != nil {
                             if lookup[key] == nil {
                                 lookup[key] = method.identifier.defId
@@ -952,15 +988,6 @@ public class Monomorphizer {
     // MARK: - Trait Placeholder Instantiation
 
     internal func instantiateTraitPlaceholderMethod(baseType: Type, name: String, methodTypeArgs: [Type]) throws {
-        if try instantiateReferenceLikeExtensionMethod(
-            on: baseType,
-            name: name,
-            methodTypeArgs: methodTypeArgs,
-            expectedMethodType: nil
-        ) != nil {
-            return
-        }
-
         let base = baseType
 
         switch base {

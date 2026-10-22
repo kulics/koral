@@ -465,8 +465,8 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, let base, let methodTypeArgs, let type):
-      print("\(indent)TraitMethodPlaceholder: \(traitName).\(methodName) : \(type)")
+    case .traitMethodPlaceholder(let traitName, let traitDefId, let traitMethodDefId, let methodName, let base, let methodTypeArgs, let type):
+      print("\(indent)TraitMethodPlaceholder: \(traitName).\(methodName)#\(traitMethodDefId.id) : \(type)")
       if !methodTypeArgs.isEmpty {
         withIndent {
           print("\(indent)MethodTypeArgs: \(methodTypeArgs.map { $0.description }.joined(separator: ", "))")

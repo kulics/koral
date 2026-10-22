@@ -44,10 +44,9 @@ struct MIRProgram {
 
   /// Look up an instantiated static method by the receiver's owner identity AND
   /// its instantiation arguments -- `List[String].new` and `List[Rune].new` are
-  /// two entries. This used to be keyed by `"\(typeName).\(methodName)"`, so two
-  /// types with the same name answered for each other.
-  func lookupStaticMethod(receiverType: Type, methodName: String) -> DefId? {
-    staticMethodLookup[context.receiverMethodKey(receiverType, methodName)]
+  /// two entries.
+  func lookupStaticMethod(receiverType: Type, methodDefId: DefId) -> DefId? {
+    staticMethodLookup[context.receiverMethodKey(receiverType, methodDefId)]
   }
 }
 
@@ -84,6 +83,7 @@ struct MIRTraitVTable {
 }
 
 struct MIRTraitVTableMethod {
+  let traitMethodDefId: DefId
   let name: String
   let returnType: Type?
   let parameters: [MIRTraitVTableParameter]

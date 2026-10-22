@@ -292,6 +292,7 @@ public indirect enum TypedExpressionNode {
   )
   /// Trait method placeholder for generic parameter method calls
   /// - traitName: The name of the trait (e.g., "Iterator", "Equatable")
+  /// - traitMethodDefId: The trait method declaration identity.
   /// - methodName: The name of the method (e.g., "next", "equals")
   /// - base: The base expression (generic parameter reference)
   /// - methodTypeArgs: Method-level type arguments (for generic methods)
@@ -301,6 +302,7 @@ public indirect enum TypedExpressionNode {
     /// Identity of the trait's declaration. `traitName` is display and C
     /// mangling only; comparisons use this.
     traitDefId: DefId,
+    traitMethodDefId: DefId,
     methodName: String,
     base: TypedExpressionNode,
     methodTypeArgs: [Type],
@@ -552,7 +554,7 @@ extension TypedExpressionNode {
       return type
     case .lambdaExpression(_, _, _, let type):
       return type
-    case .traitMethodPlaceholder(_, _, _, _, _, let type):
+    case .traitMethodPlaceholder(_, _, _, _, _, _, let type):
       return type
     case .traitObjectConversion(_, _, _, _, _, let type):
       return type

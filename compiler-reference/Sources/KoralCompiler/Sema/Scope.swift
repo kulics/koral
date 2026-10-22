@@ -340,8 +340,6 @@ public class UnifiedScope {
     guard let map = defIdMap, let graph = map.currentImportGraph, !map.currentModulePath.isEmpty else {
       return nil
     }
-    for e in graph.symbolImports {
-    }
     // An import edge is scoped to the file the `using` appears in, so the file
     // is part of the match -- same rule `ImportGraph.getImportKind` applies.
     func visible(edgeSourceFile: String?) -> Bool {

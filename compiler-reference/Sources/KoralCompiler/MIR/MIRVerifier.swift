@@ -97,7 +97,7 @@ final class MIRVerifier {
         if method.returnType != slot.returnType {
           throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): return type does not match witness slot")
         }
-        if witness.localImplementationDefIdsByMethodName[method.name] == nil &&
+        if witness.localImplementationDefIdsByTraitMethodDefId[slot.traitMethodDefId] == nil &&
             !witness.directParentTraitRefs.contains(where: { parent in
               parent == slot.declaringTraitRef
             }) &&

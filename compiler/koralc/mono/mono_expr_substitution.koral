@@ -797,50 +797,14 @@ file_private let substitution_lookup_receiver_method_symbol(
     method Symbol,
     expected_method_type_opt Option[Type],
 ) Option[Symbol] = {
-    let method_name = semantic_receiver_method_name(mono, method);
-    when lookup_direct_receiver_method_symbol(
-        mono,
-        receiver_type,
-        method,
-        method_name,
-        expected_method_type_opt,
-    ) in {
-        .Some(direct) then {
-            return Option[Symbol].Some(direct);
-        },
-        .None() then {},
-    };
-    when lookup_exact_receiver_method_symbol(
-        mono,
-        receiver_type,
-        method,
-        expected_method_type_opt,
-    ) in {
-        .Some(bound) then {
-            return Option[Symbol].Some(bound);
-        },
-        .None() then {},
-    };
-    let rebound = bind_receiver_method_symbol(
+    // Identity lookup only (Swift's `resolveMethodInstanceByIdentityForReceiver`).
+    // The definition-time DefId names the method; no name-based rebinding.
+    return lookup_exact_receiver_method_symbol(
         mono,
         receiver_type,
         method,
         expected_method_type_opt,
     );
-    if rebound.def_id.id > 0 and (rebound.def_id.id != method.def_id.id or not has_generic_parameter(
-        resolve_parameterized_type(mono, rebound.symbol_type),
-    )) then {
-        if not method_symbol_matches_expected_for_receiver_lookup(
-            mono,
-            receiver_type,
-            rebound,
-            expected_method_type_opt,
-        ) then {
-            return Option[Symbol].None();
-        };
-        return Option[Symbol].Some(rebound);
-    };
-    return Option[Symbol].None();
 };
 
 file_private let substitution_method_lookup_base_type(
@@ -1188,34 +1152,6 @@ file_private let substitution_method_has_compatible_ref_like_receiver(
     };
 };
 
-file_private let substitution_should_preserve_resolved_method_reference(
-    mono Monomorphizer,
-    method Symbol,
-    base_type Type,
-) Bool = {
-    if method.def_id.id == 0 then {
-        return false;
-    };
-    let mutable resolved_method_type = resolve_parameterized_type(
-        mono,
-        method.symbol_type,
-    );
-    if not substitution_method_has_compatible_ref_like_receiver(
-        mono,
-        resolved_method_type,
-        base_type,
-    ) then {
-        return false;
-    };
-    if has_generic_parameter(resolved_method_type) then {
-        return false;
-    };
-    return when mono.receiver_method_dispatch_info(method.def_id) in {
-        .Some(info) then is_ref_wrapper_owner(info.owner),
-        .None() then false,
-    };
-};
-
 file_private let recover_method_return_type(
     mono Monomorphizer,
     method Symbol,
@@ -1496,268 +1432,37 @@ file_private let substitute_expr_kind(
             };
             when new_callee.expr_kind in {
                 .Variable(identifier) then when identifier.kind in {
-                    .Function() then when mono.storage.remapped_function_def_ids.get(
-                        identifier.def_id.id,
-                    ) in {
-                        .Some(candidates) then {
-                            let original_method_name = when mono.storage.receiver_method_dispatch.get(
-                                identifier.def_id,
-                            ) in {
-                                .Some(info) then Option[String].Some(info.method_name),
-                                .None() then Option[String].None(),
-                            };
-                            let filtered_candidates = when original_method_name in {
-                                .Some(method_name) then {
-                                    let mutable filtered = List[Pair[DefId, Type]].new();
-                                    for candidate in candidates then {
-                                        when mono.storage.receiver_method_dispatch.get(
-                                            candidate.first,
-                                        ) in {
-                                            .Some(info) then {
-                                                if info.method_name == method_name then {
-                                                    filtered.push(candidate);
-                                                };
-                                            },
-                                            .None() then {},
-                                        };
-                                    };
-                                    filtered
-                                },
-                                .None() then candidates,
-                            };
-                            let owner_compatible_candidates = if new_args.is_empty() then {
-                                filtered_candidates
-                            } else {
-                                let mutable actual_receiver_type = resolve_parameterized_type(
-                                    mono,
-                                    new_args[UInt(0)].expr_type,
-                                );
-                                let mutable owner_filtered = List[Pair[DefId, Type]].new(
-                                );
-                                for candidate in filtered_candidates then {
-                                    let mutable owner_matches_receiver = true;
-                                    when mono.concrete_callable_info(candidate.first) in {
-                                        .Some(info) then {
-                                            when info.owner_type in {
-                                                .Some(owner_type) then {
-                                                    let mutable resolved_owner_type = resolve_parameterized_type(
-                                                        mono,
-                                                        owner_type,
-                                                    );
-                                                    owner_matches_receiver = if resolved_owner_type == actual_receiver_type then {
-                                                        true
-                                                    } else when actual_receiver_type in {
-                                                        .ReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        .MutableReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        .BorrowedReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        .MutableBorrowedReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        .WeakReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        .MutableWeakReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(
-                                                            mono,
-                                                            inner,
-                                                        ),
-                                                        _ then false,
-                                                    };
-                                                },
-                                                .None() then {
-                                                    let mutable candidate_type = resolve_parameterized_type(
-                                                        mono,
-                                                        substitute_type(
-                                                            mono,
-                                                            candidate.second,
-                                                            substitution,
-                                                        ),
-                                                    );
-                                                    owner_matches_receiver = when candidate_type in {
-                                                        .FunctionType(candidate_params, _) then if candidate_params.count(
-                                                        ) == 0 then false
-                                                        else strict_wrapper_receiver_param_matches(
-                                                            mono,
-                                                            (candidate_params[UInt(0)]).param_type,
-                                                            actual_receiver_type,
-                                                        ),
-                                                        _ then false,
-                                                    };
-                                                },
-                                            };
-                                        },
-                                        .None() then {
-                                            let mutable candidate_type = resolve_parameterized_type(
-                                                mono,
-                                                substitute_type(
-                                                    mono,
-                                                    candidate.second,
-                                                    substitution,
-                                                ),
-                                            );
-                                            owner_matches_receiver = when candidate_type in {
-                                                .FunctionType(candidate_params, _) then if candidate_params.count(
-                                                ) == 0 then false
-                                                else strict_wrapper_receiver_param_matches(
-                                                    mono,
-                                                    (candidate_params[UInt(0)]).param_type,
-                                                    actual_receiver_type,
-                                                ),
-                                                _ then false,
-                                            };
-                                        },
-                                    };
-                                    if owner_matches_receiver then {
-                                        owner_filtered.push(candidate);
-                                    };
-                                };
-                                if owner_filtered.is_empty() then when original_method_name in {
-                                    .Some(_) then owner_filtered,
-                                    .None() then filtered_candidates,
-                                } else owner_filtered
-                            };
-                            let symbol_type_filtered_candidates = if has_generic_parameter(
-                                resolve_parameterized_type(mono, identifier.symbol_type),
-                            ) then {
-                                owner_compatible_candidates
-                            } else {
-                                let mutable normalized_identifier_type = resolve_parameterized_type(
-                                    mono,
-                                    identifier.symbol_type,
-                                );
-                                let mutable strict_filtered = List[Pair[DefId, Type]].new(
-                                );
-                                for candidate in owner_compatible_candidates then {
-                                    let mutable candidate_type = resolve_parameterized_type(
-                                        mono,
-                                        substitute_type(
-                                            mono,
-                                            candidate.second,
-                                            substitution,
-                                        ),
-                                    );
-                                    if candidate_type == normalized_identifier_type then {
-                                        strict_filtered.push(candidate);
-                                    };
-                                };
-                                if strict_filtered.is_empty() then owner_compatible_candidates
-                                else strict_filtered
-                            };
-                            let mutable expected_call_param_types = List[Type].new();
-                            for arg in new_args then {
-                                expected_call_param_types.push(
-                                    resolve_parameterized_type(mono, arg.expr_type),
-                                );
-                            };
-                            let expected_call_type = Type.FunctionType(
-                                types_to_param_entries(expected_call_param_types),
-                                substituted_expr_type,
+                    .Function() then {
+                        // Identity lookup (Swift's
+                        // `resolveStandaloneMethodFunctionReference`): the
+                        // definition-time DefId names the method; monomorphization
+                        // only finds that method's instance. No name lookup, no
+                        // candidate selection by type.
+                        let mutable expected_call_param_types = List[Type].new();
+                        for arg in new_args then {
+                            expected_call_param_types.push(
+                                resolve_parameterized_type(mono, arg.expr_type),
                             );
-                            let skip_low_confidence_method_remap = when original_method_name in {
-                                .Some(_) then {
-                                    let mutable identifier_type = resolve_parameterized_type(
-                                        mono,
-                                        identifier.symbol_type,
-                                    );
-                                    has_generic_parameter(expected_call_type) or has_generic_parameter(
-                                        identifier_type,
-                                    )
-                                },
-                                .None() then false,
-                            };
-                            if not skip_low_confidence_method_remap then {
-                                let mutable matched = Option[Pair[DefId, Type]].None();
-                                for candidate in symbol_type_filtered_candidates then {
-                                    if substitute_type(
-                                        mono,
-                                        candidate.second,
-                                        substitution,
-                                    ) == expected_call_type then {
-                                        matched = Option[Pair[DefId, Type]].Some(
-                                            candidate,
-                                        );
-                                        break;
-                                    };
-                                };
-                                when matched in {
-                                    .None() then {
-                                        for candidate in symbol_type_filtered_candidates then {
-                                            let mutable candidate_type = substitute_type(
-                                                mono,
-                                                candidate.second,
-                                                substitution,
-                                            );
-                                            when candidate_type in {
-                                                .FunctionType(candidate_params, candidate_returns) then when expected_call_type in {
-                                                    .FunctionType(expected_params, expected_returns) then {
-                                                        if candidate_params.count() == expected_params.count(
-                                                        ) and candidate_returns == expected_returns then {
-                                                            let mutable all_match = true;
-                                                            let mutable idx UInt = 0;
-                                                            while idx < candidate_params.count(
-                                                            ) then {
-                                                                if (candidate_params[
-                                                                    idx
-                                                                ]).param_type != (expected_params[
-                                                                    idx
-                                                                ]).param_type then {
-                                                                    all_match = false;
-                                                                };
-                                                                idx += 1;
-                                                            };
-                                                            if all_match then {
-                                                                matched = Option[Pair[DefId, Type]].Some(
-                                                                    candidate,
-                                                                );
-                                                                break;
-                                                            };
-                                                        };
-                                                    },
-                                                    _ then {},
-                                                },
-                                                _ then {},
-                                            }
-                                        };
-                                    },
-                                    .Some(_) then {},
-                                };
-                                when matched in {
-                                    .Some(candidate) then {
-                                        new_callee = TypedExpr(
-                                            TypedExprKind.Variable(
-                                                Symbol(
-                                                    candidate.first,
-                                                    substitute_type(
-                                                        mono,
-                                                        candidate.second,
-                                                        substitution,
-                                                    ),
-                                                    identifier.kind,
-                                                ),
-                                            ),
-                                            substitute_type(
-                                                mono,
-                                                candidate.second,
-                                                substitution,
-                                            ),
-                                            callee.span,
-                                        );
-                                    },
-                                    .None() then {},
-                                };
-                            };
-                        },
-                        .None() then {},
+                        };
+                        let expected_call_type = Type.FunctionType(
+                            types_to_param_entries(expected_call_param_types),
+                            substituted_expr_type,
+                        );
+                        when resolve_standalone_method_function_reference(
+                            mono,
+                            identifier,
+                            expected_call_type,
+                            List[Type].new(),
+                        ) in {
+                            .Some(instantiated) then {
+                                new_callee = TypedExpr(
+                                    TypedExprKind.Variable(instantiated),
+                                    expected_call_type,
+                                    callee.span,
+                                );
+                            },
+                            .None() then {},
+                        };
                     },
                     _ then {},
                 },
@@ -1793,12 +1498,34 @@ file_private let substitute_expr_kind(
                             types_to_param_entries(expected_call_param_types),
                             substituted_expr_type,
                         );
-                        let mutable rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                        // Identity-priority (Swift's
+                        // `resolveTraitPlaceholderMethodByIdentity`): the trait
+                        // method's DefId is the identity. Falls back to the old
+                        // name-bridged lookup only when nothing is instantiated
+                        // under this identity yet.
+                        let trait_item_def_id = when trait_method_def_id_for_placeholder(
                             mono,
+                            trait_type,
+                            method_name,
+                        ) in {
+                            .Some(id) then id,
+                            .None() then method.def_id,
+                        };
+                        let mutable rebound_method_opt = resolve_trait_placeholder_method_by_identity(
+                            mono,
+                            trait_item_def_id,
+                            expected_call_type,
+                            resolved_method_type_args,
                             lookup_base_type,
-                            method,
-                            Option[Type].Some(expected_call_type),
                         );
+                        if rebound_method_opt is .None() then {
+                            rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                                mono,
+                                lookup_base_type,
+                                method,
+                                Option[Type].Some(expected_call_type),
+                            );
+                        };
                         if rebound_method_opt is .None() then {
                             instantiate_trait_placeholder_method(
                                 mono,
@@ -1806,12 +1533,21 @@ file_private let substitute_expr_kind(
                                 method_name,
                                 resolved_method_type_args,
                             );
-                            rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                            rebound_method_opt = resolve_trait_placeholder_method_by_identity(
                                 mono,
+                                trait_item_def_id,
+                                expected_call_type,
+                                resolved_method_type_args,
                                 lookup_base_type,
-                                method,
-                                Option[Type].Some(expected_call_type),
                             );
+                            if rebound_method_opt is .None() then {
+                                rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                                    mono,
+                                    lookup_base_type,
+                                    method,
+                                    Option[Type].Some(expected_call_type),
+                                );
+                            };
                         };
                         if rebound_method_opt is .Some(rebound_method) then {
                             let rebound_method_type = resolve_parameterized_type(
@@ -1905,11 +1641,7 @@ file_private let substitute_expr_kind(
                         mono,
                         base.expr_type,
                     );
-                    if not has_generic_parameter(base_type) and not substitution_should_preserve_resolved_method_reference(
-                        mono,
-                        method,
-                        base_type,
-                    ) then {
+                    if not has_generic_parameter(base_type) then {
                         let method_name = substitution_semantic_method_name(mono, method);
                         let mutable resolved_method_type_args = List[Type].new();
                         for method_type_arg in method_type_args then {
@@ -1919,7 +1651,10 @@ file_private let substitute_expr_kind(
                         };
                         let mutable expected_method_type = resolve_parameterized_type(
                             mono,
-                            method.symbol_type,
+                            mono.substitute_type_impl(
+                                method.symbol_type,
+                                substitution,
+                            ),
                         );
                         let mutable expected_call_param_types = List[Type].new();
                         expected_call_param_types.push(base_type);
@@ -1957,30 +1692,58 @@ file_private let substitute_expr_kind(
                             expected_types
                         };
                         let mutable rebound_method = method;
-                        for expected_type in preferred_expected_types then {
-                            when substitution_lookup_receiver_method_symbol(
-                                mono,
-                                base_type,
-                                method,
-                                Option[Type].Some(expected_type),
-                            ) in {
-                                .Some(candidate) then {
-                                    let candidate_type = resolve_parameterized_type(
+                        // Identity-priority (Swift's
+                        // `resolveMethodInstanceByIdentityForReceiver`): the
+                        // definition-time DefId is authoritative. Only when no
+                        // instance exists under this identity does the older
+                        // expected-type probe run.
+                        let identity_resolution = resolve_method_instance_by_identity_for_receiver(
+                            mono,
+                            method,
+                            expected_method_type,
+                            resolved_method_type_args,
+                            base_type,
+                        );
+                        let identity_bound = when identity_resolution in {
+                            .Instantiated(symbol) then {
+                                rebound_method = Symbol(
+                                    symbol.def_id,
+                                    resolve_parameterized_type(
                                         mono,
-                                        candidate.symbol_type,
-                                    );
-                                    let expected_type_resolved = resolve_parameterized_type(
-                                        mono,
-                                        expected_type,
-                                    );
-                                    if candidate.def_id.id > 0 and candidate_type == expected_type_resolved and (candidate.def_id.id != method.def_id.id or not has_generic_parameter(
-                                        candidate_type,
-                                    )) then {
-                                        rebound_method = candidate;
-                                        break;
-                                    };
-                                },
-                                .None() then {},
+                                        expected_method_type,
+                                    ),
+                                    symbol.kind,
+                                );
+                                true
+                            },
+                            .KeepDefinitionTime(_) then false,
+                        };
+                        if not identity_bound then {
+                            for expected_type in preferred_expected_types then {
+                                when substitution_lookup_receiver_method_symbol(
+                                    mono,
+                                    base_type,
+                                    method,
+                                    Option[Type].Some(expected_type),
+                                ) in {
+                                    .Some(candidate) then {
+                                        let candidate_type = resolve_parameterized_type(
+                                            mono,
+                                            candidate.symbol_type,
+                                        );
+                                        let expected_type_resolved = resolve_parameterized_type(
+                                            mono,
+                                            expected_type,
+                                        );
+                                        if candidate.def_id.id > 0 and candidate_type == expected_type_resolved and (candidate.def_id.id != method.def_id.id or not has_generic_parameter(
+                                            candidate_type,
+                                        )) then {
+                                            rebound_method = candidate;
+                                            break;
+                                        };
+                                    },
+                                    .None() then {},
+                                };
                             };
                         };
                         if rebound_method.def_id.id > 0 and rebound_method.def_id.id != method.def_id.id then {
@@ -2223,33 +1986,25 @@ file_private let substitute_expr_kind(
                 new_method.kind,
             );
             if not has_generic_parameter(binding_receiver_type) then {
-                if substitution_should_preserve_resolved_method_reference(
+                when substitution_lookup_receiver_method_symbol(
                     mono,
-                    new_method,
                     binding_receiver_type,
-                ) then {
-                    new_method = lookup_seed_method;
-                } else {
-                    when substitution_lookup_receiver_method_symbol(
-                        mono,
-                        binding_receiver_type,
-                        lookup_seed_method,
-                        Option[Type].Some(substituted_expr_type),
-                    ) in {
-                        .Some(bound_method) then {
-                            new_method = bound_method;
-                            new_base = align_method_reference_base_for_bound_method(
-                                mono,
-                                new_base,
-                                new_method,
-                            );
-                            new_receiver_type = resolve_parameterized_type(
-                                mono,
-                                new_base.expr_type,
-                            );
-                        },
-                        .None() then {},
-                    };
+                    lookup_seed_method,
+                    Option[Type].Some(substituted_expr_type),
+                ) in {
+                    .Some(bound_method) then {
+                        new_method = bound_method;
+                        new_base = align_method_reference_base_for_bound_method(
+                            mono,
+                            new_base,
+                            new_method,
+                        );
+                        new_receiver_type = resolve_parameterized_type(
+                            mono,
+                            new_base.expr_type,
+                        );
+                    },
+                    .None() then {},
                 };
             };
             let trait_object_type_opt = when resolve_parameterized_type(
@@ -2684,6 +2439,22 @@ file_private let substitute_symbol(
         substitution,
     );
     let mutable new_type = resolve_parameterized_type(mono, substituted_type);
+    // Identity lookup first (Swift's `resolveStandaloneMethodFunctionReference`):
+    // a method reference resolves to the instance of the SAME method the
+    // definition-time DefId names. No name lookup, no candidate selection.
+    if symbol.kind is .Function() then {
+        when resolve_standalone_method_function_reference(
+            mono,
+            symbol,
+            new_type,
+            List[Type].new(),
+        ) in {
+            .Some(instantiated) then {
+                return Symbol(instantiated.def_id, new_type, symbol.kind);
+            },
+            .None() then {},
+        };
+    };
     let has_symbol_metadata = mono.storage.context.get_module_path(symbol.def_id) is .Some(_) or mono.storage.context.get_source_file(
         symbol.def_id,
     ) is .Some(_);
@@ -3956,6 +3727,34 @@ file_private let lookup_exact_receiver_method_symbol(
     expected_method_type_opt Option[Type],
 ) Option[Symbol] = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
+
+    // Identity lookup FIRST (Swift `resolveMethodInstanceByIdentityForReceiver`,
+    // L0-L3): the definition-time DefId names the method. No name lookup, no
+    // owner/type candidate matching. A hit IS the answer; the legacy name bridge
+    // below runs only on a miss and is scheduled for removal (B10).
+    if not method.def_id.is_valid() then {
+        return Option[Symbol].None();
+    };
+    let expected_method_type = when expected_method_type_opt in {
+        .Some(t) then t,
+        .None() then method.symbol_type,
+    };
+    let identity_resolution = resolve_method_instance_by_identity_for_receiver(
+        mono,
+        method,
+        expected_method_type,
+        List[Type].new(),
+        resolved_receiver_type,
+    );
+    when identity_resolution in {
+        .Instantiated(symbol) then {
+            return Option[Symbol].Some(
+                Symbol(symbol.def_id, expected_method_type, symbol.kind),
+            );
+        },
+        .KeepDefinitionTime(_) then {},
+    };
+
     let strict_wrapper_dispatch = receiver_uses_strict_wrapper_dispatch(
         mono,
         resolved_receiver_type,

@@ -23,7 +23,7 @@ file_private let empty_monomorphized_program() MonomorphizedProgram = {
         List[VtableRequest].new(),
         Dict[DefId, ReceiverMethodDispatchInfo].new(),
         Dict[DefId, ConcreteCallableInfo].new(),
-        Dict[MethodInstanceKey, DefId].new(),
+        Dict[MethodLookupKey, DefId].new(),
         GenericTemplateRegistry.new(),
         Scope.new_root(),
         ImportGraph.new(),
@@ -31,7 +31,8 @@ file_private let empty_monomorphized_program() MonomorphizedProgram = {
         TraitRegistry.new(),
         Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
         Dict[String, ConformanceWitness].new(),
-        Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+        Dict[MethodLookupKey, ConcreteMethodEntry].new(),
+        Dict[MethodLookupKey, DefId].new(),
         Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
     );
@@ -54,7 +55,8 @@ file_private let make_builder_program_view(
         TraitRegistry.new(),
         Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
         program.conformance_witnesses,
-        Dict[MethodInstanceKey, ConcreteMethodEntry].new(),
+        Dict[MethodLookupKey, ConcreteMethodEntry].new(),
+        Dict[MethodLookupKey, DefId].new(),
         Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
     );
@@ -809,22 +811,32 @@ given MIRLowerer {
         kind MIRFunctionKind,
         body TypedExpr,
     ) MIRFunction = {
-        // For Drop methods, wrap self parameter type as *mutable Self
-        // so the generated C function uses a pointer parameter.
-        // Detection: single "self" parameter AND function name is "drop" (or ends with "_drop" for monomorphized).
+        // For std Drop implementations, keep the canonical ABI: `drop(self)`
+        // lowers to a pointer receiver in C. Identity is by trait DefId, never
+        // by method spelling.
         let mutable effective_params = params;
-        let def_name = self.context.get_name(identifier.def_id) or else "";
-        let is_drop_method = params.count() == 1 and params[UInt(0)].name == "self" and (def_name == "drop" or def_name.ends_with(
-            "_drop",
-        ));
+        let drop_trait_def_id = when self.program.receiver_method_dispatch.get(
+            identifier.def_id,
+        ) in {
+            .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
+            .None() then Option[DefId].None(),
+        };
+        let is_drop_method = params.count() == 1 and params[UInt(0)].name == "self" and self.context.is_std_drop_impl_def_id(
+            drop_trait_def_id,
+        );
         if is_drop_method then {
+            let self_param = params[UInt(0)];
+            let base_param_type = when self_param.param_type in {
+                .MutablePointerType(inner) then inner,
+                _ then self_param.param_type,
+            };
             let mutable wrapped = List[TypedParam].new();
             wrapped.push(
                 TypedParam(
-                    params[UInt(0)].name,
-                    params[UInt(0)].is_mutable,
-                    Type.MutablePointerType(params[UInt(0)].param_type),
-                    params[UInt(0)].named,
+                    self_param.name,
+                    self_param.is_mutable,
+                    Type.MutablePointerType(base_param_type),
+                    self_param.named,
                 ),
             );
             effective_params = wrapped;
@@ -871,15 +883,23 @@ given MIRLowerer {
     };
 
     module_private make_given_member_symbol(self, member TypedGivenMember) Symbol = {
-        let mutable is_drop_method = member.name == "drop" and member.params.count() == 1 and member.params[
-            UInt(0)
-        ].name == "self";
+        let drop_trait_def_id = when self.program.receiver_method_dispatch.get(
+            member.def_id,
+        ) in {
+            .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
+            .None() then Option[DefId].None(),
+        };
+        let mutable is_drop_method = member.params.count() == 1 and member.params[UInt(0)].name == "self" and self.context.is_std_drop_impl_def_id(
+            drop_trait_def_id,
+        );
         let mutable rebuilt_param_types = List[Type].new();
         for param in member.params then {
-            // For Drop trait's drop(self): wrap self parameter type as
-            // *mutable Self for MIR/codegen, matching Swift behavior.
             if is_drop_method and param.name == "self" then {
-                rebuilt_param_types.push(Type.MutablePointerType(param.param_type));
+                let base_type = when param.param_type in {
+                    .MutablePointerType(inner) then inner,
+                    _ then param.param_type,
+                };
+                rebuilt_param_types.push(Type.MutablePointerType(base_type));
             } else {
                 rebuilt_param_types.push(param.param_type);
             };
@@ -888,8 +908,6 @@ given MIRLowerer {
             types_to_param_entries(rebuilt_param_types),
             member.return_type,
         );
-        // For Drop methods, always use the rebuilt function type (with wrapped
-        // self parameter) instead of the context's stored type.
         let mutable function_type = rebuilt_function_type;
         if not is_drop_method then {
             function_type = when self.context.get_function_type(member.def_id) in {
@@ -970,6 +988,7 @@ given MIRLowerer {
             );
         };
         return MIRTraitVTableMethod(
+            slot.trait_method_def_id,
             slot.method_name,
             Option[Type].Some(slot.return_type),
             parameters,
@@ -1346,6 +1365,7 @@ given MIRLowerer {
             );
         };
         return TypedTraitMember(
+            member.def_id,
             member.name,
             member.has_generic_type_params,
             params,
@@ -1385,6 +1405,7 @@ given MIRLowerer {
             first = false;
         };
         return MIRTraitVTableMethod(
+            member.def_id,
             member.name,
             Option[Type].Some(member.return_type),
             params,

@@ -427,17 +427,16 @@ public class CodeGen {
   /// 查找静态方法的完整限定名
   /// - Parameters:
   ///   - receiverType: 接收者类型（身份 + 实例化实参）
-  ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
+  ///   - methodDefId: 方法的 DefId
   /// - Returns: 完整的 C 标识符
-  func lookupStaticMethod(receiverType: Type, methodName: String) -> String {
-    let typeName = receiverType.description
-    if let defId = mirProgram.lookupStaticMethod(receiverType: receiverType, methodName: methodName) {
+  func lookupStaticMethod(receiverType: Type, methodDefId: DefId) -> String {
+    if let defId = mirProgram.lookupStaticMethod(receiverType: receiverType, methodDefId: methodDefId) {
       if let cName = cIdentifierByDefId[defIdKey(defId)] {
         return cName
       }
-      return context.getCIdentifier(defId) ?? "std_\(typeName)_\(methodName)"
+      return context.getCIdentifier(defId) ?? "std_d\(methodDefId.id)"
     }
-    return "std_\(typeName)_\(methodName)"
+    return "std_d\(methodDefId.id)"
   }
   
   func needsDrop(_ type: Type) -> Bool {
@@ -1593,7 +1592,8 @@ public class CodeGen {
   func getFunctionReturnType(_ type: Type) -> String {
     switch type {
     case .function(_, let returns):
-      return cTypeName(returns)
+      let s = cTypeName(returns)
+      return s
     default:
       fatalError("Expected function type")
     }
@@ -1661,8 +1661,6 @@ public class CodeGen {
     }
 
     for node in mirProgram.globals {
-      if case .given(let type, let trait, _) = node, "\(type)".contains("Holder") || "\(type)".contains("Box") {
-      }
       if case .given(let type, let trait, let methods) = node,
          isStdDropTraitConformance(trait),
          dropOwnerTypeName(type) == typeName {

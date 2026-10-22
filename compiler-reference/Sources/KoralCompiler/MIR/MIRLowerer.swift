@@ -16,16 +16,6 @@ final class MIRLowerer {
     self.context = context
   }
 
-  /// Whether a conformance is to the std `Drop` trait, decided by the trait
-  /// declaration's identity. A user trait also named `Drop` is a different
-  /// declaration and must not receive the compiler's drop calling convention.
-  private func isStdDropTraitConformance(_ conformance: TypedTraitConformance?) -> Bool {
-    guard let conformance, let stdDrop = context.stdDropTraitDefId else {
-      return false
-    }
-    return conformance.traitDefId == stdDrop
-  }
-
   func lower() -> MIRProgram {
     var globals: [MIRGlobal] = []
     var functions: [MIRFunction] = []
@@ -56,38 +46,29 @@ final class MIRLowerer {
         let kind = MIRFunctionKind.global
         globals.append(.function(identifier: identifier, parameters: parameters, kind: kind))
         if shouldLowerFunction(identifier: identifier) {
-          functions.append(lowerFunction(identifier: identifier, parameters: parameters, body: body, kind: kind))
+          let loweredParameters = canonicalDropParameters(
+            identifier: identifier,
+            parameters: parameters,
+            traitConformance: nil
+          )
+          functions.append(
+            lowerFunction(
+              identifier: identifier,
+              parameters: loweredParameters,
+              body: body,
+              kind: kind
+            )
+          )
         }
       case .givenDeclaration(let type, let trait, let methods):
         globals.append(.given(type: type, trait: trait, methods: methods.map(\.identifier)))
         guard !context.containsGenericParameter(type) else { continue }
         for method in methods where shouldLowerFunction(identifier: method.identifier) {
-          // For Drop trait's drop(self): wrap self parameter type as *mutable Self
-          // so the generated C function matches __koral_TypeName_drop(struct TypeName* self).
-          // If the parameter is already *mutable Self (old syntax), keep as-is.
-          // We preserve the original defId so body references to 'self' still resolve.
-          let params: [Symbol]
-          let isDropMethod = isStdDropTraitConformance(trait)
-            && (context.getName(method.identifier.defId) == "drop")
-          if isDropMethod, let first = method.parameters.first,
-             context.getName(first.defId) == "self" {
-            switch first.type {
-            case .mutablePointer:
-              // Already *mutable Self (old syntax) — keep as-is
-              params = method.parameters
-            default:
-              // drop(self) — wrap self type as *mutable Self for C calling convention
-              // Keep the same defId so body field access still resolves 'self'
-              let pointerSelf = Symbol(
-                defId: first.defId,
-                type: .mutablePointer(element: first.type),
-                kind: first.kind
-              )
-              params = [pointerSelf] + Array(method.parameters.dropFirst())
-            }
-          } else {
-            params = method.parameters
-          }
+          let params = canonicalDropParameters(
+            identifier: method.identifier,
+            parameters: method.parameters,
+            traitConformance: trait
+          )
           functions.append(
             lowerFunction(
               identifier: method.identifier,
@@ -113,6 +94,56 @@ final class MIRLowerer {
       receiverMethodDispatch: program.receiverMethodDispatch
     )
     return loweredProgram
+  }
+
+  /// For std Drop implementations, `drop(self)` lowers to a mutable pointer
+  /// receiver in MIR/C. This is identity-based (`conformanceTraitDefId` +
+  /// logical method name), never derived from the instantiated symbol spelling.
+  private func canonicalDropParameters(
+    identifier: Symbol,
+    parameters: [Symbol],
+    traitConformance: TypedTraitConformance?
+  ) -> [Symbol] {
+    guard isStdDropMethod(identifier: identifier, traitConformance: traitConformance),
+          let first = parameters.first,
+          context.getName(first.defId) == "self"
+    else {
+      return parameters
+    }
+
+    let baseSelfType: Type
+    switch first.type {
+    case .mutablePointer(let inner):
+      baseSelfType = inner
+    default:
+      baseSelfType = first.type
+    }
+
+    let pointerSelf = Symbol(
+      defId: first.defId,
+      type: .mutablePointer(element: baseSelfType),
+      kind: first.kind
+    )
+    return [pointerSelf] + Array(parameters.dropFirst())
+  }
+
+  private func isStdDropMethod(
+    identifier: Symbol,
+    traitConformance: TypedTraitConformance?
+  ) -> Bool {
+    guard let stdDrop = context.stdDropTraitDefId else {
+      return false
+    }
+
+    if let traitConformance, traitConformance.traitDefId != stdDrop {
+      return false
+    }
+
+    guard let dispatch = program.receiverMethodDispatch[identifier.defId] else {
+      return false
+    }
+
+    return dispatch.conformanceTraitDefId == stdDrop && dispatch.methodName == "drop"
   }
 
   private func sortedVTableRequests() -> [VtableRequest] {
@@ -141,6 +172,7 @@ final class MIRLowerer {
     if let witness = program.conformanceWitnesses[request.witnessKey] {
       return witness.requirementSlots.map { slot in
         MIRTraitVTableMethod(
+          traitMethodDefId: slot.traitMethodDefId,
           name: slot.methodName,
           returnType: slot.returnType,
           parameters: slot.parameters.map {
@@ -164,6 +196,7 @@ final class MIRLowerer {
         )
       }
       return MIRTraitVTableMethod(
+        traitMethodDefId: .invalid,
         name: method.methodName,
         returnType: resolveVTableTypeNode(method.signature.returnType, traitTypeParamSubstitution: method.substitution),
         parameters: parameters,
@@ -883,8 +916,8 @@ private final class MIRFunctionBuilder {
       )
       let result = materialize(value, type: type)
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
-    case .traitMethodPlaceholder(let traitName, let traitDefId, let methodName, _, _, _):
-      fatalError("Unsupported trait method placeholder reached MIR lowering: \(traitName).\(methodName)")
+    case .traitMethodPlaceholder(let traitName, _, let traitMethodDefId, let methodName, let base, _, let type):
+      fatalError("Unsupported trait method placeholder reached MIR lowering: \(traitName).\(methodName)#\(traitMethodDefId.id) base=\(base.type) type=\(type)")
     case .traitObjectConversion(let inner, let traitName, let traitDefId, let traitTypeArgs, let concreteType, let type):
       let loweredInner: MIRValue
       if case .referenceExpression(let sourceExpr, let refType) = inner,
@@ -3691,6 +3724,11 @@ private final class MIRFunctionBuilder {
     calleeType: Type,
     resultType: Type
   ) -> Symbol? {
+    // If the method symbol's type is already concrete, trust it — the
+    // monomorphizer substituted method-level type parameters into it.
+    if case .function = method.type, !context.containsGenericParameter(method.type) {
+      return Symbol(defId: method.defId, type: method.type, kind: method.kind)
+    }
     if let programType = programFunctionType(for: method.defId) {
       return Symbol(defId: method.defId, type: programType, kind: method.kind)
     }
@@ -3805,8 +3843,6 @@ private final class MIRFunctionBuilder {
   ) -> MIRExprResult? {
     if case .function(let sym) = callee {
       let n = context.getName(sym.defId) ?? ""
-      if n == "count" || n == "fold" {
-      }
     }
     let value = MIRValue.call(MIRCall(
       callee: callee,

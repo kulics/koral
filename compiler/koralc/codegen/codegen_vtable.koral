@@ -500,6 +500,18 @@ given CodeGen {
         let trait_ref = CanonicalTraitRef(trait_name, trait_def_id, trait_type_args);
         when self.program.conformance_witnesses.get(trait_ref.key(concrete_type)) in {
             .Some(witness) then {
+                for slot in witness.requirement_slots then {
+                    if slot.method_name == method_name then {
+                        when witness.local_implementation_def_ids_by_trait_method_def_id.get(
+                            slot.trait_method_def_id,
+                        ) in {
+                            .Some(def_id) then {
+                                return Option[DefId].Some(def_id);
+                            },
+                            .None() then {},
+                        };
+                    };
+                };
                 when witness.local_implementation_def_ids_by_method_name.get(
                     method_name,
                 ) in {
@@ -1241,6 +1253,7 @@ given CodeGen {
                                 param_index += 1;
                             };
                             members[idx] = MIRTraitVTableMethod(
+                                member.trait_method_def_id,
                                 member.name,
                                 Option[Type].Some(
                                     self.function_type_return_type(function_type),
@@ -1339,6 +1352,7 @@ given CodeGen {
             );
         };
         return MIRTraitVTableMethod(
+            slot.trait_method_def_id,
             slot.method_name,
             Option[Type].Some(slot.return_type),
             parameters,
@@ -1411,6 +1425,7 @@ given CodeGen {
                         resolved_members.push(
                             self.resolve_trait_member_for_vtable_with_bindings(
                                 member,
+                                trait_info.method_def_ids_by_name.get(member.name) or else def_id_invalid(),
                                 bindings,
                             ),
                         );
@@ -1483,6 +1498,7 @@ given CodeGen {
     module_private resolve_trait_member_for_vtable_with_bindings(
         self,
         member TraitMember,
+        trait_method_def_id DefId,
         bindings Dict[String, Type],
     ) MIRTraitVTableMethod = {
         let mutable bound_params = List[MIRTraitVTableParameter].new();
@@ -1521,6 +1537,7 @@ given CodeGen {
             bindings,
         );
         return MIRTraitVTableMethod(
+            trait_method_def_id,
             member.name,
             Option[Type].Some(bound_return_type),
             bound_params,

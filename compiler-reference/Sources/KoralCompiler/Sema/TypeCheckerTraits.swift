@@ -127,6 +127,40 @@ extension TypeChecker {
     return result
   }
 
+  func traitMethodDefId(traitDefId: DefId, methodName: String) -> DefId? {
+    guard let decl = traitDeclsByDefId[traitDefId] else {
+      return nil
+    }
+    var visited: Set<UInt64> = []
+    return traitMethodDefId(in: decl, methodName: methodName, visited: &visited)
+  }
+
+  private func traitMethodDefId(
+    in decl: TraitDeclInfo,
+    methodName: String,
+    visited: inout Set<UInt64>
+  ) -> DefId? {
+    if visited.contains(decl.defId.id) {
+      return nil
+    }
+    visited.insert(decl.defId.id)
+
+    if decl.methods.contains(where: { $0.name == methodName }),
+       let defId = methodDefIdsByOwner[decl.name]?[methodName] {
+      return defId
+    }
+
+    for parent in decl.superTraits {
+      guard let parentDecl = traitInfo(parent.baseName, modulePath: decl.modulePath) else {
+        continue
+      }
+      if let defId = traitMethodDefId(in: parentDecl, methodName: methodName, visited: &visited) {
+        return defId
+      }
+    }
+    return nil
+  }
+
   /// Walks the trait DECLARATION and its parents by identity. Looking the name
   /// up again under the trait's own module path is wrong the moment the name is
   /// an import alias -- `AlphaTag` is bound in the importing module's key
@@ -260,6 +294,7 @@ extension TypeChecker {
           let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
           return RequirementSlot(
             declaringTraitRef: current,
+            traitMethodDefId: traitMethodDefId(traitDefId: current.traitDefId, methodName: method.name) ?? .invalid,
             methodName: method.name,
             parameters: parameters,
             returnType: returnType,
