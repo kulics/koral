@@ -138,6 +138,11 @@ using "std/io" { Reader as IoReader };
 
 判别只看路径形状，与有没有 `{ }` 无关。
 
+> **取舍动机**（项目目标：生成友好 / 审阅友好，2026-10 补记）：`using` 只留**一种形式**、
+> 含义由 specifier 形状决定，生成器就没有「该写哪种 import」的选择题，审阅者也只需认
+> 一种形状。相应地**不设** glob（`{ * }`）、`{ .. }`、裸名文件合并等并行写法。
+> 这是动机记录，不是当时的取舍论证——论证原文未记载。
+
 #### 3.2 文件合并
 
 ```koral
@@ -170,7 +175,12 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 1. `{ ... }` 省略即「全部可见符号」；出现则不能为空；
 2. 列表项是 **`符号名`** 或 **`符号名 as 新名`**，符号名沿用语言标识符规则；允许尾逗号；
    **别名必须与被引标识符的大小写类一致**——`Reader as IoReader` 合法，`Reader as reader` 报错；
-3. 同名冲突报错，用 `as` 消歧——**import-all 与本模块定义重名时无法消歧，只能改成显式列表**；
+3. **一个拼写只有一个所有者**，第二个**不同**声明撞同一个拼写才是冲突；同一声明到两次不算
+   （身份是声明，不是名字）。矩阵（用户向镜像在 `../guide/document.md`「Name Collisions」）：
+   与本模块顶层声明撞名、与本文件另一 import 的**不同**声明撞名、与 prelude
+   （`std` 主模块的 `List`、`Eq`、`Clone`…）撞名——三者皆报错；同一声明经两条路径到达、
+   函数内局部 `let` 遮蔽——两者皆合法。消歧用 `as`：显式列表项可改名，**import-all 不能改名，
+   只能改成显式列表**；
 4. **同一模块在同一文件内只 `using` 一次**：`using "std/io";` 与 `using "std/io" { Reader };` 并存报错。跨文件不重复——各文件各自 `using`；
 5. **模块名不绑定为命名空间**——导入 `Reader` 后写 `Reader`，不写 `io.Reader`；
 6. **`using` 必须位于文件顶部**，在任何其它顶层声明之前。
@@ -179,7 +189,8 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 > 相对旧写法 `using std::io { .. }`，新写法是 `using "std/io";`。
 
 > 📎 **本节规则在 `../guide/document.md` / `document-zh.md` 的「Using Declarations」里各有一份
-> 用户向镜像（同一批 6 条规则）。改任何一条要三处同批改。**
+> 用户向镜像**——「Module Import」5 条规则 + 独立的「Name Collisions」小节（撞名矩阵）。
+> 改任何一条要三处同批改。
 
 
 ### 解析 —— 原文「4. 解析」
@@ -349,9 +360,13 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 
 > **证据**（实现时的取证，记录下来免得再走一遍）：`println` 不写 `using` 能用
 > ⇒ `std` 主模块进了作用域；`DateTime` 不写 `using` 报 `Undefined type`，
-> 写了 `using "std/os" { .. }` 但没 import `std/time` 时报
-> `Import it explicitly with using Std::Time { DateTime }`
+> 写了 `using "std/os";` 但没 import `std/time` 时报
+> `'DateTime' is defined in module 'std/time'. Import it explicitly with using "std/time" { DateTime };`
+> （`compiler/koralc/sema/visibility_checker.koral`）
 > ⇒ **载入 ≠ 进作用域**，导入才进作用域。两条合起来只能是 prelude。
+> 注：诊断引用的写法必须是读者**真能写**的现行拼写（`f8ab1cbc` 前曾是
+> `using Std::Time { DateTime }` 的旧路径拼法）；且 `3ae776a2` 之后这条诊断只对
+> **调用方自己写过**的名字发出——经被调方签名传来的名字不再要求导入。
 
 #### 5.5 `koral.lock`：整棵依赖树
 
@@ -400,7 +415,9 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 6. **未知包名**——若它像旧的裸名文件合并写法，给出迁移提示（§8）；
 7. 包名命中但模块不存在；
 8. 包名命中、子路径为空，但该包没有主模块（列出该包已声明的模块）；
-9. 同一符号被两个模块导入（或与本模块定义重名）且未用 `as` 消歧——import-all 撞名时提示「改为显式列表」；
+9. 撞名矩阵命中：import 名与本模块顶层声明、与本文件另一 import 的不同声明、与 prelude 撞名
+   ——皆报错；同一声明到两次不报（见 §3.3 规则 3）。import-all 撞名时提示「改为显式列表」，
+   显式项提示「用 `as` 改名」；
 10. **同一模块在同一文件内被 `using` 多次**；
 11. **`using` 未位于文件顶部**；
 12. **模块图有环**（列出环路）。
@@ -573,14 +590,16 @@ using "koral";                        // ✗ 该包没有主模块
 
 ### 6.4 标准库 `std`
 
-现状 [std/koral.json](../../std/koral.json) 的 `std` / `std::io` / `std::json` …，**`std` 成为 `"."`，`std::io` 成为 `io`**：
+[std/koral.json](../../std/koral.json) 共 14 个模块：主模块（key `"."`）+ 13 个子模块
+（`container`、`hex`、`io`、`json`、`math`、`net`、`os`、`proc`、`rand`、`sync`、`text`、
+`time`、`async`）。源码侧的写法是包全名 `package[/subpath]`：
 
-| 现状 module 名 | manifest key | 源码 |
+| 模块全名 | manifest key | 源码 |
 | --- | --- | --- |
 | `std` | `.` | `using "std";` |
-| `std::io` | `io` | `using "std/io" { Reader };` |
-| `std::json` | `json` | `using "std/json";` |
-| `std::container` | `container` | `using "std/container";` |
+| `std/io` | `io` | `using "std/io" { Reader };` |
+| `std/json` | `json` | `using "std/json";` |
+| `std/container` | `container` | `using "std/container";` |
 
 ```json
 {
@@ -589,6 +608,7 @@ using "koral";                        // ✗ 该包没有主模块
   "modules": {
     ".":         { "entry": "std.koral", "links": [] },
     "container": { "entry": "container/container.koral", "links": [] },
+    "hex":       { "entry": "hex/hex.koral", "links": [] },
     "text":      { "entry": "text/text.koral", "links": [] },
     "math":      { "entry": "math/math.koral", "links": [] },
     "io":        { "entry": "io/io.koral", "links": [] },
@@ -604,16 +624,12 @@ using "koral";                        // ✗ 该包没有主模块
 }
 ```
 
-模块依赖方向（主模块是基础层）：
+模块依赖方向（主模块是基础层；下表从各模块的 `using` 派生，非手写）：
 
 ```text
-        ┌──────────────── ．（主模块，核心类型）────────────────┐
-        │                                                     │
-   container  text  math  io  rand  sync  async               │
-                    │     │                                   │
-                   json  net ─── os ─── proc                  │
-                    │     │                                   │
-                   time ──┘                                   │
+基础层（只依赖主模块）：container  hex  text  math  io  rand  sync  async
+json → math, text        time → text
+net  → hex, io, text     os   → io, time      proc → io, os
 ```
 
 **子模块依赖主模块，主模块不依赖任何子模块**（主模块的 `using` 不指向任何子模块），所以 `using "std";` 不会拉进 IO / 网络等重模块。这张图是**从各模块的 `using` 派生**出来的，不是手写的。

@@ -25,6 +25,7 @@
 |---|---|---|
 | `type-semantics.md` | managed ref 语法整体删除的决策；可变性为何是声明处；`Clone` 为何浅；`Drop` 语义契约；weak 为何是 `mutable`+`?T` | 对象**布局** → `thin-pointer-design.md`；用法 → `guide/document.md` |
 | `control-flow.md` | 为何表达式化；`while`/`for` 为何产出 `Void`；`break`/`continue` 绑定到最内层循环、函数边界拦截 | 语法 → `guide/grammar.bnf`、`guide/document.md` §2 |
+| `flow-logical-layers.md` | 流程层与逻辑层的分组规则、为何禁止隐式跨层混用、括号是唯一跨层形式 | 求值顺序/短路 → `control-flow.md`；运算符文法 → `guide/grammar.bnf` |
 | `generics-and-monomorphization.md` | 为何单态化；模板身份是声明；实例键为何带 `owner_args`；类型身份为何不得依赖声明顺序 | 泛型写法 → `guide/document.md` |
 | `traits-and-givens.md` | trait 身份是 DefId 且含实参；witness 按实例记；`given` 为何独立；`Any` 两个位的区别 | trait 写法 → `guide/document.md` §5 |
 | `name-resolution.md` | 符号是 `(module, name)`；解析顺序；裸名不是解析；禁止名字兜底；可见性默认值 | 模块/包设计 → `module-design.md` |

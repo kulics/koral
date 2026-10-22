@@ -21,8 +21,14 @@ Koral 的名义类型只有两种形态，**在声明处选定**：浅不可变�
 - 能力系统（`&mut` / `&` 之类的引用类别）
 - **声明处可变性**——整个类型的性质在声明处定死
 
-Koral 选第三类。managed reference 语法（`*T` / `*mutable T` / `?*T` / `?*mutable T` / `&` /
-`&mutable` / `box()`）曾存在过，**已整体删除**。
+Koral 选第三类。动机之一是**生成友好 / 审阅友好**（项目目标）：可变性在声明处只出现一次，
+审阅者一眼可判「谁能改什么」，生成器不必为每个字段或每条引用做局部可变性决定——
+逐字段与能力系统都把这个决定摊到了每一处使用点。（三种方案的取舍记录见「替代方案」，
+原文未记载选它的论证。）
+
+曾存在过一套 **managed reference 语义**（借用类型 `&T`、弱引用类型 `?*T` / `?*mutable T`、
+`box()` 装箱），**已整体删除**。注意删掉的是这套**语义**，不是这些字符：`*T` / `*mutable T`
+今天是**裸指针**的现行拼写，`&` / `&mutable` 是**取址运算符**（见「方案」）。
 
 ## 非目标
 
@@ -38,8 +44,9 @@ Koral 选第三类。managed reference 语法（`*T` / `*mutable T` / `?*T` / `?
 
 The active model is the simplified, declaration-site mutability design:
 
-- managed refs are removed: no `*T`, `*mutable T`, `?*T`, `?*mutable T`, no `&`, no `&mutable`, and no `box()`
-- raw pointers remain: `* T`, `*mutable T`, `&`, `&mutable`
+- the managed-ref semantics are removed: no borrow type `&T`, no weak types `?*T` / `?*mutable T`, and no `box()`
+- raw pointers are spelled `*T` / `*mutable T` (the formatter's spelling, no space after `*`); `&` / `&mutable` are the address-of operators that form them; there is no `unsafe` keyword
+- weak references are `?T` (see「弱引用」)
 - `type mutable` controls nominal shared-object semantics, not field-by-field mutability for ordinary types
 - non-`type mutable` nominal types must keep all fields immutable; only `type mutable` types may declare `mutable` fields
 - `Clone` is explicitly shallow-copy semantics: duplicate the object handle or backing storage, not a recursive deep copy
@@ -95,15 +102,17 @@ let v = Vec(1, 2);
 ### 弱引用
 
 weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
-`downgrade(T)` 得 `?T`，`upgrade(?T)` 回 `Option[T]`。弱引用不保活。
+用户 API 只有两步：**`?T(x)` 构造**弱句柄，**`?expr` 升级**回 `Option[T]`
+（旧的 `downgrade()` / `upgrade()` 函数是 C 运行时内部 `__koral_downgrade_ref` /
+`__koral_upgrade_ref`，不是用户 API；`?v` 弱绑定模式已删）。弱引用不保活。
 
-**`?T` 是句柄，不透明。** 在 `upgrade` 之前它不携带被引用对象的字段、分支或
+**`?T` 是句柄，不透明。** 在升级之前它不携带被引用对象的字段、分支或
 载荷，所以**一切试探或利用形状的操作都必须在 `?T` 上拒绝**：成员读写、方法调用、
 解构、迭代、分支匹配。把句柄**整体**绑定（`let x = w`、`for x in ws`、传参、
 返回、存入集合）是合法的，并且保留 `?T`。
 
-这条裁定的落点是**解析后所有读取类型形状的地方**，不是某一处 if：引用可以剥
-（`&T` 是被引用对象的别名），弱句柄不可以（它不是别名，是指向 control block
+这条裁定的落点是**解析后所有读取类型形状的地方**，不是某一处 if：取址可以剥
+（`&x` 得到的 `*T` 是被引用对象的别名），弱句柄不可以（它不是别名，是指向 control block
 的独立句柄，见 [`thin-pointer-design.md`](thin-pointer-design.md) §3.4）。任何
 一处「为方便把 `?T` 剥成 `T`」都会重新打开这个洞——2026-10-10 修过一轮：
 成员访问、`for` 的被迭代者、`let (a,b)` / `for (a,b)` 的被解构者都曾剥过，
@@ -120,7 +129,7 @@ clang 直接拒绝。
 它满足的是一个**封闭集合**，由编译器判定：
 
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
-- 裸指针：`* T`、`*mutable T`
+- 裸指针：`*T`、`*mutable T`
 - `type foreign` 声明（布局就是 C 的那个）
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 
@@ -152,7 +161,7 @@ clang 直接拒绝。
 
 - 这段时间里的 `retain` / `release` 都是空操作，所以接收者的那一对正好抵消，析构不会被
   重新进入，也不会下溢。
-- weak 的 `upgrade` 要求 `strong_count > 0`，所以析构期间的弱引用拿不回对象——这正是
+- weak 的升级（`?expr`）要求 `strong_count > 0`，所以析构期间的弱引用拿不回对象——这正是
   「`self` 不得逃逸」在运行时那一侧的对应物。
 
 析构函数体结束后计数恢复 0，让 weak 的最后一次释放仍能释放内存。

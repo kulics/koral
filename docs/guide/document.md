@@ -303,7 +303,7 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-Pointer types use the same spelling as type annotations: `* Int(p)`,
+Pointer types use the same spelling as type annotations: `*Int(p)`,
 `*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
 and `String(x)` are errors (`Type does not support cast`).
 
@@ -1530,7 +1530,7 @@ it from the type's own declaration.
 
 ```koral
 let consume[I Iterator[Int]](iter I) Void = {};
-let read_bytes[T foreign](buf List[T]) * T = buf.borrow_ptr();
+let read_bytes[T foreign](buf List[T]) *T = buf.borrow_ptr();
 ```
 
 A generic parameter carries its own bounds into a call: inside `f[T Any]`, a call
@@ -1601,7 +1601,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 - **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. **A type that implements `Drop` is the exception**: its destructor runs once per object, so the sharing is observable and such a type is treated like `type mutable` here.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
-- **Raw pointers**: the pointer types are `* T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
+- **Raw pointers**: the pointer types are `*T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
 - **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
 
 #### `Drop`
@@ -2523,10 +2523,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0);
 
 #### Builtin Subscript Rules
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `* T`, and `*mutable T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `*T`, and `*mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
-- `* T` supports `*expr` reads only. `*mutable T` supports both `*expr` reads and writes.
+- `*T` supports `*expr` reads only. `*mutable T` supports both `*expr` reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
@@ -2814,16 +2814,16 @@ This chapter collects the low-level surface: raw pointers, address-taking, and t
 
 Raw pointers are low-level memory access for FFI and system programming:
 
-- `* T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
+- `*T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
 - `*mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
-- `*mutable T` implicitly converts to `* T`. The reverse is not allowed.
+- `*mutable T` implicitly converts to `*T`. The reverse is not allowed.
 
 ### Unsafe Address-Of and Dereference
 
 `&` / `&mutable` are raw address-of operators. They require addressable storage; literals and temporaries are rejected.
 
 ```koral
-let p * Int = & value;
+let p *Int = &value;
 let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw deref read
@@ -2834,9 +2834,9 @@ let x = *p;       // raw deref read
 
 Rules:
 
-- `&` produces `* T`; `&mutable` produces `*mutable T`.
+- `&` produces `*T`; `&mutable` produces `*mutable T`.
 - `*expr` reads and `*expr = value` writes are the raw dereference forms.
-- Raw pointers are not a general "any type to `* T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
+- Raw pointers are not a general "any type to `*T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
 
 ### Foreign Function Interface
 

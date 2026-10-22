@@ -31,6 +31,7 @@ docs/
     thin-pointer-design.md           薄指针对象表示
     type-semantics.md                type / type mutable / Clone / Drop
     control-flow.md                  控制流
+    flow-logical-layers.md           流程层与逻辑层
     generics-and-monomorphization.md 泛型与单态化
     traits-and-givens.md             trait / given / trait object
     name-resolution.md               名字解析与身份

@@ -101,8 +101,11 @@ struct __koral_WeakRef { void* control; };   // 1 字，存 control 地址
 理由：**payload 可能已经销毁**，而 weak 仍要能查 `strong_count` 判断能否 upgrade。
 这也与 niche 表里的 `__koral_WeakRef | control == NULL` 一致。
 
-- `downgrade(p)` → `w.control = __koral_control_of(r.ptr); __koral_weak_retain(w.control);`
-- `upgrade(w)` → CAS `strong_count`（要求 `>0`）到 `+1`，成功则
+（用户 API 是 `?T(x)` 构造、`?expr` 升级；下面两个名字是 **C 运行时内部**
+`__koral_downgrade_ref` / `__koral_upgrade_ref`，不是用户可调函数。）
+
+- `__koral_downgrade_ref(p)` → `w.control = __koral_control_of(r.ptr); __koral_weak_retain(w.control);`
+- `__koral_upgrade_ref(w)` → CAS `strong_count`（要求 `>0`）到 `+1`，成功则
   `r.ptr = __koral_payload_of(control)`——从 control **反推** payload。
 
 ### 借用（本设计的关键裁定）
@@ -118,7 +121,7 @@ void* r = &local;                 // 或 &local 的 payload 地址
 保证（局部活过借用），不靠引用计数；类型系统已禁止借用逃逸——不能进 struct 字段、
 enum payload、返回类型、全局变量、lambda 捕获。
 
-因此借用就是「非拥有的瘦指针」，与 `* T` 同宽，只是不可解引用到裸内存之外、
+因此借用就是「非拥有的瘦指针」，与 `*T` 同宽，只是不可解引用到裸内存之外、
 不可 `free`。
 
 | 场景 | 传什么 | retain/release |
@@ -186,7 +189,7 @@ bootstrap 自举包（`check --package-config compiler/koral.json --target-modul
    双字句柄把一个具体内存模型焊进了 ABI。瘦下来之后 `type` 的内联 / 去箱化才有空间。
 2. **与主流 ARC/refcount 语言对齐。** Swift / ObjC / Rust `Rc` / Go 指针都是一个字。
    `shared_ptr` 的双字是 C++ 为 aliasing 做的专门妥协，Koral 不需要 aliasing 却承担了成本。
-3. **FFI 自然。** 托管值过 C 边界就是一个指针，与 `* T` 一致。
+3. **FFI 自然。** 托管值过 C 边界就是一个指针，与 `*T` 一致。
 4. **解锁后续表示优化**：小字符串 / 小容器、指针打标、vtable 进头。
 
 吞吐收益**不是**理由：`_copy`/`_drop` 辅助函数合计只占 self-time 2.7%，上限 1–3%。
@@ -266,7 +269,7 @@ value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在*
 
 1. `dtor` 改成 vtable 索引 —— 头再省 4 B，但每个托管类型多一张表。
 2. 静态字面量按内容去重 —— 需要先量字面量数量。
-3. `?*Trait`（`TraitWeakRef`，16 B）收到 1 字 —— 需要 vtable 另存，与「不用扁平布局」
+3. `?Trait`（`TraitWeakRef`，16 B）收到 1 字 —— 需要 vtable 另存，与「不用扁平布局」
    的取向一致但要多一张侧表。
 4. 小容器 / 指针打标（步骤 4c）。
 

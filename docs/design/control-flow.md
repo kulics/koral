@@ -39,6 +39,12 @@ values; `while` and `for` always produce `Void`.
 - Single-branch `if`/`when`/`while`/`for` semantically produce Void.
 - `while` / `for` evaluate to `Void` unless they terminate early with `Never` control flow.
 
+> **设计动机**（项目目标：生成友好 / 审阅友好，2026-10 补记）：四个结构的分支/循环体
+> 共用**同一个形状**（`... then ...`；`when` 的外层是 `when x in { pat then … }`，
+> `then` 属于每个 arm），生成器只有一条控制流模板要学，审阅者只认一种形状；
+> 差异只留在「能不能产生值」这一维（`if`/`when` 产分支值，`while`/`for` 产 `Void`），
+> 而不是四种各自不同的语法。这是动机记录，不是取舍论证——论证原文未记载（见文末）。
+
 ### `break` / `continue` 的绑定
 
 出处：[`../guide/document.md`](../guide/document.md) §2，看护用例
@@ -71,6 +77,11 @@ values; `while` and `for` always produce `Void`.
 实现上 `and then` 脱糖成对左操作数的 `when`：只有命中的分支体执行，变换体因此天然
 不在空值路径上求值。`or return` 是 `or else { return .Error(it) }` /
 `or else { return .None() }` 的语法糖。
+
+> **设计动机**（项目目标：生成友好 / 审阅友好，2026-10 补记）：错误与缺席的流动**写在
+> 表达式里**——语言没有 `throw` / `try` / `catch`（文法里不存在这些词），传播点 `or return`
+> 与兜底点 `or else` 都在源码里可见。审阅者不必扫调用图才能知道一个错误会走到哪里；
+> 生成器也只需在这几个词法点上做决定。副作用只发生在被选中一侧，进一步缩小了要盯的面。
 
 ### `defer` 的位置
 

@@ -185,7 +185,9 @@ trait 时两个拼写落在同一个声明上，判定对任意一对都为真�
 /// -- it is the absence of a bound, not a bound.
 ```
 
-`Bound` 只有两种：`Trait(def_id, name, args)` 与 `Mutable()`。`Any` 与「不是 bound 的形状」
+`Bound` 有三种：`Trait(def_id, name, args)`、`Mutable()`（`mutable` 约束）与
+`Foreign()`（`foreign` 类型种类约束，见 [`type-semantics.md`](type-semantics.md)
+「`foreign` 是 FFI 边界」）。`Any` 与「不是 bound 的形状」
 一并返回 `None`——它们以前会退化成 `"?"` 哨兵，每个消费方都要特判。
 
 **trait 位**（`trait Any { ... }` 或把它当 trait 名引用）：`Any` 是**普通 trait 名**，没有特权：
@@ -214,10 +216,10 @@ subject 上——判「这个擦除值的具体类型是不是 `IoError`」，�
 
 ### weak 是约束不是 marker
 
-- Weak capability is expressed with the `mutable` type-parameter constraint plus `?T`, not via a `Weak` marker trait.
-
-（同一段原文，已迁出。）weak 是「这个类型必须是 `type mutable`」的**形状要求**，
-所以它写在类型参数约束里，而不是一个空 trait。
+weak 能力 = `mutable` 约束 + `?T`，不设 marker trait。**正本**在
+[`type-semantics.md`](type-semantics.md)「弱引用」——本文只在 bound 层面接住它：
+`?T` 的形状要求（被引用类型必须 `type mutable`）写进类型参数约束（`Mutable()`），
+与 trait 无关，所以这里没有它的位置。
 
 ### `given` 与 trait 声明分开
 
@@ -242,9 +244,8 @@ subject 上——判「这个擦除值的具体类型是不是 `IoError`」，�
 - **object safety 的完整判据**：`../guide/document.md` 的「Object Safety」是**规则清单**，
   不是取舍记录——哪些规则是硬性的、哪些是实现权衡，未记。
 - **`given` 与 trait 分开的完整论证**：只从语法形状反推，无正面论证。
-- **`Eq`/`Ord`/`Hash` 用值接收者**：[`std-api-design.md`](std-api-design.md) 的「Trait Design Guidance」
-  一节登记为遗留例外（那节随 Receiver Design 一起从 `developer-guide` 迁出），只说 historical
-  reasons，具体历史未记。
+- **`Eq`/`Ord`/`Hash` 用值接收者**：遗留例外的正本在
+  [`std-api-design.md`](std-api-design.md)「Trait Design Guidance」，此处不复述。
 
 ## 实施
 

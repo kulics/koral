@@ -1,6 +1,7 @@
 # samples 能力验证 —— 判据、缺口与被否的下沉
 
-> **状态**：`sha256sum` 与 `cat` 已落地并有黄金参照；`grep` / `grep-j` / `http` 未开工。
+> **状态**：`cat`、`sha256sum`、`expr-eval` 已落地；`grep` / `grep-j` / `http` 未开工。
+> `cat` 与 `sha256sum` 有黄金参照；`expr-eval` 是登记在案的例外（见「验证」）。
 > 本文记**当前**的判据与裁定。
 
 ## 为什么用样本
@@ -25,6 +26,12 @@
 
 每个样本必须有**黄金参照**（golden reference）并**逐字节对拍**，不能只看退出码。
 布局：`samples/<name>/src/` 放实现，`samples/<name>/test/` 放带黄金参照的测试。
+
+> **登记在案的例外**：`expr-eval` 不满足上述布局——它是扁平多模块布局
+> （`expr_eval.koral` + `frontend/` / `backend/` / `types/`，无 `test/` 目录），验证方式是
+> `scripts/verify.sh` 的编译 + 冒烟管道（`expr_eval.koral` 进样例闸门，无黄金对拍）。
+> 它的价值在撞抽象边界（多模块、递归下降、AST），不按「黄金参照」验收。
+> 新样本仍按上面两条做；要给 expr-eval 补黄金测试时再撤销本例外。
 
 ## 被否掉的下沉
 

@@ -4,19 +4,23 @@
 
 这里**两类文档写法完全不同**，混用会出事：
 
-## 一、活的章程 —— [`developer-guide.md`](developer-guide.md)
+## 一、活的章程
 
 **必须遵守的流程**：构建顺序、信任边界、验证链、PR checklist、"Document first" 规则、
-编译器角色分工。
+编译器角色分工。随行为变化而**修订**。
 
-- 随行为变化而**修订**。改了工作方式或验证步骤，同批更新它。
+| 文件 | 管的是什么 |
+|---|---|
+| [`developer-guide.md`](developer-guide.md) | 构建 / 测试 / 调试 / 开发流程、编译器角色分工 |
+| [`bootstrap-productization.md`](bootstrap-productization.md) | bootstrap 产品化的约束、信任边界、panic 判定方法 |
+
 - 被 `README.md`、`tests/README.md`、`compiler/README.md`、`compiler-reference/README.md`
-  引用，是全仓库最常被指的一份文档。
+  引用，是全仓库最常被指的文档。
 - **`### Compiler roles` 这节的标题不能改** —— `README.md` 用 `#compiler-roles` 锚点链着它。
   只改内容不改标题；改了标题就得同步改所有锚点链接。
-- 判断一份东西该不该写进它的标准：**读者需要照做**。写「怎么做」，不写「当时做了什么」。
+- 判断一份东西该不该写进章程的标准：**读者需要照做**。写「怎么做」，不写「当时做了什么」。
 
-## 二、实现记录 —— 其余四份
+## 二、实现记录 —— 其余三份
 
 这些写**现在的实现是什么样、怎么演进成这样、否决了什么及原因**，不写「当时做了什么、
 接下来要改什么」。读者是想理解或评审这个实现的人。
@@ -25,7 +29,6 @@
 |---|---|
 | [`module-design-implementation.md`](module-design-implementation.md) | 模块与导入的实现裁定、CLI 信封规则 |
 | [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）模型、演进、硬性约束与被否方案 |
-| [`bootstrap-productization.md`](bootstrap-productization.md) | bootstrap 产品化的约束、信任边界、panic 判定方法 |
 | [`samples-capability.md`](samples-capability.md) | 样本验证的分界判据、语言缺口、被否掉的下沉 |
 
 写法：
@@ -39,7 +42,7 @@
 
 ## 为什么章程和记录不分成两个目录
 
-现在只有 1 份章程 + 4 份记录，多一层目录不值当。分界靠本 README 的上述规则和各自的写法。
+现在只有 2 份章程 + 3 份记录，多一层目录不值当。分界靠本 README 的上述规则和各自的写法。
 等记录多到章程被埋住，再收进 `records/` 子目录。
 
 ## 写新文档前
