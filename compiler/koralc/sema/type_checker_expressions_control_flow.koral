@@ -543,6 +543,167 @@ given TypeChecker {
         };
     };
 
+    /// Type-check a `where` guard the way an if/while condition is checked:
+    /// `is` conjuncts may bind, and the names stay visible to the rest of the
+    /// guard and to the arm/loop body. The result is a typed `and`-spine of
+    /// steps -- `IsExpr` nodes and plain Bool exprs -- that MIR walks in
+    /// order. Only the and-spine is walked; `or` / `not` keep their ordinary
+    /// expression semantics, so an `is` buried in one of those is checked by
+    /// the generic path and rejected there if it binds.
+    module_private check_guard_expression(
+        self,
+        guard Expr,
+        scope Scope,
+    ) TypedExpr = {
+        // Same rule as if/while: bindings under expression `or` / `not` are
+        // refused with the same two diagnostics.
+        if self.check_or_branches_for_bindings(guard) then {
+            return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType());
+        };
+        if not self.condition_contains_is_expression(guard) then {
+            let raw_guard = self.check_expr_core_ref(
+                guard,
+                Option[Type].Some(Type.BoolType()),
+                scope,
+            );
+            if raw_guard.expr_type is not .BoolType() then {
+                self.push_diagnostic_at_span(
+                    "Type mismatch: expected Bool, got \(self.display_type_name(raw_guard.expr_type))",
+                    expr_span(guard),
+                );
+            };
+            return raw_guard;
+        };
+
+        let mutable clauses = List[Expr].new();
+        self.flatten_and_chain_into(guard, clauses);
+        let mutable folded = Option[TypedExpr].None();
+        for clause in clauses.iterator() then {
+            let step = self.check_guard_step(clause, guard, scope);
+            folded = when folded in {
+                .Some(acc) then Option[TypedExpr].Some(
+                    make_typed_expr(
+                        TypedExprKind.AndExpr(acc, step),
+                        Type.BoolType(),
+                    ),
+                ),
+                .None() then Option[TypedExpr].Some(step),
+            };
+        };
+        return when folded in {
+            .Some(result) then result,
+            .None() then make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType()),
+        };
+    };
+
+    /// One conjunct of a guard's and-spine. `is` / `is not` become typed
+    /// pattern tests that also bind; everything else is an ordinary Bool
+    /// check.
+    module_private check_guard_step(
+        self,
+        clause Expr,
+        guard Expr,
+        scope Scope,
+    ) TypedExpr = {
+        let negated = clause is .IsNotExpr(...);
+        if clause is .IsExpr(...) or negated then {
+            let subject_pattern = when clause in {
+                .IsExpr(subject, pattern, _) then Pair[Expr, PatternNode](
+                    subject,
+                    pattern,
+                ),
+                _ then {
+                    when clause in {
+                        .IsNotExpr(subject, pattern, _) then Pair[Expr, PatternNode](
+                            subject,
+                            pattern,
+                        ),
+                        _ then Pair[Expr, PatternNode](
+                            clause,
+                            PatternNode.Wildcard(expr_span(clause)),
+                        ),
+                    }
+                },
+            };
+            let subject = subject_pattern.first;
+            let pattern = subject_pattern.second;
+            let raw_typed_subj = self.check_expr_scoped_ref(
+                subject,
+                Option[Type].None(),
+                scope,
+            );
+            // `?name` unpacks a weak handle: wrap the subject in the upgrade
+            // intrinsic so `Option[T]` gets instantiated and the pattern
+            // matches on the upgraded value.
+            let typed_subj = if self.pattern_is_weak_binding(pattern) and self.is_weak_reference_type(
+                raw_typed_subj.expr_type,
+            ) then {
+                let inner_type = when raw_typed_subj.expr_type in {
+                    .WeakReferenceType(inner) then inner,
+                    .MutableWeakReferenceType(inner) then inner,
+                    _ then raw_typed_subj.expr_type,
+                };
+                let mutable opt_args = List[Type].new();
+                opt_args.push(inner_type);
+                let upgrade_type = Type.GenericEnum(
+                    self.context().std_type_def_id("Option") or else def_id_invalid(),
+                    opt_args,
+                );
+                make_typed_expr(
+                    TypedExprKind.IntrinsicCall(
+                        TypedIntrinsic.UpgradeRef(raw_typed_subj, upgrade_type),
+                    ),
+                    upgrade_type,
+                )
+            } else {
+                raw_typed_subj
+            };
+            if negated and self.pattern_contains_bindings(pattern) and not self.pattern_is_weak_binding(
+                pattern,
+            ) then {
+                self.push_diagnostic(
+                    "Variable bindings are not allowed in 'is not' expression",
+                    pattern_span(pattern),
+                );
+            };
+            if not negated then {
+                // Bind before lowering the pattern so the names resolve, the
+                // same order the arm pattern takes.
+                let _ = self.bind_pattern_vars(
+                    pattern,
+                    typed_subj.expr_type,
+                    scope,
+                );
+                self.ensure_pattern_bindings_present(
+                    pattern,
+                    typed_subj.expr_type,
+                    scope,
+                );
+            };
+            let typed_pattern = self.lower_typed_pattern(
+                pattern,
+                typed_subj.expr_type,
+                scope,
+            );
+            return make_typed_expr(
+                TypedExprKind.IsExpr(typed_subj, typed_pattern, negated),
+                Type.BoolType(),
+            );
+        };
+        let raw = self.check_expr_core_ref(
+            clause,
+            Option[Type].Some(Type.BoolType()),
+            scope,
+        );
+        if raw.expr_type is not .BoolType() then {
+            self.push_diagnostic_at_span(
+                "Type mismatch: expected Bool, got \(self.display_type_name(raw.expr_type))",
+                expr_span(guard),
+            );
+        };
+        return raw;
+    };
+
     module_private lower_if_condition_with_bindings(
         self,
         condition Expr,

@@ -858,21 +858,71 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.WhenExpr(typed_subj, arms), result_type);
     };
 
+    /// The loop's per-element match: `while true { when iter.next() in { ... } }`.
+    ///
+    /// Without a guard the match has two arms -- the binding arm and the
+    /// end-of-iteration arm that breaks. With a guard a third arm sits between
+    /// them: the binding arm carries the guard as a real `when` arm guard (so
+    /// on a pattern with several readings the guard is re-evaluated per
+    /// reading), and a refused guard falls through to the middle arm, which
+    /// matches the same wrapper and skips the element. The end arm stays last
+    /// so a `None` still breaks instead of looping forever.
     module_private lower_while_pattern_from_typed(
         self,
         typed_subj TypedExpr,
         pattern PatternNode,
         typed_body TypedExpr,
+        typed_guard Option[TypedExpr],
         scope Scope,
     ) TypedStatement = {
         let mutable arms = List[TypedWhenArm].new();
         arms.push(
             TypedWhenArm(
-                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), Option[TypedExpr].None(),
+                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), typed_guard,
                 typed_body,
                 typed_body.expr_type,
             ),
         );
+
+        if typed_guard is .Some(_) then {
+            // The skip arm: the wrapper matched but the guard refused every
+            // reading of the user's pattern. It mirrors the wrapper shape --
+            // `Some(_)` when `next()` is an Option/Result, a bare `_` when the
+            // iterable hands values out directly -- and never sees the
+            // end-of-iteration value, which the break arm below owns.
+            let skip_pattern_node = when pattern in {
+                .EnumCase(name, _, span) then {
+                    let mutable wrapped = List[PatternElement].new();
+                    wrapped.push(
+                        PatternElement(
+                            Option[String].None(),
+                            PatternNode.Wildcard(span),
+                        ),
+                    );
+                    PatternNode.EnumCase(name, wrapped, span)
+                },
+                _ then PatternNode.Wildcard(pattern_span(pattern)),
+            };
+            let empty_block = make_typed_expr(
+                TypedExprKind.Block(
+                    List[TypedStatement].new(),
+                    Option[TypedExpr].None(),
+                ),
+                Type.VoidType(),
+            );
+            arms.push(
+                TypedWhenArm(
+                    self.lower_typed_pattern(
+                        skip_pattern_node,
+                        typed_subj.expr_type,
+                        scope,
+                    ),
+                    Option[TypedExpr].None(),
+                    empty_block,
+                    empty_block.expr_type,
+                ),
+            );
+        };
 
         let mutable break_statements = List[TypedStatement].new();
         break_statements.push(TypedStatement.BreakStmt(unknown_span()));
@@ -1212,39 +1262,41 @@ given TypeChecker {
         return self.empty_typed_block(Type.Unknown());
     };
 
-    /// The loop body under the optional `for` guard.
-    ///
-    /// The guard is checked here -- the pattern's bindings are already in
-    /// scope -- and must be `Bool`, the same rule a `when` arm guard gets.
-    /// `if` itself does not ask, so this is the only place that does. A false
-    /// guard skips the element and moves on to the next iteration, which is
-    /// exactly the body under an `if`.
-    module_private check_for_body_with_guard(
+    /// The optional `for` guard, checked with the pattern's bindings already
+    /// in scope and required to be `Bool` -- the same rule a `when` arm guard
+    /// gets. `if` itself does not ask, so this is the only place that does.
+    /// Checked the way an if/while condition is: `is` conjuncts may bind, and
+    /// the names stay visible to the rest of the guard and to the loop body.
+    /// On the iterator path this becomes the arm guard of the loop's desugared
+    /// match, where a false guard falls through to the skip-element arm and,
+    /// on a pattern with several readings, is re-evaluated per reading.
+    module_private check_for_guard(
         self,
-        body Expr,
         guard Option[Expr],
         scope Scope,
-    ) TypedExpr = {
+    ) Option[TypedExpr] = {
         return when guard in {
-            .None() then self.check_statement_body_expr(body, scope),
-            .Some(g) then {
-                let raw_guard = self.check_expr_core_ref(
-                    g,
-                    Option[Type].Some(Type.BoolType()),
-                    scope,
-                );
-                if raw_guard.expr_type is not .BoolType() then {
-                    self.push_diagnostic_at_span(
-                        "Type mismatch: expected Bool, got \(self.display_type_name(raw_guard.expr_type))",
-                        expr_span(g),
-                    );
-                };
-                let inner = self.check_statement_body_expr(body, scope);
-                make_typed_expr(
-                    TypedExprKind.IfExpr(raw_guard, inner, Option[TypedExpr].None()),
-                    Type.VoidType(),
-                )
-            },
+            .None() then Option[TypedExpr].None(),
+            .Some(g) then Option[TypedExpr].Some(
+                self.check_guard_expression(g, scope),
+            ),
+        };
+    };
+
+    /// A range loop has no match to hang a guard on, so its guard stays an
+    /// `if` around the body: false skips the element and moves on, which is
+    /// exactly what the body under an `if` does.
+    module_private wrap_body_under_for_guard(
+        self,
+        typed_guard Option[TypedExpr],
+        typed_body TypedExpr,
+    ) TypedExpr = {
+        return when typed_guard in {
+            .None() then typed_body,
+            .Some(g) then make_typed_expr(
+                TypedExprKind.IfExpr(g, typed_body, Option[TypedExpr].None()),
+                Type.VoidType(),
+            ),
         };
     };
 
@@ -1483,9 +1535,15 @@ given TypeChecker {
 
         let prev_in_loop = self.storage.in_loop;
         self.storage.in_loop = true;
-        let typed_body = self.check_for_body_with_guard(body, guard, for_scope);
+        let typed_guard = self.check_for_guard(guard, for_scope);
+        let typed_body = self.check_statement_body_expr(body, for_scope);
         self.storage.in_loop = prev_in_loop;
-        inner_statements.push(TypedStatement.ExprStmt(typed_body, span));
+        inner_statements.push(
+            TypedStatement.ExprStmt(
+                self.wrap_body_under_for_guard(typed_guard, typed_body),
+                span,
+            ),
+        );
 
         let inner_block = make_typed_expr(
             TypedExprKind.Block(inner_statements, Option[TypedExpr].None()),
@@ -1585,11 +1643,17 @@ given TypeChecker {
         };
         let _ = self.bind_pattern_vars(pattern, iter_item_type, for_scope);
         // A loop cannot skip an element the pattern refuses, so the binding
-        // must be irrefutable. Judged on the LOWERED pattern: a tuple pattern
-        // only becomes total once the subject's arity is known.
+        // must cover every element value. Judged on the LOWERED pattern: a
+        // tuple pattern only becomes total once the subject's arity is known.
+        // The syntactic irrefutability shortcut keeps its old answers; the
+        // exhaustiveness checker is what knows a single-case enum destructure
+        // or a full `or` of cases is total.
         let probe = self.lower_typed_pattern(pattern, iter_item_type, for_scope);
         let mutable user_pattern = pattern;
-        if not typed_pattern_is_irrefutable(probe) then {
+        if not typed_pattern_is_irrefutable(probe) and not self.pattern_covers_full_space(
+            probe,
+            iter_item_type,
+        ) then {
             self.push_pattern_diagnostic(
                 pattern,
                 "For binding cannot fail; use 'when' to match",
@@ -1598,7 +1662,10 @@ given TypeChecker {
         };
         let prev_in_loop = self.storage.in_loop;
         self.storage.in_loop = true;
-        let typed_body = self.check_for_body_with_guard(body, guard, for_scope);
+        // The guard is checked first: its `is` bindings (and the pattern's,
+        // already in scope) must be visible to the body.
+        let typed_guard = self.check_for_guard(guard, for_scope);
+        let typed_body = self.check_statement_body_expr(body, for_scope);
         self.storage.in_loop = prev_in_loop;
 
         let iterator_init = if uses_iterator_method then {
@@ -1635,6 +1702,7 @@ given TypeChecker {
             next_call,
             loop_pattern,
             typed_body,
+            typed_guard,
             for_scope,
         );
 

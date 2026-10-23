@@ -1383,6 +1383,126 @@ extension TypeChecker {
     }
   }
 
+  /// Type-check a `where` guard the way an if/while condition is checked:
+  /// `is` conjuncts may bind, and the names stay visible to the rest of the
+  /// guard and to the arm/loop body. The result is a typed `and`-spine of
+  /// steps -- `isExpression` nodes and plain Bool exprs -- that MIR walks in
+  /// order. Only the and-spine is walked; `or` / `not` keep their ordinary
+  /// expression semantics, so an `is` buried in one of those is checked by the
+  /// generic path and rejected there if it binds.
+  func checkGuardExpression(_ guardExpr: ExpressionNode) throws -> TypedExpressionNode {
+    // Same rule as if/while: bindings under expression `or` / `not` are
+    // refused with the same two diagnostics.
+    try checkOrBranchesForBindings(guardExpr)
+    if !conditionContainsIsExpression(guardExpr) {
+      let rawGuard = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
+      if rawGuard.type != .bool {
+        throw SemanticError(
+          .typeMismatch(expected: "Bool", got: rawGuard.type.description),
+          span: guardExpr.span)
+      }
+      return rawGuard
+    }
+
+    let clauses = flattenAndChain(guardExpr)
+    var folded: TypedExpressionNode?
+    for clause in clauses {
+      let step = try checkGuardStep(clause, guardExpr: guardExpr)
+      if let acc = folded {
+        folded = .andExpression(left: acc, right: step, type: .bool)
+      } else {
+        folded = step
+      }
+    }
+    return folded ?? .booleanLiteral(value: false, type: .bool)
+  }
+
+  /// One conjunct of a guard's and-spine. `is` / `is not` become typed
+  /// pattern tests that also bind; everything else is an ordinary Bool check.
+  private func checkGuardStep(
+    _ clause: ExpressionNode,
+    guardExpr: ExpressionNode
+  ) throws -> TypedExpressionNode {
+    switch clause {
+    case .isExpression(let subject, let pattern, _):
+      return try checkGuardIsStep(subject: subject, pattern: pattern, negated: false)
+    case .isNotExpression(let subject, let pattern, _):
+      return try checkGuardIsStep(subject: subject, pattern: pattern, negated: true)
+    default:
+      let raw = autoDereferenceValueContext(try inferTypedExpression(clause))
+      if raw.type != .bool {
+        throw SemanticError(
+          .typeMismatch(expected: "Bool", got: raw.type.description),
+          span: guardExpr.span)
+      }
+      return raw
+    }
+  }
+
+  /// A guard's `is` step: the subject is checked, the pattern binds its names
+  /// into the guard's scope (visible to the rest of the guard and to the
+  /// body), and the step is a typed pattern test. `is not` never binds.
+  private func checkGuardIsStep(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    negated: Bool
+  ) throws -> TypedExpressionNode {
+    var typedSubject = try inferTypedExpression(subject)
+
+    // `?name` unpacks a weak handle: wrap the subject in the upgrade
+    // intrinsic so `Option[T]` gets instantiated and the pattern matches on
+    // the upgraded value.
+    if case .weakBinding(let bindName, _, let span) = pattern {
+      guard let strongType = weakReferenceInnerType(typedSubject.type) else {
+        throw SemanticError(.generic(
+          "Weak binding pattern '?\(bindName)' requires a weak reference subject"
+        ), span: span)
+      }
+      let upgradeType = genericEnumType(template: "Option", args: [strongType])
+      let upgradeCall = TypedExpressionNode.intrinsicCall(
+        .upgradeRef(val: typedSubject, resultType: upgradeType))
+      let symbol = makeLocalSymbol(name: bindName, type: strongType, kind: .variable(.Value))
+      let weakPattern = TypedPattern.weakBinding(symbol: symbol)
+      if negated {
+        // `is not ?name` is allowed: the binding is unused (the pattern only
+        // tests whether the object is dead).
+        return .isNotExpression(subject: upgradeCall, pattern: weakPattern, type: .bool)
+      }
+      if let name = context.getName(symbol.defId) {
+        try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
+      }
+      return .isExpression(subject: upgradeCall, pattern: weakPattern, type: .bool)
+    }
+
+    var subjectType = typedSubject.type
+    try rejectWeakPatternSubject(subjectType, pattern: pattern, span: pattern.span)
+    if !untypedPatternRequiresRawSubject(pattern),
+       let inner = dereferenceTargetType(of: subjectType) {
+      subjectType = inner
+    }
+
+    let (typedPattern, _) = try checkPattern(pattern, subjectType: subjectType)
+
+    if negated {
+      // is not always forbids variable bindings (negated match cannot safely bind)
+      if patternContainsBindings(typedPattern) {
+        throw SemanticError(
+          .generic("Variable bindings are not allowed in 'is not' expression"),
+          span: pattern.span)
+      }
+      return .isNotExpression(subject: typedSubject, pattern: typedPattern, type: .bool)
+    }
+
+    // Bind before the rest of the guard and the body are checked so the names
+    // resolve, the same order the arm pattern takes.
+    for symbol in extractPatternSymbols(from: typedPattern) {
+      if let name = context.getName(symbol.defId) {
+        try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
+      }
+    }
+    return .isExpression(subject: typedSubject, pattern: typedPattern, type: .bool)
+  }
+
   /// Lower an `if` condition that contains `isExpression` with bindings.
   /// Returns the lowered typed expression, or nil if no lowering is needed.
   func lowerIfConditionWithBindings(
@@ -1641,15 +1761,12 @@ extension TypeChecker {
             }
           }
           // Arm guard: bindings are in scope; a false guard falls through.
+          // Checked the way an if/while condition is: `is` conjuncts may bind,
+          // and the names stay visible to the rest of the guard and to the
+          // arm body.
           var typedGuard: TypedExpressionNode? = nil
           if let guardExpr = c.guardExpr {
-            let typedGuardExpr = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
-            if typedGuardExpr.type != .bool {
-              throw SemanticError(
-                .typeMismatch(expected: "Bool", got: typedGuardExpr.type.description),
-                span: guardExpr.span)
-            }
-            typedGuard = typedGuardExpr
+            typedGuard = try checkGuardExpression(guardExpr)
           }
           // Use the current target's evolving type, if any, for subsequent arms.
           var branchExpectedType = expectedType
@@ -2216,7 +2333,7 @@ extension TypeChecker {
       // In non-condition context, variable bindings are not allowed
       if patternContainsBindings(typedPattern) {
         throw SemanticError(
-          .generic("Variable bindings in 'is' expression are only allowed in if/while conditions"),
+          .generic("Variable bindings in 'is' expression are only allowed in if/while conditions and where guards"),
           span: currentSpan
         )
       }
@@ -8476,8 +8593,11 @@ extension TypeChecker {
         let savedInLoop = inLoop
         inLoop = true
         defer { inLoop = savedInLoop }
-        return try underForGuard(
-          inferCheckedStatementBodyExpression(body), guardExpr: guardExpr)
+        // The guard is checked first: its `is` bindings (and the pattern's,
+        // already in scope) must be visible to the body.
+        let typedGuard = try checkForGuard(guardExpr)
+        let checkedBody = try inferCheckedStatementBodyExpression(body)
+        return underForGuard(checkedBody, typedGuard: typedGuard)
       }
       bodyStatements.append(.expression(typedBody))
 
@@ -8535,15 +8655,17 @@ extension TypeChecker {
   }
 
   /// The `for` binding is a full match pattern, and a loop cannot skip an
-  /// element the pattern refuses: it must be irrefutable. Judged on the
-  /// lowered pattern -- a tuple pattern only becomes total once the subject's
-  /// arity is known.
+  /// element the pattern refuses: it must cover every element value. Judged
+  /// on the lowered pattern -- a tuple pattern only becomes total once the
+  /// subject's arity is known. The syntactic irrefutability shortcut keeps its
+  /// old answers; the exhaustiveness checker is what knows a single-case enum
+  /// destructure or a full `or` of cases is total.
   private func typeCheckForBinding(
     _ pattern: PatternNode,
     elementType: Type
   ) throws -> TypedPattern {
     let (typed, _) = try checkPattern(pattern, subjectType: elementType)
-    guard typed.isIrrefutable else {
+    if !typed.isIrrefutable && !patternCoversFullSpace(typed, subjectType: elementType, span: pattern.span) {
       throw SemanticError(
         .generic("For binding cannot fail; use 'when' to match"),
         span: pattern.span
@@ -8552,24 +8674,45 @@ extension TypeChecker {
     return typed
   }
 
-  /// The loop body under the optional `for` guard.
-  ///
-  /// The guard is checked here -- the pattern's bindings are already in scope
-  /// -- and must be `Bool`, the same rule a `when` arm guard gets. A false
-  /// guard skips the element and moves on to the next iteration, which is
-  /// exactly the body under an `if`.
+  /// Whether one lowered pattern covers every value of its subject type --
+  /// the `for`-binding question, judged by the exhaustiveness checker's own
+  /// coverage machinery rather than the syntactic irrefutability shortcut.
+  private func patternCoversFullSpace(
+    _ pattern: TypedPattern,
+    subjectType: Type,
+    span: SourceSpan
+  ) -> Bool {
+    let checker = ExhaustivenessChecker(
+      subjectType: subjectType,
+      patterns: [pattern],
+      span: span,
+      resolvedEnumCases: resolveEnumCasesForExhaustiveness(subjectType),
+      context: context
+    )
+    return checker.coversFullSpace()
+  }
+
+  /// The optional `for` guard, checked with the pattern's bindings already in
+  /// scope and required to be `Bool` -- the same rule a `when` arm guard gets.
+  /// On the iterator path this becomes the arm guard of the loop's desugared
+  /// match, where a false guard falls through to the skip-element arm and,
+  /// on a pattern with several readings, is re-evaluated per reading.
+  private func checkForGuard(_ guardExpr: ExpressionNode?) throws -> TypedExpressionNode? {
+    guard let guardExpr else { return nil }
+    return try checkGuardExpression(guardExpr)
+  }
+
+  /// A range loop has no match to hang a guard on, so its guard stays an
+  /// `if` around the body: false skips the element and moves on, which is
+  /// exactly what the body under an `if` does.
+  /// A range loop has no match to hang a guard on, so its guard stays an
+  /// `if` around the body: false skips the element and moves on, which is
+  /// exactly what the body under an `if` does.
   private func underForGuard(
     _ typedBody: TypedExpressionNode,
-    guardExpr: ExpressionNode?
-  ) throws -> TypedExpressionNode {
-    guard let guardExpr else { return typedBody }
-    let typedGuard = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
-    if typedGuard.type != .bool {
-      throw SemanticError(
-        .typeMismatch(expected: "Bool", got: typedGuard.type.description),
-        span: guardExpr.span
-      )
-    }
+    typedGuard: TypedExpressionNode?
+  ) -> TypedExpressionNode {
+    guard let typedGuard else { return typedBody }
     return .ifExpression(
       condition: typedGuard, thenBranch: typedBody, elseBranch: nil, type: .void)
   }
@@ -8710,6 +8853,15 @@ extension TypeChecker {
   }
 
   /// Builds the match expression for the for loop body.
+  /// The loop's per-element match: `while true { when iter.next() in { ... } }`.
+  ///
+  /// Without a guard the match has two arms -- the binding arm and the
+  /// end-of-iteration arm that breaks. With a guard a third arm sits between
+  /// them: the binding arm carries the guard as a real `when` arm guard (so
+  /// on a pattern with several readings the guard is re-evaluated per
+  /// reading), and a refused guard falls through to the middle arm, which
+  /// matches the same wrapper and skips the element. The end arm stays last
+  /// so a `None` still breaks instead of looping forever.
   func buildForLoopWhenExpression(
     nextCall: TypedExpressionNode,
     pattern: TypedPattern,
@@ -8719,8 +8871,10 @@ extension TypeChecker {
     // Build Some case pattern with the user's pattern
     let somePattern = buildSomePattern(userPattern: pattern)
 
-    // Type check the body in a new scope with pattern bindings
-    let typedBody = try withNewScope {
+    // Type check the guard and body in a new scope with pattern bindings. The
+    // guard is checked first: its `is` bindings (and the pattern's, already in
+    // scope) must be visible to the body.
+    let (typedGuard, typedBody): (TypedExpressionNode?, TypedExpressionNode) = try withNewScope {
       // Bind pattern variables using the typed pattern symbols
       for symbol in extractPatternSymbols(from: somePattern) {
         if let name = context.getName(symbol.defId) {
@@ -8728,14 +8882,32 @@ extension TypeChecker {
         }
       }
 
-      // Type check body
+      // Type check guard, then body
       let savedInLoop = inLoop
       inLoop = true
       defer { inLoop = savedInLoop }
-      return try underForGuard(
-        inferCheckedStatementBodyExpression(body), guardExpr: guardExpr)
+      let checkedGuard = try checkForGuard(guardExpr)
+      let checkedBody = try inferCheckedStatementBodyExpression(body)
+      return (checkedGuard, checkedBody)
     }
-    
+
+    // Build match cases
+    var cases: [TypedMatchCase] = []
+    cases.append(TypedMatchCase(pattern: somePattern, guardExpr: typedGuard, body: typedBody))
+
+    if typedGuard != nil {
+      // The skip arm: the wrapper matched but the guard refused every reading
+      // of the user's pattern. It mirrors the wrapper shape and never sees
+      // the end-of-iteration value, which the break arm below owns.
+      let emptyExpr = TypedExpressionNode.blockExpression(
+        statements: [],
+        tailExpression: nil,
+        type: .void
+      )
+      cases.append(
+        TypedMatchCase(pattern: buildSomePattern(userPattern: .wildcard), guardExpr: nil, body: emptyExpr))
+    }
+
     // Build None case with break
     let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
     let breakExpr = TypedExpressionNode.blockExpression(
@@ -8743,14 +8915,11 @@ extension TypeChecker {
       tailExpression: nil,
       type: .void
     )
-    
-    // Build match cases
-    let someCase = TypedMatchCase(pattern: somePattern, guardExpr: nil, body: typedBody)
-    let noneCase = TypedMatchCase(pattern: nonePattern, guardExpr: nil, body: breakExpr)
-    
+    cases.append(TypedMatchCase(pattern: nonePattern, guardExpr: nil, body: breakExpr))
+
     return .whenExpression(
       subject: nextCall,
-      cases: [someCase, noneCase],
+      cases: cases,
       type: .void
     )
   }

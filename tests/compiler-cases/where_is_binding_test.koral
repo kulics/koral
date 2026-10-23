@@ -1,0 +1,79 @@
+// EXPECT: where_is_binding_ok
+// Design guard: a `where` guard's `is` conjuncts bind exactly like an
+// if/while condition's -- the names are visible to the rest of the guard and
+// to the arm/loop body. `x is p and <use the names>` is one and-spine: each
+// step sees what earlier steps bound, and a failed step falls through
+// (next arm / skip element) without running the body.
+
+using "std";
+
+type MyOption {
+    None(),
+    Some(value Int),
+};
+
+let wrap(v Int) MyOption = MyOption.Some(v);
+
+let pick(o MyOption) Int = when o in {
+    .Some(v) where o is .Some(w) and w > 0 then w,
+    _ then 0,
+};
+
+let fallback(o MyOption) Int = when o in {
+    .Some(v) where o is .Some(w) and w > 100 then w,
+    .Some(v) then v,
+    _ then 0,
+};
+
+let loop_sum(xs List[MyOption]) Int = {
+    let mutable sum = 0;
+    for o in xs where o is .Some(w) and w > 1 then {
+        sum += w;
+    };
+    return sum;
+};
+
+let main() Int = {
+    if pick(MyOption.Some(5)) != 5 then {
+        eprintln("FAIL: guard binding visible in guard tail and body");
+        return 1;
+    };
+    if fallback(MyOption.Some(5)) != 5 then {
+        eprintln("FAIL: refused guard falls to the next arm");
+        return 1;
+    };
+    let mutable xs = List[MyOption].new();
+    xs.push(MyOption.Some(3));
+    xs.push(MyOption.Some(0));
+    xs.push(MyOption.None());
+    if loop_sum(xs) != 3 then {
+        eprintln("FAIL: for-guard binding skips the element on refusal");
+        return 1;
+    };
+    // A range loop guards with the same rule on its own path: the binding is
+    // visible in the body, and a refused guard skips the index.
+    let mutable rsum = 0;
+    for i in 0..<5 where wrap(i) is .Some(w) and w > 1 then {
+        rsum += w;
+    };
+    if rsum != 9 then {
+        eprintln("FAIL: range-guard binding visible in body");
+        return 1;
+    };
+    // `when` as a statement walks the same guard rule on its own path.
+    let mutable seen = 0;
+    when MyOption.Some(7) in {
+        .Some(v) where MyOption.Some(7) is .Some(w) and w > 1 then {
+            seen = w;
+        },
+        _ then {
+            seen = 0 - 1;
+        },
+    };
+    if seen != 7 then {
+        eprintln("FAIL: statement-when guard binding");
+        return 1;
+    };
+    println("where_is_binding_ok");
+    return 0;
+};

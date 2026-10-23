@@ -1364,12 +1364,16 @@ private final class MIRFunctionBuilder {
     negated: Bool,
     type: Type
   ) -> MIRExprResult? {
-    // `?name` / `is not ?name`: test liveness of the upgrade result.
+    // `?name` / `is not ?name`: test liveness of the upgrade result. A
+    // positive test also binds the strong reference from the Some payload.
     if case .weakBinding = pattern {
-      guard let operand = lowerWeakBindingLivenessTest(subject: subject, negated: negated) else {
-        return nil
-      }
-      return MIRExprResult(type: type, category: .rvalue, operand: operand, place: nil)
+      return lowerWeakBindingPatternTest(subject: subject, pattern: pattern, negated: negated, type: type)
+    }
+    // A positive test whose pattern binds establishes the bindings only on the
+    // matching edge: the names are live in the rest of the guard and in the
+    // body, and a failed test must not write payload values into their slots.
+    if !negated, pattern.introducesBinding {
+      return lowerBindingPatternTest(subject: subject, pattern: pattern, type: type)
     }
     if !context.containsGenericParameter(subject.type),
        canLowerSimplePattern(pattern, subjectType: subject.type),
@@ -1379,38 +1383,131 @@ private final class MIRFunctionBuilder {
     fatalError("Unsupported pattern test reached MIR lowering")
   }
 
-  /// Liveness test for `?name`: the subject is the upgrade intrinsic
-  /// (`Option[T]`). Returns an operand for "alive" (or "dead" when negated).
-  private func lowerWeakBindingLivenessTest(
+  /// The Bool result of a binding `is` test, with the pattern's slots filled
+  /// on the matching edge. One slot per name is claimed before the test and
+  /// filled on success: the names are live in the rest of the guard and in the
+  /// body -- and must land in the SAME slots however many readings a guarded
+  /// arm re-runs the guard on -- and a failed test must not write payload
+  /// values into them (reading a non-matching variant's payload is garbage).
+  /// The subject stays in an ordinary temporary (no scope teardown) so the
+  /// fill's source places stay live through the guard's tail and the body.
+  private func lowerBindingPatternTest(
     subject: TypedExpressionNode,
-    negated: Bool
-  ) -> MIROperand? {
-    guard let prepared = preparePatternSubject(subject, nameHint: "weak_liveness") else {
-      return nil
+    pattern: TypedPattern,
+    type: Type
+  ) -> MIRExprResult? {
+    let subjectPlace: MIRPlace
+    if let place = lowerPlace(subject) {
+      subjectPlace = place
+    } else {
+      let subjectValue = lowerValue(subject)
+      guard !currentBlockIsTerminated else { return nil }
+      let subjectLocal = makeTemporary(type: subject.type, nameHint: "is_test_subject")
+      append(.declare(subjectLocal.id))
+      append(.assign(.local(subjectLocal.id), subjectValue))
+      subjectPlace = .local(subjectLocal.id)
     }
-    let optionType = subject.type
+    declarePatternBindingLocals(for: pattern)
+    guard let condition = lowerSimplePatternCondition(
+      subjectValue: .placeRead(subjectPlace, ownership: .borrow),
+      subjectPlace: subjectPlace,
+      subjectType: subject.type,
+      pattern: pattern,
+      negated: false
+    ) else {
+      return MIRExprResult(type: type, category: .rvalue, operand: .constant(.boolean(false)), place: nil)
+    }
+    let resultLocal = makeTemporary(type: .bool, nameHint: "is_test")
+    append(.declare(resultLocal.id))
+    let conditionEnd = currentBlockID
+    let bindBlock = makeBlock()
+    let failBlock = makeBlock()
+    let joinBlock = makeBlock()
+    setCurrentBlock(conditionEnd)
+    terminate(.branch(condition: condition, thenBlock: bindBlock, elseBlock: failBlock))
+
+    setCurrentBlock(bindBlock)
+    assignPatternBindingLocals(pattern: pattern, subjectPlace: subjectPlace, subjectType: subject.type)
+    append(.assign(.local(resultLocal.id), .operand(.constant(.boolean(true)))))
+    terminate(.goto(joinBlock))
+
+    setCurrentBlock(failBlock)
+    append(.assign(.local(resultLocal.id), .operand(.constant(.boolean(false)))))
+    terminate(.goto(joinBlock))
+
+    setCurrentBlock(joinBlock)
+    return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
+  }
+
+  /// Liveness test plus (on the alive edge) the strong-reference binding for
+  /// `?name`. `is not ?name` keeps the negated liveness test and no binding:
+  /// the name there is only a probe for death. The subject is the upgrade
+  /// intrinsic (`Option[T]`), so liveness is the Some tag; the fill extracts
+  /// the Some payload into the name's claimed slot.
+  private func lowerWeakBindingPatternTest(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    negated: Bool,
+    type: Type
+  ) -> MIRExprResult? {
+    let subjectPlace: MIRPlace
+    if let place = lowerPlace(subject) {
+      subjectPlace = place
+    } else {
+      let subjectValue = lowerValue(subject)
+      guard !currentBlockIsTerminated else { return nil }
+      let subjectLocal = makeTemporary(type: subject.type, nameHint: "weak_test_subject")
+      append(.declare(subjectLocal.id))
+      append(.assign(.local(subjectLocal.id), subjectValue))
+      subjectPlace = .local(subjectLocal.id)
+    }
     let tagOperand = materialize(
       .enumTag(MIREnumTag(
-        subject: .placeRead(prepared.place, ownership: .borrow),
-        enumType: optionType)),
+        subject: .placeRead(subjectPlace, ownership: .borrow),
+        enumType: subject.type)),
       type: .int)
     // Niche layout: 0 = None, 1 = Some. Alive = tag != 0.
-    let isAlive = MIRValue.binary(MIRBinaryOperation(
-      left: tagOperand,
-      operatorKind: .comparison(.notEqual),
-      right: .constant(.integer("0", .int)),
-      type: .bool))
-    let aliveOperand = materialize(isAlive, type: .bool)
+    let aliveOperand = materialize(
+      .binary(MIRBinaryOperation(
+        left: tagOperand,
+        operatorKind: .comparison(.notEqual),
+        right: .constant(.integer("0", .int)),
+        type: .bool)),
+      type: .bool)
     if negated {
-      return materialize(
-        .binary(MIRBinaryOperation(
-          left: aliveOperand,
-          operatorKind: .comparison(.equal),
-          right: .constant(.boolean(false)),
-          type: .bool)),
-        type: .bool)
+      return MIRExprResult(
+        type: type,
+        category: .rvalue,
+        operand: materialize(
+          .binary(MIRBinaryOperation(
+            left: aliveOperand,
+            operatorKind: .comparison(.equal),
+            right: .constant(.boolean(false)),
+            type: .bool)),
+          type: .bool),
+        place: nil)
     }
-    return aliveOperand
+    declarePatternBindingLocals(for: pattern)
+    let resultLocal = makeTemporary(type: .bool, nameHint: "is_test")
+    append(.declare(resultLocal.id))
+    let conditionEnd = currentBlockID
+    let bindBlock = makeBlock()
+    let failBlock = makeBlock()
+    let joinBlock = makeBlock()
+    setCurrentBlock(conditionEnd)
+    terminate(.branch(condition: aliveOperand, thenBlock: bindBlock, elseBlock: failBlock))
+
+    setCurrentBlock(bindBlock)
+    assignPatternBindingLocals(pattern: pattern, subjectPlace: subjectPlace, subjectType: subject.type)
+    append(.assign(.local(resultLocal.id), .operand(.constant(.boolean(true)))))
+    terminate(.goto(joinBlock))
+
+    setCurrentBlock(failBlock)
+    append(.assign(.local(resultLocal.id), .operand(.constant(.boolean(false)))))
+    terminate(.goto(joinBlock))
+
+    setCurrentBlock(joinBlock)
+    return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
   }
 
   private func lowerSimplePatternTest(
@@ -3247,6 +3344,25 @@ private final class MIRFunctionBuilder {
       let nextBlock = nextBlocks[index]
 
       setCurrentBlock(checkBlock)
+      // An arm whose pattern offers several readings is matched as a
+      // backtracking chain (the guard re-runs per reading); an or-free
+      // pattern keeps the single-test path, which binds by alias.
+      let alternatives = matchCase.pattern.orAlternatives
+      if alternatives.count > 1 {
+        lowerWhenArmAlternativeChain(
+          arm: matchCase,
+          alternatives: alternatives,
+          subjectPlace: subjectPlace,
+          subjectType: subject.type,
+          resultLocal: resultLocal,
+          bodyBlock: caseBlock,
+          nextBlock: nextBlock,
+          joinBlock: joinBlock
+        )
+        setCurrentBlock(nextBlock)
+        continue
+      }
+
       let subjectRead = MIRValue.placeRead(subjectPlace, ownership: .borrow)
       guard let condition = lowerSimplePatternCondition(
         subjectValue: subjectRead,
@@ -3297,6 +3413,87 @@ private final class MIRFunctionBuilder {
       return MIRExprResult(type: type, category: .rvalue, operand: type == .void ? .constant(.void) : nil, place: nil)
     }
     return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
+  }
+
+  /// One arm of a branch-chain `when` whose pattern offers several readings.
+  ///
+  /// The readings run in backtracking order: each is tested, its bindings fill
+  /// the shared slots, and the guard is re-evaluated on THOSE bindings. The
+  /// next reading is tried when the test fails OR the guard refuses -- never
+  /// the left-biased "guard runs once on the first matching reading". All
+  /// readings share one body block, so the arm body lowers exactly once.
+  private func lowerWhenArmAlternativeChain(
+    arm: TypedMatchCase,
+    alternatives: [TypedPattern],
+    subjectPlace: MIRPlace,
+    subjectType: Type,
+    resultLocal: MIRLocal?,
+    bodyBlock: MIRBlockID,
+    nextBlock: MIRBlockID,
+    joinBlock: MIRBlockID
+  ) {
+    // One slot per name, filled from each reading's own layout. Claimed
+    // before the first test so every path through the chain sees the same
+    // places; a reading that matches overwrites the slots with its values.
+    let entryBlock = currentBlockID
+    let savedPatternPlaces = patternPlaceByDefId
+    declarePatternBindingLocals(for: arm.pattern)
+
+    // The arm gives up here -- every reading either failed to match or was
+    // refused by the guard -- and leaves like a single-test arm whose guard
+    // said false: next arm's check.
+    let armFailBlock = makeBlock()
+    setCurrentBlock(armFailBlock)
+    terminate(.goto(nextBlock))
+
+    var testBlock = entryBlock
+    for (altIndex, alternative) in alternatives.enumerated() {
+      setCurrentBlock(testBlock)
+      let isLast = altIndex + 1 == alternatives.count
+      let subjectRead = MIRValue.placeRead(subjectPlace, ownership: .borrow)
+      let condition = lowerSimplePatternCondition(
+        subjectValue: subjectRead,
+        subjectPlace: subjectPlace,
+        subjectType: subjectType,
+        pattern: alternative,
+        negated: false
+      )
+      let conditionEnd = currentBlockID
+      // A reading that does not match hands over to the next reading's test;
+      // the last one hands over to the arm's give-up block. `makeBlock` moves
+      // the cursor, so come back to the condition's block before terminating.
+      let failBlock = isLast ? armFailBlock : makeBlock()
+      let fillBlock = makeBlock()
+      setCurrentBlock(conditionEnd)
+      guard let condition else {
+        terminate(.goto(failBlock))
+        testBlock = failBlock
+        continue
+      }
+      terminate(.branch(condition: condition, thenBlock: fillBlock, elseBlock: failBlock))
+
+      setCurrentBlock(fillBlock)
+      assignPatternBindingLocals(pattern: alternative, subjectPlace: subjectPlace, subjectType: subjectType)
+      // The guard runs on THIS reading's bindings and may refuse them: a
+      // false guard tries the next reading, same as a failed match.
+      if let guardExpr = arm.guardExpr {
+        let guardOperand = materialize(lowerValue(guardExpr), type: .bool)
+        let guardEnd = currentBlockID
+        let realBodyBlock = makeBlock()
+        setCurrentBlock(guardEnd)
+        terminate(.branch(condition: guardOperand, thenBlock: realBodyBlock, elseBlock: failBlock))
+        setCurrentBlock(realBodyBlock)
+      }
+      terminate(.goto(bodyBlock))
+      testBlock = failBlock
+    }
+
+    setCurrentBlock(bodyBlock)
+    lowerBranchBody(arm.body, resultLocal: resultLocal)
+    patternPlaceByDefId = savedPatternPlaces
+    if !currentBlockIsTerminated {
+      terminate(.goto(joinBlock))
+    }
   }
 
   /// Lower a when expression with simple enum/literal patterns to SwitchValue.

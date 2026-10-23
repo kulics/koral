@@ -220,3 +220,141 @@ public let typed_pattern_is_conditionless_payload(pattern TypedPattern) Bool = {
         _ then false,
     };
 };
+
+/// Whether `pattern` contains an `or` that offers more than one reading.
+///
+/// `not` is not a choice point -- a negation has no bindings to disagree on --
+/// so nothing under it counts.
+public let typed_pattern_contains_or(pattern TypedPattern) Bool = {
+    return when pattern in {
+        .OrPattern(_, _) then true,
+        .AndPattern(left, right) then typed_pattern_contains_or(left) or typed_pattern_contains_or(
+            right,
+        ),
+        .EnumCase(_, _, elements) then {
+            for element in elements then {
+                if typed_pattern_contains_or(element.pattern) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_contains_or(element.pattern) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .ListPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_contains_or(element) then {
+                    return true;
+                };
+            };
+            false
+        },
+        _ then false,
+    };
+};
+
+/// The or-free readings of `pattern`, in backtracking order.
+///
+/// Every `or` is a choice point and one alternative fixes each choice to one
+/// side. Nested choices multiply (cartesian product, the leftmost choice
+/// varying slowest), so `Point(a or b, c or d)` reads as the sequence
+/// `(a, c) (a, d) (b, c) (b, d)` -- an arm with a guard tries the leftmost
+/// reading first and falls through to the next reading when the guard
+/// refuses. A pattern with no `or` returns itself: the common case never
+/// rebuilds.
+public let typed_pattern_or_alternatives(pattern TypedPattern) List[TypedPattern] = {
+    if not typed_pattern_contains_or(pattern) then {
+        let mutable single = List[TypedPattern].new();
+        single.push(pattern);
+        return single;
+    };
+    let mutable out = List[TypedPattern].new();
+    typed_pattern_collect_or_alternatives(pattern, out);
+    return out;
+};
+
+file_private let typed_pattern_collect_or_alternatives(
+    pattern TypedPattern,
+    out List[TypedPattern],
+) Void = {
+    when pattern in {
+        .OrPattern(left, right) then {
+            typed_pattern_collect_or_alternatives(left, out);
+            typed_pattern_collect_or_alternatives(right, out);
+        },
+        .AndPattern(left, right) then {
+            for left_alt in typed_pattern_or_alternatives(left) then {
+                for right_alt in typed_pattern_or_alternatives(right) then {
+                    out.push(.AndPattern(left_alt, right_alt));
+                };
+            };
+        },
+        .EnumCase(case_name, tag_index, elements) then {
+            for combo in typed_pattern_element_combinations(elements) then {
+                out.push(.EnumCase(case_name, tag_index, combo));
+            };
+        },
+        .StructPattern(type_name, elements) then {
+            for combo in typed_pattern_element_combinations(elements) then {
+                out.push(.StructPattern(type_name, combo));
+            };
+        },
+        .ListPattern(ops, elements) then {
+            for combo in typed_pattern_list_combinations(elements) then {
+                out.push(.ListPattern(ops, combo));
+            };
+        },
+        _ then {
+            out.push(pattern);
+        },
+    };
+};
+
+/// Every reading of a labeled element list: the first element's choices vary
+/// slowest, so alternatives come out in source order.
+file_private let typed_pattern_element_combinations(
+    elements List[TypedPatternElement],
+) List[List[TypedPatternElement]] = {
+    let mutable combos = List[List[TypedPatternElement]].new();
+    combos.push(List[TypedPatternElement].new());
+    for element in elements then {
+        let alts = typed_pattern_or_alternatives(element.pattern);
+        let mutable next = List[List[TypedPatternElement]].new();
+        for combo in combos then {
+            for alt in alts then {
+                let mutable extended = combo.clone();
+                extended.push(TypedPatternElement(element.label, alt));
+                next.push(extended);
+            };
+        };
+        combos = next;
+    };
+    return combos;
+};
+
+/// The same product for a list pattern's unlabeled slots.
+file_private let typed_pattern_list_combinations(
+    elements List[TypedPattern],
+) List[List[TypedPattern]] = {
+    let mutable combos = List[List[TypedPattern]].new();
+    combos.push(List[TypedPattern].new());
+    for element in elements then {
+        let alts = typed_pattern_or_alternatives(element);
+        let mutable next = List[List[TypedPattern]].new();
+        for combo in combos then {
+            for alt in alts then {
+                let mutable extended = combo.clone();
+                extended.push(alt);
+                next.push(extended);
+            };
+        };
+        combos = next;
+    };
+    return combos;
+};

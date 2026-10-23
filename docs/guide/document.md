@@ -1087,7 +1087,7 @@ while i < 10 then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator is bound and the body following `then` runs. The loop binding position takes the **full match pattern** grammar — exactly what a `when` arm takes — but it must be **irrefutable**: a loop cannot skip an element the pattern refuses, so a refutable pattern is rejected at compile time with `For binding cannot fail; use 'when' to match`. `for` is an expression that produces `Void`.
+In each iteration, the next value produced by the iterator is bound and the body following `then` runs. The loop binding position takes the **full match pattern** grammar — exactly what a `when` arm takes — but it must **cover every element value**: a loop cannot skip an element the pattern refuses, so a pattern that leaves any value unmatched is rejected at compile time with `For binding cannot fail; use 'when' to match`. Coverage is judged by the exhaustiveness checker, not by shape alone: `.Only(v)` on a one-case enum and `.A(x) or .B(x)` on a two-case enum are accepted even though each side of the `or` alone, or the enum destructure on a multi-case type, is refused. `for` is an expression that produces `Void`.
 
 ```koral
 let nums List[Int] = [10, 20, 30];
@@ -1852,10 +1852,14 @@ let result = when x in {
 An arm may carry a guard: `pat where cond then body`. The pattern's bindings are
 visible in `cond`, the guard is evaluated before the branch body, and a false
 guard falls through to the next arm. The guard is part of the arm, never of a
-sub-pattern -- `a or b where c` reads `(a or b) where c`; give the branches
-separate arms for separate conditions. A guard must be `Bool`. `for` uses the
-same keyword in the same slot (see [for Loop](#for-loop)); the retired `if`
-spelling is rejected with a message naming `where`.
+sub-pattern -- `a or b where c` reads `(a or b) where c` -- but its evaluation
+is **backtracking**: when the arm pattern offers several readings through
+`or`, each reading binds its own values and the guard is re-evaluated on those
+bindings. The leftmost reading whose guard accepts wins; a refused guard falls
+through to the next reading of the same arm, and only when every reading is
+refused does the arm fail and the next arm get its turn. A guard must be `Bool`.
+`for` uses the same keyword in the same slot (see [for Loop](#for-loop)); the
+retired `if` spelling is rejected with a message naming `where`.
 
 ```koral
 let kind = when v in {
@@ -1869,6 +1873,12 @@ let kind = when v in {
 A guarded arm covers nothing for exhaustiveness (see [Exhaustiveness
 Checking](#exhaustiveness-checking)): the `when` above is complete because of
 the unguarded `.Some(n)` and `.None()` arms, not because of the guarded ones.
+
+The guard's `is` conjuncts bind, exactly like an `if`/`while` condition's (see
+[`is` Expressions](#is-expressions)): `where o is .Some(w) and w > 0` binds `w`
+from the first step and the rest of the guard reads it, and the names stay
+visible in the branch body. The same restrictions apply -- bindings under
+expression `or`/`not` and in `is not` are rejected.
 
 A pattern binding is scoped to its own branch. Inside the branch it names the
 matched payload; outside the `when` it does not exist, and an outer binding of

@@ -233,15 +233,12 @@ extension TypeChecker {
             }
           }
           // Arm guard: bindings are in scope; a false guard falls through.
+          // Checked the way an if/while condition is: `is` conjuncts may bind,
+          // and the names stay visible to the rest of the guard and to the
+          // arm body.
           var guardResult: TypedExpressionNode? = nil
           if let guardExpr = c.guardExpr {
-            let typedGuardExpr = autoDereferenceValueContext(try inferTypedExpression(guardExpr))
-            if typedGuardExpr.type != .bool {
-              throw SemanticError(
-                .typeMismatch(expected: "Bool", got: typedGuardExpr.type.description),
-                span: guardExpr.span)
-            }
-            guardResult = typedGuardExpr
+            guardResult = try checkGuardExpression(guardExpr)
           }
           return (guardResult, try inferStatementBodyExpression(c.body))
         }

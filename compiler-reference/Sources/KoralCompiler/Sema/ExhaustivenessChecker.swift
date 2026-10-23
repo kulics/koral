@@ -32,9 +32,29 @@ public struct ExhaustivenessChecker {
     public func check() throws {
         // First check for unreachable patterns
         try checkUnreachablePatterns()
-        
+
         // Then check for exhaustiveness
         try checkExhaustiveness()
+    }
+
+    /// Whether `patterns` cover every value of the subject type.
+    ///
+    /// The `for`-binding question, asked as coverage only: no unreachable
+    /// scan, no message. A finite subject space must come back empty after
+    /// subtracting the patterns; anything the space cannot describe falls
+    /// back to the catchall question. Callers keep their own wording.
+    public func coversFullSpace() -> Bool {
+        if subjectType.isIntegerType {
+            return patternsCoverIntegerDomain()
+        }
+        if let space = initialFinitePatternSpace() {
+            var remaining = space
+            for pattern in patterns {
+                remaining = remaining.subtract(pattern, type: subjectType, context: context)
+            }
+            return remaining.isEmpty
+        }
+        return patterns.contains { isCatchallPattern($0) }
     }
 }
 
@@ -91,6 +111,11 @@ extension ExhaustivenessChecker {
     private func coverageIsApproximate(_ pattern: TypedPattern) -> Bool {
         switch pattern {
         case .weakBinding:
+            return true
+        case .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern:
+            // `subtract` deliberately claims nothing for these (one contiguous
+            // range cannot hold "everything except a hole"), so an unchanged
+            // space says nothing about the pattern being covered already.
             return true
         case .listPattern(let elements, _):
             return !elements.allSatisfy { $0.isIrrefutable }

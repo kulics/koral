@@ -122,6 +122,16 @@ given ExhaustivenessChecker {
         // 先检查不可达模式
         let _ = self.check_unreachable_patterns() or return;
 
+        // 整数主体走区间并/交模型：单区间扣减在内点处会丢掉一侧的覆盖信息，
+        // 从而把非穷尽的匹配错判为穷尽。与参考编译器同一套区间语义。
+        if self.subject_is_integer() then {
+            if self.patterns_cover_integer_domain() then {
+                return Result[Void].Ok({});
+            };
+            let message = self.missing_catchall_message(self.exhaustiveness_type_name());
+            return Result[Void].Error(message.to_string());
+        };
+
         when self.initial_finite_pattern_space() in {
             .Some(space) then {
                 let mutable remaining = space;
@@ -268,6 +278,230 @@ given ExhaustivenessChecker {
         return Result[Void].Ok({});
     };
 
+    /// Whether `patterns` cover every value of the subject type.
+    ///
+    /// The `for`-binding question, asked as coverage only: no unreachable
+    /// scan, no message. A finite subject space must come back empty after
+    /// subtracting the patterns; anything the space cannot describe falls
+    /// back to the catchall question. Callers keep their own wording.
+    public covers_full_space(self) Bool = {
+        if self.subject_is_integer() then {
+            return self.patterns_cover_integer_domain();
+        };
+        when self.initial_finite_pattern_space() in {
+            .Some(space) then {
+                let mutable remaining = space;
+                for p in self.patterns.iterator() then {
+                    remaining = self.subtract_pattern(remaining, p, self.subject_type);
+                };
+                self.pattern_space_is_empty(remaining)
+            },
+            .None() then {
+                let mutable found = false;
+                for p in self.patterns.iterator() then {
+                    if is_catchall(p) then {
+                        found = true;
+                    };
+                };
+                found
+            },
+        }
+    };
+
+    /// Whether the subject is one of the integer types.
+    file_private subject_is_integer(self) Bool = {
+        return when self.subject_type in {
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then true,
+            _ then false,
+        };
+    };
+
+    /// The value bounds of the subject, as a span. Unbounded sides stand for
+    /// "the whole half-line", mirroring the reference compiler exactly: it
+    /// too treats `Int` / `Int32` / `Int64` as unbounded and `UInt` / `UInt32`
+    /// / `UInt64` as merely non-negative.
+    file_private integer_type_bounds(self) PatternSpace = {
+        return when self.subject_type in {
+            .UInt8Type() then PatternSpace.IntRange(true, 0, true, 255),
+            .UInt16Type() then PatternSpace.IntRange(true, 0, true, 65535),
+            .UIntType() or .UInt32Type() or .UInt64Type() then PatternSpace.IntRange(
+                true,
+                0,
+                false,
+                0,
+            ),
+            .Int8Type() then PatternSpace.IntRange(true, -128, true, 127),
+            .Int16Type() then PatternSpace.IntRange(true, -32768, true, 32767),
+            _ then PatternSpace.IntRange(false, 0, false, 0),
+        };
+    };
+
+    /// Whether `patterns` cover every integer of the subject type.
+    ///
+    /// A single contiguous `IntRange` cannot represent the holes an interior
+    /// subtraction leaves behind, so integer coverage is judged by union and
+    /// intersection of spans instead of by `PatternSpace` subtraction. This
+    /// mirrors the reference compiler's interval model, so both agree on
+    /// shapes like `>= 65 and <= 90` (the intersection) and `5 then .., <= 4`
+    /// (a hole that keeps the match non-exhaustive).
+    file_private patterns_cover_integer_domain(self) Bool = {
+        let bounds = self.integer_type_bounds();
+        let mutable remaining = List[PatternSpace].new();
+        remaining.push(bounds);
+        for p in self.patterns.iterator() then {
+            if is_catchall(p) then {
+                return true;
+            };
+            for span in self.pattern_int_spans(p).iterator() then {
+                let clamped = self.span_intersect(span, bounds);
+                if not self.span_is_empty(clamped) then {
+                    let mutable next = List[PatternSpace].new();
+                    for r in remaining.iterator() then {
+                        for piece in self.span_subtract(r, clamped).iterator() then {
+                            next.push(piece);
+                        };
+                    };
+                    remaining = next;
+                };
+            };
+        };
+        return remaining.is_empty();
+    };
+
+    /// The integer spans a pattern covers. `or` concatenates, `and`
+    /// intersects: exactly the coverage semantics of the pattern itself.
+    file_private pattern_int_spans(self, pattern TypedPattern) List[PatternSpace] = {
+        return when pattern in {
+            .Wildcard() then {
+                let mutable spans = List[PatternSpace].new();
+                spans.push(PatternSpace.IntRange(false, 0, false, 0));
+                spans
+            },
+            .Variable(_) then {
+                let mutable spans = List[PatternSpace].new();
+                spans.push(PatternSpace.IntRange(false, 0, false, 0));
+                spans
+            },
+            .IntegerLiteral(value_str) then {
+                let value = parse_int_str(value_str);
+                let mutable spans = List[PatternSpace].new();
+                spans.push(PatternSpace.IntRange(true, value, true, value));
+                spans
+            },
+            .NegativeIntegerLiteral(value_str) then {
+                let value = 0 - (parse_int_str(value_str));
+                let mutable spans = List[PatternSpace].new();
+                spans.push(PatternSpace.IntRange(true, value, true, value));
+                spans
+            },
+            .ComparisonPattern(op, value_str) then {
+                let mutable spans = List[PatternSpace].new();
+                spans.push(self.comparison_to_int_range(op, value_str));
+                spans
+            },
+            .OrPattern(left, right) then {
+                let spans = self.pattern_int_spans(left);
+                for s in self.pattern_int_spans(right).iterator() then {
+                    spans.push(s);
+                };
+                spans
+            },
+            .AndPattern(left, right) then {
+                let mutable spans = List[PatternSpace].new();
+                for l in self.pattern_int_spans(left).iterator() then {
+                    for r in self.pattern_int_spans(right).iterator() then {
+                        let both = self.span_intersect(l, r);
+                        if not self.span_is_empty(both) then {
+                            spans.push(both);
+                        };
+                    };
+                };
+                spans
+            },
+            _ then List[PatternSpace].new(),
+        };
+    };
+
+    /// Whether the span carries no value at all.
+    file_private span_is_empty(self, span PatternSpace) Bool = {
+        return when span in {
+            .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
+            _ then true,
+        };
+    };
+
+    /// The values both spans carry. Unbounded sides win by absence: a bound
+    /// only exists on the result when BOTH sides pin it.
+    file_private span_intersect(self, a PatternSpace, b PatternSpace) PatternSpace = {
+        return when a in {
+            .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
+                .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
+                    let lo_has = a_lo_has or b_lo_has;
+                    let lo = if a_lo_has and b_lo_has then {
+                        if a_lo > b_lo then a_lo else b_lo
+                    } else if a_lo_has then {
+                        a_lo
+                    } else {
+                        b_lo
+                    };
+                    let hi_has = a_hi_has or b_hi_has;
+                    let hi = if a_hi_has and b_hi_has then {
+                        if a_hi < b_hi then a_hi else b_hi
+                    } else if a_hi_has then {
+                        a_hi
+                    } else {
+                        b_hi
+                    };
+                    PatternSpace.IntRange(lo_has, lo, hi_has, hi)
+                },
+                _ then PatternSpace.Empty(),
+            },
+            _ then PatternSpace.Empty(),
+        };
+    };
+
+    /// The parts of `span` the subtraction does not carry -- zero, one or two
+    /// spans. Exact, so the remaining set never shrinks past the truth.
+    file_private span_subtract(self, span PatternSpace, sub PatternSpace) List[PatternSpace] = {
+        let pieces = List[PatternSpace].new();
+        when span in {
+            .IntRange(s_lo_has, s_lo, s_hi_has, s_hi) then when sub in {
+                .IntRange(d_lo_has, d_lo, d_hi_has, d_hi) then {
+                    // Disjoint spans: subtracting `sub` removes nothing.
+                    let sub_left_of_span = d_hi_has and s_lo_has and d_hi < s_lo;
+                    let sub_right_of_span = d_lo_has and s_hi_has and d_lo > s_hi;
+                    if sub_left_of_span or sub_right_of_span then {
+                        pieces.push(span);
+                        return pieces;
+                    };
+                    // The left remnant survives when `sub` starts strictly
+                    // above the span's lower edge.
+                    let cut_left = d_lo_has and (not s_lo_has or d_lo > s_lo);
+                    if cut_left then {
+                        pieces.push(
+                            PatternSpace.IntRange(s_lo_has, s_lo, true, d_lo - 1),
+                        );
+                    };
+                    // The right remnant survives when `sub` ends strictly
+                    // below the span's upper edge.
+                    let cut_right = d_hi_has and (not s_hi_has or d_hi < s_hi);
+                    if cut_right then {
+                        pieces.push(
+                            PatternSpace.IntRange(true, d_hi + 1, s_hi_has, s_hi),
+                        );
+                    };
+                },
+                _ then {
+                    pieces.push(span);
+                },
+            },
+            _ then {
+                pieces.push(span);
+            },
+        };
+        return pieces;
+    };
+
     // 检查不可达模式（已被前面模式完全覆盖的分支）
     /// Whether `subtract` can only approximate what this pattern covers.
     ///
@@ -277,6 +511,14 @@ given ExhaustivenessChecker {
     file_private coverage_is_approximate(self, pattern TypedPattern) Bool = {
         return when pattern in {
             .WeakBinding(_) then true,
+            // `subtract` deliberately claims nothing for these (one contiguous
+            // range cannot hold "everything except a hole"), so an unchanged
+            // space says nothing about the pattern being covered already.
+            .IntegerLiteral(_) then true,
+            .NegativeIntegerLiteral(_) then true,
+            .FloatLiteral(_) then true,
+            .StringLiteral(_) then true,
+            .ComparisonPattern(_, _) then true,
             .ListPattern(_, elements) then {
                 for element in elements then {
                     if not typed_pattern_is_irrefutable(element) then {
@@ -444,36 +686,11 @@ given ExhaustivenessChecker {
             .BoolType() then Option[PatternSpace].Some(
                 PatternSpace.BoolValues(true, true),
             ),
-            .IntType() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(false, 0, false, 0),
-            ),
-            .UIntType() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, 0, false, 0),
-            ),
-            .Int8Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, -128, true, 127),
-            ),
-            .Int16Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, -32768, true, 32767),
-            ),
-            .Int32Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(false, 0, false, 0),
-            ),
-            .Int64Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(false, 0, false, 0),
-            ),
-            .UInt8Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, 0, true, 255),
-            ),
-            .UInt16Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, 0, true, 65535),
-            ),
-            .UInt32Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, 0, false, 0),
-            ),
-            .UInt64Type() then Option[PatternSpace].Some(
-                PatternSpace.IntRange(true, 0, false, 0),
-            ),
+            // Integer subjects carry no PatternSpace: one contiguous range
+            // cannot represent the holes an interior subtraction leaves, so
+            // the subtract path both over- and under-claims there. Integer
+            // coverage is judged by `patterns_cover_integer_domain` instead --
+            // the same interval model the reference compiler uses.
             .GenericStruct(...) then {
                 if self.is_std_list_subject(self.subject_type) then {
                     Option[PatternSpace].Some(
@@ -819,32 +1036,37 @@ given ExhaustivenessChecker {
             .Wildcard() then PatternSpace.Empty(),
             .Variable(_) then PatternSpace.Empty(),
             .BoolLiteral(value) then self.subtract_bool(space, value),
-            .IntegerLiteral(value_str) then {
-                let value = parse_int_str(value_str);
-                self.subtract_int_literal(space, value)
-            },
-            .NegativeIntegerLiteral(value_str) then {
-                let value = 0 - (parse_int_str(value_str));
-                self.subtract_int_literal(space, value)
-            },
+            // A literal or comparison claims nothing here: one contiguous
+            // range cannot express "everything except a hole", so any
+            // reduction would over-claim what the pattern really covers.
+            // Integer coverage is judged by `pattern_int_spans` instead --
+            // the same stance the reference compiler takes.
+            .IntegerLiteral(_) then space,
+            .NegativeIntegerLiteral(_) then space,
+            .ComparisonPattern(_, _) then space,
             .EnumCase(case_name, _, elements) then self.subtract_enum_case(
                 space,
                 case_name,
                 elements,
                 subject_type,
             ),
-            .ComparisonPattern(op, value_str) then self.subtract_comparison(
-                space,
-                op,
-                value_str,
-            ),
             .OrPattern(left, right) then {
                 let after_left = self.subtract_pattern(space, left, subject_type);
                 self.subtract_pattern(after_left, right, subject_type)
             },
             .AndPattern(left, right) then {
-                let after_left = self.subtract_pattern(space, left, subject_type);
-                self.subtract_pattern(after_left, right, subject_type)
+                // `and` covers the INTERSECTION of its sides, never the union.
+                // Subtracting both over-claims: `.A(x) and y` would eat the
+                // whole enum and make the next arm look unreachable. Only a
+                // side that is itself total pins the coverage down to the
+                // other side; otherwise claim nothing.
+                if typed_pattern_is_irrefutable(left) then {
+                    self.subtract_pattern(space, right, subject_type)
+                } else if typed_pattern_is_irrefutable(right) then {
+                    self.subtract_pattern(space, left, subject_type)
+                } else {
+                    space
+                }
             },
             .ListPattern(_, elements) then self.subtract_list_pattern(
                 space,
@@ -932,55 +1154,12 @@ given ExhaustivenessChecker {
             .Wildcard() then true,
             .Variable(_) then true,
             .BoolLiteral(_) then space is .BoolValues(_, _),
-            .IntegerLiteral(_) then when space in {
-                .IntRange(has_min, min_val, has_max, max_val) then {
-                    if not has_min and not has_max then {
-                        return false;
-                    };
-                    let value = when pattern in {
-                        .IntegerLiteral(value_str) then parse_int_str(value_str),
-                        _ then 0,
-                    };
-                    if has_min and has_max and min_val == max_val and value == min_val then {
-                        return true;
-                    };
-                    if has_min and value == min_val then {
-                        return true;
-                    };
-                    if has_max and value == max_val then {
-                        return true;
-                    };
-                    return false;
-                },
-                .Full(_) then true,
-                _ then false,
-            },
-            .NegativeIntegerLiteral(_) then when space in {
-                .IntRange(has_min, min_val, has_max, max_val) then {
-                    if not has_min and not has_max then {
-                        return false;
-                    };
-                    let value = when pattern in {
-                        .NegativeIntegerLiteral(value_str) then 0 - parse_int_str(
-                            value_str,
-                        ),
-                        _ then 0,
-                    };
-                    if has_min and has_max and min_val == max_val and value == min_val then {
-                        return true;
-                    };
-                    if has_min and value == min_val then {
-                        return true;
-                    };
-                    if has_max and value == max_val then {
-                        return true;
-                    };
-                    return false;
-                },
-                .Full(_) then true,
-                _ then false,
-            },
-            .ComparisonPattern(_, _) then space is .IntRange(_, _, _, _) or is .Full(_),
+            // A literal or comparison subtracts nothing (one contiguous range
+            // cannot hold "everything except a hole"), so an unchanged space
+            // says nothing about the pattern being covered already.
+            .IntegerLiteral(_) then false,
+            .NegativeIntegerLiteral(_) then false,
+            .ComparisonPattern(_, _) then false,
             .EnumCase(case_name, _, elements) then {
                 let case_fields = when space in {
                     .Full(_) then self.enum_case_map_for_type(subject_type).get(

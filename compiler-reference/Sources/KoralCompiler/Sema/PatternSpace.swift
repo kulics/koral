@@ -221,9 +221,17 @@ extension PatternSpace {
             return self
             
         case .andPattern(let left, let right):
-            // And pattern: subtract both sub-patterns
-            let afterLeft = self.subtract(left, type: type, context: context)
-            return afterLeft.subtract(right, type: type, context: context)
+            // `and` covers the INTERSECTION of its sides, never the union.
+            // Subtracting both over-claims: `.A(x) and y` would eat the whole
+            // enum and make the next arm look unreachable. Only a side that is
+            // itself total pins the coverage down to the other side; otherwise
+            // claim nothing.
+            if left.isIrrefutable {
+                return subtract(right, type: type, context: context)
+            } else if right.isIrrefutable {
+                return subtract(left, type: type, context: context)
+            }
+            return self
             
         case .orPattern(let left, let right):
             // Or pattern: subtract both sub-patterns (enum of covered spaces)

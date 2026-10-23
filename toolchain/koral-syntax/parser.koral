@@ -3070,9 +3070,9 @@ given CstParser {
             return .Ok(.ListPattern(lb, items, rb));
         };
 
-        // `( p )` -- parenthesized pattern
         // `( a, b, c )` -- tuple pattern: positional destructuring of a struct,
-        // also the `for (a, b, c) in ...` binding form
+        // also the `for (a, b, c) in ...` binding form. A single pattern under
+        // `(` groups nothing and is rejected below.
         if self.check(.LParen()) then {
             let lp = self.eat();
             let first = when self.parse_pattern_node() in {
@@ -3108,13 +3108,14 @@ given CstParser {
                 };
                 return .Ok(.TuplePattern(lp, items, rp));
             };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            return .Ok(.ParenPattern(lp, first, rp));
+            // `(` in pattern position opens a tuple, which needs at least two
+            // slots. A single parenthesized pattern groups nothing to group:
+            // a `when` arm is already a full pattern, and under `is` the
+            // combinators are the connectors `or is` / `and is`, which live
+            // outside the slot. Same wording as the compilers.
+            return .Error(
+                "A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'",
+            );
         };
 
         // Variable or struct pattern: name or Name(args)
