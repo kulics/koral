@@ -6,6 +6,11 @@
 public type ExhaustivenessChecker(
     subject_type Type,
     patterns List[TypedPattern],
+    /// Indices of invented arms -- the synthetic else of a desugared if-is /
+    /// while-is. They make the match exhaustive but are not patterns anyone
+    /// wrote: no unreachable or duplicate complaint names them, and they never
+    /// stand as the catchall a later pattern would "follow".
+    synthetic_indices Set[UInt],
     context CompilerContext,
     generic_templates GenericTemplateRegistry,
     span SourceSpan,
@@ -110,6 +115,27 @@ given ExhaustivenessChecker {
         return ExhaustivenessChecker(
             subject_type,
             patterns,
+            Set[UInt].new(),
+            context,
+            generic_templates,
+            span,
+        );
+    };
+
+    /// The same check with invented arms marked: they still count for
+    /// coverage but draw no complaint of their own.
+    public new_marking_synthetic(
+        subject_type Type,
+        patterns List[TypedPattern],
+        synthetic_indices Set[UInt],
+        context CompilerContext,
+        generic_templates GenericTemplateRegistry,
+        span SourceSpan,
+    ) ExhaustivenessChecker = {
+        return ExhaustivenessChecker(
+            subject_type,
+            patterns,
+            synthetic_indices,
             context,
             generic_templates,
             span,
@@ -557,17 +583,19 @@ given ExhaustivenessChecker {
     file_private check_unreachable_patterns(self) Result[Void] = {
         let mutable covered_trait_object_types = Set[String].new();
         let mutable has_catchall = false;
-        let mutable catchall_is_struct = false;
         let mutable catchall_index UInt = 0;
         let mutable catchall_pattern_desc = StringBuilder.new();
         catchall_pattern_desc.push_string("");
-        let pattern_count = self.patterns.count();
         let mutable pattern_index UInt = 0;
         let mutable remaining_space = self.initial_finite_pattern_space();
         let mutable seen_patterns = Set[String].new();
 
         for p in self.patterns.iterator() then {
-            if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
+            // An invented arm -- the synthetic else of a desugared if-is /
+            // while-is -- still counts for coverage but draws no complaint of
+            // its own: nothing anyone wrote is "already covered" by it, and it
+            // never stands as the catchall a later pattern would follow.
+            if self.synthetic_indices.contains(pattern_index) then {
                 pattern_index += 1;
                 continue;
             };
@@ -585,45 +613,51 @@ given ExhaustivenessChecker {
                 seen_patterns.insert(pd);
             };
             if has_catchall then {
-                // When the catchall is a struct pattern and the current pattern is a
-                // wildcard, this is the synthetic else-branch of an if-is / while-is
-                // lowered when expression. Skip the unreachable error to match the
-                // Swift compiler behaviour (which uses a separate ifPatternExpression
-                // node that never runs the exhaustiveness checker).
-                let skip = catchall_is_struct and (p is .Wildcard());
-                if not skip then {
-                    let message = unreachable_after_pattern_message(
-                        pattern_description(p, self.context),
-                        catchall_pattern_desc.to_string(),
-                        catchall_index,
-                    );
-                    return Result[Void].Error(message);
-                };
+                let message = unreachable_after_pattern_message(
+                    pattern_description(p, self.context),
+                    catchall_pattern_desc.to_string(),
+                    catchall_index,
+                );
+                return Result[Void].Error(message);
             };
 
             when remaining_space in {
                 .Some(space) then {
                     let reduced = self.subtract_pattern(space, p, self.subject_type);
-                    let is_catchall_pattern = p is .Wildcard() or is .Variable(_);
                     // A weak binding or a refutable list slot has approximate
                     // coverage: `subtract` can come back unchanged without the
                     // pattern being unreachable. Both are exempt from the
-                    // "unchanged means covered" reading.
+                    // "unchanged means covered" reading -- and so is any
+                    // pattern whose leaves include a literal or comparison,
+                    // because one contiguous range cannot hold "everything
+                    // except a hole".
                     let approximate = self.coverage_is_approximate(p);
-                    if not is_catchall_pattern and not approximate and self.can_precisely_subtract_pattern(
+                    if approximate or not self.can_precisely_subtract_pattern(
                         space,
                         p,
                         self.subject_type,
-                    ) and self.pattern_space_equals(space, reduced) then {
+                    ) then {
+                        remaining_space = Option[PatternSpace].Some(reduced);
+                    } else if self.pattern_space_equals(space, reduced) then {
                         let mutable message = StringBuilder.new();
-                        message.push_string(
-                            "Unreachable pattern: already covered by previous patterns",
-                        );
+                        message.push_string("Unreachable pattern '");
+                        message.push_string(pattern_description(p, self.context));
+                        message.push_string("': already covered by previous patterns");
                         return Result[Void].Error(message.to_string());
+                    } else {
+                        remaining_space = Option[PatternSpace].Some(reduced);
                     };
-                    remaining_space = Option[PatternSpace].Some(reduced);
                 },
                 .None() then {},
+            };
+
+            if is_catchall(p) then {
+                has_catchall = true;
+                catchall_index = pattern_index;
+                catchall_pattern_desc = StringBuilder.new();
+                catchall_pattern_desc.push_string(pattern_description(p, self.context));
+                pattern_index += 1;
+                continue;
             };
 
             let pattern_trait_types = collect_trait_object_types(p, self.context);
@@ -644,13 +678,6 @@ given ExhaustivenessChecker {
                 };
             };
 
-            if is_catchall(p) then {
-                has_catchall = true;
-                catchall_is_struct = p is .StructPattern(_, _);
-                catchall_index = pattern_index;
-                catchall_pattern_desc = StringBuilder.new();
-                catchall_pattern_desc.push_string(pattern_description(p, self.context));
-            };
             pattern_index += 1;
         };
 
@@ -1144,6 +1171,20 @@ given ExhaustivenessChecker {
         return if self.pattern_space_is_empty(next) then PatternSpace.Empty() else next;
     };
 
+
+    file_private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
+        let _ = self;
+        return when space in {
+            .BoolValues(has_true, has_false) then {
+                let next_true = if value then false else has_true;
+                let next_false = if value then has_false else false;
+                if not next_true and not next_false then PatternSpace.Empty()
+                else PatternSpace.BoolValues(next_true, next_false)
+            },
+            _ then space,
+        };
+    };
+
     file_private can_precisely_subtract_pattern(
         self,
         space PatternSpace,
@@ -1202,19 +1243,6 @@ given ExhaustivenessChecker {
                 subject_type,
             ) and self.can_precisely_subtract_pattern(space, right, subject_type),
             _ then false,
-        };
-    };
-
-    file_private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
-        let _ = self;
-        return when space in {
-            .BoolValues(has_true, has_false) then {
-                let next_true = if value then false else has_true;
-                let next_false = if value then has_false else false;
-                if not next_true and not next_false then PatternSpace.Empty()
-                else PatternSpace.BoolValues(next_true, next_false)
-            },
-            _ then space,
         };
     };
 
@@ -1617,28 +1645,6 @@ given ExhaustivenessChecker {
         return msg.to_string();
     };
 
-    file_private is_synthetic_trailing_wildcard(
-        self,
-        pattern TypedPattern,
-        pattern_index UInt,
-        pattern_count UInt,
-    ) Bool = {
-        if pattern_count != UInt(2) then {
-            return false;
-        };
-        if pattern_index + UInt(1) != pattern_count then {
-            return false;
-        };
-        if pattern is not .Wildcard() then {
-            return false;
-        };
-        let first_pattern = self.patterns[UInt(0)];
-        return when first_pattern in {
-            .Wildcard() then false,
-            .Variable(_) then false,
-            _ then true,
-        };
-    };
 
     // 检查 enum 是否已被完全覆盖
     file_private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {

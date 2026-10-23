@@ -318,6 +318,7 @@ given TypeChecker {
                         condition,
                         body,
                         expr_span(expr),
+                        scope,
                     ),
                     _ then Option[Expr].None(),
                 };
@@ -382,6 +383,7 @@ given TypeChecker {
                         then_branch,
                         else_branch,
                         current_span,
+                        scope,
                     );
                     when lowered_opt in {
                         .Some(lowered) then {
@@ -507,6 +509,7 @@ given TypeChecker {
                 );
                 let mutable typed_arms = List[TypedWhenArm].new();
                 let mutable patterns = List[TypedPattern].new();
+                let mutable synthetic_indices = Set[UInt].new();
                 for arm in arms then {
                     let mutable arm_scope = Scope.new_child(scope);
                     let arm_pattern_ref = arm.pattern;
@@ -545,6 +548,9 @@ given TypeChecker {
                     );
                     // A guarded arm covers nothing for exhaustiveness.
                     if typed_guard is .None() then {
+                        if arm.pattern_invented then {
+                            synthetic_indices.insert(patterns.count());
+                        };
                         patterns.push(lowered_pattern_ref);
                     };
                     typed_arms.push(
@@ -556,9 +562,10 @@ given TypeChecker {
                         ),
                     );
                 };
-                let ex_checker = ExhaustivenessChecker.new(
+                let ex_checker = ExhaustivenessChecker.new_marking_synthetic(
                     exhaustiveness_subject_type,
                     patterns,
+                    synthetic_indices,
                     self.context(),
                     self.storage.generic_templates,
                     span,
@@ -626,6 +633,7 @@ given TypeChecker {
                     condition,
                     body,
                     span,
+                    scope,
                 );
                 when lowered_opt in {
                     .Some(lowered) then self.check_while_statement_expr(

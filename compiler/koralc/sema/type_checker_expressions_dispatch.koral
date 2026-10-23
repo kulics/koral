@@ -622,6 +622,7 @@ given TypeChecker {
                 );
                 let mutable typed_arms = List[TypedWhenArm].new();
                 let mutable patterns = List[TypedPattern].new();
+                let mutable synthetic_indices = Set[UInt].new();
                 let mutable result_type = Type.Unknown();
                 let mutable running_expected = expected;
                 let mutable arm_index UInt = 0;
@@ -775,6 +776,9 @@ given TypeChecker {
                     // reads as two `_`, and the duplicate check then piles a
                     // second diagnostic on top of the real one.
                     if typed_guard is .None() and not arm_complained then {
+                        if arm.pattern_invented then {
+                            synthetic_indices.insert(patterns.count());
+                        };
                         patterns.push(lowered_pattern_ref);
                     };
                     typed_arms.push(
@@ -795,9 +799,10 @@ given TypeChecker {
                 // Later arms are still checked: koralc keeps going where the
                 // seed throws, so a genuine second fault is still worth saying.
                 if not any_arm_complained then {
-                    let ex_checker = ExhaustivenessChecker.new(
+                    let ex_checker = ExhaustivenessChecker.new_marking_synthetic(
                         exhaustiveness_subject_type,
                         patterns,
+                        synthetic_indices,
                         self.context(),
                         self.storage.generic_templates,
                         span,
@@ -1426,6 +1431,7 @@ given TypeChecker {
                     then_branch,
                     else_branch,
                     unknown_span(),
+                    scope,
                 );
                 when lowered_opt in {
                     .Some(lowered) then {
@@ -3347,6 +3353,14 @@ given TypeChecker {
                         "Variable bindings in 'is' expression are only allowed in if/while conditions and where guards",
                         span,
                     );
+                    // Still define the names: the message is the only one
+                    // Swift emits, and uses of these names must not pile a
+                    // second.
+                    let _ = self.bind_pattern_vars(
+                        ast_pattern_ref,
+                        typed_subj.expr_type,
+                        scope,
+                    );
                 };
                 let _ = span;
                 let typed_pattern = self.lower_typed_pattern(
@@ -3370,6 +3384,14 @@ given TypeChecker {
                     self.push_diagnostic(
                         "Variable bindings are not allowed in 'is not' expression",
                         span,
+                    );
+                    // Still define the names: the message is the only one
+                    // Swift emits, and uses of these names must not pile a
+                    // second.
+                    let _ = self.bind_pattern_vars(
+                        ast_pattern_ref,
+                        raw_typed_subj.expr_type,
+                        scope,
                     );
                 };
                 let typed_subj = if self.pattern_is_weak_binding(ast_pattern_ref) and self.is_weak_reference_type(

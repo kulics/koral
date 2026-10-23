@@ -415,6 +415,45 @@ given TypeChecker {
         };
     };
 
+    /// Neutralise the cascade a rejected binding would otherwise cause.
+    ///
+    /// The names never bind at runtime -- the construct is refused -- but they
+    /// must still RESOLVE, or every use in the guard or body piles
+    /// `Undefined variable` (and whatever that unknown value then fails to do)
+    /// on top of the one real message. Swift stops at the first diagnostic;
+    /// koralc keeps checking, so the two streams only agree when a rejection
+    /// leaves the names defined.
+    module_private bind_rejected_is_patterns(self, expr Expr, scope Scope) Void = {
+        when expr in {
+            .IsExpr(subject, pattern, _) then {
+                let typed_subj = self.check_expr_scoped_ref(
+                    subject,
+                    Option[Type].None(),
+                    scope,
+                );
+                let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
+            },
+            .IsNotExpr(subject, pattern, _) then {
+                let typed_subj = self.check_expr_scoped_ref(
+                    subject,
+                    Option[Type].None(),
+                    scope,
+                );
+                let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
+            },
+            .AndExpr(left, right, _) then {
+                self.bind_rejected_is_patterns(left, scope);
+                self.bind_rejected_is_patterns(right, scope);
+            },
+            .OrExpr(left, right, _) then {
+                self.bind_rejected_is_patterns(left, scope);
+                self.bind_rejected_is_patterns(right, scope);
+            },
+            .Unary(_, inner, _) then self.bind_rejected_is_patterns(inner, scope),
+            _ then {},
+        };
+    };
+
     module_private check_or_branches_for_bindings(self, expr Expr) Bool = {
         return when expr in {
             .OrExpr(left, right, _) then {
@@ -483,7 +522,7 @@ given TypeChecker {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span;
                 let mutable arms = List[WhenArm].new();
-                arms.push(WhenArm(pattern, Option[Expr].None(), then_expr, false));
+                arms.push(WhenArm(pattern, Option[Expr].None(), then_expr, false, false));
                 let else_body = when else_expr in {
                     .Some(else_ref) then else_ref,
                     .None() then Expr.Block(
@@ -503,6 +542,7 @@ given TypeChecker {
                         Option[Expr].None(),
                         else_body,
                         else_is_invented,
+                        true,
                     ),
                 );
                 Expr.WhenExpr(subject, arms, actual_span)
@@ -521,7 +561,7 @@ given TypeChecker {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span;
                 let mutable arms = List[WhenArm].new();
-                arms.push(WhenArm(pattern, Option[Expr].None(), body, false));
+                arms.push(WhenArm(pattern, Option[Expr].None(), body, false, false));
                 // Invented: `while ... is` has one branch, and the wildcard
                 // exists only to make the `when` exhaustive.
                 arms.push(
@@ -529,6 +569,7 @@ given TypeChecker {
                         PatternNode.Wildcard(unknown_span()),
                         Option[Expr].None(),
                         self.make_break_block_expr(actual_span),
+                        true,
                         true,
                     ),
                 );
@@ -558,6 +599,7 @@ given TypeChecker {
         // Same rule as if/while: bindings under expression `or` / `not` are
         // refused with the same two diagnostics.
         if self.check_or_branches_for_bindings(guard) then {
+            self.bind_rejected_is_patterns(guard, scope);
             return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType());
         };
         if not self.condition_contains_is_expression(guard) then {
@@ -665,6 +707,9 @@ given TypeChecker {
                     "Variable bindings are not allowed in 'is not' expression",
                     pattern_span(pattern),
                 );
+                // Still define the names: the message is the only one Swift
+                // emits, and uses of these names must not pile a second.
+                let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
             };
             if not negated then {
                 // Bind before lowering the pattern so the names resolve, the
@@ -710,8 +755,10 @@ given TypeChecker {
         then_expr Expr,
         else_expr Option[Expr],
         outer_span SourceSpan,
+        scope Scope,
     ) Option[Expr] = {
         if self.check_or_branches_for_bindings(condition) then {
+            self.bind_rejected_is_patterns(condition, scope);
             return Option[Expr].Some(
                 Expr.IfExpr(
                     Expr.BoolLiteral(false, outer_span),
@@ -782,6 +829,7 @@ given TypeChecker {
         condition Expr,
         body Expr,
         outer_span SourceSpan,
+        scope Scope,
     ) Option[Expr] = {
         if not self.condition_contains_is_expression(condition) then {
             return Option[Expr].None();
@@ -793,6 +841,7 @@ given TypeChecker {
             body,
             Option[Expr].Some(break_block),
             outer_span,
+            scope,
         );
         return when lowered_body_opt in {
             .Some(lowered_body) then Option[Expr].Some(
