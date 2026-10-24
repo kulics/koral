@@ -15,36 +15,59 @@ extension AccessModifier: CustomStringConvertible {
 
 // MARK: - Module System Types
 
-/// One item of a `using` import list: `Name`, or `Name as Alias`.
+/// One item of a `using` import list (§3.3): `Name`, `Name as Alias`, or
+/// `!Name` on an exclusion.
 ///
-/// There is no "everything" item -- `{ }` omitted already means that (§3), so
-/// `{ * }` / `{ .. }` have nothing to be a spelling of.
+/// `excluded` is only meaningful alongside `importAll`: `{ !a, ... }` takes
+/// everything but `a`. A positive item with `importAll` is a rename that stays
+/// in force while the rest of the module's surface comes along (`{ a as b, ... }`).
 public struct UsingModuleItem {
   public let name: String
   public let alias: String?
+  public let excluded: Bool
 
-  public init(name: String, alias: String? = nil) {
+  public init(name: String, alias: String? = nil, excluded: Bool = false) {
     self.name = name
     self.alias = alias
+    self.excluded = excluded
+  }
+}
+
+/// The body of `using "spec" { ... }` -- a filter over a module's members (§3.3).
+///
+/// `importAll` marks the `...` base set: with it, the items are renames that
+/// survive the sweep (`{ a as b, ... }`) or exclusions removed from it
+/// (`{ !a, ... }`). Without it the items are the whole answer (`{ a, b }`).
+public struct UsingImportList {
+  public let items: [UsingModuleItem]
+  public let importAll: Bool
+
+  public init(items: [UsingModuleItem], importAll: Bool) {
+    self.items = items
+    self.importAll = importAll
   }
 }
 
 /// `using "<specifier>" ("{" items "}")?;`
 ///
-/// There is exactly one form. The specifier is a string, and what it means is
-/// decided by its SHAPE (§3.1): `./` or `../` makes it a file to merge in,
-/// anything else is the full name of a module, `package[/subpath]`.
+/// The OPERATION follows from the braces (§3): bare is a merge (the target
+/// joins this module, boundary gone), braces are an import (the boundary stays
+/// and the list filters members). The specifier only says where the target is
+/// (§3.1): `./` or `../` is a local module's entry file, anything else is the
+/// full name of a registered module, `package[/subpath]`.
 ///
-/// `items == nil` means `{ }` was omitted -- "every visible member" (§3).
-/// A present-but-empty list is an error (§7.4) and never survives parsing.
+/// `items == nil` means the braces were omitted. `importAll` is only meaningful
+/// alongside braces: it is the `...` base set (§3.3).
 public struct UsingDeclaration {
   public let specifier: String
   public let items: [UsingModuleItem]?
+  public let importAll: Bool
   public let span: SourceSpan
 
-  public init(specifier: String, items: [UsingModuleItem]?, span: SourceSpan) {
+  public init(specifier: String, items: [UsingModuleItem]?, importAll: Bool = false, span: SourceSpan) {
     self.specifier = specifier
     self.items = items
+    self.importAll = importAll
     self.span = span
   }
 

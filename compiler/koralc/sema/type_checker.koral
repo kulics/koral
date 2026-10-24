@@ -614,7 +614,7 @@ given TypeChecker {
             .TypeAliasDecl(_, name, _, _, _) then "type \(name)",
             .IntrinsicTypeDecl(_, name, _, _, _) then "type intrinsic \(name)",
             .ForeignTypeDecl(_, name, _, _, _) then "type foreign \(name)",
-            .UsingDecl(specifier, _, _) then "using \(specifier)",
+            .UsingDecl(specifier, _, _, _) then "using \(specifier)",
             .TraitDecl(_, name, _, _, _, _, _) then "trait \(name)",
             .GivenDecl(_, _, _, _) then "given",
             .GivenTraitDecl(_, _, _, _, _) then "given as trait",
@@ -638,7 +638,7 @@ given TypeChecker {
     ///   also what let a trait from ANY module be named without importing it.
     ///   Spelling the prelude out keeps the first and drops the second.
     /// - **`using`**. An explicit list binds those names; a batch import
-    ///   (`using "std";`) has no symbol edges and binds every importable trait
+    ///   (`using "std" { ... };`) has no symbol edges and binds every importable trait
     ///   the target declares.
     module_private register_imported_trait_names(
         self,
@@ -665,7 +665,7 @@ given TypeChecker {
             };
             self.bind_imported_trait_name(edge.symbol, edge.module, info.def_id);
         };
-        // A batch import (`using "std";`) has no symbol edges at all -- the
+        // A batch import (`using "std" { ... };`) has no symbol edges at all -- the
         // spelling is the target's own for every member.
         for edge in graph.edges then {
             when edge.kind in {
@@ -676,6 +676,13 @@ given TypeChecker {
                             continue;
                         };
                         if not self.importable_trait_access(info.def_id) then {
+                            continue;
+                        };
+                        // `{ !a, ... }` drops a name and `{ a as b, ... }`
+                        // re-spells it; the re-spelling arrived as its own
+                        // symbol edge above, so the target's spelling is not
+                        // bound again here (§3.3).
+                        if not batch_filter_allows(edge.filter, info.name) then {
                             continue;
                         };
                         self.bind_imported_trait_name(info.name, edge.source, info.def_id);
@@ -1445,7 +1452,7 @@ given TypeChecker {
             .TypeAliasDecl(_, _, _, span, _) then span,
             .IntrinsicTypeDecl(_, _, _, span, _) then span,
             .ForeignTypeDecl(_, _, _, span, _) then span,
-            .UsingDecl(_, _, span) then span,
+            .UsingDecl(_, _, _, span) then span,
             .TraitDecl(_, _, _, _, _, span, _) then span,
             .GivenDecl(_, _, _, span) then span,
             .GivenTraitDecl(_, _, _, _, span) then span,

@@ -422,7 +422,9 @@ extension TypeChecker {
       for decl in traitDeclsByDefId.values {
         guard decl.modulePath == edge.target else { continue }
         guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .package_private else { continue }
-        registerImportedTraitName(localName: decl.name, defId: decl.defId, modulePath: edge.source)
+        // `{ !a, ... }` drops a name and `{ a as b, ... }` re-spells it (§3.3).
+        guard let localName = batchFilterLocalName(edge.filter, name: decl.name) else { continue }
+        registerImportedTraitName(localName: localName, defId: decl.defId, modulePath: edge.source)
       }
     }
 
@@ -441,10 +443,12 @@ extension TypeChecker {
       let sourcePackageID = packageID(forSourceFile: sourceFile)
 
       for name in moduleInfo.publicTypes.keys.sorted() {
+        // `{ !a, ... }` drops a name and `{ a as b, ... }` re-spells it (§3.3).
+        guard let localName = batchFilterLocalName(edge.filter, name: name) else { continue }
         guard let type = moduleInfo.publicTypes[name] else { continue }
         guard canImportType(type, intoPackageID: sourcePackageID) else { continue }
         try checkImportNameCollision(
-          name: name,
+          name: localName,
           bound: nominalTypeId(type),
           sourceFile: sourceFile,
           fromModule: edge.target,
@@ -452,15 +456,17 @@ extension TypeChecker {
           isImportAll: true,
           isType: true
         )
-        if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
-          try currentScope.definePrivateType(name, sourceFile: sourceFile, type: type)
+        if currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
+          try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: type)
         }
       }
       for name in moduleInfo.publicSymbols.keys.sorted() {
+        // `{ !a, ... }` drops a name and `{ a as b, ... }` re-spells it (§3.3).
+        guard let localName = batchFilterLocalName(edge.filter, name: name) else { continue }
         guard let symbol = moduleInfo.publicSymbols[name] else { continue }
         guard canImportSymbol(symbol, intoPackageID: sourcePackageID) else { continue }
         try checkImportNameCollision(
-          name: name,
+          name: localName,
           bound: symbol.defId,
           sourceFile: sourceFile,
           fromModule: edge.target,
@@ -469,7 +475,7 @@ extension TypeChecker {
           isType: isTypeSymbol(symbol)
         )
         try registerImportedSymbol(
-          name: name,
+          name: localName,
           symbol: symbol,
           sourceModulePath: edge.source,
           sourceFile: sourceFile

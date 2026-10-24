@@ -1,7 +1,7 @@
 // Module system data structures.
 // Mirrors compiler-reference/Sources/KoralCompiler/Module/ModuleResolver.swift
 
-using "std/os";
+using "std/os" { ... };
 
 // ── ImportKind ────────────────────────────────────────────────────────────────
 
@@ -17,12 +17,17 @@ public type ImportKind {
 /// `span` is where the `using` is written. A collision between an imported
 /// name and something already in scope is reported there -- that is the line
 /// the reader has to edit (§3.3).
+///
+/// `filter` narrows a batch (`{ ... }`) edge: `!name` entries drop a member and
+/// `name as alias` entries rewrite its spelling. Empty means the batch comes
+/// whole. It is always empty on non-batch edges (§3.3).
 public type ImportEdge(
     source List[String],
     target List[String],
     kind ImportKind,
     source_file Option[String],
     span SourceSpan,
+    filter List[UsingModuleItem],
 );
 
 public type SymbolImportEdge(
@@ -34,6 +39,21 @@ public type SymbolImportEdge(
     source_file Option[String],
     span SourceSpan,
 );
+
+/// Whether `spelling` lands under its own name from a filtered batch (§3.3).
+///
+/// A name the filter mentions does not: `!a` drops it and `a as b` re-spells
+/// it, and the re-spelling is carried by its own symbol edge so it resolves
+/// through the ordinary import layer. Everything the filter is silent about
+/// comes whole.
+public let batch_filter_allows(filter List[UsingModuleItem], spelling String) Bool = {
+    for item in filter then {
+        if item.name == spelling then {
+            return false;
+        };
+    };
+    return true;
+};
 
 // ── ImportGraph ───────────────────────────────────────────────────────────────
 
@@ -58,8 +78,9 @@ given ImportGraph {
         kind ImportKind,
         source_file Option[String],
         span SourceSpan,
+        filter List[UsingModuleItem],
     ) Void = {
-        self.edges.push(ImportEdge(from, to, kind, source_file, span));
+        self.edges.push(ImportEdge(from, to, kind, source_file, span, filter));
     };
 
     public add_symbol_import(
@@ -136,7 +157,9 @@ given ImportGraph {
             return ImportKind.Local();
         };
 
-        // Symbol import
+        // Symbol import. The LOCAL spelling is what grants access: `a as b`
+        // makes `b` nameable and leaves `a` unnamed (§3.3). Matching
+        // `original_symbol` here would hand out the pre-rename spelling too.
         when symbol_name in {
             .Some(name) then {
                 when self.symbol_import_candidates(name) in {
@@ -145,7 +168,7 @@ given ImportGraph {
                             if string_list_eq(si.module, in_module) and string_list_eq(
                                 si.target,
                                 symbol_module_path,
-                            ) and (si.symbol == name or si.original_symbol == name) and source_file_matches(
+                            ) and si.symbol == name and source_file_matches(
                                 si.source_file,
                                 in_source_file,
                             ) then {
@@ -168,6 +191,13 @@ given ImportGraph {
                 when edge.kind in {
                     .BatchImport() then {
                         if string_list_eq(symbol_module_path, edge.target) then {
+                            // `{ !a, ... }` drops a member and `{ a as b, ... }`
+                            // re-spells it; either way it does not arrive under
+                            // its own name (§3.3).
+                            if symbol_name is .Some(n) and not batch_filter_allows(edge.filter, n)
+                            then {
+                                continue;
+                            };
                             return edge.kind;
                         };
                     },
@@ -328,8 +358,9 @@ given CompilationUnit {
         kind ImportKind,
         source_file Option[String],
         span SourceSpan,
+        filter List[UsingModuleItem],
     ) Void = {
-        self.storage.import_graph.add_module_import(from, to, kind, source_file, span);
+        self.storage.import_graph.add_module_import(from, to, kind, source_file, span, filter);
     };
 
     public add_symbol_import_edge(

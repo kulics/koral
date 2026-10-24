@@ -9,7 +9,7 @@
 // segment is a package name; everything after it is the subpath. There is no
 // lookup that skips the package: a bare subpath is not a spelling of anything.
 
-using "std/os";
+using "std/os" { ... };
 
 // ── ModuleError ───────────────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ public type ModuleError {
     UnknownModule(name String, package_name String, declared List[String], span SourceSpan),
     NoMainModule(package_name String, declared List[String], span SourceSpan),
     InvalidModuleSpecifier(specifier String, span SourceSpan),
+    FileClaimedTwice(file String, owner String, claimant String),
 };
 
 given ModuleError {
@@ -89,12 +90,14 @@ given ModuleError as Error {
                 "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared_list)"
             },
             .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
+            .FileClaimedTwice(file, owner, claimant) then "source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'",
         };
     };
 };
 
 file_private type PendingUsing {
-    Module(specifier String, span SourceSpan, items Option[List[UsingModuleItem]]),
+    Module(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
+    LocalModule(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
     File(specifier String, span SourceSpan),
 };
 
@@ -110,6 +113,10 @@ module_private type mutable ModuleResolverStorage(
     mutable module_index Dict[String, ResolvedModuleSpec],
     // Modules currently being loaded, for import-cycle detection.
     mutable module_stack List[String],
+    // Which module's closure already claims each source file (§7). A file is
+    // compiled into exactly one module; a second claim is an error rather than
+    // a second copy of the same declarations under a different identity.
+    mutable claimed_files Dict[String, String],
 );
 
 public type mutable ModuleResolver(module_private mutable storage ModuleResolverStorage);
@@ -133,6 +140,7 @@ given ModuleResolver {
             Option[LoadedPackage].None(),
             Dict[String, ResolvedModuleSpec].new(),
             List[String].new(),
+            Dict[String, String].new(),
         );
         return ModuleResolver(s);
     };
@@ -143,6 +151,12 @@ given ModuleResolver {
     public set_packages(self, registry PackageRegistry, root LoadedPackage) Void = {
         self.storage.registry = Option[PackageRegistry].Some(registry);
         self.storage.root_package = Option[LoadedPackage].Some(root);
+    };
+
+    /// The source files this compilation already claims (§7). A package-level
+    /// sweep diffs this against the files on disk to find orphans.
+    public claimed_files(self) Dict[String, String] = {
+        return self.storage.claimed_files;
     };
 
     /// Load a module declared in a manifest, and everything its `using`
@@ -207,6 +221,27 @@ given ModuleResolver {
             };
         };
 
+        // A source file is compiled into exactly one module's closure (§7).
+        // A second claim would give the same declarations two identities.
+        let claim_key = join_path(module.path(), ".");
+        when self.storage.claimed_files.get(normalized_file) in {
+            .Some(owner_key) then {
+                if owner_key != claim_key then {
+                    return Result[Void].Error(
+                        // `Error: ` envelope with no location prefix: the
+                        // message names the file and both modules, and the
+                        // driver prints a module-resolution failure as text
+                        // rather than as a source diagnostic. Both compilers
+                        // use this exact shape (§7).
+                        "Error: source file '\(normalized_file)' is already part of module '\(owner_key)' and cannot also join '\(claim_key)'",
+                    );
+                };
+            },
+            .None() then {
+                self.storage.claimed_files.insert(normalized_file, claim_key);
+            },
+        };
+
         self.storage.resolving_files.push(normalized_file);
         module_debug("[module] resolve_file: \(normalized_file)");
         // A module is imported once per file (§3.3). A second `using` for the
@@ -220,11 +255,30 @@ given ModuleResolver {
 
         for using_decl in pending then {
             when using_decl in {
-                .Module(specifier, using_span, items) then {
+                .Module(specifier, using_span, items, import_all) then {
                     when self.record_module_using(
                         specifier,
                         using_span,
                         items,
+                        import_all,
+                        module,
+                        unit,
+                        normalized_file,
+                        imported_this_file,
+                    ) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            self.storage.resolving_files.pop();
+                            return Result[Void].Error(e);
+                        },
+                    };
+                },
+                .LocalModule(specifier, using_span, items, import_all) then {
+                    when self.record_local_module_using(
+                        specifier,
+                        using_span,
+                        items,
+                        import_all,
                         module,
                         unit,
                         normalized_file,
@@ -294,13 +348,19 @@ given ModuleResolver {
         let mutable pending = List[PendingUsing].new();
         for decl in program.declarations then {
             when decl in {
-                .UsingDecl(specifier, items, span) then {
-                    if specifier.starts_with("./") or specifier.starts_with("../") or specifier.starts_with(
+                .UsingDecl(specifier, items, import_all, span) then {
+                    let is_path = specifier.starts_with("./") or specifier.starts_with("../") or specifier.starts_with(
                         ".\\",
-                    ) or specifier.starts_with("..\\") then {
+                    ) or specifier.starts_with("..\\");
+                    if is_path and items is .Some(_) then {
+                        // A local path with braces imports from the module
+                        // rooted at that entry file (§3.1). The entry file is
+                        // the module's identity; no manifest entry is needed.
+                        pending.push(.LocalModule(specifier, span, items, import_all));
+                    } else if is_path then {
                         pending.push(.File(specifier, span));
                     } else {
-                        pending.push(.Module(specifier, span, items));
+                        pending.push(.Module(specifier, span, items, import_all));
                     };
                 },
                 _ then {
@@ -325,6 +385,7 @@ given ModuleResolver {
         specifier_span SourceSpan,
         module ModuleInfo,
         unit CompilationUnit,
+        load Bool,
     ) Result[ResolvedModuleSpec] = {
         // The specifier is `package[/subpath]`. The first segment is a package
         // name; the rest is the subpath inside it (§4). There is no lookup that
@@ -419,7 +480,9 @@ given ModuleResolver {
             };
         };
 
-        let _ = self.resolve_module_spec(spec, unit) or return;
+        if load then {
+            let _ = self.resolve_module_spec(spec, unit) or return;
+        };
         return Result[ResolvedModuleSpec].Ok(spec);
     };
 
@@ -428,12 +491,20 @@ given ModuleResolver {
         specifier String,
         specifier_span SourceSpan,
         items Option[List[UsingModuleItem]],
+        import_all Bool,
         module ModuleInfo,
         unit CompilationUnit,
         current_file String,
         imported_this_file Set[String],
     ) Result[Void] = {
-        let spec = self.resolve_module_import(specifier, specifier_span, module, unit) or return;
+        let is_merge = items is .None();
+        let spec = self.resolve_module_import(
+            specifier,
+            specifier_span,
+            module,
+            unit,
+            not is_merge,
+        ) or return;
         if imported_this_file.contains(spec.full_name) then {
             return Result[Void].Error(
                 ModuleError.DuplicateUsing(spec.full_name, specifier_span).render(
@@ -450,17 +521,173 @@ given ModuleResolver {
         let target_path = spec.path_segments;
         when items in {
             .None() then {
-                // `{ }` omitted: every visible member of the module (§3).
-                unit.add_import_edge(
-                    module.path(),
-                    target_path,
-                    ImportKind.BatchImport(),
-                    import_source_file,
+                // Bare form is a MERGE (§3.2): the target module joins this
+                // one and its boundary is gone. It is the same operation the
+                // `./` path form performs -- a specifier only says where the
+                // target is, not what happens to it.
+                return self.merge_module_into(
+                    spec,
+                    specifier,
                     specifier_span,
+                    module,
+                    unit,
                 );
             },
             .Some(list) then {
-                for item in list then {
+                if import_all then {
+                    // `{ ... }`, `{ a as b, ... }`, `{ !a, ... }` -- the whole
+                    // surface with the listed renames applied and exclusions
+                    // removed (§3.3). The filter rides on the batch edge and
+                    // stops a renamed/excluded spelling from landing under its
+                    // own name; a rename is ALSO a symbol edge so the new
+                    // spelling resolves through the ordinary layer 2.
+                    unit.add_import_edge(
+                        module.path(),
+                        target_path,
+                        ImportKind.BatchImport(),
+                        import_source_file,
+                        specifier_span,
+                        list,
+                    );
+                    for item in list then {
+                        if item.alias is .Some(_) then {
+                            unit.add_symbol_import_edge(
+                                module.path(),
+                                target_path,
+                                item.alias or else item.name,
+                                ImportKind.MemberImport(),
+                                import_source_file,
+                                Option[String].Some(item.name),
+                                specifier_span,
+                            );
+                        };
+                    };
+                } else if list.is_empty() then {
+                    // `{ }` -- a placeholder with no member surface (§3.3).
+                    // It is a dependency edge and nothing more: no names, and
+                    // (once §3.4 lands) no methods.
+                    unit.add_import_edge(
+                        module.path(),
+                        target_path,
+                        ImportKind.ModuleImport(),
+                        import_source_file,
+                        specifier_span,
+                        List[UsingModuleItem].new(),
+                    );
+                } else {
+                    for item in list then {
+                        unit.add_symbol_import_edge(
+                            module.path(),
+                            target_path,
+                            item.alias or else item.name,
+                            ImportKind.MemberImport(),
+                            import_source_file,
+                            Option[String].Some(item.name),
+                            specifier_span,
+                        );
+                    };
+                };
+            },
+        };
+        return Result[Void].Ok({});
+    };
+
+    /// Import from a local module named by its entry file (§3.1). A local path
+    /// with braces needs no manifest entry: the entry file IS the module, and
+    /// its identity is the entry's position inside the package (§5.3.1).
+    ///
+    /// The target module is created on first reference if nothing claimed it.
+    /// Once it exists it is a module like any other -- it can also be merged
+    /// (bare form) or imported by name if a manifest entry names it.
+    file_private record_local_module_using(
+        self,
+        specifier String,
+        specifier_span SourceSpan,
+        items Option[List[UsingModuleItem]],
+        import_all Bool,
+        module ModuleInfo,
+        unit CompilationUnit,
+        current_file String,
+        imported_this_file Set[String],
+    ) Result[Void] = {
+        let current_dir = current_file.into_path().dir_name().to_string();
+        let mutable target = current_dir.into_path();
+        for segment in specifier.split("/") then {
+            if segment == "." or segment.is_empty() then {
+                continue;
+            };
+            if segment == ".." then {
+                target = target.dir_name();
+            } else {
+                target = target.join(segment);
+            };
+        };
+        let entry_abs = when absolute_path(target) in {
+            .Ok(p) then p.to_string(),
+            .Error(_) then target.to_string(),
+        };
+        if not path_exist(entry_abs.into_path()) then {
+            return Result[Void].Error(
+                ModuleError.FileNotFound(specifier, current_dir).render(
+                    module.entry_file(),
+                ),
+            );
+        };
+        if imported_this_file.contains(entry_abs) then {
+            return Result[Void].Error(
+                ModuleError.DuplicateUsing(specifier, specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
+        };
+        imported_this_file.insert(entry_abs);
+
+        // The module's identity for an unregistered local module is its entry
+        // file's stem -- the same derivation `resolve_module_with_path` uses
+        // when no manifest names it. Two local modules sharing a stem would
+        // share an identity; name them distinctly or register them.
+        let stem = entry_abs.into_path().with_ext_name("").base_name();
+        let target_path = List[String].new();
+        let stem_id = module_file_name_to_identifier(stem);
+        target_path.push(stem_id);
+
+        // Load the target as its own module so its declarations exist under
+        // `target_path` and the boundary stays (§3.1). `resolve_module_spec`
+        // is idempotent on the unit key, so a second `using` of the same entry
+        // reuses the module rather than loading it twice.
+        let owner = self.storage.root_package or else {
+            return Result[Void].Error(
+                ModuleError.FileNotFound(specifier, current_dir).render(
+                    module.entry_file(),
+                ),
+            );
+        };
+        let spec = ResolvedModuleSpec(
+            stem_id,
+            target_path,
+            stem_id,
+            stem_id,
+            entry_abs,
+            List[String].new(),
+            owner.identity,
+            owner.kind,
+            owner,
+        );
+        let _ = self.resolve_module_spec(spec, unit) or return;
+
+        let mutable list = items or else List[UsingModuleItem].new();
+        let import_source_file = Option[String].Some(current_file);
+        if import_all then {
+            unit.add_import_edge(
+                module.path(),
+                target_path,
+                ImportKind.BatchImport(),
+                import_source_file,
+                specifier_span,
+                list,
+            );
+            for item in list then {
+                if item.alias is .Some(_) then {
                     unit.add_symbol_import_edge(
                         module.path(),
                         target_path,
@@ -471,8 +698,63 @@ given ModuleResolver {
                         specifier_span,
                     );
                 };
-            },
+            };
+        } else if list.is_empty() then {
+            unit.add_import_edge(
+                module.path(),
+                target_path,
+                ImportKind.ModuleImport(),
+                import_source_file,
+                specifier_span,
+                List[UsingModuleItem].new(),
+            );
+        } else {
+            for item in list then {
+                unit.add_symbol_import_edge(
+                    module.path(),
+                    target_path,
+                    item.alias or else item.name,
+                    ImportKind.MemberImport(),
+                    import_source_file,
+                    Option[String].Some(item.name),
+                    specifier_span,
+                );
+            };
         };
+        return Result[Void].Ok({});
+    };
+
+    /// Merge a whole module into the current one (§3.2). The bare form of
+    /// `using "spec";` lands here for a registered module exactly as it does
+    /// for a local entry file -- a specifier says where the target is, the
+    /// braces say whether its boundary survives.
+    ///
+    /// The target's boundary is gone afterwards: its `module_private` names are
+    /// this module's `module_private` names. It may therefore be merged into at
+    /// most one module, and once merged it can no longer be imported (§7).
+    file_private merge_module_into(
+        self,
+        spec ResolvedModuleSpec,
+        specifier String,
+        specifier_span SourceSpan,
+        module ModuleInfo,
+        unit CompilationUnit,
+    ) Result[Void] = {
+        let target = when absolute_path(spec.entry_file.into_path()) in {
+            .Ok(p) then p.to_string(),
+            .Error(_) then spec.entry_file,
+        };
+        if module.has_merged_submodule(target) then {
+            return Result[Void].Error(
+                ModuleError.DuplicateUsing(specifier, specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
+        };
+        module.add_merged_submodule(target);
+        // `resolve_file` walks the target's own merge closure, so the whole
+        // module -- entry plus everything it merges -- joins this one.
+        let _ = self.resolve_file(target, module, unit) or return;
         return Result[Void].Ok({});
     };
 

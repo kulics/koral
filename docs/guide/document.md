@@ -2661,55 +2661,80 @@ There is no top-level `entry` (the default build target IS the main module), no
 
 #### Using Declarations
 
-`using` has one form. The specifier is a string, and what it means follows from
-its **shape**:
+`using` has one form. The **operation** follows from the braces; the specifier
+only says where the target is:
 
-| Specifier | Meaning |
+| Form | Operation | Boundary |
+| --- | --- | --- |
+| `using "spec";` | **merge** -- the target joins this module | gone |
+| `using "spec" { … };` | **import** -- take names from the target | kept |
+
+| Specifier | Names |
 | --- | --- |
-| starts with `./` or `../` | **file merge** |
-| anything else | **module import** |
+| `./x.koral`, `../y/z.koral` | the module rooted at that entry file |
+| `pkg`, `pkg/sub` | a registered module's `package[/subpath]` |
 
 Every `using` must sit at the top of the file, before any other top-level
 declaration. A module is imported once per file.
 
-##### File Merge
+A **single file is a module** -- the smallest kind. There is no separate
+"file merge" concept: the bare form merges a module, and a module happens to be
+one file when it merges nothing.
+
+##### Merge
 
 ```koral
 using "./helpers.koral";
-using "../shared/format.koral";
+using "./util.koral";          // a module that itself merges others
 ```
 
-This merges the target file's **top-level definitions into the current module**.
-It is not an external-unit dependency, not a package import, not a submodule
-declaration, not an aliasing mechanism.
+The target's whole closure joins the current module and its boundary is gone:
+its `module_private` names become this module's `module_private` names.
 
-1. The specifier must start with `./` or `../` and end in `.koral`;
-2. It resolves against the directory of the current file, and `.` / `..` may appear;
-3. It creates no module identity and takes no part in package/module resolution;
-4. It may not be combined with `{ ... }` (a merge is the whole file; there is nothing to pick);
-5. Merged files share the module's scope, so `module_private` is visible across them.
+1. A local path must end in `.koral` and is resolved against the directory of
+   the current file; `.` / `..` may appear;
+2. A merged module may be merged into at most one module, and once merged it
+   cannot also be imported -- every source file is compiled into exactly one
+   module;
+3. Merging a registered module (`using "std/text";`) is legal and does the same
+   thing; it is rarely what you want.
 
-##### Module Import
+##### Import
 
 ```koral
-using "std/io";                        // every visible member
-using "std/io" { Reader, Writer };     // only some
-using "std/io" { Reader as IoReader }; // per-name alias
+using "std/os" { };                          // nothing at all
+using "std/io" { Reader, Writer };           // only some
+using "std/io" { Reader as IoReader };       // per-name alias
+using "std/os" { ... };                      // every visible member
+using "std/os" { Config as OsConfig, ... };  // every member, `Config` renamed
+using "std/os" { !Config, !Builder, ... };   // every member but these
 ```
 
-1. `{ ... }` omitted means "every visible member"; if written, it may not be empty
-   (`{ .. }` / `{ * }` are no longer spellings of anything);
-2. An item is `Name` or `Name as Alias`, trailing comma allowed. The alias must keep the referenced
-   name's case class: `Reader as IoReader` is valid, `Reader as reader` is an error.
-   The item may be a trait: `Tag as AlphaTag` binds `AlphaTag` as a trait name and it can be
-   used as a generic bound or a trait-object type. The alias is a spelling -- the trait it
-   names is the same declaration. An unrenamed `Tag` binds the same way, under the name
-   written here, so a bound `[T Tag]` in this file means the trait this import names;
+| Form | Names |
+| --- | --- |
+| `{ }` | none -- a placeholder while editing, like Go's `import _` |
+| `{ a, b }` | exactly these |
+| `{ a as b }` | exactly these, one renamed |
+| `{ ... }` | every visible member |
+| `{ a as b, ... }` | every member, `a` spelled `b` |
+| `{ !a, !b, ... }` | every member but `a` and `b` |
+
+1. `...` is the base set and closes the list. Items alongside it are renames or
+   exclusions (`!`), never both; a positive item without `as` next to `...` is
+   redundant and rejected. `{ !a }` without `...` is rejected.
+2. An item is `Name` or `Name as Alias`, trailing comma allowed. The alias must
+   keep the referenced name's case class: `Reader as IoReader` is valid,
+   `Reader as reader` is an error. The item may be a trait: `Tag as AlphaTag`
+   binds `AlphaTag` as a trait name and it can be used as a generic bound or a
+   trait-object type. The alias is a spelling -- the trait it names is the same
+   declaration.
 3. `as` renames one imported symbol, never the module -- a module name is not a
-   namespace, so after `using "std/io" { Reader };` you write `Reader`, not `io.Reader`;
-4. Imported names are file-local bindings and are not re-exported;
-5. A name collision is an error; `as` disambiguates. When an import-all collides
-   with a local declaration, switch to an explicit list.
+   namespace, so after `using "std/io" { Reader };` you write `Reader`, not
+   `io.Reader`. A local path may also import: `using "./util.koral" { a };`
+   names the module rooted at `util.koral` and needs no manifest entry.
+4. Imported names are file-local bindings and are not re-exported.
+5. A name collision is an error; `as` renames and `!` excludes. The diagnostic
+   says which.
 
 ##### Name Collisions
 
@@ -2722,19 +2747,18 @@ declaration arriving twice is never a clash.
 | a top-level declaration in this module | **error** |
 | another import in this file, different declaration | **error** |
 | the prelude (`std`'s root: `List`, `Eq`, `Clone`, …), different declaration | **error** |
-| the same declaration arriving again (two files of one module each `using "std";`) | fine |
+| the same declaration arriving again (two files of one module each `using "std" { ... };`) | fine |
 | a local `let` inside a function | fine — nested shadowing is legal |
 
-The fix depends on which form the import has: an import-all cannot be renamed,
-so switch to an explicit list; an explicit item can take `as`. The diagnostic
-says which.
+The fix depends on the form: a bare name can take `as`, and a `{ ... }` list can
+take either `as` (rename) or `!` (drop). The diagnostic says which.
 
 ```koral
-using "game/render" { List };        // error: the prelude already owns `List`
-using "game/render" { List as RList };  // fine
-
-using "game/render";                 // error if `render` exports a `List`
-using "game/render" { Sprite };      // fine
+using "game/render" { List };              // error: the prelude owns `List`
+using "game/render" { List as RList };     // fine
+using "game/render" { ... };               // error if `render` exports a `List`
+using "game/render" { !List, ... };        // fine -- drop theirs
+using "game/render" { Sprite };            // fine
 ```
 
 #### Resolution

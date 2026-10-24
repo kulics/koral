@@ -2,9 +2,9 @@
 // Koral Formatter - Test Suite
 // ============================================================================
 
-using "koral_syntax";
+using "koral_syntax" { ... };
 
-using "std/os";
+using "std/os" { ... };
 
 type mutable TestRunner(mutable pass_count UInt, mutable fail_count UInt);
 
@@ -140,9 +140,11 @@ let main() Void = {
     );
 
     // === Using declarations ===
-    // One spelling, classified by the specifier's SHAPE (module-design §3.1):
-    // `./` or `../` merges a file, anything else imports `package[/subpath]`.
-    // `{ .. }` is gone -- an omitted list already means every visible member.
+    // The OPERATION follows from the braces (module-design §3): bare is a
+    // merge, braces are an import. The specifier only says where the target
+    // is -- `./` or `../` is a local module's entry file, anything else is a
+    // registered module's `package[/subpath]`. Forms are a payload: every
+    // shape below must survive a round trip unchanged.
     t.test("using", "using \"foo\";\n", "using \"foo\";\n");
     t.test(
         "module using",
@@ -155,6 +157,31 @@ let main() Void = {
         "file merge parent",
         "using \"../shared/util.koral\";\n",
         "using \"../shared/util.koral\";\n",
+    );
+    t.test(
+        "import inert placeholder",
+        "using \"std/os\" { };\n",
+        "using \"std/os\" { };\n",
+    );
+    t.test(
+        "import all",
+        "using \"std/os\"{...};\n",
+        "using \"std/os\" { ... };\n",
+    );
+    t.test(
+        "import all with rename",
+        "using \"std/os\" { Config as OsConfig, ... };\n",
+        "using \"std/os\" { Config as OsConfig, ... };\n",
+    );
+    t.test(
+        "import all with exclusions",
+        "using \"std/os\"{!Config,!Builder,...};\n",
+        "using \"std/os\" { !Config, !Builder, ... };\n",
+    );
+    t.test(
+        "local path import",
+        "using \"./util.koral\" { util_pub };\n",
+        "using \"./util.koral\" { util_pub };\n",
     );
 
     // === Type declarations ===

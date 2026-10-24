@@ -1,5 +1,5 @@
-using "std/os";
-using "std/proc";
+using "std/os" { ... };
+using "std/proc" { ... };
 
 file_private type InvocationOptions(
     command String,
@@ -562,6 +562,76 @@ file_private let resolve_target_spec(
     );
 };
 
+/// Every entry the manifest declares, as package-root-relative paths. A
+/// declared entry is a module even when this build does not reach it.
+file_private let declared_module_entries(manifest PackageManifest) List[String] = {
+    let mutable out = List[String].new();
+    for entry in manifest.modules.iterator() then {
+        out.push(entry.second.entry_path);
+    };
+    return out;
+};
+
+/// Report `.koral` files under `package_root` that no module claims but that
+/// sit beside one that is (§7). Absent when the package is clean.
+///
+/// The "sits beside a claimed file" half is what keeps test fixtures out of
+/// it: `test/cases/*.koral` are formatter inputs in a directory no module
+/// owns, while a source file dropped next to a module's other files is exactly
+/// the mistake this is for -- it is compiled nowhere and checked by nothing.
+file_private let check_orphan_sources(
+    package_root String,
+    claimed Dict[String, String],
+    declared_entries List[String],
+) Option[String] = {
+    let mutable declared = Set[String].new();
+    for e in declared_entries then {
+        let abs = when absolute_path((package_root.into_path()).join(e)) in {
+            .Ok(p) then p.to_string(),
+            .Error(_) then package_root + "/" + e,
+        };
+        declared.insert(abs);
+    };
+    let mutable claimed_dirs = Set[String].new();
+    for entry in claimed.iterator() then {
+        claimed_dirs.insert(entry.first.into_path().dir_name().to_string());
+    };
+    let mutable orphans = List[String].new();
+    when walk_dir(package_root.into_path()) in {
+        .Ok(mut_iter) then {
+            let mutable iter = mut_iter;
+            while iter.next() is .Some(entry) then {
+                let path = entry.path().to_string();
+                if not path.ends_with(".koral") then {
+                    continue;
+                };
+                let normalized = when absolute_path(path.into_path()) in {
+                    .Ok(p) then p.to_string(),
+                    .Error(_) then path,
+                };
+                if claimed.contains_key(normalized) or declared.contains(normalized) then {
+                    continue;
+                };
+                if claimed_dirs.contains(normalized.into_path().dir_name().to_string()) then {
+                    orphans.push(normalized);
+                };
+            };
+        },
+        .Error(_) then {
+            return Option[String].None();
+        },
+    };
+    if orphans.is_empty() then {
+        return Option[String].None();
+    };
+    orphans.sort();
+    let mutable text = "Error: source file(s) belong to no module; every .koral file beside a module's other files must be part of exactly one module's closure:";
+    for o in orphans then {
+        text = text + "\n  " + o;
+    };
+    return Option[String].Some(text);
+};
+
 file_private let prepare_package_compilation(
     options InvocationOptions,
 ) Result[PreparedCompilation] = {
@@ -610,6 +680,21 @@ file_private let prepare_package_compilation(
     let resolver = ModuleResolver.new();
     let unit = load_target_unit(resolver, registry, root, target_spec) or return;
 
+    // Every source file under the package root must belong to exactly one
+    // module's closure (§7). A file no module claims is not compiled, not
+    // checked, and not noticed -- which is the worst of the three.
+    let orphan_check = check_orphan_sources(
+        package_config_path.into_path().dir_name().to_string(),
+        resolver.claimed_files(),
+        declared_module_entries(root.manifest),
+    );
+    when orphan_check in {
+        .Some(msg) then {
+            return Result[PreparedCompilation].Error(msg);
+        },
+        .None() then {},
+    };
+
     let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path_sorted());
     let linked_libraries = linked_libraries_of(resolver);
     let default_output_dir = package_config_path.into_path().dir_name();
@@ -648,7 +733,7 @@ file_private let prepare_single_file_compilation(
     let unit = CompilationUnit.empty();
 
     // A bare file has no package of its own. The standard library is still
-    // nameable -- `using "std/io";` is a package import even here -- so the
+    // nameable -- `using "std/io" { ... };` is a package import even here -- so the
     // registry std brings with it is installed before the file is read.
     let resolved_std_manifest_path = if options.no_std then Option[String].None()
     else when options.std_config_path in {

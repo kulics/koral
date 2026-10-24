@@ -23,6 +23,7 @@ public enum ModuleError: Error, CustomStringConvertible {
     case invalidModuleSpecifier(String, span: SourceSpan)
     case fileMergeWithList(String, span: SourceSpan)
     case fileMergeNotKoral(String, span: SourceSpan)
+    case fileClaimedTwice(file: String, owner: String, claimant: String, entryFile: String)
 
     /// The phase the failure belongs to.
     ///
@@ -129,11 +130,18 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "File merge '\(specifier)' takes no import list; it merges the whole file"
         case .fileMergeNotKoral(let specifier, _):
             return "File merge path must end in '.koral'; write '\(specifier).koral'"
+        case .fileClaimedTwice(let file, let owner, let claimant, _):
+            return "Error: source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'"
         }
     }
 
     public var description: String {
         switch self {
+        case .fileClaimedTwice:
+            // Printed as text, not as a source diagnostic: the message names
+            // the file and both modules and carries the `Error: ` envelope the
+            // driver gives a module-resolution failure (§7).
+            return messageWithoutLocation
         case .fileNotFound:
             return messageWithoutLocation
         case .circularDependency:
@@ -244,6 +252,8 @@ public class ModuleInfo {
 
     /// 已合并子模块列表（以入口文件绝对路径表示）
     public var mergedSubmodules: [String] = []
+    /// Which module's closure already claims each source file (§7). See
+    /// `ModuleResolver.claimedFiles`.
 
     /// 是否为外部模块
     public let isExternal: Bool
@@ -383,6 +393,10 @@ public class ModuleResolver {
     /// where `using` can only merge files.
     public var registry: PackageRegistry?
     public var rootPackage: LoadedPackage?
+    /// Which module's closure already claims each source file (§7). A file is
+    /// compiled into exactly one module; a second claim is an error rather than
+    /// a second copy of the same declarations under a different identity.
+    public var claimedFiles: [String: String] = [:]
 
     /// Every module reachable by full name, built as modules get loaded.
     public var moduleIndex: [String: ResolvedModuleSpec] = [:]
@@ -476,6 +490,19 @@ public class ModuleResolver {
             return
         }
 
+        // A source file is compiled into exactly one module's closure (§7).
+        // A second claim would give the same declarations two identities.
+        let claimKey = module.path.joined(separator: ".")
+        if let ownerKey = claimedFiles[file] {
+            if ownerKey != claimKey {
+                throw PackageManifestError.message(
+                    "source file '\(file)' is already part of module '\(ownerKey)' and cannot also join '\(claimKey)'"
+                )
+            }
+        } else {
+            claimedFiles[file] = claimKey
+        }
+
         resolvingFiles.append(file)
         defer { _ = resolvingFiles.popLast() }
 
@@ -545,13 +572,29 @@ public class ModuleResolver {
         importedThisFile: inout Set<String>
     ) throws {
         if using.isFileMerge {
+            if using.items != nil {
+                // A local path with braces imports from the module rooted at
+                // that entry file (§3.1). The entry file is the module's
+                // identity; no manifest entry is needed.
+                try recordLocalModuleUsing(using: using, module: module, unit: unit, currentFile: currentFile)
+                return
+            }
             try resolveFileMerge(using: using, fileName: using.specifier, module: module, unit: unit, currentFile: currentFile)
             return
         }
 
-        let spec = try resolveModuleImport(using: using, module: module, unit: unit)
+        let isMerge = using.items == nil
+        let spec = try resolveModuleImport(using: using, module: module, unit: unit, load: !isMerge)
         if !importedThisFile.insert(spec.fullName).inserted {
             throw ModuleError.duplicateUsing(spec.fullName, span: using.span)
+        }
+        if isMerge {
+            // Bare form is a MERGE (§3.2): the target module joins this one and
+            // its boundary is gone. Same operation the `./` path form performs.
+            // It is deliberately NOT loaded as its own module first -- that
+            // would claim the files twice (§7).
+            try mergeModule(into: module, spec: spec, specifier: using.specifier, span: using.span, unit: unit)
+            return
         }
         // Import edges are scoped to the FILE the `using` is written in:
         // a `using` in one file of a module does not silently apply to its
@@ -568,7 +611,8 @@ public class ModuleResolver {
     private func resolveModuleImport(
         using: UsingDeclaration,
         module: ModuleInfo,
-        unit: CompilationUnit
+        unit: CompilationUnit,
+        load: Bool = true
     ) throws -> ResolvedModuleSpec {
         // The specifier is `package[/subpath]`. The first segment is a package
         // name; the rest is the subpath inside it (§4). There is no lookup that
@@ -625,7 +669,9 @@ public class ModuleResolver {
             )
         }
 
-        _ = try resolveModule(spec: spec, unit: unit)
+        if load {
+            _ = try resolveModule(spec: spec, unit: unit)
+        }
         return spec
     }
 
@@ -641,11 +687,55 @@ public class ModuleResolver {
         let targetPath = target.pathSegments
 
         guard let items = using.items else {
-            // `{ }` omitted: every visible member of the module (§3).
+            // Bare form. It still means "every visible member" for a module
+            // specifier; §3.2 turns it into a merge once every caller has moved
+            // onto `{ ... }`.
             unit.importGraph.addModuleImport(
                 from: module.path,
                 to: targetPath,
                 kind: .batchImport,
+                sourceFile: importSourceFile,
+                span: using.span
+            )
+            return
+        }
+
+        if using.importAll {
+            // `{ ... }`, `{ a as b, ... }`, `{ !a, ... }` -- the whole surface
+            // with the listed renames applied and exclusions removed (§3.3).
+            // The filter rides on the batch edge and stops a renamed/excluded
+            // spelling from landing under its own name; a rename is ALSO a
+            // symbol edge so the new spelling resolves through the ordinary
+            // import layer.
+            unit.importGraph.addModuleImport(
+                from: module.path,
+                to: targetPath,
+                kind: .batchImport,
+                sourceFile: importSourceFile,
+                span: using.span,
+                filter: items
+            )
+            for item in items where item.alias != nil {
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: item.alias ?? item.name,
+                    originalSymbol: item.name,
+                    kind: .memberImport,
+                    sourceFile: importSourceFile,
+                    span: using.span
+                )
+            }
+            return
+        }
+
+        if items.isEmpty {
+            // `{ }` -- a placeholder with no member surface (§3.3). It is a
+            // dependency edge and nothing more: no names, no methods.
+            unit.importGraph.addModuleImport(
+                from: module.path,
+                to: targetPath,
+                kind: .moduleImport,
                 sourceFile: importSourceFile,
                 span: using.span
             )
@@ -663,6 +753,76 @@ public class ModuleResolver {
                 span: using.span
             )
         }
+    }
+
+    /// Import from a local module named by its entry file (§3.1). A local path
+    /// with braces needs no manifest entry: the entry file IS the module, and
+    /// its identity is the entry file's stem -- the same derivation the
+    /// resolver uses when no manifest names it.
+    private func recordLocalModuleUsing(
+        using: UsingDeclaration,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        currentFile: String
+    ) throws {
+        let currentDir = URL(fileURLWithPath: currentFile).deletingLastPathComponent().path
+        var target = URL(fileURLWithPath: currentDir)
+        for segment in using.specifier.split(separator: "/") {
+            if segment == "." || segment.isEmpty { continue }
+            if segment == ".." {
+                target = target.deletingLastPathComponent()
+            } else {
+                target = target.appendingPathComponent(String(segment))
+            }
+        }
+        let entryAbs = target.standardized.path
+        guard FileManager.default.fileExists(atPath: entryAbs) else {
+            throw ModuleError.fileNotFound(using.specifier, searchPath: currentDir)
+        }
+
+        let stem = URL(fileURLWithPath: entryAbs).deletingPathExtension().lastPathComponent
+        let stemId = moduleFileNameToIdentifier(stem)
+        let targetPath = [stemId]
+
+        // Load the target as its own module so its declarations exist under
+        // `targetPath` and the boundary stays (§3.1).
+        guard let owner = module.owner ?? rootPackage else {
+            throw ModuleError.fileNotFound(using.specifier, searchPath: currentDir)
+        }
+        let spec = ResolvedModuleSpec(
+            fullName: stemId,
+            pathSegments: targetPath,
+            key: stemId,
+            subpath: stemId,
+            entryFile: entryAbs,
+            links: [],
+            packageIdentity: owner.identity,
+            packageKind: owner.kind,
+            owner: owner
+        )
+        _ = try resolveModule(spec: spec, unit: unit)
+
+        recordImportToGraph(using: using, module: module, unit: unit, target: spec, sourceFile: currentFile)
+    }
+
+    /// Merge a whole module into the current one (§3.2). The target's boundary
+    /// is gone afterwards: its `module_private` names are this module's own, so
+    /// it may be merged into at most one module and, once merged, can no longer
+    /// be imported (§7). `resolveFile` walks the target's own merge closure, so
+    /// entry plus everything it merges join this module together.
+    private func mergeModule(
+        into module: ModuleInfo,
+        spec: ResolvedModuleSpec,
+        specifier: String,
+        span: SourceSpan,
+        unit: CompilationUnit
+    ) throws {
+        let target = URL(fileURLWithPath: spec.entryFile).standardized.path
+        if module.mergedSubmodules.contains(target) {
+            throw ModuleError.duplicateUsing(specifier, span: span)
+        }
+        module.mergedSubmodules.append(target)
+        try resolveFile(file: target, module: module, unit: unit)
     }
 
     /// 解析文件合并: using "file_name"

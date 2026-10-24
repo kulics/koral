@@ -1044,44 +1044,92 @@ given Parser {
         return .Ok(members);
     };
 
-    /// `{ Name, Other as Alias }` -- the filter on an import (§3.3).
-    /// Omitting the braces means "everything"; writing them empty means nothing,
-    /// which is not a thing to ask for (§7.4).
+    /// `{ … }` -- the filter on an import (§3.3).
+    ///
+    /// Omitting the braces is a merge (§3.2); writing them is an import, and the
+    /// list says which members come along. Six forms:
+    ///
+    ///     { }                  nothing at all (a placeholder while editing)
+    ///     { a, b }             exactly these
+    ///     { a as b }           exactly these, one renamed
+    ///     { ... }              every visible member
+    ///     { a as b, ... }      every member, `a` spelled `b`
+    ///     { !a, !b, ... }      every member but `a` and `b`
+    ///
+    /// `...` is the base set. Items alongside it are renames (positive) or
+    /// exclusions (`!`), never both; a positive item without `as` next to `...`
+    /// is redundant and rejected.
     module_private parse_using_import_list(
         self,
         specifier String,
         is_file_merge Bool,
-    ) Result[List[UsingModuleItem]] = {
+    ) Result[UsingImportList] = {
         let brace_token = self.current();
         self.advance();
         let mutable items = List[UsingModuleItem].new();
+        let mutable import_all = false;
+        let mutable saw_exclude = false;
+        let mutable saw_positive = false;
 
         while self.current().kind is not .RBrace() then {
             if self.current().kind is .Range() then {
-                // `{ .. }` used to mean "everything". Omitting the list means
-                // that now (§3), so `..` is not a name anyone could import.
+                // `{ .. }` used to mean "everything" and `...` means it now (§3.3).
                 return .Error(
                     self.parser_error_at(
-                        "\"..\" is not an import item; omit the list to import every visible member of \"\(specifier)\"",
+                        "\"..\" is not an import item; write \"...\" to import every visible member of \"\(specifier)\"",
                         self.current(),
                     ),
                 );
             };
             if self.current().kind is .Ellipsis() then {
-                // `...` is the elision glyph (open ranges today, rest imports
-                // someday); it is never a name to import.
-                return .Error(
-                    self.parser_error_at(
-                        "\"...\" is not an import item; omit the list to import every visible member of \"\(specifier)\"",
-                        self.current(),
-                    ),
+                // `...` is the base set and closes the list: renames and
+                // exclusions come before it, nothing comes after (§3.3).
+                self.advance();
+                import_all = true;
+                if self.current().kind is .Comma() then {
+                    self.advance();
+                };
+                if self.current().kind is not .RBrace() then {
+                    return .Error(
+                        self.parser_error_at(
+                            "\"...\" closes the import list; put renames or exclusions before it, or write \"{ ... }\"",
+                            self.current(),
+                        ),
+                    );
+                };
+                self.advance();
+                return self.finish_import_list(
+                    specifier,
+                    items,
+                    true,
+                    saw_exclude,
+                    saw_positive,
+                    brace_token,
+                    is_file_merge,
                 );
             };
+
             let name_token = self.current();
+            let mutable excluded = false;
+            if self.current().kind is .Bang() then {
+                self.advance();
+                excluded = true;
+                saw_exclude = true;
+            } else {
+                saw_positive = true;
+            };
             let name = self.expect_identifier("import item") or return;
 
             let alias = when self.current().kind in {
                 .KwAs() then {
+                    if excluded then {
+                        return .Error(
+                            self.parser_error_at(
+                                "'!\(name)' is an exclusion and cannot be renamed; drop the '!' or drop the 'as'",
+                                name_token,
+                            ),
+                        );
+                    };
                     self.advance();
                     let alias_name = self.expect_identifier("using alias") or return;
                     let name_is_upper = self.is_upper_first(name);
@@ -1107,7 +1155,7 @@ given Parser {
                 _ then Option[String].None(),
             };
 
-            items.push(UsingModuleItem(name, alias));
+            items.push(UsingModuleItem(name, alias, excluded));
 
             when self.current().kind in {
                 .Comma() then {
@@ -1123,23 +1171,55 @@ given Parser {
         };
 
         self.advance();
-        if items.is_empty() then {
-            if is_file_merge then {
-                return .Error(
-                    self.parser_error_at(
-                        "File merge '\(specifier)' takes no import list; it merges the whole file",
-                        brace_token,
-                    ),
-                );
-            };
+        return self.finish_import_list(specifier, items, false, saw_exclude, saw_positive, brace_token, is_file_merge);
+    };
+
+    /// Validate one import list's shape once its items and base set are known
+    /// (§3.3). `is_file_merge` covers the bare caller path where no brace was
+    /// read -- a merge has no member surface to filter.
+    module_private finish_import_list(
+        self,
+        specifier String,
+        items List[UsingModuleItem],
+        import_all Bool,
+        saw_exclude Bool,
+        saw_positive Bool,
+        brace_token Token,
+        is_file_merge Bool,
+    ) Result[UsingImportList] = {
+        let _ = is_file_merge;
+
+        if saw_exclude and saw_positive then {
             return .Error(
                 self.parser_error_at(
-                    "import list cannot be empty; omit it to import every visible member of \"\(specifier)\"",
+                    "an import list is either all-positive or all-exclusions; '{ !a, ... }' and '{ a as b, ... }' do not mix",
                     brace_token,
                 ),
             );
         };
-        return .Ok(items);
+        if saw_exclude and not import_all then {
+            return .Error(
+                self.parser_error_at(
+                    "'!' excludes from the whole module surface and needs '...'; write '{ !name, ... }'",
+                    brace_token,
+                ),
+            );
+        };
+        if import_all and saw_positive then {
+            // A positive item beside `...` is only meaningful as a rename --
+            // without `as` it is the whole surface renamed to itself.
+            for item in items then {
+                if not item.excluded and item.alias is .None() then {
+                    return .Error(
+                        self.parser_error_at(
+                            "'\(item.name)' next to '...' is redundant; either drop it, rename it with 'as', or exclude it with '!'",
+                            brace_token,
+                        ),
+                    );
+                };
+            };
+        };
+        return .Ok(UsingImportList(items, import_all));
     };
 
     /// A module's full name is `package[/subpath]`, lowercase identifier
@@ -1267,20 +1347,17 @@ given Parser {
         ) or specifier.starts_with("..\\");
 
         let mutable items = Option[List[UsingModuleItem]].None();
+        let mutable import_all = false;
         if self.current().kind is .LBrace() then {
             let parsed = self.parse_using_import_list(specifier, is_file_merge) or return;
-            items = Option[List[UsingModuleItem]].Some(parsed);
+            items = Option[List[UsingModuleItem]].Some(parsed.items);
+            import_all = parsed.import_all;
         };
 
         if is_file_merge then {
-            if items is .Some(_) then {
-                return .Error(
-                    self.parser_error_at(
-                        "File merge '\(specifier)' takes no import list; it merges the whole file",
-                        specifier_token,
-                    ),
-                );
-            };
+            // A local path may be merged (bare) or imported (braces). Either
+            // way it names the module rooted at that entry file (§3.1); the
+            // braces decide only whether the boundary survives.
             if not specifier.ends_with(".koral") then {
                 return .Error(
                     self.parser_error_at(
@@ -1298,7 +1375,7 @@ given Parser {
         // compile while every other declaration demanded its terminator.
         self.require_semicolon() or return;
 
-        return .Ok(Decl.UsingDecl(specifier, items, self.span_from_start(start)));
+        return .Ok(Decl.UsingDecl(specifier, items, import_all, self.span_from_start(start)));
     };
 
     module_private parse_trait_decl(self, access AccessModifier) Result[Decl] = {
@@ -1487,7 +1564,7 @@ given Parser {
             let decl = self.parse_top_level_decl() or return;
             // Check that using declarations appear before other declarations.
             let is_using = when decl in {
-                .UsingDecl(_, _, _) then true,
+                .UsingDecl(_, _, _, _) then true,
                 _ then false,
             };
             if is_using then {

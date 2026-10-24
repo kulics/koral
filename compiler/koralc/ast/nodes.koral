@@ -328,7 +328,7 @@ public type Decl {
     TypeAliasDecl(access AccessModifier, name String, target TypeNode, span SourceSpan, name_span SourceSpan),
     IntrinsicTypeDecl(access AccessModifier, name String, type_params List[TypeParameter], span SourceSpan, name_span SourceSpan),
     ForeignTypeDecl(access AccessModifier, name String, fields Option[List[Field]], span SourceSpan, name_span SourceSpan),
-    UsingDecl(specifier String, items Option[List[UsingModuleItem]], span SourceSpan),
+    UsingDecl(specifier String, items Option[List[UsingModuleItem]], import_all Bool, span SourceSpan),
     TraitDecl(access AccessModifier, name String, type_params List[TypeParameter], parents List[TypeNode], members List[TraitMember], span SourceSpan, name_span SourceSpan),
     GivenDecl(target_type TypeNode, type_params List[TypeParameter], members List[GivenMember], span SourceSpan),
     GivenTraitDecl(target_type TypeNode, type_params List[TypeParameter], trait_type TypeNode, members List[GivenMember], span SourceSpan),
@@ -350,7 +350,7 @@ public let decl_name(decl Decl) Option[String] = when decl in {
     .IntrinsicTypeDecl(_, name, _, _, _) then Option[String].Some(name),
     .ForeignTypeDecl(_, name, _, _, _) then Option[String].Some(name),
     .TraitDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
-    .UsingDecl(_, _, _) then Option[String].None(),
+    .UsingDecl(_, _, _, _) then Option[String].None(),
     .GivenDecl(_, _, _, _) then Option[String].None(),
     .GivenTraitDecl(_, _, _, _, _) then Option[String].None(),
     .IntrinsicGivenDecl(_, _, _, _) then Option[String].None(),
@@ -369,7 +369,7 @@ public let decl_name_span(decl Decl) SourceSpan = {
         .TypeAliasDecl(_, _, _, _, name_span) then name_span,
         .IntrinsicTypeDecl(_, _, _, _, name_span) then name_span,
         .ForeignTypeDecl(_, _, _, _, name_span) then name_span,
-        .UsingDecl(_, _, span) then span,
+        .UsingDecl(_, _, _, span) then span,
         .TraitDecl(_, _, _, _, _, _, name_span) then name_span,
         .GivenDecl(_, _, _, span) then span,
         .GivenTraitDecl(_, _, _, _, span) then span,
@@ -396,7 +396,7 @@ public let decl_access(decl Decl) Option[AccessModifier] = when decl in {
     .IntrinsicTypeDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
     .ForeignTypeDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
     .TraitDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .UsingDecl(_, _, _) then Option[AccessModifier].None(),
+    .UsingDecl(_, _, _, _) then Option[AccessModifier].None(),
     .GivenDecl(_, _, _, _) then Option[AccessModifier].None(),
     .GivenTraitDecl(_, _, _, _, _) then Option[AccessModifier].None(),
     .IntrinsicGivenDecl(_, _, _, _) then Option[AccessModifier].None(),
@@ -406,7 +406,19 @@ public let decl_access(decl Decl) Option[AccessModifier] = when decl in {
 ///
 /// There is no "everything" item -- `{ }` omitted already means that (§3), so
 /// `{ * }` / `{ .. }` have nothing to be a spelling of.
-public type UsingModuleItem(name String, alias Option[String]);
+/// One entry in an import list (§3.3).
+///
+/// `excluded` is only meaningful alongside `import_all`: `{ !a, ... }` takes
+/// everything but `a`. A positive item with `import_all` is a rename that stays
+/// in force while the rest of the module's surface comes along (`{ a as b, ... }`).
+public type UsingModuleItem(name String, alias Option[String], excluded Bool);
+
+/// The body of `using "spec" { … }` -- a filter over a module's members (§3.3).
+///
+/// `import_all` marks the `...` base set: with it, the items are renames that
+/// survive the sweep (`{ a as b, ... }`) or exclusions removed from it
+/// (`{ !a, ... }`). Without it the items are the whole answer (`{ a, b }`).
+public type UsingImportList(items List[UsingModuleItem], import_all Bool);
 
 public type mutable Param(name String, is_mutable Bool, type_name TypeNode, named Bool);
 

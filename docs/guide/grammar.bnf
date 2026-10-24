@@ -7,34 +7,51 @@
 
 <using-decl> ::= "using" <string-literal> <import-list>? ";"
 
-// 一种写法（§3）。specifier 是字符串，含义由它的形状决定（§3.1）：
-//   "./..." 或 "../..." 开头 → 文件合并，目标必须以 .koral 结尾（§3.2）
-//   其它                    → 模块导入，写法是 包名[/子路径]（§3.3）
+// 操作由有无括号决定（module-design §3）：
+//   裸形式                    → 合并：目标模块并进当前模块，边界消掉
+//   带 <import-list>          → 导入：取目标的名字，边界保留
+// specifier 只回答目标在哪（§3.1）：
+//   "./..." 或 "../..." 开头  → 本地模块的入口文件（相对当前文件，允许 . / ..）
+//   其它                      → 已登记模块，写法是 包名[/子路径]
 //
-// 文件合并：把目标文件的顶层定义并入当前模块。不是外部单元依赖、不是包导入、
-// 不是子模块声明、不是别名机制；不允许与 <import-list> 连用（合并就是全部）。
+// 单文件即模块（§1）：「文件合并」不是独立概念，裸形式合并的永远是模块，
+// 一个不合并任何东西的模块恰好只有一个文件。
 //
-// 模块导入：<import-list> 省略即「全部可见成员」；出现则不能为空（§7.4）。
-// 同一模块在同一文件内只 using 一次（§7.10）。
+// 合并：目标的整个闭包并进当前模块。一个模块最多被并进一个模块，
+// 且被并后不得再被导入（§7）——每个源文件恰好属于一个模块。
+//
+// 导入清单六形态，构成一个集合代数（§3.3）：
 
-<import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"
+<import-list> ::= "{" "}"                                    // 惰性占位（同 Go import _）
+               | "{" "..." "}"                              // 全部可见成员
+               | "{" import-item ("," import-item)* "}"     // 白名单
+               | "{" rename-item ("," rename-item)* "," "..." "}"   // 全量 + 改名
+               | "{" "!" name ("," "!" name)* "," "..." "}" // 全量 + 排除
 
 <import-item> ::= (<identifier> | <type-identifier>) <import-alias>?
+<rename-item> ::= (<identifier> | <type-identifier>) <import-alias>
 <import-alias> ::= "as" (<identifier> | <type-identifier>)
+
 // 别名必须与被引标识符的大小写类一致：`Reader as IoReader` 合法，
 // `Reader as reader` 报 "alias must start with an uppercase letter because
 // referenced identifier 'Reader' starts with uppercase"（反之亦然）。
+//
+// `...` 是基集并收尾清单：与它同表的条目只能是改名或排除，不得混写；
+// `...` 旁边不带 `as` 的正面条目多余，`{ !a }` 不带 `...` 非法。
+// `!` 是排除记号——它在 Koral 没有第二个岗位（逻辑取反是 `not`，不等是 `!=`）。
 
 // 说明：
-// 1) using "std/io";                        导入 std/io 的全部可见成员
-// 2) using "std/io" { Reader, Writer };     只带一部分
-// 3) using "std/io" { Reader as IoReader }; 逐项别名（允许尾逗号）
-// 4) using "./helpers.koral";               文件合并
-// 5) 模块名不绑定为命名空间：导入 Reader 后写 Reader，不写 io.Reader
-// 6) 包名是单段小写标识符（§2.1），子路径用 / 分隔，全程无 "."
+// 1) using "./helpers.koral";              合并单文件模块
+// 2) using "std/io" { ... };               导入 std/io 的全部可见成员
+// 3) using "std/io" { Reader, Writer };    只带一部分
+// 4) using "std/io" { Reader as IoReader };逐项别名（允许尾逗号）
+// 5) using "std/os" { !Config, ... };      全量，除去 Config
+// 6) using "./util.koral" { util_pub };    导入本地模块（不需要 manifest 登记）
+// 7) 模块名不绑定为命名空间：导入 Reader 后写 Reader，不写 io.Reader
+// 8) 包名是单段小写标识符（§2.1），子路径用 / 分隔，全程无 "."
 //    manifest 里的 "." 只是记法（§5.2）——源码里主模块就写包名本身
-// 7) 模块的包内名写在 koral.json 的 modules 里；源码一律写全名
-// 8) `{ .. }` / `{ * }` 不再是写法：省略列表就是全部
+// 9) `{ .. }` / `{ * }` 不是写法：全部是 `{ ... }`
+// 10) 同一模块在同一文件内只 using 一次（§7）
 
 // ============================================================================
 // Global Declarations

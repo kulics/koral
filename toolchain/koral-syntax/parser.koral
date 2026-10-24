@@ -3750,17 +3750,19 @@ given CstParser {
         ) or spec.starts_with("..\\");
     };
 
-    /// `<import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"`
-    /// `<import-item> ::= <identifier> ("as" <identifier>)?`
+    /// `<import-list>` -- the filter on an import (§3.3). Six forms:
     ///
-    /// `{ .. }` is no longer a spelling (§8) -- omitting the list already means
-    /// every visible member, so a list that is present has to name at least one.
-    /// `<import-list> ::= "{" <import-item> ("," <import-item>)* ","? "}"`
-    /// `<import-item> ::= <identifier> ("as" <identifier>)?`
+    ///     { }                  nothing at all (a placeholder while editing)
+    ///     { a, b }             exactly these
+    ///     { a as b }           exactly these, one renamed
+    ///     { ... }              every visible member
+    ///     { a as b, ... }      every member, `a` spelled `b`
+    ///     { !a, !b, ... }      every member but `a` and `b`
     ///
-    /// `{ .. }` is no longer a spelling (§8) -- omitting the list already means
-    /// every visible member, so a list that is present has to name at least one.
-    /// The list may span lines, so newlines are skipped as whitespace here.
+    /// `...` is the base set and closes the list. Items alongside it are
+    /// renames (positive) or exclusions (`!`), never both; a positive item
+    /// without `as` next to `...` is redundant and rejected. The list may span
+    /// lines, so newlines are skipped as whitespace here.
     file_private validate_import_list_tokens(
         self,
         tokens List[Token],
@@ -3773,40 +3775,60 @@ given CstParser {
             );
         };
         i += 1;
-        let mutable saw_item = false;
+        let mutable import_all = false;
+        let mutable saw_exclude = false;
+        let mutable saw_positive = false;
         while true then {
             i = CstParser.skip_newline_tokens(tokens, i);
             if i >= tokens.count() then {
                 return .Error("Parse error: expected '}' in import list");
             };
             if tokens[i] is .RBrace() then {
-                if not saw_item then {
-                    return .Error(
-                        "Parse error: import list cannot be empty; omit the list to import every visible member",
-                    );
-                };
-                return self.validate_using_trailing_tokens(
+                return self.finish_import_list_tokens(
                     tokens,
                     i + 1,
-                    "Parse error: unexpected tokens after using declaration",
+                    import_all,
+                    saw_exclude,
+                    saw_positive,
                 );
             };
-            if tokens[i] is not .Ident(_) then {
-                if tokens[i] is .Range() then {
+            if tokens[i] is .Ellipsis() then {
+                // `...` is the base set and closes the list (§3.3).
+                i = CstParser.skip_newline_tokens(tokens, i + 1);
+                if i < tokens.count() and tokens[i] is .Comma() then {
+                    i = CstParser.skip_newline_tokens(tokens, i + 1);
+                };
+                if i >= tokens.count() or tokens[i] is not .RBrace() then {
                     return .Error(
-                        "Parse error: '..' is not an import item; omit the list to import every visible member",
+                        "Parse error: '...' closes the import list; put renames or exclusions before it, or write '{ ... }'",
                     );
                 };
-                if tokens[i] is .Ellipsis() then {
-                    return .Error(
-                        "Parse error: '...' is not an import item; omit the list to import every visible member",
-                    );
-                };
+                return self.finish_import_list_tokens(
+                    tokens,
+                    i + 1,
+                    true,
+                    saw_exclude,
+                    saw_positive,
+                );
+            };
+            if tokens[i] is .Range() then {
+                return .Error(
+                    "Parse error: '..' is not an import item; write '...' to import every visible member",
+                );
+            };
+            let mutable excluded = false;
+            if tokens[i] is .Bang() then {
+                excluded = true;
+                saw_exclude = true;
+                i = CstParser.skip_newline_tokens(tokens, i + 1);
+            } else {
+                saw_positive = true;
+            };
+            if i >= tokens.count() or tokens[i] is not .Ident(_) then {
                 return .Error(
                     "Parse error: expected an import item or '}' in import list",
                 );
             };
-            saw_item = true;
             let item_name = when tokens[i] in {
                 .Ident(n) then n,
                 _ then "",
@@ -3815,6 +3837,11 @@ given CstParser {
 
             i = CstParser.skip_newline_tokens(tokens, i);
             if i < tokens.count() and tokens[i] is .KwAs() then {
+                if excluded then {
+                    return .Error(
+                        "Parse error: '!\(item_name)' is an exclusion and cannot be renamed; drop the '!' or drop the 'as'",
+                    );
+                };
                 i = CstParser.skip_newline_tokens(tokens, i + 1);
                 if i >= tokens.count() or tokens[i] is not .Ident(_) then {
                     return .Error("Parse error: expected an alias name after 'as'");
@@ -3865,16 +3892,46 @@ given CstParser {
                 continue;
             };
             if tokens[i] is .RBrace() then {
-                return self.validate_using_trailing_tokens(
+                return self.finish_import_list_tokens(
                     tokens,
                     i + 1,
-                    "Parse error: unexpected tokens after using declaration",
+                    import_all,
+                    saw_exclude,
+                    saw_positive,
                 );
             };
             return .Error("Parse error: expected ',' or '}' in import list");
         };
 
         return .Ok({});
+    };
+
+    /// Validate one import list's shape once its items and base set are known
+    /// (§3.3). Shared by both exits of the token loop so the two paths cannot
+    /// drift apart.
+    file_private finish_import_list_tokens(
+        self,
+        tokens List[Token],
+        next UInt,
+        import_all Bool,
+        saw_exclude Bool,
+        saw_positive Bool,
+    ) Result[Void] = {
+        if saw_exclude and saw_positive then {
+            return .Error(
+                "Parse error: an import list is either all-positive or all-exclusions; '{ !a, ... }' and '{ a as b, ... }' do not mix",
+            );
+        };
+        if saw_exclude and not import_all then {
+            return .Error(
+                "Parse error: '!' excludes from the whole module surface and needs '...'; write '{ !name, ... }'",
+            );
+        };
+        return self.validate_using_trailing_tokens(
+            tokens,
+            next,
+            "Parse error: unexpected tokens after using declaration",
+        );
     };
 
     file_private skip_newline_tokens(tokens List[Token], start UInt) UInt = {
@@ -3904,29 +3961,20 @@ given CstParser {
                 "Parse error: 'using' takes no alias; rename a dependency by changing its key, or name members in an import list with 'as'",
             );
         };
-        if self.is_file_merge_specifier(spec) then {
-            if not spec.ends_with(".koral") then {
-                return .Error("Parse error: file merge path must end in '.koral'");
-            };
-            if tokens.count() > 2 and tokens[2] is .LBrace() then {
-                return .Error(
-                    "Parse error: file merge takes no import list; it merges the whole file",
-                );
-            };
-            return self.validate_using_trailing_tokens(
-                tokens,
-                2,
-                "Parse error: unexpected tokens after file merge using",
-            );
+        if self.is_file_merge_specifier(spec) and not spec.ends_with(".koral") then {
+            return .Error("Parse error: file merge path must end in '.koral'");
         };
-
+        // A local path may be merged (bare) or imported (braces) -- the
+        // braces decide only whether the target's boundary survives (§3).
+        // The spec's shape says where the target is (§3.1), never what
+        // happens to it.
         if tokens.count() > 2 and tokens[2] is .LBrace() then {
             return self.validate_import_list_tokens(tokens, 2);
         };
         return self.validate_using_trailing_tokens(
             tokens,
             2,
-            "Parse error: unexpected tokens after module import",
+            "Parse error: unexpected tokens after using declaration",
         );
     };
 

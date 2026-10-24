@@ -238,9 +238,6 @@ public class Driver {
       // message alone -- the same shape the bootstrap compiler uses.
       writeStderr("\(error)")
       exit(1)
-    } catch let error as AccessError {
-      writeStderr("Access Error: \(error)")
-      exit(1)
     } catch {
       writeStderr("Error: \(error)")
       exit(1)
@@ -412,6 +409,52 @@ public class Driver {
     return result
   }
 
+  /// Report `.koral` files under `packageRoot` that no module claims but that
+  /// sit beside one that is (§7). Declared manifest entries are modules even
+  /// when this build does not reach them, so they are never orphans.
+  ///
+  /// The "sits beside a claimed file" half is what keeps test fixtures out of
+  /// it: `test/cases/*.koral` are formatter inputs in a directory no module
+  /// owns, while a source file dropped next to a module's other files is
+  /// exactly the mistake this is for.
+  private func checkOrphanSources(
+    packageRoot: String,
+    unit: CompilationUnit,
+    declaredEntries: [String]
+  ) throws {
+    var claimed = Set<String>()
+    var claimedDirs = Set<String>()
+    for name in unit.loadOrder {
+      guard let module = unit.loadedModules[name] else { continue }
+      for f in [module.entryFile] + module.mergedSubmodules {
+        let norm = URL(fileURLWithPath: f).standardized.path
+        claimed.insert(norm)
+        claimedDirs.insert(URL(fileURLWithPath: norm).deletingLastPathComponent().path)
+      }
+    }
+    let declared = Set(declaredEntries.map { URL(fileURLWithPath: $0).standardized.path })
+
+    var orphans: [String] = []
+    let rootURL = URL(fileURLWithPath: packageRoot)
+    guard let walker = FileManager.default.enumerator(
+      at: rootURL, includingPropertiesForKeys: nil
+    ) else { return }
+    for case let url as URL in walker {
+      guard url.pathExtension == "koral" else { continue }
+      let norm = url.standardized.path
+      if claimed.contains(norm) || declared.contains(norm) { continue }
+      if claimedDirs.contains(url.deletingLastPathComponent().path) {
+        orphans.append(norm)
+      }
+    }
+    guard !orphans.isEmpty else { return }
+    var text = "source file(s) belong to no module; every .koral file beside a module's other files must be part of exactly one module's closure:"
+    for o in orphans.sorted() {
+      text += "\n  " + o
+    }
+    throw PackageManifestError.message(text)
+  }
+
   private func registerLoadedSources(unit: CompilationUnit) {
     for name in unit.loadOrder {
       guard let module = unit.loadedModules[name] else { continue }
@@ -540,6 +583,15 @@ public class Driver {
     let (unit, _) = try loadCompilationUnit(targetSpec: targetSpec, registry: registry, root: root)
 
     let packageRootURL = packageConfigURL.deletingLastPathComponent()
+
+    // Every source file beside a module's other files must belong to exactly
+    // one module's closure (§7). A file no module claims is compiled nowhere
+    // and checked by nothing.
+    try checkOrphanSources(
+      packageRoot: packageRootURL.path,
+      unit: unit,
+      declaredEntries: root.manifest.modules.values.map { $0.entryPath }.sorted()
+    )
     let outputDirectory: URL
     if let outputDir {
       outputDirectory = URL(fileURLWithPath: outputDir).standardized

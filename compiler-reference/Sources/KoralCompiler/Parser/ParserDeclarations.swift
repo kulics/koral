@@ -1241,18 +1241,17 @@ extension Parser {
       || specifier.hasPrefix(".\\") || specifier.hasPrefix("..\\")
 
     var items: [UsingModuleItem]? = nil
+    var importAll = false
     if currentToken === .leftBrace {
       let parsed = try parseUsingImportList(isFileMerge: isFileMerge, specifier: specifier)
-      items = parsed
+      items = parsed.items
+      importAll = parsed.importAll
     }
 
     if isFileMerge {
-      if items != nil {
-        throw ParserError.rejectedConstruct(
-          span: specifierSpan,
-          message: "File merge '\(specifier)' takes no import list; it merges the whole file"
-        )
-      }
+      // A local path may be merged (bare) or imported (braces). Either way it
+      // names the module rooted at that entry file (§3.1); the braces decide
+      // only whether the boundary survives.
       if !specifier.hasSuffix(".koral") {
         throw ParserError.rejectedConstruct(
           span: specifierSpan,
@@ -1264,7 +1263,7 @@ extension Parser {
     }
 
     let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-    return UsingDeclaration(specifier: specifier, items: items, span: span)
+    return UsingDeclaration(specifier: specifier, items: items, importAll: importAll, span: span)
   }
 
   /// A module's full name is `package[/subpath]`, lowercase identifier
@@ -1316,40 +1315,82 @@ extension Parser {
     }
   }
 
-  /// `{ Name, Other as Alias }` -- the filter on an import (§3.3).
-  /// Omitting the braces means "everything"; writing them empty means nothing,
-  /// which is not a thing to ask for (§7.4).
-  private func parseUsingImportList(isFileMerge: Bool, specifier: String) throws -> [UsingModuleItem] {
+  /// `{ ... }` -- the filter on an import (§3.3).
+  ///
+  /// Omitting the braces is a merge (§3.2); writing them is an import, and the
+  /// list says which members come along. Six forms:
+  ///
+  ///     { }                  nothing at all (a placeholder while editing)
+  ///     { a, b }             exactly these
+  ///     { a as b }           exactly these, one renamed
+  ///     { ... }              every visible member
+  ///     { a as b, ... }      every member, `a` spelled `b`
+  ///     { !a, !b, ... }      every member but `a` and `b`
+  ///
+  /// `...` is the base set. Items alongside it are renames (positive) or
+  /// exclusions (`!`), never both; a positive item without `as` next to `...`
+  /// is redundant and rejected.
+  private func parseUsingImportList(isFileMerge: Bool, specifier: String) throws -> UsingImportList {
     let braceSpan = currentSpan
     try match(.leftBrace)
     var items: [UsingModuleItem] = []
+    var importAll = false
+    var sawExclude = false
+    var sawPositive = false
 
     while currentToken !== .rightBrace {
       if currentToken === .range {
-        // `{ .. }` used to mean "everything". Omitting the list means that now
-        // (§3), so `..` is not a name anyone could import -- point at it and
-        // say what replaces it (§8).
+        // `{ .. }` used to mean "everything" and `...` means it now (§3.3).
         throw ParserError.rejectedConstruct(
           span: currentSpan,
-          message: "\"..\" is not an import item; omit the list to import every visible member of \"\(specifier)\""
+          message: "\"..\" is not an import item; write \"...\" to import every visible member of \"\(specifier)\""
         )
       }
       if currentToken === .ellipsis {
-        // `...` is the elision glyph (open ranges today, rest imports someday);
-        // it is never a name to import.
-        throw ParserError.rejectedConstruct(
-          span: currentSpan,
-          message: "\"...\" is not an import item; omit the list to import every visible member of \"\(specifier)\""
-        )
+        // `...` is the base set and closes the list: renames and exclusions
+        // come before it, nothing comes after (§3.3).
+        try match(.ellipsis)
+        importAll = true
+        if currentToken === .comma {
+          try match(.comma)
+        }
+        if currentToken !== .rightBrace {
+          throw ParserError.rejectedConstruct(
+            span: currentSpan,
+            message: "\"...\" closes the import list; put renames or exclusions before it, or write \"{ ... }\""
+          )
+        }
+        try match(.rightBrace)
+        return try finishUsingImportList(
+          specifier: specifier, items: items, importAll: true,
+          sawExclude: sawExclude, sawPositive: sawPositive,
+          braceSpan: braceSpan, isFileMerge: isFileMerge)
+      }
+
+      // Point at the item's first token -- `!` or the name -- so an `!`+`as`
+      // pair blames the exclusion marker rather than the name it marks.
+      let nameSpan = currentSpan
+      var excluded = false
+      if currentToken === .bang {
+        try match(.bang)
+        excluded = true
+        sawExclude = true
+      } else {
+        sawPositive = true
       }
       guard case .identifier(let symbolName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "import item")
       }
-      let nameSpan = currentSpan
       try match(currentToken)
 
       var alias: String? = nil
       if currentToken === .asKeyword {
+        if excluded {
+          throw ParserError.rejectedConstruct(
+            span: nameSpan,
+            message: "'!\(symbolName)' is an exclusion and cannot be renamed; drop the '!' or drop the 'as'"
+          )
+        }
         try match(.asKeyword)
         guard case .identifier(let aliasName) = currentToken else {
           throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "using alias")
@@ -1374,7 +1415,7 @@ extension Parser {
         alias = aliasName
       }
 
-      items.append(UsingModuleItem(name: symbolName, alias: alias))
+      items.append(UsingModuleItem(name: symbolName, alias: alias, excluded: excluded))
 
       if currentToken === .comma {
         try match(.comma)
@@ -1384,19 +1425,48 @@ extension Parser {
     }
 
     try match(.rightBrace)
-    if items.isEmpty {
-      if isFileMerge {
-        throw ParserError.rejectedConstruct(
-          span: braceSpan,
-          message: "File merge '\(specifier)' takes no import list; it merges the whole file"
-        )
-      }
+    return try finishUsingImportList(
+      specifier: specifier, items: items, importAll: importAll,
+      sawExclude: sawExclude, sawPositive: sawPositive,
+      braceSpan: braceSpan, isFileMerge: isFileMerge)
+  }
+
+  /// Validate one import list's shape once its items and base set are known
+  /// (§3.3). Kept separate from the token loop so both exits share one set of
+  /// rules and one wording.
+  private func finishUsingImportList(
+    specifier: String,
+    items: [UsingModuleItem],
+    importAll: Bool,
+    sawExclude: Bool,
+    sawPositive: Bool,
+    braceSpan: SourceSpan,
+    isFileMerge: Bool
+  ) throws -> UsingImportList {
+    _ = isFileMerge
+    if sawExclude && sawPositive {
       throw ParserError.rejectedConstruct(
         span: braceSpan,
-        message: "import list cannot be empty; omit it to import every visible member of \"\(specifier)\""
+        message: "an import list is either all-positive or all-exclusions; '{ !a, ... }' and '{ a as b, ... }' do not mix"
       )
     }
-    return items
+    if sawExclude && !importAll {
+      throw ParserError.rejectedConstruct(
+        span: braceSpan,
+        message: "'!' excludes from the whole module surface and needs '...'; write '{ !name, ... }'"
+      )
+    }
+    if importAll && sawPositive {
+      // A positive item beside `...` is only meaningful as a rename --
+      // without `as` it is the whole surface renamed to itself.
+      for item in items where !item.excluded && item.alias == nil {
+        throw ParserError.rejectedConstruct(
+          span: braceSpan,
+          message: "'\(item.name)' next to '...' is redundant; either drop it, rename it with 'as', or exclude it with '!'"
+        )
+      }
+    }
+    return UsingImportList(items: items, importAll: importAll)
   }
 
 }
